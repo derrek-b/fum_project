@@ -1,25 +1,18 @@
-import React from "react";
-import { Container, Row, Col } from "react-bootstrap";
-import { useSelector } from "react-redux";
-import Navbar from "../components/Navbar"; // Updated path
-import PositionCard from "../components/PositionCard"; // Updated path
-import styles from "../styles/Home.module.css"; // Updated path
+import React, { useState } from "react";
+import { Container } from "react-bootstrap";
+import Navbar from "../components/Navbar";
+import PositionContainer from "../components/PositionContainer";
+import styles from "../styles/Home.module.css";
 
 export default function Home() {
-  const positions = useSelector((state) => state.positions.positions);
+  const [provider, setProvider] = useState(null);
 
   return (
     <div className={styles.container}>
-      <Navbar />
+      <Navbar setProvider={setProvider} />
       <Container>
         <h1 className={styles.title}>Liquidity Dashboard</h1>
-        <Row>
-          {positions.map((pos) => (
-            <Col md={6} key={pos.id}>
-              <PositionCard position={pos} />
-            </Col>
-          ))}
-        </Row>
+        <PositionContainer provider={provider} />
       </Container>
     </div>
   );

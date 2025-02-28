@@ -7,12 +7,11 @@ export const store = configureStore({
     positions: positionsReducer,
     wallet: walletReducer,
   },
-  // Optional: Configure serializableCheck to ignore non-serializable errors for chainId
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ["wallet/setWallet"], // Ignore setWallet actions
-        ignoredPaths: ["wallet.chainId"], // Ignore chainId in state
+        ignoredActions: ["wallet/setWallet", "positions/setPositions"], // Ignore both wallet and positions actions
+        ignoredPaths: ["wallet.chainId", "positions.positions"], // Ignore chainId and positions in state
       },
     }),
 });
