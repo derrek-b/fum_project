@@ -7,8 +7,13 @@ export default function PositionCard({ position }) {
       <Card.Body>
         <Card.Title>Position #{position.id} - {position.tokenPair}</Card.Title>
         <Card.Text>
-          {/* Placeholder for future fields */}
-          <strong>Token Pair:</strong> {position.tokenPair}<br />
+          <strong>Activity:</strong> {position.active}<br />
+          {/* Placeholder for future fields - can re-add later */}
+          {/* <strong>Liquidity:</strong> {position.liquidity}<br />
+          <strong>Unclaimed Fees:</strong> {position.unclaimedFees}<br />
+          <strong>Price Range:</strong> {position.priceRange}<br />
+          <strong>Current Price:</strong> {position.currentPrice}<br />
+          <strong>Holdings:</strong> {position.holdings} */}
         </Card.Text>
       </Card.Body>
     </Card>
