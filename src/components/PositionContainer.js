@@ -36,7 +36,15 @@ export default function PositionContainer({ provider }) {
       setLoading(true);
       setError(null);
       try {
-        const positionManagerAddress = config.chains.arbitrum.platforms.uniswapV3.positionManagerAddress;
+        // Dynamically get the positionManagerAddress based on chainId
+
+        console.log(chainId)
+        const chainConfig = config.chains[chainId];
+        if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+          throw new Error(`No configuration found for chainId: ${chainId}`);
+        }
+        const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+
         const positionManager = new ethers.Contract(
           positionManagerAddress,
           nonfungiblePositionManagerABI.abi,
@@ -55,8 +63,10 @@ export default function PositionContainer({ provider }) {
           const positionId = String(tokenId);
 
           const positionData = await positionManager.positions(tokenId);
+          console.log(positionData)
           const { nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1 } = positionData;
-
+          console.log('tokensOwed0', tokensOwed0)
+          console.log('tokensOwed1', tokensOwed1)
           // Fetch token details for Token instances
           const token0Contract = new ethers.Contract(token0, ERC20ABI.abi, provider);
           const token1Contract = new ethers.Contract(token1, ERC20ABI.abi, provider);
@@ -67,7 +77,7 @@ export default function PositionContainer({ provider }) {
               token0Contract.decimals(),
               token0Contract.name(),
               token0Contract.symbol(),
-              token0Contract.balanceOf(address), // User's balance for token0
+              token0Contract.balanceOf(address),
             ]);
             decimals0 = Number(decimals0.toString());
             balance0 = Number(balance0.toString());
@@ -80,7 +90,7 @@ export default function PositionContainer({ provider }) {
               token1Contract.decimals(),
               token1Contract.name(),
               token1Contract.symbol(),
-              token1Contract.balanceOf(address), // User's balance for token1
+              token1Contract.balanceOf(address),
             ]);
             decimals1 = Number(decimals1.toString());
             balance1 = Number(balance1.toString());
@@ -193,7 +203,10 @@ export default function PositionContainer({ provider }) {
         <Row>
           {positions.filter((pos) => pos.liquidity > 0).map((pos) => (
             <Col md={6} key={pos.id}>
-              <PositionCard position={pos} />
+              <PositionCard
+                position={pos}
+                provider={provider}
+              />
             </Col>
           ))}
         </Row>

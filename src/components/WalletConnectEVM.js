@@ -23,6 +23,7 @@ export default function WalletConnectEVM({ setProvider }) {
       const account = await signer.getAddress();
       const network = await newProvider.getNetwork();
       const chainId = Number(network.chainId); // Convert BigInt to Number
+      console.log('chainId', chainId, network.chainId)
 
       dispatch(setWallet({ address: account, chainId }));
     } catch (error) {
