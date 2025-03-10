@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from "react";
-import { Row, Col } from "react-bootstrap";
+import { Row, Col, Alert, Spinner } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import PositionCard from "./PositionCard";
 import { ethers } from "ethers";
@@ -37,8 +37,7 @@ export default function PositionContainer({ provider }) {
       setError(null);
       try {
         // Dynamically get the positionManagerAddress based on chainId
-
-        console.log(chainId)
+        console.log(chainId);
         const chainConfig = config.chains[chainId];
         if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
           throw new Error(`No configuration found for chainId: ${chainId}`);
@@ -63,10 +62,11 @@ export default function PositionContainer({ provider }) {
           const positionId = String(tokenId);
 
           const positionData = await positionManager.positions(tokenId);
-          console.log(positionData)
+          console.log(positionData);
           const { nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1 } = positionData;
-          console.log('tokensOwed0', tokensOwed0)
-          console.log('tokensOwed1', tokensOwed1)
+          console.log('tokensOwed0', tokensOwed0);
+          console.log('tokensOwed1', tokensOwed1);
+
           // Fetch token details for Token instances
           const token0Contract = new ethers.Contract(token0, ERC20ABI.abi, provider);
           const token1Contract = new ethers.Contract(token1, ERC20ABI.abi, provider);
@@ -181,7 +181,8 @@ export default function PositionContainer({ provider }) {
         dispatch(setPools(poolData));
         dispatch(setTokens(tokenData));
       } catch (error) {
-        setError("Error fetching positions. Please try again or check your connection.");
+        console.error("Position fetching error:", error);
+        setError(`Error fetching positions: ${error.message}`);
         setLocalPositions([]);
         dispatch(setPositions([]));
         // Do not clear pools or tokens on partial error—only on disconnect
@@ -193,23 +194,49 @@ export default function PositionContainer({ provider }) {
     fetchPositions();
   }, [isConnected, address, provider, chainId, dispatch]);
 
+  const activePositions = positions.filter((pos) => pos.liquidity > 0);
+
   return (
     <div>
-      {loading ? (
-        <p>Loading positions...</p>
+      {!isConnected ? (
+        <Alert variant="info" className="text-center">
+          Connect your wallet to view your liquidity positions
+        </Alert>
+      ) : loading ? (
+        <div className="text-center py-5">
+          <Spinner animation="border" variant="primary" role="status" />
+          <p className="mt-3">Loading your liquidity positions...</p>
+        </div>
       ) : error ? (
-        <p style={{ color: "red" }}>{error}</p>
+        <Alert variant="danger">
+          <Alert.Heading>Error Loading Positions</Alert.Heading>
+          <p>{error}</p>
+        </Alert>
+      ) : activePositions.length === 0 ? (
+        <Alert variant="warning" className="text-center">
+          <p className="mb-0">No active liquidity positions found for this wallet.</p>
+          {chainId && (
+            <small className="d-block mt-2">
+              Connected to {config.chains[chainId]?.name || `Chain ID ${chainId}`}
+            </small>
+          )}
+        </Alert>
       ) : (
-        <Row>
-          {positions.filter((pos) => pos.liquidity > 0).map((pos) => (
-            <Col md={6} key={pos.id}>
-              <PositionCard
-                position={pos}
-                provider={provider}
-              />
-            </Col>
-          ))}
-        </Row>
+        <>
+          <p className="text-muted mb-3">
+            Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
+          </p>
+          <Row>
+            {activePositions.map((pos) => (
+              <Col md={6} key={pos.id}>
+                <PositionCard
+                  position={pos}
+                  provider={provider}
+                />
+              </Col>
+            ))}
+          </Row>
+        </>
       )}
     </div>
   );

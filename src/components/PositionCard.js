@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Card, Button } from "react-bootstrap";
+import { Card, Button, Spinner } from "react-bootstrap";
 import { isInRange, calculatePrice } from "../utils/positionHelpers";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
@@ -35,6 +35,7 @@ export default function PositionCard({ position, provider }) {
   // State for claiming process
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimError, setClaimError] = useState(null);
+  const [claimSuccess, setClaimSuccess] = useState(false);
 
   // Function to claim fees
   const claimFees = async () => {
@@ -45,6 +46,7 @@ export default function PositionCard({ position, provider }) {
 
     setIsClaiming(true);
     setClaimError(null);
+    setClaimSuccess(false);
     try {
       // Dynamically get the positionManagerAddress based on chainId
       const chainConfig = config.chains[chainId];
@@ -59,8 +61,8 @@ export default function PositionCard({ position, provider }) {
       const collectParams = {
         tokenId: position.id,
         recipient: address,
-        amount0Max: parseInt(Number.MAX_VALUE),
-        amount1Max: parseInt(Number.MAX_VALUE),
+        amount0Max: ethers.MaxUint256,
+        amount1Max: ethers.MaxUint256,
       };
 
       console.log("Sending collect transaction with params:", collectParams);
@@ -68,8 +70,14 @@ export default function PositionCard({ position, provider }) {
       console.log("Transaction sent, waiting for confirmation...");
       await tx.wait();
       console.log(`Fees claimed for position ${position.id}:`, tx);
-      // Refresh data (temporary)
-      window.location.reload();
+
+      // Set success state
+      setClaimSuccess(true);
+
+      // Refresh data after a short delay (temporary solution)
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
     } catch (error) {
       console.error("Error claiming fees:", error);
       setClaimError(`Failed to claim fees: ${error.message}`);
@@ -78,41 +86,97 @@ export default function PositionCard({ position, provider }) {
     }
   };
 
+  // Prepare activityBadge
+  const activityBadge = (
+    <span
+      className={`badge bg-${active ? 'success' : 'danger'}`}
+      style={{ fontSize: '0.85rem' }}
+    >
+      {active ? "in-range" : "out-of-range"}
+    </span>
+  );
+
   return (
-    <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000", cursor: "default" }}>
+    <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000" }}>
       <Card.Body>
-        <Card.Title>Position #{position.id} - {position.tokenPair}</Card.Title>
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <Card.Title>Position #{position.id} - {position.tokenPair}</Card.Title>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={togglePanel}
+            aria-label="Position actions"
+          >
+            <span role="img" aria-label="menu">🔧</span>
+          </Button>
+        </div>
+
         <Card.Text>
-          <strong>Activity:</strong> {active ? "in-range" : "out-of-range"}<br />
+          <strong>Activity:</strong> {activityBadge}<br />
           <strong>Current Price:</strong> {currentPrice} {position.tokenPair}<br />
+          {/* Removed liquidity display - not useful context for users */}
         </Card.Text>
-        <Button
-          variant="secondary"
-          onClick={togglePanel}
-          style={{ padding: "0.25rem 0.5rem", width: "2rem", textAlign: "center" }}
-        >
-          <span role="img" aria-label="menu">🍔</span>
-        </Button>
+
         {isPanelVisible && (
           <div
             style={{
-              marginTop: "0.5rem",
-              padding: "0.5rem",
+              marginTop: "1rem",
+              padding: "0.75rem",
               backgroundColor: "#fff",
-              border: "1px solid #ccc",
-              borderRadius: "4px",
+              border: "1px solid #dee2e6",
+              borderRadius: "0.375rem",
             }}
           >
-            <a
-              href="#"
-              style={{ display: "block", marginBottom: "0.25rem", color: isClaiming ? "gray" : "inherit" }}
-              onClick={(e) => { e.preventDefault(); if (!isClaiming) claimFees(); }}
-            >
-              Claim Fees {isClaiming ? "(Claiming...)" : claimError ? `(${claimError})` : ""}
-            </a>
-            <a href="#" style={{ display: "block", marginBottom: "0.25rem" }} onClick={(e) => e.preventDefault()} disabled>Add Liquidity</a>
-            <a href="#" style={{ display: "block", marginBottom: "0.25rem" }} onClick={(e) => e.preventDefault()} disabled>Remove Liquidity</a>
-            <a href="#" style={{ display: "block", marginBottom: "0.25rem" }} onClick={(e) => e.preventDefault()} disabled>Close Position</a>
+            <div className="d-grid gap-2">
+              <Button
+                variant={claimSuccess ? "success" : "primary"}
+                size="sm"
+                disabled={isClaiming}
+                onClick={claimFees}
+              >
+                {isClaiming ? (
+                  <>
+                    <Spinner
+                      as="span"
+                      animation="border"
+                      size="sm"
+                      role="status"
+                      aria-hidden="true"
+                      className="me-2"
+                    />
+                    Claiming...
+                  </>
+                ) : claimSuccess ? (
+                  <>✓ Fees Claimed</>
+                ) : (
+                  <>Claim Fees</>
+                )}
+              </Button>
+
+              <Button variant="outline-primary" size="sm" disabled>
+                Add Liquidity
+              </Button>
+
+              <Button variant="outline-primary" size="sm" disabled>
+                Remove Liquidity
+              </Button>
+
+              <Button variant="outline-danger" size="sm" disabled>
+                Close Position
+              </Button>
+            </div>
+
+            {claimError && (
+              <div className="alert alert-danger mt-2 p-2 small" role="alert">
+                {claimError}
+              </div>
+            )}
+
+            {claimSuccess && (
+              <div className="alert alert-success mt-2 p-2 small" role="alert">
+                Successfully claimed fees! Page will refresh shortly.
+              </div>
+            )}
           </div>
         )}
       </Card.Body>

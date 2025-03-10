@@ -27,6 +27,17 @@ const config = {
   },
 };
 
+// Helper function to convert tick to price
+function tickToPrice(baseToken, quoteToken, tick) {
+  // Calculate price from tick using the formula: 1.0001^tick
+  const price = Math.pow(1.0001, tick);
+
+  // Apply decimal adjustment based on token decimals
+  // For WETH (18 decimals) to USDC (6 decimals), adjustment is 10^(6-18) = 10^-12
+  const decimalAdjustment = Math.pow(10, quoteToken.decimals - baseToken.decimals);
+  return price * decimalAdjustment;
+}
+
 // Main function
 async function main() {
   console.log('Starting seed script to create Uniswap V3 test position...');
@@ -345,9 +356,8 @@ async function main() {
     }
 
     // Calculate price range in human-readable format
-    // Fixed price calculation
-    const lowerPrice = tickToPrice(WETH, USDC, position.tickLower).toFixed(2);
-    const upperPrice = tickToPrice(WETH, USDC, position.tickUpper).toFixed(2);
+    const lowerPrice = tickToPrice(WETH, USDC, position.tickLower).toFixed(6);
+    const upperPrice = tickToPrice(WETH, USDC, position.tickUpper).toFixed(6);
     console.log(`- Price Range: ${lowerPrice} - ${upperPrice} USDC per WETH`);
     console.log(`- Current Price: ${price.toFixed(2)} USDC per WETH`);
 
@@ -470,20 +480,6 @@ async function main() {
   }
 
   console.log('\nSeed script completed.');
-
-  // Helper function to convert tick to price - FIXED VERSION
-  function tickToPrice(baseToken, quoteToken, tick) {
-    // Calculate price from tick using the formula: 1.0001^tick
-    const price = Math.pow(1.0001, tick);
-
-    // Apply decimal adjustment based on token decimals
-    // For WETH (18 decimals) to USDC (6 decimals), we need to multiply by 10^(6-18) = 10^-12
-    const decimalAdjustment = Math.pow(10, quoteToken.decimals - baseToken.decimals);
-
-    // For numbers that might be very small due to decimal adjustments,
-    // ensure we're handling the math properly
-    return price * decimalAdjustment;
-  }
 }
 
 // Execute the script
