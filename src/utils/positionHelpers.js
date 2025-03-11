@@ -6,12 +6,79 @@ export function isInRange(currentTick, tickLower, tickUpper) {
   return currentTick >= tickLower && tickUpper >= currentTick;
 }
 
-export function calculatePrice(sqrtPriceX96, decimals0, decimals1) {
-  const priceInt = (sqrtPriceX96 / 2 ** 96) ** 2; // Changed ^ to **
+export function calculatePrice(sqrtPriceX96, decimals0, decimals1, invert = false) {
+  if (!sqrtPriceX96 || sqrtPriceX96 === "0") return "N/A";
+
+  // Convert sqrtPriceX96 to a number and calculate price
+  const sqrtPriceX96AsNumber = Number(sqrtPriceX96) / (2 ** 96);
+  const priceInt = sqrtPriceX96AsNumber * sqrtPriceX96AsNumber;
+
+  // Apply decimal adjustment - must handle both positive and negative cases
   const decimalsDiff = decimals1 - decimals0;
-  const price = Number(priceInt) * Math.pow(10, decimalsDiff < 0 ? -decimalsDiff : 0);
+  let price = priceInt * Math.pow(10, decimalsDiff < 0 ? -decimalsDiff : 0);
+
+  // Invert the price if requested
+  if (invert) {
+    price = 1 / price;
+  }
+
+  // Format with appropriate precision
   const formattedPrice = Number.isFinite(price) ? price.toFixed(6) : "N/A";
   return formattedPrice;
+}
+
+/**
+ * Convert a tick value to a corresponding price
+ * @param {number} tick - The tick value
+ * @param {number} decimals0 - Decimals of token0
+ * @param {number} decimals1 - Decimals of token1
+ * @param {boolean} invert - Whether to invert the price (show token0/token1 instead of token1/token0)
+ * @returns {string} The formatted price corresponding to the tick
+ */
+export function tickToPrice(tick, decimals0, decimals1, invert = false) {
+  if (!Number.isFinite(tick)) return "N/A";
+
+  // Calculate raw price using the same formula from Uniswap: 1.0001^tick
+  const rawPrice = Math.pow(1.0001, tick);
+
+  // Apply the SAME decimal adjustment as in calculatePrice function
+  const decimalsDiff = decimals1 - decimals0;
+  let price = rawPrice * Math.pow(10, decimalsDiff < 0 ? -decimalsDiff : 0);
+
+  // Invert if requested (token0 per token1 instead of token1 per token0)
+  if (invert) {
+    price = 1 / price;
+  }
+
+  // Format based on value (same formatting logic as used elsewhere)
+  if (!Number.isFinite(price)) return "N/A";
+  if (price < 0.0001) return "< 0.0001";
+  if (price > 1000000) return price.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  // Return with appropriate precision
+  return price.toFixed(6);
+}
+
+/**
+ * Format a price value with appropriate precision
+ * @param {number} price - The price to format
+ * @returns {string} The formatted price
+ */
+export function formatPrice(price) {
+  if (!Number.isFinite(price)) return "N/A";
+  if (price === 0) return "0";
+
+  // Handle very small numbers
+  if (price < 0.0001) return "<0.0001";
+
+  // Dynamic precision based on price magnitude
+  if (price < 0.001) return price.toFixed(6);
+  if (price < 0.1) return price.toFixed(5);
+  if (price < 1) return price.toFixed(4);
+  if (price < 100) return price.toFixed(2);
+  if (price > 1000000) return price.toExponential(2);
+
+  return price.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /**
@@ -233,8 +300,8 @@ export function calculateUncollectedFees({
     console.log(`\nConverting to human-readable amounts:`);
     console.log(`- Token0 Decimals: ${token0?.decimals || 18}`);
     console.log(`- Token1 Decimals: ${token1?.decimals || 6}`);
-    console.log(`- Token0 Fee: ${uncollectedFees0Raw / BigInt(10 ** (token0?.decimals || 18))}.${uncollectedFees0Raw % BigInt(10 ** (token0?.decimals || 18))}`);
-    console.log(`- Token1 Fee: ${uncollectedFees1Raw / BigInt(10 ** (token1?.decimals || 6))}.${uncollectedFees1Raw % BigInt(10 ** (token1?.decimals || 6))}`);
+    console.log(`- Token0 Fee: ${formatUnits(uncollectedFees0Raw, token0?.decimals || 18)}`);
+    console.log(`- Token1 Fee: ${formatUnits(uncollectedFees1Raw, token1?.decimals || 6)}`);
   }
 
   // Format with proper decimals

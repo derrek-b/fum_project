@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Card, Button, Spinner, Badge } from "react-bootstrap";
-import { isInRange, calculatePrice, calculateUncollectedFees } from "../utils/positionHelpers";
+import { isInRange, calculatePrice, calculateUncollectedFees, tickToPrice, formatPrice } from "../utils/positionHelpers";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
 import nonfungiblePositionManagerABI from "@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json" assert { type: "json" };
@@ -24,11 +24,45 @@ export default function PositionCard({ position, provider }) {
   const token1Data = tokens[poolData.token1] || { decimals: 0, symbol: '?' };
   const currentTick = poolData.tick || 0;
   const sqrtPriceX96 = poolData.sqrtPriceX96 || "0";
+
+  // Current price calculation
   const currentPrice = useMemo(() => calculatePrice(sqrtPriceX96, token0Data.decimals, token1Data.decimals), [
     sqrtPriceX96,
     token0Data.decimals,
     token1Data.decimals,
   ]);
+
+  // State for price display direction
+  const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
+
+  // Calculate price range
+  const lowerPrice = useMemo(() => {
+    return tickToPrice(position.tickLower, token0Data.decimals, token1Data.decimals, invertPriceDisplay);
+  }, [position.tickLower, token0Data.decimals, token1Data.decimals, invertPriceDisplay]);
+
+  const upperPrice = useMemo(() => {
+    return tickToPrice(position.tickUpper, token0Data.decimals, token1Data.decimals, invertPriceDisplay);
+  }, [position.tickUpper, token0Data.decimals, token1Data.decimals, invertPriceDisplay]);
+
+  // Ensure lower price is always smaller than upper price (they swap when inverting)
+  const displayLowerPrice = Math.min(lowerPrice, upperPrice);
+  const displayUpperPrice = Math.max(lowerPrice, upperPrice);
+
+  // Format current price based on inversion
+  const currentPriceDisplay = useMemo(() => {
+    if (currentPrice === "N/A") return "N/A";
+    const numericPrice = parseFloat(currentPrice);
+    return invertPriceDisplay ?
+      formatPrice(1 / numericPrice) :
+      currentPrice;
+  }, [currentPrice, invertPriceDisplay]);
+
+  // Set price direction labels
+  const priceLabel = invertPriceDisplay ?
+    `${token0Data.symbol} per ${token1Data.symbol}` :
+    `${token1Data.symbol} per ${token0Data.symbol}`;
+
+  // Check if position is in range
   const active = useMemo(() => isInRange(currentTick, position.tickLower, position.tickUpper), [
     currentTick,
     position.tickLower,
@@ -172,9 +206,28 @@ export default function PositionCard({ position, provider }) {
           </Button>
         </div>
 
+        {/* Price Range Display (New) */}
+        <div className="mb-2">
+          <div className="d-flex align-items-center">
+            <strong className="me-2">Price Range:</strong>
+            <span>
+              {formatPrice(displayLowerPrice)} - {formatPrice(displayUpperPrice)} {priceLabel}
+            </span>
+            <Button
+              variant="link"
+              className="p-0 ms-2"
+              size="sm"
+              onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
+              title="Switch price direction"
+            >
+              <span role="img" aria-label="switch">⇄</span>
+            </Button>
+          </div>
+        </div>
+
         <Card.Text>
           <strong>Activity:</strong> {activityBadge}<br />
-          <strong>Current Price:</strong> {currentPrice} {position.tokenPair}<br />
+          <strong>Current Price:</strong> {currentPriceDisplay} {priceLabel}<br />
 
           {/* Add uncollected fees section */}
           <strong>Uncollected Fees:</strong>
