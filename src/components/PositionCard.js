@@ -1,18 +1,27 @@
 import React, { useMemo, useState } from "react";
-import { Card, Button, Spinner } from "react-bootstrap";
-import { isInRange, calculatePrice } from "../utils/positionHelpers";
+import { Card, Button, Spinner, Badge } from "react-bootstrap";
+import { isInRange, calculatePrice, calculateUncollectedFees } from "../utils/positionHelpers";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
 import nonfungiblePositionManagerABI from "@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json" assert { type: "json" };
 import config from "../utils/config";
+
+// Helper function to format fee display with max 4 decimal places
+// and show "< 0.0001" for very small amounts
+const formatFeeDisplay = (value) => {
+  const numValue = parseFloat(value);
+  if (numValue === 0) return "0";
+  if (numValue < 0.0001) return "< 0.0001";
+  return numValue.toFixed(4).replace(/\.?0+$/, "");
+};
 
 export default function PositionCard({ position, provider }) {
   const { address, chainId } = useSelector((state) => state.wallet);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const poolData = pools[position.poolAddress] || {};
-  const token0Data = tokens[poolData.token0] || { decimals: 0 };
-  const token1Data = tokens[poolData.token1] || { decimals: 0 };
+  const token0Data = tokens[poolData.token0] || { decimals: 0, symbol: '?' };
+  const token1Data = tokens[poolData.token1] || { decimals: 0, symbol: '?' };
   const currentTick = poolData.tick || 0;
   const sqrtPriceX96 = poolData.sqrtPriceX96 || "0";
   const currentPrice = useMemo(() => calculatePrice(sqrtPriceX96, token0Data.decimals, token1Data.decimals), [
@@ -25,6 +34,58 @@ export default function PositionCard({ position, provider }) {
     position.tickLower,
     position.tickUpper,
   ]);
+
+  // State for fee calculation errors
+  const [feeLoadingError, setFeeLoadingError] = useState(false);
+
+  // Calculate uncollected fees
+  const uncollectedFees = useMemo(() => {
+    // Reset error state
+    setFeeLoadingError(false);
+
+    // Check if we have all required data
+    if (!poolData.feeGrowthGlobal0X128 ||
+        !poolData.feeGrowthGlobal1X128 ||
+        !poolData.ticks ||
+        !poolData.ticks[position.tickLower] ||
+        !poolData.ticks[position.tickUpper]) {
+
+      // Set error state if data is missing
+      setFeeLoadingError(true);
+      return null;
+    }
+
+    const tickLower = poolData.ticks[position.tickLower];
+    const tickUpper = poolData.ticks[position.tickUpper];
+
+    // Create position object expected by calculateUncollectedFees
+    const positionForFeeCalc = {
+      ...position,
+      // Convert to BigInt compatible format
+      liquidity: BigInt(position.liquidity),
+      feeGrowthInside0LastX128: BigInt(position.feeGrowthInside0LastX128),
+      feeGrowthInside1LastX128: BigInt(position.feeGrowthInside1LastX128),
+      tokensOwed0: BigInt(position.tokensOwed0),
+      tokensOwed1: BigInt(position.tokensOwed1)
+    };
+
+    try {
+      return calculateUncollectedFees({
+        position: positionForFeeCalc,
+        currentTick: poolData.tick,
+        feeGrowthGlobal0X128: poolData.feeGrowthGlobal0X128,
+        feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
+        tickLower,
+        tickUpper,
+        token0: token0Data,
+        token1: token1Data
+      });
+    } catch (error) {
+      console.error("Error calculating fees for position", position.id, ":", error);
+      setFeeLoadingError(true);
+      return null;
+    }
+  }, [position, poolData, token0Data, token1Data]);
 
   // State to toggle panel visibility
   const [isPanelVisible, setIsPanelVisible] = useState(false);
@@ -114,7 +175,31 @@ export default function PositionCard({ position, provider }) {
         <Card.Text>
           <strong>Activity:</strong> {activityBadge}<br />
           <strong>Current Price:</strong> {currentPrice} {position.tokenPair}<br />
-          {/* Removed liquidity display - not useful context for users */}
+
+          {/* Add uncollected fees section */}
+          <strong>Uncollected Fees:</strong>
+          <div className="ps-3 mt-1 mb-2">
+            {feeLoadingError ? (
+              <div className="text-danger small">
+                <i className="me-1">⚠️</i>
+                Unable to load fee data. Please try refreshing.
+              </div>
+            ) : !uncollectedFees ? (
+              <div className="text-secondary small">
+                <Spinner animation="border" size="sm" className="me-2" />
+                Loading fee data...
+              </div>
+            ) : (
+              <>
+                <Badge bg="light" text="dark" className="me-1">
+                  {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+                </Badge>
+                <Badge bg="light" text="dark">
+                  {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+                </Badge>
+              </>
+            )}
+          </div>
         </Card.Text>
 
         {isPanelVisible && (
@@ -131,7 +216,10 @@ export default function PositionCard({ position, provider }) {
               <Button
                 variant={claimSuccess ? "success" : "primary"}
                 size="sm"
-                disabled={isClaiming}
+                disabled={isClaiming || !uncollectedFees || feeLoadingError ||
+                          (uncollectedFees &&
+                           parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                           parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
                 onClick={claimFees}
               >
                 {isClaiming ? (
@@ -148,6 +236,8 @@ export default function PositionCard({ position, provider }) {
                   </>
                 ) : claimSuccess ? (
                   <>✓ Fees Claimed</>
+                ) : feeLoadingError ? (
+                  <>Fee Data Unavailable</>
                 ) : (
                   <>Claim Fees</>
                 )}

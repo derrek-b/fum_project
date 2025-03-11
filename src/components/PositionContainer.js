@@ -168,10 +168,61 @@ export default function PositionContainer({ provider }) {
                   secondsPerLiquidityCumulativeX128: lastObservation.secondsPerLiquidityCumulativeX128.toString(),
                   initialized: lastObservation.initialized,
                 },
+                ticks: {} // Initialize ticks object to store tick data
               };
+
+              // Fetch tick data for this position
+              try {
+                // Fetch the lower tick data
+                const lowerTickData = await poolContract.ticks(tickLower);
+                poolData[poolAddress].ticks[tickLower] = {
+                  feeGrowthOutside0X128: lowerTickData.feeGrowthOutside0X128.toString(),
+                  feeGrowthOutside1X128: lowerTickData.feeGrowthOutside1X128.toString(),
+                  initialized: lowerTickData.initialized
+                };
+
+                // Fetch the upper tick data
+                const upperTickData = await poolContract.ticks(tickUpper);
+                poolData[poolAddress].ticks[tickUpper] = {
+                  feeGrowthOutside0X128: upperTickData.feeGrowthOutside0X128.toString(),
+                  feeGrowthOutside1X128: upperTickData.feeGrowthOutside1X128.toString(),
+                  initialized: upperTickData.initialized
+                };
+
+                console.log(`Fetched tick data for position ${positionId}: lower=${tickLower}, upper=${tickUpper}`);
+              } catch (tickError) {
+                console.error(`Failed to fetch tick data for position ${positionId}:`, tickError);
+              }
             } catch (slot0Error) {
               console.error(`Failed to fetch slot0 or pool data for pool ${poolAddress}:`, { slot0Error });
               poolData[poolAddress] = { poolAddress }; // Minimal data on failure
+            }
+          } else if (poolData[poolAddress].ticks) {
+            // If pool data exists but we haven't fetched these specific ticks yet
+            const poolContract = new ethers.Contract(poolAddress, IUniswapV3PoolABI.abi, provider);
+
+            try {
+              // Check if we need to fetch the lower tick
+              if (!poolData[poolAddress].ticks[tickLower]) {
+                const lowerTickData = await poolContract.ticks(tickLower);
+                poolData[poolAddress].ticks[tickLower] = {
+                  feeGrowthOutside0X128: lowerTickData.feeGrowthOutside0X128.toString(),
+                  feeGrowthOutside1X128: lowerTickData.feeGrowthOutside1X128.toString(),
+                  initialized: lowerTickData.initialized
+                };
+              }
+
+              // Check if we need to fetch the upper tick
+              if (!poolData[poolAddress].ticks[tickUpper]) {
+                const upperTickData = await poolContract.ticks(tickUpper);
+                poolData[poolAddress].ticks[tickUpper] = {
+                  feeGrowthOutside0X128: upperTickData.feeGrowthOutside0X128.toString(),
+                  feeGrowthOutside1X128: upperTickData.feeGrowthOutside1X128.toString(),
+                  initialized: upperTickData.initialized
+                };
+              }
+            } catch (tickError) {
+              console.error(`Failed to fetch additional tick data for position ${positionId}:`, tickError);
             }
           }
         }
