@@ -8,6 +8,8 @@ const JSBI = require('jsbi');
 const IUniswapV3PoolABI = require('@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
 const NonfungiblePositionManagerABI = require('@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json').abi;
 const ERC20ABI = require('@openzeppelin/contracts/build/contracts/ERC20.json').abi;
+// const fs = require('fs');
+// const path = require('path');
 
 // Define config directly for local fork of Arbitrum
 const config = {
@@ -27,15 +29,440 @@ const config = {
   },
 };
 
-// Helper function to convert tick to price
-function tickToPrice(baseToken, quoteToken, tick) {
-  // Calculate price from tick using the formula: 1.0001^tick
-  const price = Math.pow(1.0001, tick);
+// Function to perform multiple swaps to generate fees with nonce management
+async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
+  console.log(`\n--- Performing ${numSwaps} swaps to generate fees ---`);
 
-  // Apply decimal adjustment based on token decimals
-  // For WETH (18 decimals) to USDC (6 decimals), adjustment is 10^(6-18) = 10^-12
-  const decimalAdjustment = Math.pow(10, quoteToken.decimals - baseToken.decimals);
-  return price * decimalAdjustment;
+  // Setup contracts and addresses
+  const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+  const USDC_ADDRESS = '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8';
+  const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+
+  // Contract setup
+  const wethContract = new ethers.Contract(
+    WETH_ADDRESS,
+    ['function approve(address spender, uint256 amount) external returns (bool)'],
+    wallet
+  );
+
+  const usdcContract = new ethers.Contract(
+    USDC_ADDRESS,
+    ['function approve(address spender, uint256 amount) external returns (bool)'],
+    wallet
+  );
+
+  const ROUTER_ABI = [
+    'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external returns (uint256)'
+  ];
+
+  const router = new ethers.Contract(
+    UNISWAP_ROUTER_ADDRESS,
+    ROUTER_ABI,
+    wallet
+  );
+
+  // Get the current nonce and provider
+  const provider = wallet.provider;
+  let currentNonce = await provider.getTransactionCount(wallet.address);
+  console.log(`Starting with nonce: ${currentNonce}`);
+
+  // Approve router to spend tokens (with explicit nonce)
+  console.log('Approving router to spend WETH...');
+  const approveTx1 = await wethContract.approve(
+    UNISWAP_ROUTER_ADDRESS,
+    ethers.parseEther('50'),
+    { nonce: currentNonce++ }
+  );
+  await approveTx1.wait();
+  console.log('WETH approval confirmed');
+
+  console.log('Approving router to spend USDC...');
+  const approveTx2 = await usdcContract.approve(
+    UNISWAP_ROUTER_ADDRESS,
+    ethers.parseUnits('50000', 6),
+    { nonce: currentNonce++ }
+  );
+  await approveTx2.wait();
+  console.log('USDC approval confirmed');
+
+  // Reset nonce after approvals in case anything changed
+  currentNonce = await provider.getTransactionCount(wallet.address);
+  console.log(`Nonce after approvals: ${currentNonce}`);
+
+  // Perform alternating swaps
+  for (let i = 0; i < numSwaps; i++) {
+    try {
+      // Re-check nonce before each swap to ensure we're in sync
+      currentNonce = await provider.getTransactionCount(wallet.address);
+
+      const isWethToUsdc = i % 2 === 0;
+      const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
+      const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
+      const amountIn = isWethToUsdc ?
+        ethers.parseEther('0.1') : // 0.1 WETH
+        ethers.parseUnits('100', 6); // 100 USDC
+
+      console.log(`Swap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
+
+      // Setup swap parameters
+      const params = {
+        tokenIn,
+        tokenOut,
+        fee: 3000, // 0.3% fee tier
+        recipient: wallet.address,
+        deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
+        amountIn,
+        amountOutMinimum: 0, // No minimum for testing
+        sqrtPriceLimitX96: 0 // No price limit
+      };
+
+      // Execute swap with explicit nonce
+      const tx = await router.exactInputSingle(
+        params,
+        { nonce: currentNonce }
+      );
+
+      console.log(`  Swap transaction sent: ${tx.hash}`);
+
+      // Wait for the transaction to be mined
+      await tx.wait();
+      console.log(`  Swap confirmed`);
+
+      // Small delay to give the node time to update its state (optional)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+    } catch (error) {
+      console.error(`Error in swap ${i+1}:`, error.message);
+      // Continue with the next swap even if one fails
+    }
+  }
+
+  console.log('Swap operations completed');
+}
+
+// Function to calculate uncollected fees (similar to our positionHelpers.js)
+async function calculateUncollectedFees(wallet, positionId, positionManagerAddress, poolAddress, token0, token1, verbose = true) {
+  console.log(`\n--- Calculating uncollected fees for position #${positionId} ---`);
+
+  // Create contract instances
+  const positionManager = new ethers.Contract(
+    positionManagerAddress,
+    [
+      'function positions(uint256 tokenId) external view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)'
+    ],
+    wallet
+  );
+
+  const poolContract = new ethers.Contract(
+    poolAddress,
+    [
+      'function feeGrowthGlobal0X128() external view returns (uint256)',
+      'function feeGrowthGlobal1X128() external view returns (uint256)',
+      'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+      'function ticks(int24 tick) external view returns (uint128 liquidityGross, int128 liquidityNet, uint256 feeGrowthOutside0X128, uint256 feeGrowthOutside1X128, int56 tickCumulativeOutside, uint160 secondsPerLiquidityOutsideX128, uint32 secondsOutside, bool initialized)'
+    ],
+    wallet
+  );
+
+  // Fetch position data
+  const position = await positionManager.positions(positionId);
+  const tickLower = Number(position.tickLower);
+  const tickUpper = Number(position.tickUpper);
+
+  // Fetch pool data
+  const slot0 = await poolContract.slot0();
+  const currentTick = Number(slot0.tick);
+  const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
+  const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
+
+  // Fetch tick data
+  let lowerTickData, upperTickData;
+  try {
+    lowerTickData = await poolContract.ticks(tickLower);
+    upperTickData = await poolContract.ticks(tickUpper);
+  } catch (error) {
+    console.log(`Error fetching tick data: ${error.message}`);
+    console.log(`Using default zero values`);
+    lowerTickData = {
+      feeGrowthOutside0X128: 0,
+      feeGrowthOutside1X128: 0,
+      initialized: false
+    };
+    upperTickData = {
+      feeGrowthOutside0X128: 0,
+      feeGrowthOutside1X128: 0,
+      initialized: false
+    };
+  }
+
+  // Calculate the uncollected fees using our positionHelper methods
+  return calculateFees({
+    position,
+    currentTick,
+    feeGrowthGlobal0X128,
+    feeGrowthGlobal1X128,
+    tickLower: lowerTickData,
+    tickUpper: upperTickData,
+    token0,
+    token1,
+    verbose
+  });
+}
+
+// Import our fee calculation function (reimplemented directly for simplicity)
+function calculateFees({
+  position,
+  currentTick,
+  feeGrowthGlobal0X128,
+  feeGrowthGlobal1X128,
+  tickLower,
+  tickUpper,
+  token0,
+  token1,
+  verbose = false
+}) {
+  // Convert all inputs to proper types
+  const toBigInt = (val) => {
+    if (typeof val === 'bigint') return val;
+    if (typeof val === 'string') return BigInt(val);
+    if (typeof val === 'number') return BigInt(Math.floor(val));
+    if (val?._isBigNumber) return BigInt(val.toString());
+    if (val?.toString) return BigInt(val.toString());
+    return BigInt(0);
+  };
+
+  // Position data extraction
+  const tickLowerValue = Number(position.tickLower);
+  const tickUpperValue = Number(position.tickUpper);
+  const liquidity = toBigInt(position.liquidity);
+  const feeGrowthInside0LastX128 = toBigInt(position.feeGrowthInside0LastX128);
+  const feeGrowthInside1LastX128 = toBigInt(position.feeGrowthInside1LastX128);
+  const tokensOwed0 = toBigInt(position.tokensOwed0);
+  const tokensOwed1 = toBigInt(position.tokensOwed1);
+
+  if (verbose) {
+    console.log(`\n=== CALCULATING UNCOLLECTED FEES ===`);
+    console.log(`Position Data (Raw):`);
+    console.log(`- Position ID: ${position.tokenId || 'N/A'}`);
+    console.log(`- Position Liquidity: ${position.liquidity}`);
+    console.log(`- Position Tick Range: ${position.tickLower} to ${position.tickUpper}`);
+    console.log(`- Position Last Fee Growth Inside 0: ${position.feeGrowthInside0LastX128}`);
+    console.log(`- Position Last Fee Growth Inside 1: ${position.feeGrowthInside1LastX128}`);
+    console.log(`- Position Tokens Owed 0: ${position.tokensOwed0}`);
+    console.log(`- Position Tokens Owed 1: ${position.tokensOwed1}`);
+
+    console.log(`\nPosition Data (Converted):`);
+    console.log(`- Position Liquidity: ${liquidity}`);
+    console.log(`- Position Tick Range: ${tickLowerValue} to ${tickUpperValue}`);
+    console.log(`- Position Last Fee Growth Inside 0: ${feeGrowthInside0LastX128}`);
+    console.log(`- Position Last Fee Growth Inside 1: ${feeGrowthInside1LastX128}`);
+    console.log(`- Position Tokens Owed 0: ${tokensOwed0}`);
+    console.log(`- Position Tokens Owed 1: ${tokensOwed1}`);
+
+    console.log(`\nPool Data (Raw):`);
+    console.log(`- Current Tick: ${currentTick}`);
+    console.log(`- Fee Growth Global 0: ${feeGrowthGlobal0X128}`);
+    console.log(`- Fee Growth Global 1: ${feeGrowthGlobal1X128}`);
+
+    console.log(`\nPool Data (Converted):`);
+    console.log(`- Current Tick: ${currentTick}`);
+    console.log(`- Fee Growth Global 0: ${toBigInt(feeGrowthGlobal0X128)}`);
+    console.log(`- Fee Growth Global 1: ${toBigInt(feeGrowthGlobal1X128)}`);
+
+    console.log(`\nTick Data (Raw):`);
+    if (tickLower) {
+      console.log(`- Lower Tick (${tickLowerValue}) Fee Growth Outside 0: ${tickLower.feeGrowthOutside0X128}`);
+      console.log(`- Lower Tick (${tickLowerValue}) Fee Growth Outside 1: ${tickLower.feeGrowthOutside1X128}`);
+      console.log(`- Lower Tick Initialized: ${tickLower.initialized || false}`);
+    } else {
+      console.log(`- Lower Tick (${tickLowerValue}) Data: Not available (using zeros)`);
+    }
+
+    if (tickUpper) {
+      console.log(`- Upper Tick (${tickUpperValue}) Fee Growth Outside 0: ${tickUpper.feeGrowthOutside0X128}`);
+      console.log(`- Upper Tick (${tickUpperValue}) Fee Growth Outside 1: ${tickUpper.feeGrowthOutside1X128}`);
+      console.log(`- Upper Tick Initialized: ${tickUpper.initialized || false}`);
+    } else {
+      console.log(`- Upper Tick (${tickUpperValue}) Data: Not available (using zeros)`);
+    }
+  }
+
+  // Ensure we have tick data or use defaults
+  const lowerTickData = {
+    feeGrowthOutside0X128: tickLower ? toBigInt(tickLower.feeGrowthOutside0X128) : 0n,
+    feeGrowthOutside1X128: tickLower ? toBigInt(tickLower.feeGrowthOutside1X128) : 0n,
+    initialized: tickLower ? Boolean(tickLower.initialized) : false
+  };
+
+  const upperTickData = {
+    feeGrowthOutside0X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside0X128) : 0n,
+    feeGrowthOutside1X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside1X128) : 0n,
+    initialized: tickUpper ? Boolean(tickUpper.initialized) : false
+  };
+
+  // Convert global fee growth to BigInt
+  const feeGrowthGlobal0X128BigInt = toBigInt(feeGrowthGlobal0X128);
+  const feeGrowthGlobal1X128BigInt = toBigInt(feeGrowthGlobal1X128);
+
+  if (verbose) {
+    console.log(`\nTick Data (Converted):`);
+    console.log(`- Lower Tick (${tickLowerValue}) Fee Growth Outside 0: ${lowerTickData.feeGrowthOutside0X128}`);
+    console.log(`- Lower Tick (${tickLowerValue}) Fee Growth Outside 1: ${lowerTickData.feeGrowthOutside1X128}`);
+    console.log(`- Upper Tick (${tickUpperValue}) Fee Growth Outside 0: ${upperTickData.feeGrowthOutside0X128}`);
+    console.log(`- Upper Tick (${tickUpperValue}) Fee Growth Outside 1: ${upperTickData.feeGrowthOutside1X128}`);
+  }
+
+  // Calculate current fee growth inside the position's range
+  let feeGrowthInside0X128, feeGrowthInside1X128;
+
+  if (currentTick < tickLowerValue) {
+    // Current tick is below the position's range
+    feeGrowthInside0X128 = lowerTickData.feeGrowthOutside0X128 - upperTickData.feeGrowthOutside0X128;
+    feeGrowthInside1X128 = lowerTickData.feeGrowthOutside1X128 - upperTickData.feeGrowthOutside1X128;
+
+    if (verbose) {
+      console.log(`\nCase: Current tick (${currentTick}) is BELOW position range`);
+      console.log(`- Formula: feeGrowthInside = lowerTick.feeGrowthOutside - upperTick.feeGrowthOutside`);
+      console.log(`- Token0: ${lowerTickData.feeGrowthOutside0X128} - ${upperTickData.feeGrowthOutside0X128}`);
+      console.log(`- Token1: ${lowerTickData.feeGrowthOutside1X128} - ${upperTickData.feeGrowthOutside1X128}`);
+    }
+  } else if (currentTick >= tickUpperValue) {
+    // Current tick is at or above the position's range
+    feeGrowthInside0X128 = upperTickData.feeGrowthOutside0X128 - lowerTickData.feeGrowthOutside0X128;
+    feeGrowthInside1X128 = upperTickData.feeGrowthOutside1X128 - lowerTickData.feeGrowthOutside1X128;
+
+    if (verbose) {
+      console.log(`\nCase: Current tick (${currentTick}) is ABOVE position range`);
+      console.log(`- Formula: feeGrowthInside = upperTick.feeGrowthOutside - lowerTick.feeGrowthOutside`);
+      console.log(`- Token0: ${upperTickData.feeGrowthOutside0X128} - ${lowerTickData.feeGrowthOutside0X128}`);
+      console.log(`- Token1: ${upperTickData.feeGrowthOutside1X128} - ${lowerTickData.feeGrowthOutside1X128}`);
+    }
+  } else {
+    // Current tick is within the position's range
+    feeGrowthInside0X128 = feeGrowthGlobal0X128BigInt - lowerTickData.feeGrowthOutside0X128 - upperTickData.feeGrowthOutside0X128;
+    feeGrowthInside1X128 = feeGrowthGlobal1X128BigInt - lowerTickData.feeGrowthOutside1X128 - upperTickData.feeGrowthOutside1X128;
+
+    if (verbose) {
+      console.log(`\nCase: Current tick (${currentTick}) is WITHIN position range`);
+      console.log(`- Formula: feeGrowthInside = feeGrowthGlobal - lowerTick.feeGrowthOutside - upperTick.feeGrowthOutside`);
+      console.log(`- Token0: ${feeGrowthGlobal0X128BigInt} - ${lowerTickData.feeGrowthOutside0X128} - ${upperTickData.feeGrowthOutside0X128}`);
+      console.log(`- Token1: ${feeGrowthGlobal1X128BigInt} - ${lowerTickData.feeGrowthOutside1X128} - ${upperTickData.feeGrowthOutside1X128}`);
+    }
+  }
+
+  // Handle negative values by adding 2^256
+  const MAX_UINT256 = 2n ** 256n;
+  if (feeGrowthInside0X128 < 0n) {
+    if (verbose) console.log(`Handling negative value for feeGrowthInside0X128: ${feeGrowthInside0X128} + 2^256`);
+    feeGrowthInside0X128 += MAX_UINT256;
+  }
+
+  if (feeGrowthInside1X128 < 0n) {
+    if (verbose) console.log(`Handling negative value for feeGrowthInside1X128: ${feeGrowthInside1X128} + 2^256`);
+    feeGrowthInside1X128 += MAX_UINT256;
+  }
+
+  if (verbose) {
+    console.log(`\nFee Growth Inside (after underflow protection):`);
+    console.log(`- Fee Growth Inside 0: ${feeGrowthInside0X128}`);
+    console.log(`- Fee Growth Inside 1: ${feeGrowthInside1X128}`);
+  }
+
+  // Calculate fee growth since last position update
+  let feeGrowthDelta0 = feeGrowthInside0X128 - feeGrowthInside0LastX128;
+  let feeGrowthDelta1 = feeGrowthInside1X128 - feeGrowthInside1LastX128;
+
+  // Handle underflow
+  if (feeGrowthDelta0 < 0n) {
+    if (verbose) console.log(`Handling negative value for feeGrowthDelta0: ${feeGrowthDelta0} + 2^256`);
+    feeGrowthDelta0 += MAX_UINT256;
+  }
+
+  if (feeGrowthDelta1 < 0n) {
+    if (verbose) console.log(`Handling negative value for feeGrowthDelta1: ${feeGrowthDelta1} + 2^256`);
+    feeGrowthDelta1 += MAX_UINT256;
+  }
+
+  if (verbose) {
+    console.log(`\nFee Growth Delta (since last position update):`);
+    console.log(`- Token0 Delta: ${feeGrowthDelta0}`);
+    console.log(`- Token1 Delta: ${feeGrowthDelta1}`);
+  }
+
+  // Calculate uncollected fees
+  // The formula is: tokensOwed + (liquidity * feeGrowthDelta) / 2^128
+  const DENOMINATOR = 2n ** 128n;
+
+  if (verbose) {
+    console.log(`\nFee Calculation Breakdown:`);
+    console.log(`- Liquidity: ${liquidity}`);
+    console.log(`- Denominator (2^128): ${DENOMINATOR}`);
+    console.log(`\nCalculation for Token0:`);
+    console.log(`- Fee Growth Delta: ${feeGrowthDelta0}`);
+    console.log(`- liquidity * feeGrowthDelta0 = ${liquidity * feeGrowthDelta0}`);
+    console.log(`- (liquidity * feeGrowthDelta0) / 2^128 = ${(liquidity * feeGrowthDelta0) / DENOMINATOR}`);
+  }
+
+  const uncollectedFees0Raw = tokensOwed0 + (liquidity * feeGrowthDelta0) / DENOMINATOR;
+  const uncollectedFees1Raw = tokensOwed1 + (liquidity * feeGrowthDelta1) / DENOMINATOR;
+
+  if (verbose) {
+    console.log(`\nUncollected Fees Calculation:`);
+    console.log(`- Formula: tokensOwed + (liquidity * feeGrowthDelta) / 2^128`);
+    console.log(`- Token0: ${tokensOwed0} + (${liquidity} * ${feeGrowthDelta0}) / ${DENOMINATOR} = ${uncollectedFees0Raw}`);
+    console.log(`- Token1: ${tokensOwed1} + (${liquidity} * ${feeGrowthDelta1}) / ${DENOMINATOR} = ${uncollectedFees1Raw}`);
+
+    console.log(`\nConverting to human-readable amounts:`);
+    console.log(`- Token0 Decimals: ${token0?.decimals || 18}`);
+    console.log(`- Token1 Decimals: ${token1?.decimals || 6}`);
+    console.log(`- Token0 Fee: ${formatUnits(uncollectedFees0Raw, token0?.decimals || 18)}`);
+    console.log(`- Token1 Fee: ${formatUnits(uncollectedFees1Raw, token1?.decimals || 6)}`);
+  }
+
+  // Format with proper decimals
+  const token0Decimals = token0?.decimals || 18;
+  const token1Decimals = token1?.decimals || 6;
+
+  // Return both raw and formatted values for flexibility
+  return {
+    token0: {
+      raw: uncollectedFees0Raw,
+      // Convert to string for safer handling in UI
+      formatted: formatUnits(uncollectedFees0Raw, token0Decimals)
+    },
+    token1: {
+      raw: uncollectedFees1Raw,
+      formatted: formatUnits(uncollectedFees1Raw, token1Decimals)
+    }
+  };
+}
+
+/**
+ * Helper function to format BigInt values with decimals
+ * @param {BigInt} value - The raw token amount as BigInt
+ * @param {number} decimals - Number of decimals for the token
+ * @returns {string} Formatted string with proper decimal places
+ */
+function formatUnits(value, decimals) {
+  if (!value) return '0';
+
+  const divisor = BigInt(10 ** decimals);
+  const integerPart = (value / divisor).toString();
+
+  let fractionalPart = (value % divisor).toString();
+  // Pad with leading zeros if needed
+  fractionalPart = fractionalPart.padStart(decimals, '0');
+
+  // Remove trailing zeros
+  while (fractionalPart.endsWith('0') && fractionalPart.length > 1) {
+    fractionalPart = fractionalPart.substring(0, fractionalPart.length - 1);
+  }
+
+  if (fractionalPart === '0') {
+    return integerPart;
+  }
+
+  return `${integerPart}.${fractionalPart}`;
 }
 
 // Main function
@@ -356,8 +783,9 @@ async function main() {
     }
 
     // Calculate price range in human-readable format
-    const lowerPrice = tickToPrice(WETH, USDC, position.tickLower).toFixed(6);
-    const upperPrice = tickToPrice(WETH, USDC, position.tickUpper).toFixed(6);
+    // Fixed price calculation
+    const lowerPrice = tickToPrice(WETH, USDC, position.tickLower).toFixed(2);
+    const upperPrice = tickToPrice(WETH, USDC, position.tickUpper).toFixed(2);
     console.log(`- Price Range: ${lowerPrice} - ${upperPrice} USDC per WETH`);
     console.log(`- Current Price: ${price.toFixed(2)} USDC per WETH`);
 
@@ -475,11 +903,80 @@ async function main() {
     const positionBalance = await positionManager.balanceOf(wallet.address);
     console.log(`\nTotal positions owned: ${positionBalance}`);
 
+    // Save token information for use in the fee calculation
+    const token0Info = {
+      address: WETH_ADDRESS,
+      decimals: 18,
+      symbol: 'WETH'
+    };
+
+    const token1Info = {
+      address: USDC_ADDRESS,
+      decimals: 6,
+      symbol: 'USDC'
+    };
+
+    // NEW SECTION: Generate fees by performing multiple swaps
+    console.log('\n=== GENERATING FEES FOR THE POSITION ===');
+
+    // Perform multiple swaps to generate fees (just one swap for now as requested)
+    await performSwapsToGenerateFees(wallet, 5);
+
+    // Calculate fees directly without "poking" the position
+    console.log('\n=== CALCULATING UNCOLLECTED FEES ===');
+    const feesResult = await calculateUncollectedFees(
+      wallet,
+      tokenId,
+      positionManagerAddress,
+      poolAddress,
+      token0Info,
+      token1Info,
+      true // verbose logging
+    );
+
+    console.log('\n=== FEE CALCULATION RESULT ===');
+    console.log(`WETH Fees: ${feesResult.token0.formatted}`);
+    console.log(`USDC Fees: ${feesResult.token1.formatted}`);
+
+//     // Save the fee calculation as a separate JS module for frontend reference
+//     const feesExportCode = `
+// // Generated by seed.js - Example calculation for position ${tokenId}
+// export const sampleFeeCalculation = {
+//   positionId: "${tokenId}",
+//   token0: {
+//     symbol: "WETH",
+//     fees: "${feesResult.token0.formatted}"
+//   },
+//   token1: {
+//     symbol: "USDC",
+//     fees: "${feesResult.token1.formatted}"
+//   },
+//   calculationMethod: "Off-chain calculation from pool state"
+// };
+// `;
+
+//     fs.writeFileSync(path.join(__dirname, '..', 'src', 'utils', 'sampleFeeCalculation.js'), feesExportCode);
+//     console.log('\nSaved fee calculation example to src/utils/sampleFeeCalculation.js');
+
   } catch (err) {
     console.error('Error creating position:', err);
   }
 
   console.log('\nSeed script completed.');
+
+  // Helper function to convert tick to price - FIXED VERSION
+  function tickToPrice(baseToken, quoteToken, tick) {
+    // Calculate price from tick using the formula: 1.0001^tick
+    const price = Math.pow(1.0001, tick);
+
+    // Apply decimal adjustment based on token decimals
+    // For WETH (18 decimals) to USDC (6 decimals), we need to multiply by 10^(6-18) = 10^-12
+    const decimalAdjustment = Math.pow(10, quoteToken.decimals - baseToken.decimals);
+
+    // For numbers that might be very small due to decimal adjustments,
+    // ensure we're handling the math properly
+    return price * decimalAdjustment;
+  }
 }
 
 // Execute the script
