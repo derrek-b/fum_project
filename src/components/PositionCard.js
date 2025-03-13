@@ -142,34 +142,106 @@ export default function PositionCard({ position, provider }) {
     setIsClaiming(true);
     setClaimError(null);
     setClaimSuccess(false);
+
     try {
-      // Dynamically get the positionManagerAddress based on chainId
+      // Dynamically get the positionManagerAddress
       const chainConfig = config.chains[chainId];
       if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
       const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      console.log(`Using position manager at: ${positionManagerAddress}`);
 
+      // Get signer
       const signer = await provider.getSigner();
-      const nftManager = new ethers.Contract(positionManagerAddress, nonfungiblePositionManagerABI.abi, signer);
 
-      const collectParams = {
+      // First, create a contract instance to get position data
+      const nftManager = new ethers.Contract(
+        positionManagerAddress,
+        nonfungiblePositionManagerABI.abi,
+        provider
+      );
+
+      // Get current position data directly from contract
+      const positionData = await nftManager.positions(position.id);
+      console.log("Position data:", {
+        tokensOwed0: positionData.tokensOwed0.toString(),
+        tokensOwed1: positionData.tokensOwed1.toString()
+      });
+
+      // Import required SDK classes
+      const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
+      const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
+
+      // Create Token instances for the SDK
+      const token0 = new Token(
+        chainId,
+        poolData.token0,
+        token0Data.decimals,
+        token0Data.symbol,
+        token0Data.name || token0Data.symbol
+      );
+
+      const token1 = new Token(
+        chainId,
+        poolData.token1,
+        token1Data.decimals,
+        token1Data.symbol,
+        token1Data.name || token1Data.symbol
+      );
+
+      // Create collectOptions object as per Uniswap docs
+      const collectOptions = {
         tokenId: position.id,
+        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
+          token0,
+          positionData.tokensOwed0.toString()
+        ),
+        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
+          token1,
+          positionData.tokensOwed1.toString()
+        ),
         recipient: address,
-        amount0Max: ethers.MaxUint256,
-        amount1Max: ethers.MaxUint256,
       };
 
-      console.log("Sending collect transaction with params:", collectParams);
-      const tx = await nftManager.collect(collectParams);
-      console.log("Transaction sent, waiting for confirmation...");
+      console.log("Collect options prepared:", {
+        tokenId: collectOptions.tokenId,
+        expectedCurrencyOwed0: collectOptions.expectedCurrencyOwed0.toExact(),
+        expectedCurrencyOwed1: collectOptions.expectedCurrencyOwed1.toExact(),
+        recipient: collectOptions.recipient
+      });
+
+      // Use SDK to generate calldata and value
+      const { calldata, value } = NonfungiblePositionManager.collectCallParameters(collectOptions);
+
+      console.log("Generated calldata and value:", {
+        calldata: calldata.substring(0, 66) + '...',
+        value: value.toString()
+      });
+
+      // Construct transaction
+      const transaction = {
+        data: calldata,
+        to: positionManagerAddress,
+        value: value,
+        from: address,
+        gasLimit: 300000  // Explicit gas limit
+      };
+
+      console.log("Sending transaction...");
+
+      // Send transaction
+      const tx = await signer.sendTransaction(transaction);
+      console.log("Transaction sent, hash:", tx.hash);
+
+      // Wait for confirmation
       await tx.wait();
-      console.log(`Fees claimed for position ${position.id}:`, tx);
+      console.log(`Fees claimed for position ${position.id}!`);
 
       // Set success state
       setClaimSuccess(true);
 
-      // Refresh data after a short delay (temporary solution)
+      // Refresh data after a short delay
       setTimeout(() => {
         window.location.reload();
       }, 3000);
@@ -228,32 +300,32 @@ export default function PositionCard({ position, provider }) {
         <Card.Text>
           <strong>Activity:</strong> {activityBadge}<br />
           <strong>Current Price:</strong> {currentPriceDisplay} {priceLabel}<br />
-
-          {/* Add uncollected fees section */}
           <strong>Uncollected Fees:</strong>
-          <div className="ps-3 mt-1 mb-2">
-            {feeLoadingError ? (
-              <div className="text-danger small">
-                <i className="me-1">⚠️</i>
-                Unable to load fee data. Please try refreshing.
-              </div>
-            ) : !uncollectedFees ? (
-              <div className="text-secondary small">
-                <Spinner animation="border" size="sm" className="me-2" />
-                Loading fee data...
-              </div>
-            ) : (
-              <>
-                <Badge bg="light" text="dark" className="me-1">
-                  {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
-                </Badge>
-                <Badge bg="light" text="dark">
-                  {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
-                </Badge>
-              </>
-            )}
-          </div>
         </Card.Text>
+
+        {/* Move the div outside of CardText */}
+        <div className="ps-3 mt-1 mb-2">
+          {feeLoadingError ? (
+            <div className="text-danger small">
+              <i className="me-1">⚠️</i>
+              Unable to load fee data. Please try refreshing.
+            </div>
+          ) : !uncollectedFees ? (
+            <div className="text-secondary small">
+              <Spinner animation="border" size="sm" className="me-2" />
+              Loading fee data...
+            </div>
+          ) : (
+            <>
+              <Badge bg="light" text="dark" className="me-1">
+                {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+              </Badge>
+              <Badge bg="light" text="dark">
+                {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+              </Badge>
+            </>
+          )}
+        </div>
 
         {isPanelVisible && (
           <div
