@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Row, Col, Alert, Spinner } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import PositionCard from "./PositionCard";
+import RefreshControls from "./RefreshControls";
 import { ethers } from "ethers";
 import config from "../utils/config";
 import { setPositions } from "../redux/positionsSlice";
 import { setPools, clearPools } from "../redux/poolSlice";
 import { setTokens, clearTokens } from "../redux/tokensSlice";
+import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../redux/updateSlice";
 import nonfungiblePositionManagerABI from "@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json" assert { type: "json" };
 import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json" assert { type: "json" };
 import IUniswapV3PoolABI from "@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json" assert { type: "json" };
@@ -18,10 +20,42 @@ import { Token } from "@uniswap/sdk-core";
 export default function PositionContainer({ provider }) {
   const dispatch = useDispatch();
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  // Get update state values
+  const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
   const [positions, setLocalPositions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Add timer reference
+  const timerRef = useRef(null);
 
+  // Set up auto-refresh timer
+  useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Only set up timer if auto-refresh is enabled and we're connected
+    if (autoRefresh.enabled && isConnected && provider && address && chainId) {
+      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
+      timerRef.current = setInterval(() => {
+        console.log('Auto-refreshing data...');
+        dispatch(markAutoRefresh());
+        dispatch(triggerUpdate());
+      }, autoRefresh.interval);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch]);
+
+  // Fetch positions data - added lastUpdate to dependencies
   useEffect(() => {
     if (!isConnected || !address || !provider || !chainId) {
       setLocalPositions([]);
@@ -35,6 +69,8 @@ export default function PositionContainer({ provider }) {
     const fetchPositions = async () => {
       setLoading(true);
       setError(null);
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
+
       try {
         // Dynamically get the positionManagerAddress based on chainId
         console.log(chainId);
@@ -239,13 +275,17 @@ export default function PositionContainer({ provider }) {
         // Do not clear pools or tokens on partial error—only on disconnect
       } finally {
         setLoading(false);
+        dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
       }
     };
 
     fetchPositions();
-  }, [isConnected, address, provider, chainId, dispatch]);
+  }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
 
   const activePositions = positions.filter((pos) => pos.liquidity > 0);
+
+  // Get the refreshing state
+  const isUpdatingPositions = resourcesUpdating?.positions || false;
 
   return (
     <div>
@@ -274,9 +314,22 @@ export default function PositionContainer({ provider }) {
         </Alert>
       ) : (
         <>
-          <p className="text-muted mb-3">
-            Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
-          </p>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <p className="text-muted mb-0">
+              Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
+            </p>
+
+            <div className="d-flex align-items-center">
+              {isUpdatingPositions && (
+                <div className="d-flex align-items-center me-3">
+                  <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
+                  <small className="text-muted">Refreshing...</small>
+                </div>
+              )}
+              <RefreshControls />
+            </div>
+          </div>
+
           <Row>
             {activePositions.map((pos) => (
               <Col md={6} key={pos.id}>

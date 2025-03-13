@@ -349,3 +349,130 @@ function formatUnits(value, decimals) {
 
   return `${integerPart}.${fractionalPart}`;
 }
+
+/**
+ * Claim fees for a position using the Uniswap SDK
+ * @param {Object} params Parameters object
+ * @param {Object} params.position Position data
+ * @param {Object} params.provider Ethers provider
+ * @param {string} params.address User wallet address
+ * @param {number} params.chainId Current chain ID
+ * @param {Object} params.poolData Pool data for this position
+ * @param {Object} params.token0Data Token0 metadata
+ * @param {Object} params.token1Data Token1 metadata
+ * @param {Function} params.dispatch Redux dispatch function
+ * @param {Function} params.onStart Callback when process starts
+ * @param {Function} params.onSuccess Callback on success
+ * @param {Function} params.onError Callback on error
+ * @param {Function} params.onFinish Callback when process finishes
+ */
+export async function claimPositionFees({
+  position,
+  provider,
+  address,
+  chainId,
+  poolData,
+  token0Data,
+  token1Data,
+  dispatch,
+  onStart,
+  onSuccess,
+  onError,
+  onFinish
+}) {
+  if (!provider || !address || !chainId) {
+    onError && onError("Wallet not connected");
+    return;
+  }
+
+  onStart && onStart();
+
+  try {
+    // Dynamically get the positionManagerAddress
+    const config = require("../utils/config").default;
+    const chainConfig = config.chains[chainId];
+    if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      throw new Error(`No configuration found for chainId: ${chainId}`);
+    }
+    const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+
+    // Get signer
+    const signer = await provider.getSigner();
+
+    // Import necessary modules
+    const { ethers } = require("ethers");
+    const nonfungiblePositionManagerABI = require("@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json");
+    const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
+    const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
+
+    // Create contract instance to get position data
+    const nftManager = new ethers.Contract(
+      positionManagerAddress,
+      nonfungiblePositionManagerABI.abi,
+      provider
+    );
+
+    // Get current position data directly from contract
+    const positionData = await nftManager.positions(position.id);
+
+    // Create Token instances for the SDK
+    const token0 = new Token(
+      chainId,
+      poolData.token0,
+      token0Data.decimals,
+      token0Data.symbol,
+      token0Data.name || token0Data.symbol
+    );
+
+    const token1 = new Token(
+      chainId,
+      poolData.token1,
+      token1Data.decimals,
+      token1Data.symbol,
+      token1Data.name || token1Data.symbol
+    );
+
+    // Create collectOptions object as per Uniswap docs
+    const collectOptions = {
+      tokenId: position.id,
+      expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
+        token0,
+        positionData.tokensOwed0.toString()
+      ),
+      expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
+        token1,
+        positionData.tokensOwed1.toString()
+      ),
+      recipient: address
+    };
+
+    // Use SDK to generate calldata and value
+    const { calldata, value } = NonfungiblePositionManager.collectCallParameters(collectOptions);
+
+    // Construct transaction
+    const transaction = {
+      data: calldata,
+      to: positionManagerAddress,
+      value: value,
+      from: address,
+      gasLimit: 300000
+    };
+
+    // Send transaction
+    const tx = await signer.sendTransaction(transaction);
+    await tx.wait();
+
+    // Trigger an update after successful transaction
+    if (dispatch) {
+      const { triggerUpdate } = require('../redux/updateSlice');
+      dispatch(triggerUpdate());
+    }
+
+    onSuccess && onSuccess(tx);
+  } catch (error) {
+    console.error("Error claiming fees:", error);
+    onError && onError(error.message || "Unknown error");
+  } finally {
+    onFinish && onFinish();
+  }
+}

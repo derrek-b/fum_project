@@ -4,6 +4,7 @@ import positionsReducer from "./positionsSlice";
 import poolReducer from "./poolSlice";
 import tokensReducer from "./tokensSlice";
 import walletReducer from "./walletSlice";
+import updatesReducer from "./updateSlice";
 
 export const store = configureStore({
   reducer: {
@@ -11,6 +12,7 @@ export const store = configureStore({
     pools: poolReducer,
     tokens: tokensReducer,
     wallet: walletReducer,
+    updates: updatesReducer, // Added new reducer
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

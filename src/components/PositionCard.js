@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Card, Button, Spinner, Badge } from "react-bootstrap";
-import { isInRange, calculatePrice, calculateUncollectedFees, tickToPrice, formatPrice } from "../utils/positionHelpers";
-import { useSelector } from "react-redux";
+import { isInRange, calculatePrice, calculateUncollectedFees, tickToPrice, formatPrice, claimPositionFees } from "../utils/positionHelpers";
+import { useSelector, useDispatch } from "react-redux";
 import { ethers } from "ethers";
 import nonfungiblePositionManagerABI from "@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json" assert { type: "json" };
 import config from "../utils/config";
@@ -133,141 +133,62 @@ export default function PositionCard({ position, provider }) {
   const [claimSuccess, setClaimSuccess] = useState(false);
 
   // Function to claim fees
-  const claimFees = async () => {
-    if (!provider || !address || !chainId) {
-      setClaimError("Wallet not connected");
-      return;
-    }
+  const dispatch = useDispatch();
 
-    setIsClaiming(true);
-    setClaimError(null);
-    setClaimSuccess(false);
+  const claimFees = async (e) => {
+    if (e) e.preventDefault();
 
-    try {
-      // Dynamically get the positionManagerAddress
-      const chainConfig = config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
+    claimPositionFees({
+      position,
+      provider,
+      address,
+      chainId,
+      poolData,
+      token0Data,
+      token1Data,
+      dispatch,  // Pass the dispatch function
+      onStart: () => {
+        setIsClaiming(true);
+        setClaimError(null);
+        setClaimSuccess(false);
+      },
+      onFinish: () => {
+        setIsClaiming(false);
+      },
+      onSuccess: () => {
+        setClaimSuccess(true);
+        // No need to reload page now since we're updating via Redux
+      },
+      onError: (errorMessage) => {
+        setClaimError(`Failed to claim fees: ${errorMessage}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-      console.log(`Using position manager at: ${positionManagerAddress}`);
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // First, create a contract instance to get position data
-      const nftManager = new ethers.Contract(
-        positionManagerAddress,
-        nonfungiblePositionManagerABI.abi,
-        provider
-      );
-
-      // Get current position data directly from contract
-      const positionData = await nftManager.positions(position.id);
-      console.log("Position data:", {
-        tokensOwed0: positionData.tokensOwed0.toString(),
-        tokensOwed1: positionData.tokensOwed1.toString()
-      });
-
-      // Import required SDK classes
-      const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
-      const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
-
-      // Create Token instances for the SDK
-      const token0 = new Token(
-        chainId,
-        poolData.token0,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
-      );
-
-      const token1 = new Token(
-        chainId,
-        poolData.token1,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
-      );
-
-      // Create collectOptions object as per Uniswap docs
-      const collectOptions = {
-        tokenId: position.id,
-        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
-          token0,
-          positionData.tokensOwed0.toString()
-        ),
-        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
-          token1,
-          positionData.tokensOwed1.toString()
-        ),
-        recipient: address,
-      };
-
-      console.log("Collect options prepared:", {
-        tokenId: collectOptions.tokenId,
-        expectedCurrencyOwed0: collectOptions.expectedCurrencyOwed0.toExact(),
-        expectedCurrencyOwed1: collectOptions.expectedCurrencyOwed1.toExact(),
-        recipient: collectOptions.recipient
-      });
-
-      // Use SDK to generate calldata and value
-      const { calldata, value } = NonfungiblePositionManager.collectCallParameters(collectOptions);
-
-      console.log("Generated calldata and value:", {
-        calldata: calldata.substring(0, 66) + '...',
-        value: value.toString()
-      });
-
-      // Construct transaction
-      const transaction = {
-        data: calldata,
-        to: positionManagerAddress,
-        value: value,
-        from: address,
-        gasLimit: 300000  // Explicit gas limit
-      };
-
-      console.log("Sending transaction...");
-
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      console.log("Transaction sent, hash:", tx.hash);
-
-      // Wait for confirmation
-      await tx.wait();
-      console.log(`Fees claimed for position ${position.id}!`);
-
-      // Set success state
-      setClaimSuccess(true);
-
-      // Refresh data after a short delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 3000);
-    } catch (error) {
-      console.error("Error claiming fees:", error);
-      setClaimError(`Failed to claim fees: ${error.message}`);
-    } finally {
-      setIsClaiming(false);
-    }
+    });
   };
 
   // Prepare activityBadge
-  const activityBadge = (
+  const activityIndicator = (
     <span
-      className={`badge bg-${active ? 'success' : 'danger'}`}
-      style={{ fontSize: '0.85rem' }}
-    >
-      {active ? "in-range" : "out-of-range"}
-    </span>
+      style={{
+        display: 'inline-block',
+        width: '10px',
+        height: '10px',
+        borderRadius: '50%',
+        backgroundColor: active ? '#28a745' : '#dc3545',
+        marginLeft: '8px',
+        marginRight: '4px'
+      }}
+      title={active ? "In range" : "Out of range"}
+    />
   );
 
   return (
     <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000" }}>
       <Card.Body>
         <div className="d-flex justify-content-between align-items-center mb-2">
-          <Card.Title>Position #{position.id} - {position.tokenPair}</Card.Title>
+          <Card.Title>
+            Position #{position.id} - {position.tokenPair}
+            {activityIndicator}
+          </Card.Title>
           <Button
             variant="outline-secondary"
             size="sm"
@@ -298,7 +219,6 @@ export default function PositionCard({ position, provider }) {
         </div>
 
         <Card.Text>
-          <strong>Activity:</strong> {activityBadge}<br />
           <strong>Current Price:</strong> {currentPriceDisplay} {priceLabel}<br />
           <strong>Uncollected Fees:</strong>
         </Card.Text>
