@@ -9,9 +9,9 @@ export default function PositionCard({ position, provider }) {
   const { address, chainId } = useSelector((state) => state.wallet);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const poolData = pools[position.poolAddress] || {};
-  const token0Data = tokens[poolData.token0] || { decimals: 0, symbol: '?' };
-  const token1Data = tokens[poolData.token1] || { decimals: 0, symbol: '?' };
+  const poolData = pools[position.poolAddress];
+  const token0Data = poolData?.token0 ? tokens[poolData.token0] : null;
+  const token1Data = poolData?.token1 ? tokens[poolData.token1] : null;
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
@@ -177,6 +177,10 @@ export default function PositionCard({ position, provider }) {
       typeof value === 'bigint' ? value.toString() : value
     )
   });
+
+  if (!poolData || !token0Data || !token1Data) {
+    return <Card><Card.Body>Loading position data or data unavailable...</Card.Body></Card>;
+  }
 
   return (
     <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000" }}>

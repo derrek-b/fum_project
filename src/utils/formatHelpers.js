@@ -24,6 +24,7 @@ export function formatPrice(price) {
 }
 
 /**
+ * NOTE - DO NOT USE FOR CALCULATIONS
  * Helper function to format BigInt values with decimals
  * @param {BigInt} value - The raw token amount as BigInt
  * @param {number} decimals - Number of decimals for the token

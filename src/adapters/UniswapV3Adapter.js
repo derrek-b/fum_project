@@ -465,7 +465,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Verbose logging code removed for brevity
     }
 
-    // Ensure we have tick data or use defaults
+    // Ensure we have tick data
+    if (!tickLower || !tickUpper) {
+      throw new Error("Required tick data is missing for fee calculation");
+    }
+
     const lowerTickData = {
       feeGrowthOutside0X128: tickLower ? toBigInt(tickLower.feeGrowthOutside0X128) : 0n,
       feeGrowthOutside1X128: tickLower ? toBigInt(tickLower.feeGrowthOutside1X128) : 0n,
@@ -540,8 +544,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const uncollectedFees1Raw = tokensOwed1 + (liquidity * feeGrowthDelta1) / DENOMINATOR;
 
     // Format with proper decimals
-    const token0Decimals = token0?.decimals || 18;
-    const token1Decimals = token1?.decimals || 6;
+    if (!token0?.decimals || !token1?.decimals) {
+      throw new Error("Token decimal information missing - cannot calculate fees accurately");
+    }
+    const token0Decimals = token0.decimals;
+    const token1Decimals = token1.decimals;
 
     console.log(6, uncollectedFees0Raw)
     console.log(formatUnits(uncollectedFees0Raw, token0Decimals))
