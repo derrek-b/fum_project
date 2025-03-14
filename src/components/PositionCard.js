@@ -1,125 +1,113 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Card, Button, Spinner, Badge } from "react-bootstrap";
-import { isInRange, calculatePrice, calculateUncollectedFees, tickToPrice, formatPrice, claimPositionFees } from "../utils/positionHelpers";
 import { useSelector, useDispatch } from "react-redux";
-import { ethers } from "ethers";
-import nonfungiblePositionManagerABI from "@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json" assert { type: "json" };
-import config from "../utils/config";
-
-// Helper function to format fee display with max 4 decimal places
-// and show "< 0.0001" for very small amounts
-const formatFeeDisplay = (value) => {
-  const numValue = parseFloat(value);
-  if (numValue === 0) return "0";
-  if (numValue < 0.0001) return "< 0.0001";
-  return numValue.toFixed(4).replace(/\.?0+$/, "");
-};
+import { AdapterFactory } from "../adapters";
+import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
 
 export default function PositionCard({ position, provider }) {
+  const dispatch = useDispatch();
   const { address, chainId } = useSelector((state) => state.wallet);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const poolData = pools[position.poolAddress] || {};
   const token0Data = tokens[poolData.token0] || { decimals: 0, symbol: '?' };
   const token1Data = tokens[poolData.token1] || { decimals: 0, symbol: '?' };
-  const currentTick = poolData.tick || 0;
-  const sqrtPriceX96 = poolData.sqrtPriceX96 || "0";
 
-  // Current price calculation
-  const currentPrice = useMemo(() => calculatePrice(sqrtPriceX96, token0Data.decimals, token1Data.decimals), [
-    sqrtPriceX96,
-    token0Data.decimals,
-    token1Data.decimals,
-  ]);
+  // Get the appropriate adapter for this position
+  const adapter = useMemo(() => {
+    if (!position.platform || !provider) return null;
+    try {
+      return AdapterFactory.getAdapter(position.platform, provider);
+    } catch (error) {
+      console.error(`Failed to get adapter for position ${position.id}:`, error);
+      return null;
+    }
+  }, [position.platform, provider]);
+
+  // Use adapter for position-specific calculations
+  const isActive = useMemo(() => {
+    if (!adapter) return false;
+    return adapter.isPositionInRange(position, poolData);
+  }, [adapter, position, poolData]);
 
   // State for price display direction
   const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
 
-  // Calculate price range
-  const lowerPrice = useMemo(() => {
-    return tickToPrice(position.tickLower, token0Data.decimals, token1Data.decimals, invertPriceDisplay);
-  }, [position.tickLower, token0Data.decimals, token1Data.decimals, invertPriceDisplay]);
+  // Calculate price information using the adapter
+  const priceInfo = useMemo(() => {
+    if (!adapter) return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
 
-  const upperPrice = useMemo(() => {
-    return tickToPrice(position.tickUpper, token0Data.decimals, token1Data.decimals, invertPriceDisplay);
-  }, [position.tickUpper, token0Data.decimals, token1Data.decimals, invertPriceDisplay]);
+    return adapter.calculatePrice(
+      position,
+      poolData,
+      token0Data,
+      token1Data,
+      invertPriceDisplay
+    );
+  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay]);
+
+  // Extract values from priceInfo
+  const { currentPrice, lowerPrice, upperPrice } = priceInfo;
 
   // Ensure lower price is always smaller than upper price (they swap when inverting)
-  const displayLowerPrice = Math.min(lowerPrice, upperPrice);
-  const displayUpperPrice = Math.max(lowerPrice, upperPrice);
+  const displayLowerPrice = useMemo(() => {
+    if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
+    return Math.min(parseFloat(lowerPrice), parseFloat(upperPrice));
+  }, [lowerPrice, upperPrice]);
 
-  // Format current price based on inversion
-  const currentPriceDisplay = useMemo(() => {
-    if (currentPrice === "N/A") return "N/A";
-    const numericPrice = parseFloat(currentPrice);
-    return invertPriceDisplay ?
-      formatPrice(1 / numericPrice) :
-      currentPrice;
-  }, [currentPrice, invertPriceDisplay]);
+  const displayUpperPrice = useMemo(() => {
+    if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
+    return Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
+  }, [lowerPrice, upperPrice]);
 
   // Set price direction labels
-  const priceLabel = invertPriceDisplay ?
-    `${token0Data.symbol} per ${token1Data.symbol}` :
-    `${token1Data.symbol} per ${token0Data.symbol}`;
-
-  // Check if position is in range
-  const active = useMemo(() => isInRange(currentTick, position.tickLower, position.tickUpper), [
-    currentTick,
-    position.tickLower,
-    position.tickUpper,
-  ]);
+  const priceLabel = invertPriceDisplay
+    ? `${token0Data.symbol} per ${token1Data.symbol}`
+    : `${token1Data.symbol} per ${token0Data.symbol}`;
 
   // State for fee calculation errors
   const [feeLoadingError, setFeeLoadingError] = useState(false);
 
-  // Calculate uncollected fees
-  const uncollectedFees = useMemo(() => {
-    // Reset error state
+  // Calculate uncollected fees using the adapter
+  const [uncollectedFees, setUncollectedFees] = useState(null);
+  const [isLoadingFees, setIsLoadingFees] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoadingFees(true);
     setFeeLoadingError(false);
 
-    // Check if we have all required data
-    if (!poolData.feeGrowthGlobal0X128 ||
-        !poolData.feeGrowthGlobal1X128 ||
-        !poolData.ticks ||
-        !poolData.ticks[position.tickLower] ||
-        !poolData.ticks[position.tickUpper]) {
-
-      // Set error state if data is missing
+    if (!adapter) {
       setFeeLoadingError(true);
-      return null;
+      setIsLoadingFees(false);
+      return;
     }
 
-    const tickLower = poolData.ticks[position.tickLower];
-    const tickUpper = poolData.ticks[position.tickUpper];
+    const loadFees = async () => {
+      try {
+        const fees = await adapter.calculateFees(position, poolData, token0Data, token1Data);
 
-    // Create position object expected by calculateUncollectedFees
-    const positionForFeeCalc = {
-      ...position,
-      // Convert to BigInt compatible format
-      liquidity: BigInt(position.liquidity),
-      feeGrowthInside0LastX128: BigInt(position.feeGrowthInside0LastX128),
-      feeGrowthInside1LastX128: BigInt(position.feeGrowthInside1LastX128),
-      tokensOwed0: BigInt(position.tokensOwed0),
-      tokensOwed1: BigInt(position.tokensOwed1)
+        // Only update state if component is still mounted
+        if (isMounted) {
+          setUncollectedFees(fees);
+          setIsLoadingFees(false);
+        }
+      } catch (error) {
+        console.error("Error calculating fees for position", position.id, ":", error);
+        if (isMounted) {
+          setFeeLoadingError(true);
+          setIsLoadingFees(false);
+        }
+      }
     };
 
-    try {
-      return calculateUncollectedFees({
-        position: positionForFeeCalc,
-        currentTick: poolData.tick,
-        feeGrowthGlobal0X128: poolData.feeGrowthGlobal0X128,
-        feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
-        tickLower,
-        tickUpper,
-        token0: token0Data,
-        token1: token1Data
-      });
-    } catch (error) {
-      console.error("Error calculating fees for position", position.id, ":", error);
-      setFeeLoadingError(true);
-      return null;
-    }
-  }, [position, poolData, token0Data, token1Data]);
+    loadFees();
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+    };
+  }, [adapter, position, poolData, token0Data, token1Data]);
 
   // State to toggle panel visibility
   const [isPanelVisible, setIsPanelVisible] = useState(false);
@@ -132,13 +120,15 @@ export default function PositionCard({ position, provider }) {
   const [claimError, setClaimError] = useState(null);
   const [claimSuccess, setClaimSuccess] = useState(false);
 
-  // Function to claim fees
-  const dispatch = useDispatch();
-
+  // Function to claim fees using the adapter
   const claimFees = async (e) => {
     if (e) e.preventDefault();
+    if (!adapter) {
+      setClaimError("No adapter available for this position");
+      return;
+    }
 
-    claimPositionFees({
+    adapter.claimFees({
       position,
       provider,
       address,
@@ -146,7 +136,7 @@ export default function PositionCard({ position, provider }) {
       poolData,
       token0Data,
       token1Data,
-      dispatch,  // Pass the dispatch function
+      dispatch,
       onStart: () => {
         setIsClaiming(true);
         setClaimError(null);
@@ -157,7 +147,6 @@ export default function PositionCard({ position, provider }) {
       },
       onSuccess: () => {
         setClaimSuccess(true);
-        // No need to reload page now since we're updating via Redux
       },
       onError: (errorMessage) => {
         setClaimError(`Failed to claim fees: ${errorMessage}`);
@@ -165,7 +154,7 @@ export default function PositionCard({ position, provider }) {
     });
   };
 
-  // Prepare activityBadge
+  // Prepare activity badge
   const activityIndicator = (
     <span
       style={{
@@ -173,13 +162,21 @@ export default function PositionCard({ position, provider }) {
         width: '10px',
         height: '10px',
         borderRadius: '50%',
-        backgroundColor: active ? '#28a745' : '#dc3545',
+        backgroundColor: isActive ? '#28a745' : '#dc3545',
         marginLeft: '8px',
         marginRight: '4px'
       }}
-      title={active ? "In range" : "Out of range"}
+      title={isActive ? "In range" : "Out of range"}
     />
   );
+
+  console.log('Fee calculation result:', {
+    position: position.id,
+    feeLoadingError,
+    uncollectedFees: JSON.stringify(uncollectedFees, (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    )
+  });
 
   return (
     <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000" }}>
@@ -188,6 +185,11 @@ export default function PositionCard({ position, provider }) {
           <Card.Title>
             Position #{position.id} - {position.tokenPair}
             {activityIndicator}
+            {position.platformName && (
+              <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
+                {position.platformName}
+              </Badge>
+            )}
           </Card.Title>
           <Button
             variant="outline-secondary"
@@ -199,12 +201,12 @@ export default function PositionCard({ position, provider }) {
           </Button>
         </div>
 
-        {/* Price Range Display (New) */}
+        {/* Price Range Display */}
         <div className="mb-2">
           <div className="d-flex align-items-center">
             <strong className="me-2">Price Range:</strong>
             <span>
-              {formatPrice(displayLowerPrice)} - {formatPrice(displayUpperPrice)} {priceLabel}
+              {displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)} - {displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)} {priceLabel}
             </span>
             <Button
               variant="link"
@@ -219,7 +221,7 @@ export default function PositionCard({ position, provider }) {
         </div>
 
         <Card.Text>
-          <strong>Current Price:</strong> {currentPriceDisplay} {priceLabel}<br />
+          <strong>Current Price:</strong> {currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))} {priceLabel}<br />
           <strong>Uncollected Fees:</strong>
         </Card.Text>
 
@@ -230,12 +232,12 @@ export default function PositionCard({ position, provider }) {
               <i className="me-1">⚠️</i>
               Unable to load fee data. Please try refreshing.
             </div>
-          ) : !uncollectedFees ? (
+          ) : isLoadingFees ? (
             <div className="text-secondary small">
               <Spinner animation="border" size="sm" className="me-2" />
               Loading fee data...
             </div>
-          ) : (
+          ) : uncollectedFees ? (
             <>
               <Badge bg="light" text="dark" className="me-1">
                 {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
@@ -244,7 +246,7 @@ export default function PositionCard({ position, provider }) {
                 {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
               </Badge>
             </>
-          )}
+          ) : null}
         </div>
 
         {isPanelVisible && (
@@ -309,7 +311,7 @@ export default function PositionCard({ position, provider }) {
 
             {claimSuccess && (
               <div className="alert alert-success mt-2 p-2 small" role="alert">
-                Successfully claimed fees! Page will refresh shortly.
+                Successfully claimed fees!
               </div>
             )}
           </div>
