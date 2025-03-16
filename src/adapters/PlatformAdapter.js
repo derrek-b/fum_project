@@ -84,4 +84,19 @@ export default class PlatformAdapter {
   calculatePrice(position, poolData, token0Data, token1Data, invert = false) {
     throw new Error("calculatePrice must be implemented by subclasses");
   }
+
+   /**
+   * Calculate token amounts for a position (if it were to be closed)
+   * @param {Object} position - Position object
+   * @param {Object} poolData - Pool data
+   * @param {Object} token0Data - Token0 data
+   * @param {Object} token1Data - Token1 data
+   * @param {number} chainId - Chain ID from the wallet
+   * @returns {Promise<Object>} - Token amounts
+   */
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
+    throw new Error("calculateTokenAmounts must be implemented by subclasses");
+  }
 }
+
+

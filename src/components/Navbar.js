@@ -2,7 +2,7 @@ import React from "react";
 import { Navbar as BSNavbar, Nav } from "react-bootstrap";
 import WalletConnectEVM from "./WalletConnectEVM";
 
-export default function Navbar({ setProvider }) {
+export default function Navbar() {
   return (
     <BSNavbar bg="dark" variant="dark" expand="lg" className="mb-4">
       <BSNavbar.Brand href="/">
@@ -16,7 +16,7 @@ export default function Navbar({ setProvider }) {
         -fied
       </BSNavbar.Brand>
       <Nav className="ms-auto">
-        <WalletConnectEVM setProvider={setProvider} />
+        <WalletConnectEVM />
       </Nav>
     </BSNavbar>
   );

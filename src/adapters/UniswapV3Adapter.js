@@ -674,4 +674,85 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       onFinish && onFinish();
     }
   }
+
+  /**
+   * Calculate token amounts for a position (if it were to be closed)
+   * @param {Object} position - Position object
+   * @param {Object} poolData - Pool data
+   * @param {Object} token0Data - Token0 data
+   * @param {Object} token1Data - Token1 data
+   * @param {number} chainId - Chain ID from the wallet
+   * @returns {Object} - Token amounts
+   */
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
+    try {
+      if (!position || !poolData || !token0Data || !token1Data || !chainId) {
+        throw new Error("Missing data for token amount calculation");
+      }
+
+      if (position.liquidity <= 0) {
+        return {
+          token0: { raw: 0n, formatted: "0" },
+          token1: { raw: 0n, formatted: "0" }
+        };
+      }
+
+      // Import required libraries from Uniswap SDK
+      const { Position, Pool } = require("@uniswap/v3-sdk");
+      const { Token, CurrencyAmount } = require("@uniswap/sdk-core");
+
+      // Create Token objects - use chainId from params
+      const token0 = new Token(
+        chainId,
+        token0Data.address,
+        token0Data.decimals,
+        token0Data.symbol,
+        token0Data.name || token0Data.symbol
+      );
+
+      const token1 = new Token(
+        chainId,
+        token1Data.address,
+        token1Data.decimals,
+        token1Data.symbol,
+        token1Data.name || token1Data.symbol
+      );
+
+      // Create Pool instance
+      const pool = new Pool(
+        token0,
+        token1,
+        poolData.fee,
+        poolData.sqrtPriceX96,
+        poolData.liquidity,
+        poolData.tick
+      );
+
+      // Create Position instance
+      const positionInstance = new Position({
+        pool,
+        liquidity: position.liquidity.toString(),
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper
+      });
+
+      // Get token amounts
+      const amount0 = positionInstance.amount0;
+      const amount1 = positionInstance.amount1;
+
+      return {
+        token0: {
+          raw: BigInt(amount0.quotient.toString()),
+          formatted: amount0.toSignificant(6)
+        },
+        token1: {
+          raw: BigInt(amount1.quotient.toString()),
+          formatted: amount1.toSignificant(6)
+        }
+      };
+    } catch (error) {
+      console.error("Error calculating token amounts:", error);
+      throw error;
+    }
+  }
 }

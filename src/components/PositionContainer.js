@@ -14,9 +14,9 @@ import { setTokens, clearTokens } from "../redux/tokensSlice";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../redux/platformsSlice";
 
-export default function PositionContainer({ provider }) {
+export default function PositionContainer() {
   const dispatch = useDispatch();
-  const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
   const [positions, setLocalPositions] = useState([]);
@@ -174,7 +174,7 @@ export default function PositionContainer({ provider }) {
           <p className="mb-0">No active liquidity positions found for this wallet.</p>
           {chainId && (
             <small className="d-block mt-2">
-              Connected to {config.chains[1337]?.name || `Chain ID ${chainId}`}
+              Connected to {config.chains[chainId]?.name || `Chain ID ${chainId}`}
             </small>
           )}
         </Alert>
@@ -202,10 +202,7 @@ export default function PositionContainer({ provider }) {
           <Row>
             {activePositions.map((pos) => (
               <Col md={6} key={pos.id}>
-                <PositionCard
-                  position={pos}
-                  provider={provider}
-                />
+                <PositionCard position={pos} />
               </Col>
             ))}
           </Row>

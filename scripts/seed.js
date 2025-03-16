@@ -35,7 +35,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
 
   // Setup contracts and addresses
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
-  const USDC_ADDRESS = '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8';
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
   const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
 
   // Contract setup
@@ -70,7 +70,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   console.log('Approving router to spend WETH...');
   const approveTx1 = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('50'),
+    ethers.parseEther('5000'),
     { nonce: currentNonce++ }
   );
   await approveTx1.wait();
@@ -79,7 +79,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   console.log('Approving router to spend USDC...');
   const approveTx2 = await usdcContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseUnits('50000', 6),
+    ethers.parseUnits('5000000', 6),
     { nonce: currentNonce++ }
   );
   await approveTx2.wait();
@@ -99,8 +99,8 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
       const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
       const amountIn = isWethToUsdc ?
-        ethers.parseEther('0.1') : // 0.1 WETH
-        ethers.parseUnits('100', 6); // 100 USDC
+        ethers.parseEther('2') : // 0.1 WETH
+        ethers.parseUnits('3800', 6); // 100 USDC
 
       console.log(`Swap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
 
@@ -108,7 +108,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       const params = {
         tokenIn,
         tokenOut,
-        fee: 3000, // 0.3% fee tier
+        fee: 500, // 0.05%
         recipient: wallet.address,
         deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
         amountIn,
@@ -485,7 +485,7 @@ async function main() {
 
   // Define token addresses for Arbitrum
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
-  const USDC_ADDRESS = '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8'; // USDC on Arbitrum
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
 
   // Create token instances
   const WETH = new Token(
@@ -521,7 +521,7 @@ async function main() {
   // 3. Execute the swap through the Uniswap router
 
   // Step 1: Wrap ETH to WETH using the WETH contract
-  console.log(`Wrapping 5 ETH to WETH...`);
+  console.log(`Wrapping 10 ETH to WETH...`);
 
   // WETH contract address is the same as the token address
   const wethContractWithABI = new ethers.Contract(
@@ -536,7 +536,7 @@ async function main() {
 
   // Deposit 5 ETH to get WETH
   const wrapTx = await wethContractWithABI.deposit({
-    value: ethers.parseEther('5')
+    value: ethers.parseEther('10')
   });
 
   console.log(`Wrap transaction sent: ${wrapTx.hash}`);
@@ -549,7 +549,7 @@ async function main() {
   console.log(`Approving Uniswap Router to spend WETH...`);
   const approveTx = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('2.5')
+    ethers.parseEther('5')
   );
 
   console.log(`Approve transaction sent: ${approveTx.hash}`);
@@ -567,7 +567,7 @@ async function main() {
     wallet
   );
 
-  console.log(`Swapping 2.5 WETH for USDC...`);
+  console.log(`Swapping 5 WETH for USDC...`);
 
   // Current timestamp plus 20 minutes (in seconds)
   const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
@@ -575,10 +575,10 @@ async function main() {
   const swapTx = await uniswapRouter.exactInputSingle({
     tokenIn: WETH_ADDRESS,
     tokenOut: USDC_ADDRESS,
-    fee: 3000, // 0.3% fee tier
+    fee: 500, // 0.3% fee tier
     recipient: wallet.address,
     deadline: deadline,
-    amountIn: ethers.parseEther('2.5'),
+    amountIn: ethers.parseEther('5'),
     amountOutMinimum: 0, // For testing, we accept any amount out (in production, set a min)
     sqrtPriceLimitX96: 0 // No price limit
   });
@@ -600,8 +600,8 @@ async function main() {
   // Step 4: Gather Pool Information (AFTER the swap to get updated pool state)
   console.log('\n--- Creating Pool Instance and Gathering Information ---');
 
-  // Define fee tier - using 0.3% (3000) for WETH/USDC which is common
-  const FEE_TIER = 3000;
+  // Define fee tier - using 0.05% (500) for WETH/USDC which is common
+  const FEE_TIER = 500;
 
   // Get the pool address
   const poolAddress = Pool.getAddress(WETH, USDC, FEE_TIER);
@@ -715,7 +715,7 @@ async function main() {
   console.log('Creating Position instance with centered price range...');
 
   // Amounts we want to use for the position
-  const wethAmount = ethers.parseEther('0.1');
+  const wethAmount = ethers.parseEther('3');
   console.log(`WETH amount for position: ${ethers.formatEther(wethAmount)} WETH`);
 
   // Convert WETH to CurrencyAmount
@@ -920,7 +920,7 @@ async function main() {
     console.log('\n=== GENERATING FEES FOR THE POSITION ===');
 
     // Perform multiple swaps to generate fees (just one swap for now as requested)
-    await performSwapsToGenerateFees(wallet, 5);
+    await performSwapsToGenerateFees(wallet, 200);
 
     // Calculate fees directly without "poking" the position
     console.log('\n=== CALCULATING UNCOLLECTED FEES ===');
@@ -931,7 +931,7 @@ async function main() {
       poolAddress,
       token0Info,
       token1Info,
-      true // verbose logging
+      false // verbose logging
     );
 
     console.log('\n=== FEE CALCULATION RESULT ===');

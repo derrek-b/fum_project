@@ -1,12 +1,14 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Card, Button, Spinner, Badge } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
+import { useRouter } from "next/router";
 import { AdapterFactory } from "../adapters";
 import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
 
-export default function PositionCard({ position, provider }) {
+export default function PositionCard({ position }) {
   const dispatch = useDispatch();
-  const { address, chainId } = useSelector((state) => state.wallet);
+  const router = useRouter();
+  const { address, chainId, provider } = useSelector((state) => state.wallet);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const poolData = pools[position.poolAddress];
@@ -113,7 +115,10 @@ export default function PositionCard({ position, provider }) {
   const [isPanelVisible, setIsPanelVisible] = useState(false);
 
   // Function to toggle panel visibility
-  const togglePanel = () => setIsPanelVisible(!isPanelVisible);
+  const togglePanel = (e) => {
+    e.stopPropagation(); // Prevent the card click from triggering
+    setIsPanelVisible(!isPanelVisible);
+  };
 
   // State for claiming process
   const [isClaiming, setIsClaiming] = useState(false);
@@ -122,7 +127,9 @@ export default function PositionCard({ position, provider }) {
 
   // Function to claim fees using the adapter
   const claimFees = async (e) => {
-    if (e) e.preventDefault();
+    e.preventDefault();
+    e.stopPropagation(); // Prevent the card click from triggering
+
     if (!adapter) {
       setClaimError("No adapter available for this position");
       return;
@@ -154,6 +161,11 @@ export default function PositionCard({ position, provider }) {
     });
   };
 
+  // Handle card click to navigate to detail page
+  const handleCardClick = () => {
+    router.push(`/position/${position.id}`);
+  };
+
   // Prepare activity badge
   const activityIndicator = (
     <span
@@ -183,7 +195,15 @@ export default function PositionCard({ position, provider }) {
   }
 
   return (
-    <Card className="mb-3" style={{ backgroundColor: "#f5f5f5", borderColor: "#a30000" }}>
+    <Card
+      className="mb-3"
+      style={{
+        backgroundColor: "#f5f5f5",
+        borderColor: "#a30000",
+        cursor: "pointer"
+      }}
+      onClick={handleCardClick}
+    >
       <Card.Body>
         <div className="d-flex justify-content-between align-items-center mb-2">
           <Card.Title>
@@ -216,7 +236,10 @@ export default function PositionCard({ position, provider }) {
               variant="link"
               className="p-0 ms-2"
               size="sm"
-              onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card click
+                setInvertPriceDisplay(!invertPriceDisplay);
+              }}
               title="Switch price direction"
             >
               <span role="img" aria-label="switch">⇄</span>
@@ -262,6 +285,7 @@ export default function PositionCard({ position, provider }) {
               border: "1px solid #dee2e6",
               borderRadius: "0.375rem",
             }}
+            onClick={(e) => e.stopPropagation()} // Prevent card click when clicking the panel
           >
             <div className="d-grid gap-2">
               <Button
@@ -294,15 +318,30 @@ export default function PositionCard({ position, provider }) {
                 )}
               </Button>
 
-              <Button variant="outline-primary" size="sm" disabled>
+              <Button
+                variant="outline-primary"
+                size="sm"
+                disabled
+                onClick={(e) => e.stopPropagation()} // Prevent card click
+              >
                 Add Liquidity
               </Button>
 
-              <Button variant="outline-primary" size="sm" disabled>
+              <Button
+                variant="outline-primary"
+                size="sm"
+                disabled
+                onClick={(e) => e.stopPropagation()} // Prevent card click
+              >
                 Remove Liquidity
               </Button>
 
-              <Button variant="outline-danger" size="sm" disabled>
+              <Button
+                variant="outline-danger"
+                size="sm"
+                disabled
+                onClick={(e) => e.stopPropagation()} // Prevent card click
+              >
                 Close Position
               </Button>
             </div>

@@ -4,9 +4,9 @@ import React, { useState } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { createEthersProvider } from "../utils/wallet";
-import { setWallet, disconnectWallet } from "../redux/walletSlice";
+import { setWallet, disconnectWallet, setProvider } from "../redux/walletSlice";
 
-export default function WalletConnectEVM({ setProvider }) {
+export default function WalletConnectEVM() {
   const dispatch = useDispatch();
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
   const [isConnecting, setIsConnecting] = useState(false); // Track connection attempt
@@ -16,7 +16,7 @@ export default function WalletConnectEVM({ setProvider }) {
     setIsConnecting(true);
     try {
       const newProvider = await createEthersProvider(); // Create provider only on connect
-      setProvider(newProvider); // Pass provider to parent (index.js via Navbar)
+      dispatch(setProvider(newProvider)); // Store provider in Redux
 
       await newProvider.send("eth_requestAccounts", []); // Request accounts from MetaMask
       const signer = await newProvider.getSigner();
@@ -25,7 +25,11 @@ export default function WalletConnectEVM({ setProvider }) {
       const chainId = Number(network.chainId); // Convert BigInt to Number
       console.log('chainId', chainId, network.chainId)
 
-      dispatch(setWallet({ address: account, chainId }));
+      dispatch(setWallet({
+        address: account,
+        chainId,
+        provider: newProvider
+      }));
     } catch (error) {
       console.error("Failed to connect EVM wallet:", error);
     } finally {
@@ -34,7 +38,6 @@ export default function WalletConnectEVM({ setProvider }) {
   };
 
   const disconnect = () => {
-    setProvider(null); // Set to null on disconnect
     dispatch(disconnectWallet());
   };
 
