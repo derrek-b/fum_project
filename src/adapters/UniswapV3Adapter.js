@@ -476,21 +476,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       initialized: tickLower ? Boolean(tickLower.initialized) : false
     };
 
-    console.log(1, lowerTickData)
-
     const upperTickData = {
       feeGrowthOutside0X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside0X128) : 0n,
       feeGrowthOutside1X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside1X128) : 0n,
       initialized: tickUpper ? Boolean(tickUpper.initialized) : false
     };
 
-    console.log(2, upperTickData)
-
     // Convert global fee growth to BigInt
     const feeGrowthGlobal0X128BigInt = toBigInt(feeGrowthGlobal0X128);
     const feeGrowthGlobal1X128BigInt = toBigInt(feeGrowthGlobal1X128);
-
-    console.log(3, feeGrowthGlobal0X128BigInt)
 
     // Calculate current fee growth inside the position's range
     let feeGrowthInside0X128, feeGrowthInside1X128;
@@ -508,8 +502,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       feeGrowthInside0X128 = feeGrowthGlobal0X128BigInt - lowerTickData.feeGrowthOutside0X128 - upperTickData.feeGrowthOutside0X128;
       feeGrowthInside1X128 = feeGrowthGlobal1X128BigInt - lowerTickData.feeGrowthOutside1X128 - upperTickData.feeGrowthOutside1X128;
     }
-
-    console.log(4, feeGrowthInside0X128)
 
     // Handle negative values by adding 2^256
     const MAX_UINT256 = 2n ** 256n;
@@ -534,8 +526,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       feeGrowthDelta1 += MAX_UINT256;
     }
 
-    console.log(5, feeGrowthDelta0)
-
     // Calculate uncollected fees
     // The formula is: tokensOwed + (liquidity * feeGrowthDelta) / 2^128
     const DENOMINATOR = 2n ** 128n;
@@ -549,9 +539,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
     const token0Decimals = token0.decimals;
     const token1Decimals = token1.decimals;
-
-    console.log(6, uncollectedFees0Raw)
-    console.log(formatUnits(uncollectedFees0Raw, token0Decimals))
 
     // Return both raw and formatted values for flexibility
     const returnTokens =  {
@@ -660,13 +647,61 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const tx = await signer.sendTransaction(transaction);
       await tx.wait();
 
-      // Trigger an update after successful transaction
-      if (dispatch) {
-        const { triggerUpdate } = require('../redux/updateSlice');
-        dispatch(triggerUpdate());
-      }
+      // IMPORTANT: After claiming fees, fetch the updated position data
+      try {
+        // Get the updated position directly from the contract
+        const updatedPositionData = await nftManager.positions(position.id);
 
-      onSuccess && onSuccess(tx);
+        // Create an updated position object that reflects the fee claim
+        const updatedPosition = {
+          ...position,
+          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
+          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
+          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
+        };
+
+        // Also get fresh pool data for fee calculation
+        const poolContract = new ethers.Contract(
+          position.poolAddress,
+          IUniswapV3PoolABI.abi,
+          provider
+        );
+
+        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
+        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
+
+        // Update the pool data with fresh fee growth values
+        const updatedPoolData = {
+          ...poolData,
+          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
+          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
+        };
+
+        if (dispatch) {
+          // Import the necessary actions
+          const { setPositions } = require('../redux/positionsSlice');
+          const { setPools } = require('../redux/poolSlice');
+          const { triggerUpdate } = require('../redux/updateSlice');
+
+          // This is passed to the component to update Redux
+          onSuccess && onSuccess({
+            success: true,
+            tx,
+            updatedPosition,
+            updatedPoolData
+          });
+
+          // Also trigger an update to refresh the UI
+          dispatch(triggerUpdate());
+        } else {
+          onSuccess && onSuccess({ success: true, tx });
+        }
+      } catch (updateError) {
+        console.error("Error fetching updated position data:", updateError);
+        // Still consider the claim successful even if the update fails
+        onSuccess && onSuccess({ success: true, tx });
+      }
     } catch (error) {
       console.error("Error claiming fees:", error);
       onError && onError(error.message || "Unknown error");
@@ -753,6 +788,304 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       console.error("Error calculating token amounts:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Decrease liquidity for a position
+   * @param {Object} params - Parameters for decreasing liquidity
+   * @returns {Promise<Object>} - Transaction receipt
+   */
+  async decreaseLiquidity(params) {
+    const {
+      position,
+      provider,
+      address,
+      chainId,
+      percentage = 100,
+      slippageTolerance = 0.5,
+      dispatch,
+      onStart,
+      onFinish,
+      onSuccess,
+      onError
+    } = params;
+
+    if (!provider || !address || !chainId) {
+      onError && onError("Wallet not connected");
+      return;
+    }
+
+    onStart && onStart();
+
+    try {
+      // Get chain configuration
+      const chainConfig = this.config.chains[chainId];
+      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+        throw new Error(`No configuration found for chainId: ${chainId}`);
+      }
+
+      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+
+      // Get signer
+      const signer = await provider.getSigner();
+
+      // Create contract instance for the position manager
+      const positionManager = new ethers.Contract(
+        positionManagerAddress,
+        nonfungiblePositionManagerABI.abi,
+        signer
+      );
+
+      // Calculate liquidity to remove based on percentage
+      const liquidityToRemove = percentage === 100
+        ? BigInt(position.liquidity.toString())
+        : BigInt(Math.floor(position.liquidity * percentage / 100)).toString();
+
+      console.log(`Decreasing ${percentage}% liquidity (${liquidityToRemove} of ${position.liquidity}) for position ${position.id}`);
+
+      // Only proceed if the position has liquidity
+      if (position.liquidity <= 0) {
+        throw new Error("Position has no liquidity to remove");
+      }
+
+      // Calculate minimum amounts based on current amounts and slippage tolerance
+      // This requires first getting the current amounts
+      const { token0Data, token1Data } = params;
+      let amount0Min, amount1Min;
+
+      try {
+        // Use the SDK to calculate expected amounts
+        const { Position, Pool } = require("@uniswap/v3-sdk");
+        const { Token } = require("@uniswap/sdk-core");
+
+        // Create Token objects
+        const token0 = new Token(
+          chainId,
+          token0Data.address,
+          token0Data.decimals,
+          token0Data.symbol,
+          token0Data.name || token0Data.symbol
+        );
+
+        const token1 = new Token(
+          chainId,
+          token1Data.address,
+          token1Data.decimals,
+          token1Data.symbol,
+          token1Data.name || token1Data.symbol
+        );
+
+        // Create Pool instance from position data
+        const poolData = params.poolData;
+        const pool = new Pool(
+          token0,
+          token1,
+          poolData.fee,
+          poolData.sqrtPriceX96,
+          poolData.liquidity,
+          poolData.tick
+        );
+
+        // Create Position instance
+        const positionInstance = new Position({
+          pool,
+          liquidity: liquidityToRemove.toString(),
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper
+        });
+
+        // Get expected amounts
+        const amount0 = positionInstance.amount0;
+        const amount1 = positionInstance.amount1;
+
+        // Apply slippage tolerance
+        const slippageFactor = 1 - slippageTolerance/100;
+        amount0Min = BigInt(Math.floor(Number(amount0.quotient.toString()) * slippageFactor));
+        amount1Min = BigInt(Math.floor(Number(amount1.quotient.toString()) * slippageFactor));
+
+        console.log(`Expected amounts: ${amount0.toSignificant(6)} ${token0.symbol}, ${amount1.toSignificant(6)} ${token1.symbol}`);
+        console.log(`Minimum amounts (with ${slippageTolerance}% slippage): ${amount0Min} ${token0.symbol}, ${amount1Min} ${token1.symbol}`);
+      } catch (error) {
+        // NO FALLBACKS - If we can't calculate minimum amounts, throw an error
+        console.error("Error calculating minimum amounts:", error);
+        throw new Error(`Failed to calculate minimum token amounts for safe removal: ${error.message}`);
+      }
+
+      // Create decreaseLiquidity parameters
+      const decreaseLiquidityParams = {
+        tokenId: position.id,
+        liquidity: liquidityToRemove.toString(),
+        amount0Min: amount0Min.toString(),
+        amount1Min: amount1Min.toString(),
+        deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
+      };
+
+      // Execute liquidity decrease
+      const decreaseTx = await positionManager.decreaseLiquidity(decreaseLiquidityParams);
+      const decreaseReceipt = await decreaseTx.wait();
+      console.log(`Liquidity decreased for position ${position.id}`);
+
+      // After decreasing liquidity, we need to collect the tokens
+      // The issue is with this collect parameters
+      const collectTokensParams = {
+        tokenId: position.id,
+        recipient: address,
+        // FIXED: Use the right parameter names
+        amount0Max: BigInt("0xffffffffffffffffffffffffffffffff"),
+        amount1Max: BigInt("0xffffffffffffffffffffffffffffffff")
+      };
+
+      const collectTokensTx = await positionManager.collect(collectTokensParams);
+      const collectReceipt = await collectTokensTx.wait();
+      console.log(`Tokens collected for position ${position.id}`);
+
+      // Trigger update after successful transaction
+      if (dispatch) {
+        const { triggerUpdate } = require('../redux/updateSlice');
+        dispatch(triggerUpdate());
+      }
+
+      onSuccess && onSuccess({
+        decreaseReceipt,
+        collectReceipt,
+        percentage
+      });
+
+      return {
+        decreaseReceipt,
+        collectReceipt
+      };
+    } catch (error) {
+      console.error("Error decreasing liquidity:", error);
+      onError && onError(error.message || "Unknown error");
+      throw error;
+    } finally {
+      onFinish && onFinish();
+    }
+  }
+
+  /**
+   * Close a position - removes liquidity and optionally burns the position NFT
+   * @param {Object} params - Parameters for closing the position
+   * @returns {Promise<Object>} - Transaction receipt
+   */
+  async closePosition(params) {
+    const {
+      position,
+      provider,
+      address,
+      chainId,
+      collectFees = true,
+      burnPosition = true,
+      dispatch,
+      onStart,
+      onFinish,
+      onSuccess,
+      onError
+    } = params;
+
+    if (!provider || !address || !chainId) {
+      onError && onError("Wallet not connected");
+      return;
+    }
+
+    onStart && onStart();
+
+    try {
+      // Step 1: If requested, collect any uncollected fees
+      let feeReceipt = null;
+      if (collectFees) {
+        console.log(`Collecting fees for position ${position.id} before closing`);
+
+        try {
+          const feeResult = await this.claimFees({
+            position,
+            provider,
+            address,
+            chainId,
+            poolData: params.poolData,
+            token0Data: params.token0Data,
+            token1Data: params.token1Data,
+            dispatch
+          });
+
+          if (feeResult && feeResult.success) {
+            feeReceipt = feeResult;
+            console.log(`Fees collected for position ${position.id}`);
+          } else {
+            // If fee collection failed but we're still proceeding, log it clearly
+            console.warn("Fee collection failed but continuing with position closure");
+          }
+        } catch (error) {
+          // Don't silently continue - inform the user there was an error
+          console.error(`Error collecting fees: ${error.message}`);
+          throw new Error(`Fee collection failed: ${error.message}. Please try again or collect fees separately first.`);
+        }
+      }
+
+      // Step 2: Remove all liquidity using our decreaseLiquidity method
+      // This will fail properly if there's an issue - no fallbacks
+      const liquidityResult = await this.decreaseLiquidity({
+        position,
+        provider,
+        address,
+        chainId,
+        percentage: 100, // Remove all liquidity
+        poolData: params.poolData,
+        token0Data: params.token0Data,
+        token1Data: params.token1Data,
+        dispatch
+      });
+
+      console.log(`Liquidity removed for position ${position.id}`);
+
+      // Step 3: If requested, burn the position NFT
+      let burnReceipt = null;
+      if (burnPosition) {
+        console.log(`Burning position NFT ${position.id}`);
+
+        const positionManagerAddress = this.config.chains[chainId].platforms.uniswapV3.positionManagerAddress;
+        const signer = await provider.getSigner();
+        const positionManager = new ethers.Contract(
+          positionManagerAddress,
+          nonfungiblePositionManagerABI.abi,
+          signer
+        );
+
+        const burnTx = await positionManager.burn(position.id);
+        burnReceipt = await burnTx.wait();
+
+        console.log(`Position ${position.id} successfully burned. Transaction hash: ${burnReceipt.hash}`);
+      } else {
+        console.log(`Position ${position.id} closed (liquidity removed) but not burned as requested`);
+      }
+
+      // Trigger update after successful transaction
+      if (dispatch) {
+        const { triggerUpdate } = require('../redux/updateSlice');
+        dispatch(triggerUpdate());
+      }
+
+      onSuccess && onSuccess({
+        feeReceipt,
+        liquidityResult,
+        burnReceipt,
+        fullyBurned: burnPosition
+      });
+
+      return {
+        feeReceipt,
+        liquidityResult,
+        burnReceipt,
+        fullyBurned: burnPosition
+      };
+    } catch (error) {
+      console.error("Error closing position:", error);
+      onError && onError(error.message || "Unknown error");
+      throw error;
+    } finally {
+      onFinish && onFinish();
     }
   }
 }

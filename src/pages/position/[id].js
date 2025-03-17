@@ -10,7 +10,10 @@ import { fetchTokenPrices, calculateUsdValue } from "../../utils/coingeckoUtils"
 import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
 import RefreshControls from "../../components/RefreshControls";
+import RemoveLiquidityModal from "../../components/RemoveLiquidityModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
+import { setPositions } from "@/redux/positionsSlice";
+import { setPools } from "@/redux/poolSlice";
 
 export default function PositionDetailPage() {
   const dispatch = useDispatch();
@@ -19,8 +22,9 @@ export default function PositionDetailPage() {
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const { address, chainId, provider } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
+
   const timerRef = useRef(null);
 
   // State for various UI elements
@@ -43,6 +47,12 @@ export default function PositionDetailPage() {
   const [isClosing, setIsClosing] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
+  const [forceUpdateCounter, setForceUpdateCounter] = useState(0);
+
+  // Hacky way to force update since redux/state changes aren't triggering refresh
+  const forceUpdate = () => setForceUpdateCounter(prev => prev + 1);
 
   // Find the position by ID
   const position = useMemo(() => {
@@ -145,12 +155,13 @@ export default function PositionDetailPage() {
     }
 
     // Only set up timer if auto-refresh is enabled and we're connected
-    if (autoRefresh.enabled && provider && address && chainId && id) {
-      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms for position #${id}`);
+    if (autoRefresh.enabled && isConnected && provider && address && chainId) {
+      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
       timerRef.current = setInterval(() => {
-        console.log(`Auto-refreshing position #${id} data...`);
+        const timestamp = Date.now();
+        console.log(`Auto-refresh triggered at ${new Date(timestamp).toISOString()}`);
         dispatch(markAutoRefresh());
-        dispatch(triggerUpdate());
+        dispatch(triggerUpdate()); // This should carry the timestamp
       }, autoRefresh.interval);
     }
 
@@ -161,15 +172,65 @@ export default function PositionDetailPage() {
         timerRef.current = null;
       }
     };
-  }, [autoRefresh.enabled, autoRefresh.interval, provider, address, chainId, id, dispatch]);
+  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch]);
+
+  // Ensure we're actively tracking lastUpdate changes with a dedicated effect
+  useEffect(() => {
+    if (lastUpdate) {
+      console.log("lastUpdate detected in position details:", new Date(lastUpdate).toISOString());
+
+      // Explicitly force re-fetches by clearing local state
+      setUncollectedFees(null);
+      setTokenBalances(null);
+      setIsLoadingFees(true);
+      setIsLoadingBalances(true);
+
+      // This is critical - we need to force a refresh of these calculations
+      if (adapter && position && poolData && token0Data && token1Data) {
+        // Force fee recalculation
+        adapter.calculateFees(position, poolData, token0Data, token1Data)
+          .then(fees => {
+            console.log("Refreshed fees:", fees);
+            setUncollectedFees(fees);
+            setIsLoadingFees(false);
+            forceUpdate(); // Force component re-render
+          })
+          .catch(error => {
+            console.error("Error refreshing fees:", error);
+            setFeeLoadingError(true);
+            setIsLoadingFees(false);
+          });
+
+        // Force token balances recalculation if we have chainId
+        if (chainId) {
+          adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
+            .then(balances => {
+              console.log("Refreshed balances:", balances);
+              setTokenBalances(balances);
+              setIsLoadingBalances(false);
+              forceUpdate(); // Force component re-render
+            })
+            .catch(error => {
+              console.error("Error refreshing balances:", error);
+              setBalanceError(true);
+              setIsLoadingBalances(false);
+            });
+        }
+      }
+    }
+  }, [lastUpdate, adapter, position, poolData, token0Data, token1Data, chainId]);
 
   // Mark resources as updating when lastUpdate changes
   useEffect(() => {
     if (id && lastUpdate) {
-      // Set loading states when refresh is triggered
+      console.log("Position detail update triggered:", new Date().toISOString());
+
+      // Force state resets to trigger recalculations
+      setUncollectedFees(null);
+      setTokenBalances(null);
       setIsLoadingFees(true);
-      setFeeLoadingError(false);
       setIsLoadingBalances(true);
+      setFeeLoadingError(false);
       setBalanceError(false);
       setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
 
@@ -177,6 +238,50 @@ export default function PositionDetailPage() {
       dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
     }
   }, [lastUpdate, id, dispatch]);
+
+  // Add this useEffect to position/[id].js
+  useEffect(() => {
+    // Only run when lastUpdate changes and we have necessary context
+    if (lastUpdate && adapter && provider && address && chainId && id) {
+      console.log("Refreshing position data due to lastUpdate change:", new Date(lastUpdate).toISOString());
+
+      // Track the latest refresh timestamp to avoid duplicate refreshes
+      const refreshTimestamp = lastUpdate;
+
+      // Fetch fresh data from blockchain
+      adapter.getPositions(address, chainId).then(result => {
+        // Check if this is still the latest refresh (prevents race conditions)
+        if (refreshTimestamp !== lastUpdate) return;
+
+        // Find our specific position
+        const freshPosition = result.positions.find(p => p.id === id);
+        if (freshPosition) {
+          // Get fresh pool data
+          const freshPoolData = result.poolData[freshPosition.poolAddress];
+          const freshTokenData = result.tokenData;
+
+          // Update Redux with fresh data (without creating reference cycles)
+          if (positions && positions.length > 0) {
+            // Create a new array to avoid reference issues
+            const updatedPositions = [...positions];
+            // Find and replace the specific position
+            const posIndex = updatedPositions.findIndex(p => p.id === id);
+            if (posIndex >= 0) {
+              updatedPositions[posIndex] = freshPosition;
+              dispatch(setPositions(updatedPositions));
+            }
+          }
+
+          // Update the specific pool
+          if (freshPoolData) {
+            dispatch(setPools({ [freshPosition.poolAddress]: freshPoolData }));
+          }
+        }
+      }).catch(error => {
+        console.error("Error refreshing position data:", error);
+      });
+    }
+  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch]); // Remove positions from deps
 
   // Fetch fee data using the adapter
   useEffect(() => {
@@ -217,7 +322,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id]);
+  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id]); // Make sure lastUpdate is included here
 
   // Fetch token balances using the adapter
   useEffect(() => {
@@ -238,7 +343,7 @@ export default function PositionDetailPage() {
           poolData,
           token0Data,
           token1Data,
-          chainId // Pass chainId from Redux store
+          chainId
         );
 
         if (isMounted) {
@@ -259,7 +364,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate]);
+  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate]); // Make sure lastUpdate is included here
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
@@ -326,11 +431,37 @@ export default function PositionDetailPage() {
         poolData,
         token0Data,
         token1Data,
+        dispatch,
         onStart: () => setIsClaiming(true),
         onFinish: () => setIsClaiming(false),
-        onSuccess: () => {
+        onSuccess: (result) => {
           setActionSuccess("Successfully claimed fees!");
-          dispatch(triggerUpdate()); // Refresh data after claiming
+
+          // If we have updated position and pool data, update Redux
+          if (result.updatedPosition && result.updatedPoolData) {
+            // Import Redux actions
+            // const { setPositions } = require('../redux/positionsSlice');
+            // const { setPools } = require('../redux/poolSlice');
+
+            // Update the specific position in the positions array
+            const updatedPositions = positions.map(p => {
+              console.log('inside updatedPositions');
+              return p.id === position.id ? result.updatedPosition : p
+            });
+
+            // Update Redux store with the new data
+            dispatch(setPositions(updatedPositions));
+
+            // Create a pool data update object with just the updated pool
+            const poolUpdate = {
+              [position.poolAddress]: result.updatedPoolData
+            };
+            dispatch(setPools(poolUpdate));
+
+            // Force a re-fetch of uncollected fees with the updated data
+            setUncollectedFees(null);
+            setIsLoadingFees(true);
+          }
         },
         onError: (errorMessage) => setActionError(`Failed to claim fees: ${errorMessage}`)
       });
@@ -339,6 +470,92 @@ export default function PositionDetailPage() {
       setActionError(`Error claiming fees: ${error.message}`);
     } finally {
       setIsClaiming(false);
+    }
+  };
+
+  // Add handler function for removing liquidity
+  const handleRemoveLiquidity = async (percentage) => {
+    if (!adapter) {
+      setActionError("No adapter available for this position");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setIsRemoving(true);
+
+    try {
+      await adapter.decreaseLiquidity({
+        position,
+        provider,
+        address,
+        chainId,
+        percentage,
+        poolData,
+        token0Data,
+        token1Data,
+        dispatch,
+        onStart: () => setIsRemoving(true),
+        onFinish: () => setIsRemoving(false),
+        onSuccess: (result) => {
+          setActionSuccess(`Successfully removed ${percentage}% of liquidity!`);
+          setShowRemoveLiquidityModal(false);
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setActionError(`Failed to remove liquidity: ${errorMessage}`);
+          setShowRemoveLiquidityModal(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error removing liquidity:", error);
+      setActionError(`Error removing liquidity: ${error.message}`);
+      setIsRemoving(false);
+    }
+  };
+
+  // Update handleClosePosition to accept the shouldBurn parameter
+  const handleClosePosition = async (shouldBurn) => {
+    if (!adapter) {
+      setActionError("No adapter available for this position");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setIsClosing(true);
+
+    try {
+      await adapter.closePosition({
+        position,
+        provider,
+        address,
+        chainId,
+        poolData,
+        token0Data,
+        token1Data,
+        collectFees: true, // Collect fees as part of closing
+        burnPosition: shouldBurn, // Use the value from the modal
+        dispatch,
+        onStart: () => setIsClosing(true),
+        onFinish: () => setIsClosing(false),
+        onSuccess: () => {
+          setActionSuccess("Position successfully closed!");
+          setShowCloseModal(false);
+          // Navigate back to the main dashboard after a short delay
+          setTimeout(() => {
+            router.push('/');
+          }, 2000);
+        },
+        onError: (errorMessage) => {
+          setActionError(`Failed to close position: ${errorMessage}`);
+          setShowCloseModal(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error closing position:", error);
+      setActionError(`Error closing position: ${error.message}`);
+      setIsClosing(false);
     }
   };
 
@@ -661,6 +878,7 @@ export default function PositionDetailPage() {
                     variant="outline-primary"
                     className="w-100 mb-3"
                     disabled={isRemoving}
+                    onClick={() => setShowRemoveLiquidityModal(true)}
                   >
                     {isRemoving ? "Processing..." : "Remove Liquidity"}
                   </Button>
@@ -716,6 +934,19 @@ export default function PositionDetailPage() {
             </Card>
           </Col>
         </Row>
+
+        <RemoveLiquidityModal
+          show={showRemoveLiquidityModal}
+          onHide={() => setShowRemoveLiquidityModal(false)}
+          position={position}
+          tokenBalances={tokenBalances}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          isRemoving={isRemoving}
+          onRemoveLiquidity={handleRemoveLiquidity}
+          errorMessage={actionError}
+        />
       </Container>
     </>
   );

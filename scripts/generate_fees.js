@@ -12,7 +12,7 @@ const TOKENS = {
     symbol: 'WETH'
   },
   USDC: {
-    address: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
+    address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // USDC on Arbitrum
     decimals: 6,
     symbol: 'USDC'
   }

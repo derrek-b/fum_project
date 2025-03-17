@@ -97,6 +97,24 @@ export default class PlatformAdapter {
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     throw new Error("calculateTokenAmounts must be implemented by subclasses");
   }
+
+  /**
+   * Close a position
+   * @param {Object} params - Parameters for closing the position
+   * @returns {Promise<Object>} - Transaction receipt
+   */
+  async closePosition(params) {
+    throw new Error("closePosition must be implemented by subclasses");
+  }
+
+  /**
+   * Decrease liquidity for a position
+   * @param {Object} params - Parameters for decreasing liquidity
+   * @returns {Promise<Object>} - Transaction receipt
+   */
+  async decreaseLiquidity(params) {
+    throw new Error("decreaseLiquidity must be implemented by subclasses");
+  }
 }
 
 
