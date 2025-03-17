@@ -1,21 +1,48 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert } from "react-bootstrap";
 import Link from "next/link";
 import Head from "next/head";
 import { AdapterFactory } from "../../adapters";
 import { formatPrice, formatFeeDisplay } from "../../utils/formatHelpers";
+import { fetchTokenPrices, calculateUsdValue } from "../../utils/coingeckoUtils";
 import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
+import RefreshControls from "../../components/RefreshControls";
+import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 
 export default function PositionDetailPage() {
+  const dispatch = useDispatch();
   const router = useRouter();
   const { id } = router.query;
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const { address, chainId, provider } = useSelector((state) => state.wallet);
+  const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
+  const timerRef = useRef(null);
+
+  // State for various UI elements
+  const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
+  const [uncollectedFees, setUncollectedFees] = useState(null);
+  const [isLoadingFees, setIsLoadingFees] = useState(false);
+  const [feeLoadingError, setFeeLoadingError] = useState(false);
+  const [tokenBalances, setTokenBalances] = useState(null);
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
+  const [balanceError, setBalanceError] = useState(false);
+  const [tokenPrices, setTokenPrices] = useState({
+    token0: null,
+    token1: null,
+    loading: false,
+    error: null
+  });
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const [actionError, setActionError] = useState(null);
+  const [actionSuccess, setActionSuccess] = useState(null);
 
   // Find the position by ID
   const position = useMemo(() => {
@@ -23,13 +50,13 @@ export default function PositionDetailPage() {
     return positions.find((p) => p.id === id);
   }, [positions, id]);
 
-  // Get pool and token data for the position
+  // Get pool and token data for the position - DEFINE THESE BEFORE USING THEM
   const poolData = position ? pools[position.poolAddress] : null;
   const token0Data = poolData?.token0 ? tokens[poolData.token0] : null;
   const token1Data = poolData?.token1 ? tokens[poolData.token1] : null;
 
-  // State for price display direction
-  const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
+  // Check if any resources are currently updating
+  const isUpdating = resourcesUpdating?.positions || false;
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
@@ -37,33 +64,51 @@ export default function PositionDetailPage() {
     try {
       return AdapterFactory.getAdapter(position.platform, provider);
     } catch (error) {
-      console.error(`Failed to get adapter for position ${position?.id}:`, error);
+      console.error(`Failed to get adapter for position ${id}:`, error);
       return null;
     }
-  }, [position?.platform, provider]);
+  }, [position?.platform, provider, id]);
 
   // Use adapter for position-specific calculations
   const isActive = useMemo(() => {
     if (!adapter || !position || !poolData) return false;
-    return adapter.isPositionInRange(position, poolData);
+    try {
+      return adapter.isPositionInRange(position, poolData);
+    } catch (error) {
+      console.error("Error checking if position is in range:", error);
+      return false;
+    }
   }, [adapter, position, poolData]);
 
   // Calculate price information using the adapter
   const priceInfo = useMemo(() => {
-    if (!adapter || !position || !poolData || !token0Data || !token1Data)
+    if (!adapter || !position || !poolData || !token0Data || !token1Data) {
       return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
+    }
 
-    return adapter.calculatePrice(
-      position,
-      poolData,
-      token0Data,
-      token1Data,
-      invertPriceDisplay
-    );
+    try {
+      return adapter.calculatePrice(
+        position,
+        poolData,
+        token0Data,
+        token1Data,
+        invertPriceDisplay
+      );
+    } catch (error) {
+      console.error("Error calculating price:", error);
+      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
+    }
   }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay]);
 
   // Extract values from priceInfo
   const { currentPrice, lowerPrice, upperPrice } = priceInfo;
+
+  // Set price direction labels
+  const priceLabel = token0Data && token1Data ? (
+    invertPriceDisplay
+      ? `${token0Data.symbol} per ${token1Data.symbol}`
+      : `${token1Data.symbol} per ${token0Data.symbol}`
+  ) : "";
 
   // Ensure lower price is always smaller than upper price (they swap when inverting)
   const displayLowerPrice = useMemo(() => {
@@ -75,13 +120,6 @@ export default function PositionDetailPage() {
     if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
     return Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
   }, [lowerPrice, upperPrice]);
-
-  // Set price direction labels
-  const priceLabel = token0Data && token1Data ? (
-    invertPriceDisplay
-      ? `${token0Data.symbol} per ${token1Data.symbol}`
-      : `${token1Data.symbol} per ${token0Data.symbol}`
-  ) : "";
 
   // Calculate position percentage for the progress bar
   const pricePositionPercent = useMemo(() => {
@@ -98,17 +136,55 @@ export default function PositionDetailPage() {
     return Math.floor(((current - lower) / (upper - lower)) * 100);
   }, [displayLowerPrice, displayUpperPrice, currentPrice]);
 
-  // State for uncollected fees and loading state
-  const [uncollectedFees, setUncollectedFees] = useState(null);
-  const [isLoadingFees, setIsLoadingFees] = useState(false);
-  const [feeLoadingError, setFeeLoadingError] = useState(false);
+  // Set up auto-refresh timer
+  useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Only set up timer if auto-refresh is enabled and we're connected
+    if (autoRefresh.enabled && provider && address && chainId && id) {
+      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms for position #${id}`);
+      timerRef.current = setInterval(() => {
+        console.log(`Auto-refreshing position #${id} data...`);
+        dispatch(markAutoRefresh());
+        dispatch(triggerUpdate());
+      }, autoRefresh.interval);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [autoRefresh.enabled, autoRefresh.interval, provider, address, chainId, id, dispatch]);
+
+  // Mark resources as updating when lastUpdate changes
+  useEffect(() => {
+    if (id && lastUpdate) {
+      // Set loading states when refresh is triggered
+      setIsLoadingFees(true);
+      setFeeLoadingError(false);
+      setIsLoadingBalances(true);
+      setBalanceError(false);
+      setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
+
+      // Mark resources as updating in Redux
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
+    }
+  }, [lastUpdate, id, dispatch]);
 
   // Fetch fee data using the adapter
   useEffect(() => {
     let isMounted = true;
 
+    // Guard against undefined values
     if (!adapter || !position || !poolData || !token0Data || !token1Data) {
-      return;
+      return; // Early return if any required data is missing
     }
 
     setIsLoadingFees(true);
@@ -122,9 +198,12 @@ export default function PositionDetailPage() {
         if (isMounted) {
           setUncollectedFees(fees);
           setIsLoadingFees(false);
+
+          // Mark resource as updated in Redux
+          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
         }
       } catch (error) {
-        console.error("Error calculating fees for position", position.id, ":", error);
+        console.error("Error calculating fees for position", id, ":", error);
         if (isMounted) {
           setFeeLoadingError(true);
           setIsLoadingFees(false);
@@ -138,19 +217,15 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data]);
-
-  // State for token balances
-  const [tokenBalances, setTokenBalances] = useState(null);
-  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
-  const [balanceError, setBalanceError] = useState(false);
+  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id]);
 
   // Fetch token balances using the adapter
   useEffect(() => {
     let isMounted = true;
 
-    if (!adapter || !position || !poolData || !token0Data || !token1Data) {
-      return;
+    // Guard against undefined values
+    if (!adapter || !position || !poolData || !token0Data || !token1Data || !chainId) {
+      return; // Early return if any required data is missing
     }
 
     setIsLoadingBalances(true);
@@ -184,15 +259,52 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data]);
+  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate]);
 
-  // States for action buttons
-  const [isClaiming, setIsClaiming] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-  const [actionError, setActionError] = useState(null);
-  const [actionSuccess, setActionSuccess] = useState(null);
+  // Fetch token prices from CoinGecko
+  useEffect(() => {
+    // Guard against undefined token data
+    if (!token0Data?.symbol || !token1Data?.symbol) return;
+
+    const getPrices = async () => {
+      setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
+
+      try {
+        // Use our utility function to fetch prices
+        const tokenSymbols = [token0Data.symbol, token1Data.symbol];
+        const prices = await fetchTokenPrices(tokenSymbols);
+
+        setTokenPrices({
+          token0: prices[token0Data.symbol],
+          token1: prices[token1Data.symbol],
+          loading: false,
+          error: null
+        });
+      } catch (error) {
+        console.error("Error fetching token prices:", error);
+        setTokenPrices(prev => ({
+          ...prev,
+          loading: false,
+          error: "Failed to fetch token prices"
+        }));
+      }
+    };
+
+    getPrices();
+  }, [token0Data, token1Data, lastUpdate]);
+
+  // Function to manually refresh data
+  const refreshData = () => {
+    dispatch(triggerUpdate());
+  };
+
+  // Calculate USD values
+  const getUsdValue = (amount, tokenSymbol) => {
+    if (!amount || amount === "0" || tokenPrices.loading || tokenPrices.error) return null;
+
+    const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
+    return calculateUsdValue(amount, price);
+  };
 
   // Function to claim fees using the adapter
   const claimFees = async () => {
@@ -216,7 +328,10 @@ export default function PositionDetailPage() {
         token1Data,
         onStart: () => setIsClaiming(true),
         onFinish: () => setIsClaiming(false),
-        onSuccess: () => setActionSuccess("Successfully claimed fees!"),
+        onSuccess: () => {
+          setActionSuccess("Successfully claimed fees!");
+          dispatch(triggerUpdate()); // Refresh data after claiming
+        },
         onError: (errorMessage) => setActionError(`Failed to claim fees: ${errorMessage}`)
       });
     } catch (error) {
@@ -266,26 +381,38 @@ export default function PositionDetailPage() {
           </Button>
         </Link>
 
-        <h1 className="mb-4">
-          Position #{position.id}
-          <span
-            style={{
-              display: 'inline-block',
-              width: '14px',
-              height: '14px',
-              borderRadius: '50%',
-              backgroundColor: isActive ? '#28a745' : '#dc3545',
-              marginLeft: '12px',
-              marginRight: '8px'
-            }}
-            title={isActive ? "In range" : "Out of range"}
-          />
-          {position.platformName && (
-            <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
-              {position.platformName}
-            </Badge>
-          )}
-        </h1>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h1 className="mb-0">
+            Position #{position.id}
+            <span
+              style={{
+                display: 'inline-block',
+                width: '14px',
+                height: '14px',
+                borderRadius: '50%',
+                backgroundColor: isActive ? '#28a745' : '#dc3545',
+                marginLeft: '12px',
+                marginRight: '8px'
+              }}
+              title={isActive ? "In range" : "Out of range"}
+            />
+            {position.platformName && (
+              <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
+                {position.platformName}
+              </Badge>
+            )}
+          </h1>
+
+          <div className="d-flex align-items-center">
+            {isUpdating && (
+              <div className="d-flex align-items-center me-3">
+                <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
+                <small className="text-muted">Refreshing...</small>
+              </div>
+            )}
+            <RefreshControls />
+          </div>
+        </div>
 
         <Row>
           <Col lg={8}>
@@ -311,15 +438,6 @@ export default function PositionDetailPage() {
                   </Col>
                   <Col md={6}>
                     <div className="mb-3">
-                      <strong>Pool Address:</strong>{" "}
-                      <small className="text-muted">
-                        {position.poolAddress.substring(0, 8)}...{position.poolAddress.substring(36)}
-                      </small>
-                    </div>
-                    <div className="mb-3">
-                      <strong>Liquidity:</strong> {position.liquidity.toLocaleString()}
-                    </div>
-                    <div className="mb-3">
                       <strong>Price Direction:</strong>{" "}
                       <span>
                         {priceLabel}
@@ -333,6 +451,55 @@ export default function PositionDetailPage() {
                           <span role="img" aria-label="switch">⇄</span>
                         </Button>
                       </span>
+                    </div>
+                    {/* Token balances now in the Overview section */}
+                    <div className="mb-3">
+                      <strong>Token Balances:</strong>
+                      {balanceError ? (
+                        <div className="text-danger small">Error calculating balances</div>
+                      ) : isLoadingBalances ? (
+                        <div className="d-flex align-items-center">
+                          <Spinner animation="border" size="sm" className="me-2" />
+                          <span className="small">Loading...</span>
+                        </div>
+                      ) : tokenBalances ? (
+                        <div className="mt-2">
+                          <div className="mb-1 ps-1">
+                            <div className="d-flex justify-content-between align-items-center">
+                              <Badge bg="light" text="dark" className="px-2 py-1">
+                                {tokenBalances.token0.formatted} {token0Data.symbol}
+                              </Badge>
+                              {tokenPrices.token0 && (
+                                <span className="text-muted small">
+                                  ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="ps-1">
+                            <div className="d-flex justify-content-between align-items-center">
+                              <Badge bg="light" text="dark" className="px-2 py-1">
+                                {tokenBalances.token1.formatted} {token1Data.symbol}
+                              </Badge>
+                              {tokenPrices.token1 && (
+                                <span className="text-muted small">
+                                  ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {tokenPrices.token0 && tokenPrices.token1 && (
+                            <div className="mt-2 text-center small text-muted border-top pt-1">
+                              Total Value: ${(
+                                (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
+                                (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
+                              ).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-muted small">Not available</div>
+                      )}
                     </div>
                   </Col>
                 </Row>
@@ -396,74 +563,6 @@ export default function PositionDetailPage() {
                 </div>
               </Card.Body>
             </Card>
-
-            <Card className="mb-4">
-              <Card.Header>
-                <h5 className="mb-0">Token Balances</h5>
-              </Card.Header>
-              <Card.Body>
-                {balanceError ? (
-                  <Alert variant="danger">
-                    <p className="mb-0">Error calculating token balances. This may be due to an issue with the position data or network connectivity.</p>
-                  </Alert>
-                ) : isLoadingBalances ? (
-                  <div className="text-center py-4">
-                    <Spinner animation="border" variant="primary" />
-                    <p className="mt-3">Calculating token balances...</p>
-                  </div>
-                ) : (
-                  <Row>
-                    <Col md={6}>
-                      <Card className="border mb-3">
-                        <Card.Body>
-                          <div className="d-flex justify-content-between align-items-center">
-                            <div>
-                              <h6 className="mb-0">{token0Data.symbol}</h6>
-                              <small className="text-muted">Token 0</small>
-                            </div>
-                            <div className="text-end">
-                              {tokenBalances ? (
-                                <>
-                                  <h5 className="mb-0">{tokenBalances.token0.formatted}</h5>
-                                </>
-                              ) : (
-                                <p className="mb-0 text-muted">Not available</p>
-                              )}
-                            </div>
-                          </div>
-                        </Card.Body>
-                      </Card>
-                    </Col>
-                    <Col md={6}>
-                      <Card className="border mb-3">
-                        <Card.Body>
-                          <div className="d-flex justify-content-between align-items-center">
-                            <div>
-                              <h6 className="mb-0">{token1Data.symbol}</h6>
-                              <small className="text-muted">Token 1</small>
-                            </div>
-                            <div className="text-end">
-                              {tokenBalances ? (
-                                <>
-                                  <h5 className="mb-0">{tokenBalances.token1.formatted}</h5>
-                                </>
-                              ) : (
-                                <p className="mb-0 text-muted">Not available</p>
-                              )}
-                            </div>
-                          </div>
-                        </Card.Body>
-                      </Card>
-                    </Col>
-                  </Row>
-                )}
-                <div className="text-muted small mt-2">
-                  <strong>Note:</strong> These values represent your position's current token balances
-                  (excluding uncollected fees). The exact amounts you'd receive may vary based on price
-                  impact at the time of closing your position.
-                </div>
-              </Card.Body>
-            </Card>
           </Col>
 
           <Col lg={4}>
@@ -474,28 +573,51 @@ export default function PositionDetailPage() {
               <Card.Body>
                 <div className="mb-4">
                   <h6>Uncollected Fees</h6>
-                  <div className="d-flex gap-2 mb-3">
+                  <div className="mb-3">
                     {feeLoadingError ? (
                       <div className="text-danger small w-100">
                         <i className="me-1">⚠️</i>
                         Unable to load fee data. Please try refreshing.
                       </div>
                     ) : isLoadingFees ? (
-                      <div className="text-secondary small w-100">
+                      <div className="text-secondary text-center py-2">
                         <Spinner animation="border" size="sm" className="me-2" />
                         Loading fee data...
                       </div>
                     ) : uncollectedFees ? (
-                      <>
-                        <Badge bg="light" text="dark" className="px-3 py-2">
-                          {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
-                        </Badge>
-                        <Badge bg="light" text="dark" className="px-3 py-2">
-                          {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
-                        </Badge>
-                      </>
+                      <div className="border rounded p-2 bg-light">
+                        <div className="d-flex justify-content-between align-items-center mb-2">
+                          <Badge bg="white" text="dark" className="px-3 py-2">
+                            {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+                          </Badge>
+                          {tokenPrices.token0 && (
+                            <span className="text-muted small">
+                              ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="d-flex justify-content-between align-items-center mb-1">
+                          <Badge bg="white" text="dark" className="px-3 py-2">
+                            {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+                          </Badge>
+                          {tokenPrices.token1 && (
+                            <span className="text-muted small">
+                              ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                            </span>
+                          )}
+                        </div>
+
+                        {tokenPrices.token0 && tokenPrices.token1 && (
+                          <div className="text-center small border-top pt-2 mt-2 fw-bold">
+                            Total Value: ${(
+                              (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
+                              (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
+                            ).toFixed(2)}
+                          </div>
+                        )}
+                      </div>
                     ) : (
-                      <div className="text-muted small w-100">
+                      <div className="text-muted small text-center py-2">
                         No fee data available
                       </div>
                     )}
@@ -580,6 +702,9 @@ export default function PositionDetailPage() {
                 </div>
                 <div className="mb-2">
                   <strong>Chain ID:</strong> {chainId}
+                </div>
+                <div className="mb-2">
+                  <strong>Liquidity:</strong> {position.liquidity.toLocaleString()}
                 </div>
                 <div>
                   <strong>Pool Address:</strong><br />

@@ -966,15 +966,12 @@ async function main() {
 
   // Helper function to convert tick to price - FIXED VERSION
   function tickToPrice(baseToken, quoteToken, tick) {
-    // Calculate price from tick using the formula: 1.0001^tick
-    const price = Math.pow(1.0001, tick);
+    // Use logarithm for numerical stability with extreme tick values
+    const price = Math.exp(tick * Math.log(1.0001));
 
     // Apply decimal adjustment based on token decimals
-    // For WETH (18 decimals) to USDC (6 decimals), we need to multiply by 10^(6-18) = 10^-12
     const decimalAdjustment = Math.pow(10, quoteToken.decimals - baseToken.decimals);
 
-    // For numbers that might be very small due to decimal adjustments,
-    // ensure we're handling the math properly
     return price * decimalAdjustment;
   }
 }
