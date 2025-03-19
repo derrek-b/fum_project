@@ -862,11 +862,9 @@ const formatTickToPrice = (tick) => {
     const decimals1 = tokensSwapped ? token0Decimals : token1Decimals;
 
     // Get the base price
-    console.log(`Converting tick ${tick} to price with decimals: ${decimals0}, ${decimals1}`);
     let price;
     try {
       price = adapter._tickToPrice(tick, decimals0, decimals1);
-      console.log(`Raw price from tick: ${price}`);
     } catch (adapterError) {
       console.error("Error in adapter._tickToPrice:", adapterError);
       return 'N/A';

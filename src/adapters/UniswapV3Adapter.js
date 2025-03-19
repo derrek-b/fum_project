@@ -1199,7 +1199,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
 /**
- * Create a new liquidity position
+ * Create a new liquidity position using proper Uniswap SDK calculations
  * @param {Object} params - Parameters for creating a position
  * @returns {Promise<Object>} - Transaction receipt and created position
  */
@@ -1223,6 +1223,7 @@ async createPosition(params) {
     onError
   } = params;
 
+  // Parameter validation
   if (!provider || !address || !chainId) {
     onError && onError("Wallet not connected");
     return;
@@ -1238,14 +1239,14 @@ async createPosition(params) {
     }
 
     const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+    console.log(`Position Manager Address: ${positionManagerAddress}`);
 
     // Get signer
     const signer = await provider.getSigner();
 
     // Import required libraries from Uniswap SDK
-    const { NonfungiblePositionManager, Pool, Position } = require('@uniswap/v3-sdk');
+    const { Pool, Position } = require('@uniswap/v3-sdk');
     const { Token, CurrencyAmount, Percent } = require('@uniswap/sdk-core');
-    const { TickMath } = require('@uniswap/v3-sdk');
 
     // Create contract instances for tokens
     const tokenABI = [
@@ -1253,6 +1254,7 @@ async createPosition(params) {
       'function symbol() external view returns (string)',
       'function name() external view returns (string)',
       'function approve(address spender, uint amount) external returns (bool)',
+      'function allowance(address owner, address spender) external view returns (uint)',
       'function balanceOf(address owner) external view returns (uint)'
     ];
 
@@ -1280,6 +1282,9 @@ async createPosition(params) {
       token1Contract.balanceOf(address)
     ]);
 
+    console.log(`Token0: ${token0Symbol} (${token0Address}), Decimals: ${token0Decimals}`);
+    console.log(`Token1: ${token1Symbol} (${token1Address}), Decimals: ${token1Decimals}`);
+
     // Create Token instances for the SDK
     const token0 = new Token(
       chainId,
@@ -1297,153 +1302,266 @@ async createPosition(params) {
       token1Name
     );
 
-    // We need pool data to create a position
-    // Get or create Pool instance using Factory
-    const poolAddress = Pool.getAddress(token0, token1, feeTier);
-    const poolContract = new ethers.Contract(
-      poolAddress,
-      [
-        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
-        'function liquidity() external view returns (uint128)'
-      ],
-      provider
-    );
+    // Check if token0 address is less than token1 address
+    const needSwap = token0Address.toLowerCase() > token1Address.toLowerCase();
+    console.log(`Token address order check - Need to swap? ${needSwap}`);
 
-    // Get pool data
-    const [slot0, liquidity] = await Promise.all([
-      poolContract.slot0(),
-      poolContract.liquidity()
-    ]);
+    // Get properly ordered tokens
+    const sortedToken0 = needSwap ? token1 : token0;
+    const sortedToken1 = needSwap ? token0 : token1;
+    const sortedToken0Symbol = needSwap ? token1Symbol : token0Symbol;
+    const sortedToken1Symbol = needSwap ? token0Symbol : token1Symbol;
 
+    // Get pool information to check that the pool exists and get the current tick
+    const poolAddress = Pool.getAddress(sortedToken0, sortedToken1, feeTier);
+    console.log(`Calculated pool address: ${poolAddress}`);
+
+    // Create a pool contract to verify the pool exists and get data
+    const poolABI = [
+      'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+      'function liquidity() external view returns (uint128)',
+      'function tickSpacing() external view returns (int24)'
+    ];
+
+    const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
+
+    // Check if pool exists and get pool data
+    let slot0, liquidity, tickSpacing;
+    try {
+      [slot0, liquidity, tickSpacing] = await Promise.all([
+        poolContract.slot0(),
+        poolContract.liquidity(),
+        poolContract.tickSpacing()
+      ]);
+      console.log(`Pool exists at ${poolAddress}`);
+      console.log(`Current tick: ${Number(slot0.tick)}`);
+      console.log(`Tick spacing: ${Number(tickSpacing)}`);
+    } catch (error) {
+      console.error("Error fetching pool data:", error);
+      throw new Error(`Pool does not exist for ${token0Symbol}/${token1Symbol} with fee tier ${feeTier/10000}%. Please choose different tokens or fee tier.`);
+    }
+
+    // Ensure ticks are multiples of tickSpacing
+    const actualTickSpacing = Number(tickSpacing);
+
+    // Round tickLower down to the nearest multiple of tickSpacing
+    const adjustedTickLower = Math.floor(tickLower / actualTickSpacing) * actualTickSpacing;
+
+    // Round tickUpper up to the nearest multiple of tickSpacing
+    const adjustedTickUpper = Math.ceil(tickUpper / actualTickSpacing) * actualTickSpacing;
+
+    console.log(`Original ticks: [${tickLower}, ${tickUpper}]`);
+    console.log(`Adjusted ticks: [${adjustedTickLower}, ${adjustedTickUpper}]`);
+
+    // Create Pool instance
     const pool = new Pool(
-      token0,
-      token1,
+      sortedToken0,
+      sortedToken1,
       Number(feeTier),
       slot0.sqrtPriceX96.toString(),
       liquidity.toString(),
       Number(slot0.tick)
     );
 
-    // Parse the amounts
-    const amount0Desired = ethers.parseUnits(token0Amount, token0Decimals);
-    const amount1Desired = ethers.parseUnits(token1Amount, token1Decimals);
+    // Parse the input amounts
+    const amount0Raw = token0Amount ? ethers.parseUnits(token0Amount, token0Decimals) : 0n;
+    const amount1Raw = token1Amount ? ethers.parseUnits(token1Amount, token1Decimals) : 0n;
 
-    // Convert to CurrencyAmount
-    const tokenAmount0 = CurrencyAmount.fromRawAmount(token0, amount0Desired.toString());
-    const tokenAmount1 = CurrencyAmount.fromRawAmount(token1, amount1Desired.toString());
+    console.log(`Input amounts: ${token0Amount} ${token0Symbol}, ${token1Amount} ${token1Symbol}`);
 
-    // Create Position instance using fromAmounts method
-    const position = Position.fromAmounts({
-      pool,
-      tickLower,
-      tickUpper,
-      amount0: tokenAmount0.quotient.toString(),
-      amount1: tokenAmount1.quotient.toString(),
-      useFullPrecision: true
-    });
+    // Create the position
+    // We'll use one of two approaches depending on which token has a non-zero amount
+    let position;
 
-    // Calculate minimum amounts based on slippage tolerance
-    const slippageFactor = new Percent(Math.floor(slippageTolerance * 100), 10000); // Convert to basis points
-
-    const [amount0Min, amount1Min] = position.mintAmountsWithSlippage(slippageFactor);
-
-    // First approve tokens
-    const positionManager = new ethers.Contract(
-      positionManagerAddress,
-      [
-        'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline)) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)'
-      ],
-      signer
+    // Convert to CurrencyAmount for the SDK
+    const token0CurrencyAmount = CurrencyAmount.fromRawAmount(
+      needSwap ? sortedToken1 : sortedToken0,
+      (needSwap ? amount1Raw : amount0Raw).toString()
     );
 
-    console.log("Approving tokens for position creation...");
+    const token1CurrencyAmount = CurrencyAmount.fromRawAmount(
+      needSwap ? sortedToken0 : sortedToken1,
+      (needSwap ? amount0Raw : amount1Raw).toString()
+    );
 
-    // Check if approval is needed
-    const approvalTxs = [];
-
-    const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
-    if (token0Allowance < amount0Desired) {
-      const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
-      approvalTxs.push(tx0.wait());
+    // Create position based on the non-zero amount
+    if ((needSwap ? amount1Raw : amount0Raw) > 0n) {
+      console.log(`Creating position using ${needSwap ? sortedToken1Symbol : sortedToken0Symbol} amount`);
+      position = Position.fromAmount0({
+        pool,
+        tickLower: adjustedTickLower,
+        tickUpper: adjustedTickUpper,
+        amount0: token0CurrencyAmount.quotient.toString(),
+        useFullPrecision: true
+      });
+    } else if ((needSwap ? amount0Raw : amount1Raw) > 0n) {
+      console.log(`Creating position using ${needSwap ? sortedToken0Symbol : sortedToken1Symbol} amount`);
+      position = Position.fromAmount1({
+        pool,
+        tickLower: adjustedTickLower,
+        tickUpper: adjustedTickUpper,
+        amount1: token1CurrencyAmount.quotient.toString(),
+        useFullPrecision: true
+      });
+    } else {
+      throw new Error("At least one token amount must be non-zero");
     }
 
-    const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
-    if (token1Allowance < amount1Desired) {
-      const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
-      approvalTxs.push(tx1.wait());
+    // Log calculated amounts
+    console.log("Position calculated by SDK:");
+    console.log(`- Liquidity: ${position.liquidity.toString()}`);
+    console.log(`- ${sortedToken0Symbol} amount: ${position.amount0.toSignificant(6)}`);
+    console.log(`- ${sortedToken1Symbol} amount: ${position.amount1.toSignificant(6)}`);
+
+    // Calculate minimum amounts with slippage tolerance
+    const slippageTolerancePercent = new Percent(Math.floor(slippageTolerance * 100), 10000);
+    const { amount0: amount0Min, amount1: amount1Min } = position.mintAmountsWithSlippage(slippageTolerancePercent);
+
+    console.log(`Minimum amounts with ${slippageTolerance}% slippage:`);
+    console.log(`- Min ${sortedToken0Symbol}: ${amount0Min.toString()}`);
+    console.log(`- Min ${sortedToken1Symbol}: ${amount1Min.toString()}`);
+
+    // Get desired amounts from position
+    const amount0Desired = position.amount0.quotient.toString();
+    const amount1Desired = position.amount1.quotient.toString();
+
+    // Approve tokens if needed
+    const approvalTxs = [];
+
+    // We need to use the original token contracts with the proper token order for approvals
+    if (BigInt(amount0Desired) > 0n) {
+      const sortedToken0Contract = new ethers.Contract(sortedToken0.address, tokenABI, signer);
+      const token0Allowance = await sortedToken0Contract.allowance(address, positionManagerAddress);
+
+      if (token0Allowance < BigInt(amount0Desired)) {
+        console.log(`Approving ${sortedToken0Symbol}...`);
+        const tx0 = await sortedToken0Contract.approve(positionManagerAddress, amount0Desired);
+        approvalTxs.push(tx0.wait());
+      } else {
+        console.log(`${sortedToken0Symbol} already has sufficient approval`);
+      }
+    }
+
+    if (BigInt(amount1Desired) > 0n) {
+      const sortedToken1Contract = new ethers.Contract(sortedToken1.address, tokenABI, signer);
+      const token1Allowance = await sortedToken1Contract.allowance(address, positionManagerAddress);
+
+      if (token1Allowance < BigInt(amount1Desired)) {
+        console.log(`Approving ${sortedToken1Symbol}...`);
+        const tx1 = await sortedToken1Contract.approve(positionManagerAddress, amount1Desired);
+        approvalTxs.push(tx1.wait());
+      } else {
+        console.log(`${sortedToken1Symbol} already has sufficient approval`);
+      }
     }
 
     // Wait for all approvals to complete
     if (approvalTxs.length > 0) {
       await Promise.all(approvalTxs);
-      console.log("Tokens approved");
+      console.log("All token approvals completed");
     }
+
+    // Create the position manager contract
+    const positionManager = new ethers.Contract(
+      positionManagerAddress,
+      nonfungiblePositionManagerABI.abi,
+      signer
+    );
 
     // Create mint parameters
     const mintParams = {
-      token0: token0Address,
-      token1: token1Address,
+      token0: sortedToken0.address,
+      token1: sortedToken1.address,
       fee: feeTier,
-      tickLower,
-      tickUpper,
-      amount0Desired: amount0Desired.toString(),
-      amount1Desired: amount1Desired.toString(),
+      tickLower: adjustedTickLower,
+      tickUpper: adjustedTickUpper,
+      amount0Desired: amount0Desired,
+      amount1Desired: amount1Desired,
       amount0Min: amount0Min.toString(),
       amount1Min: amount1Min.toString(),
       recipient: address,
-      deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
+      deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
     };
 
-    console.log("Creating position...");
-    const mintTx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
+    console.log("Creating position with parameters:", {
+      token0: sortedToken0Symbol,
+      token1: sortedToken1Symbol,
+      fee: feeTier,
+      tickLower: adjustedTickLower,
+      tickUpper: adjustedTickUpper,
+      amount0Desired: ethers.formatUnits(amount0Desired, sortedToken0.decimals),
+      amount1Desired: ethers.formatUnits(amount1Desired, sortedToken1.decimals),
+      amount0Min: ethers.formatUnits(amount0Min.toString(), sortedToken0.decimals),
+      amount1Min: ethers.formatUnits(amount1Min.toString(), sortedToken1.decimals)
+    });
 
-    console.log("Transaction sent:", mintTx.hash);
-    const receipt = await mintTx.wait();
-    console.log("Position created!");
+    // Execute the mint transaction
+    console.log("Sending mint transaction...");
+    try {
+      const mintTx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
+      console.log("Transaction sent:", mintTx.hash);
 
-    // Find the Transfer event to get the tokenId
-    const transferEvent = receipt.logs.find(log => {
-      try {
-        // A Transfer event has 3 topics: event signature + from + to
-        return log.topics.length === 4 &&
-               log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-               log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
-               log.topics[2] === ethers.zeroPadValue(address.toLowerCase(), 32);
-      } catch (e) {
-        return false;
+      const receipt = await mintTx.wait();
+      console.log("Position created!");
+
+      // Find the Transfer event to get the tokenId
+      const transferEvent = receipt.logs.find(log => {
+        try {
+          return log.topics.length === 4 &&
+                 log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
+                 log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
+                 log.topics[2] === ethers.zeroPadValue(address.toLowerCase(), 32);
+        } catch (e) {
+          return false;
+        }
+      });
+
+      if (!transferEvent) {
+        throw new Error("Transfer event not found in transaction receipt");
       }
-    });
 
-    if (!transferEvent) {
-      throw new Error("Transfer event not found in transaction receipt");
+      // Extract tokenId from the event
+      const tokenId = ethers.toBigInt(transferEvent.topics[3]);
+      console.log(`Successfully minted position with ID: ${tokenId}`);
+
+      // Trigger update after successful creation
+      if (dispatch) {
+        const { triggerUpdate } = require('../redux/updateSlice');
+        dispatch(triggerUpdate());
+      }
+
+      onSuccess && onSuccess({
+        receipt,
+        tokenId: tokenId.toString(),
+        txHash: receipt.hash,
+        token0Symbol: needSwap ? token1Symbol : token0Symbol,
+        token1Symbol: needSwap ? token0Symbol : token1Symbol
+      });
+
+      return {
+        receipt,
+        tokenId: tokenId.toString(),
+        txHash: receipt.hash
+      };
+    } catch (error) {
+      console.error("Mint transaction failed with error:", error);
+
+      // Better error handling
+      if (error.message) {
+        if (error.message.includes("Price slippage check")) {
+          const detailedError = "Transaction failed due to price movement. Try increasing the slippage tolerance or try again.";
+          onError && onError(detailedError);
+        } else if (error.message.includes("insufficient funds")) {
+          onError && onError("Insufficient ETH for gas fees");
+        } else {
+          onError && onError(`Transaction failed: ${error.message}`);
+        }
+      } else {
+        onError && onError("Unknown error occurred");
+      }
+
+      throw error;
     }
-
-    // Extract tokenId from the event
-    const tokenId = ethers.toBigInt(transferEvent.topics[3]);
-    console.log(`Successfully minted position with ID: ${tokenId}`);
-
-    // Trigger update after successful creation
-    if (dispatch) {
-      const { triggerUpdate } = require('../redux/updateSlice');
-      dispatch(triggerUpdate());
-    }
-
-    onSuccess && onSuccess({
-      receipt,
-      tokenId: tokenId.toString(),
-      txHash: receipt.hash,
-      token0,
-      token1,
-      amount0,
-      amount1
-    });
-
-    return {
-      receipt,
-      tokenId: tokenId.toString(),
-      txHash: receipt.hash
-    };
-
   } catch (error) {
     console.error("Error creating position:", error);
     onError && onError(error.message || "Unknown error");
@@ -1496,10 +1614,7 @@ async addLiquidity(params) {
     // Create contract instances
     const positionManager = new ethers.Contract(
       positionManagerAddress,
-      [
-        'function positions(uint256 tokenId) external view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)',
-        'function increaseLiquidity(tuple(uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline)) external payable returns (uint128 liquidity, uint256 amount0, uint256 amount1)'
-      ],
+      nonfungiblePositionManagerABI.abi, // Use the full ABI from the imported JSON
       signer
     );
 
@@ -1521,27 +1636,33 @@ async addLiquidity(params) {
     const token1Decimals = await token1Contract.decimals();
 
     // Parse the amounts
-    const amount0Desired = ethers.parseUnits(token0Amount, token0Decimals);
-    const amount1Desired = ethers.parseUnits(token1Amount, token1Decimals);
+    const amount0Desired = token0Amount ? ethers.parseUnits(token0Amount, token0Decimals) : 0n;
+    const amount1Desired = token1Amount ? ethers.parseUnits(token1Amount, token1Decimals) : 0n;
 
     // Calculate slippage tolerance for minimum amounts
     const slippageFactor = 1 - (slippageTolerance / 100);
-    const amount0Min = BigInt(Math.floor(Number(amount0Desired) * slippageFactor));
-    const amount1Min = BigInt(Math.floor(Number(amount1Desired) * slippageFactor));
+    const amount0Min = amount0Desired === 0n ? 0n : BigInt(Math.floor(Number(amount0Desired) * slippageFactor));
+    const amount1Min = amount1Desired === 0n ? 0n : BigInt(Math.floor(Number(amount1Desired) * slippageFactor));
 
     // Check token approvals and approve if needed
     const approvalTxs = [];
 
-    const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
-    if (token0Allowance < amount0Desired) {
-      const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
-      approvalTxs.push(tx0.wait());
+    if (amount0Desired > 0n) {
+      const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+      if (token0Allowance < amount0Desired) {
+        console.log("Approving token0...");
+        const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
+        approvalTxs.push(tx0.wait());
+      }
     }
 
-    const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
-    if (token1Allowance < amount1Desired) {
-      const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
-      approvalTxs.push(tx1.wait());
+    if (amount1Desired > 0n) {
+      const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+      if (token1Allowance < amount1Desired) {
+        console.log("Approving token1...");
+        const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
+        approvalTxs.push(tx1.wait());
+      }
     }
 
     // Wait for all approvals to complete
@@ -1550,18 +1671,24 @@ async addLiquidity(params) {
       console.log("Tokens approved");
     }
 
-    // Create increaseLiquidity parameters
-    const increaseLiquidityParams = {
-      tokenId: position.id,
-      amount0Desired: amount0Desired.toString(),
-      amount1Desired: amount1Desired.toString(),
-      amount0Min: amount0Min.toString(),
-      amount1Min: amount1Min.toString(),
-      deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
-    };
+    // CRITICAL CHANGE: The increaseLiquidity function expects an array-like parameter, not an object
+    // Create the correct parameter format for increaseLiquidity
+    // This is the key fix: The contract expects this specific format
+    const increaseLiquidityParams = [
+      position.id,
+      amount0Desired.toString(),
+      amount1Desired.toString(),
+      amount0Min.toString(),
+      amount1Min.toString(),
+      Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
+    ];
 
-    console.log("Increasing liquidity for position", position.id);
-    const increaseTx = await positionManager.increaseLiquidity(increaseLiquidityParams, { gasLimit: 5000000 });
+    console.log("Increasing liquidity for position", position.id, "with params:", increaseLiquidityParams);
+
+    // Send the transaction
+    const increaseTx = await positionManager.increaseLiquidity(increaseLiquidityParams, {
+      gasLimit: 5000000
+    });
 
     console.log("Transaction sent:", increaseTx.hash);
     const receipt = await increaseTx.wait();
@@ -1588,7 +1715,29 @@ async addLiquidity(params) {
 
   } catch (error) {
     console.error("Error adding liquidity:", error);
-    onError && onError(error.message || "Unknown error");
+
+    // Try to extract more specific error information
+    let errorMessage = "Unknown error";
+
+    if (error.message) {
+      if (error.message.includes("insufficient funds")) {
+        errorMessage = "Insufficient ETH for transaction";
+      } else if (error.message.includes("price slippage check")) {
+        errorMessage = "Price slippage too high. Try increasing slippage tolerance.";
+      } else if (error.message.includes("execution reverted")) {
+        // Try to extract the revert reason
+        const revertMatch = error.message.match(/reason="([^"]+)"/);
+        if (revertMatch && revertMatch[1]) {
+          errorMessage = `Transaction reverted: ${revertMatch[1]}`;
+        } else {
+          errorMessage = "Transaction reverted by the contract";
+        }
+      } else {
+        errorMessage = error.message;
+      }
+    }
+
+    onError && onError(errorMessage);
     throw error;
   } finally {
     onFinish && onFinish();
