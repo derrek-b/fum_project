@@ -31,6 +31,11 @@ export default class PlatformAdapter {
     }
   }
 
+
+  getPoolAddress(token0Address, token1Address, fee, token0Decimals, token1Decimals) {
+    throw new Error("getPoolAddress must be implemented by subclasses");
+  }
+
   /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
@@ -114,6 +119,24 @@ export default class PlatformAdapter {
    */
   async decreaseLiquidity(params) {
     throw new Error("decreaseLiquidity must be implemented by subclasses");
+  }
+
+  /**
+   * Create a new liquidity position
+   * @param {Object} params - Parameters for creating a position
+   * @returns {Promise<Object>} - Transaction receipt and created position
+   */
+  async createPosition(params) {
+    throw new Error("createPosition must be implemented by subclasses");
+  }
+
+  /**
+   * Add liquidity to an existing position
+   * @param {Object} params - Parameters for adding liquidity
+   * @returns {Promise<Object>} - Transaction receipt and updated position
+   */
+  async addLiquidity(params) {
+    throw new Error("addLiquidity must be implemented by subclasses");
   }
 }
 

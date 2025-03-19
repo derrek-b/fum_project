@@ -7,6 +7,8 @@ import { AdapterFactory } from "../adapters";
 import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
 import { fetchTokenPrices } from "../utils/coingeckoUtils";
 import RemoveLiquidityModal from "./RemoveLiquidityModal";
+import ClosePositionModal from "./ClosePositionModal";
+import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../redux/updateSlice";
 
 export default function PositionCard({ position }) {
@@ -195,6 +197,8 @@ export default function PositionCard({ position }) {
   // State for modals
   const [showActionsModal, setShowActionsModal] = useState(false);
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
+  const [showClosePositionModal, setShowClosePositionModal] = useState(false);
+  const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
 
   // State for claiming process
   const [isClaiming, setIsClaiming] = useState(false);
@@ -205,6 +209,16 @@ export default function PositionCard({ position }) {
   const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState(null);
   const [removeSuccess, setRemoveSuccess] = useState(false);
+
+  // State for closing position process
+  const [isClosing, setIsClosing] = useState(false);
+  const [closeError, setCloseError] = useState(null);
+  const [closeSuccess, setCloseSuccess] = useState(false);
+
+  // State for adding liquidity process
+  const [isAdding, setIsAdding] = useState(false);
+  const [addError, setAddError] = useState(null);
+  const [addSuccess, setAddSuccess] = useState(false);
 
   // Function to claim fees using the adapter
   const claimFees = async () => {
@@ -277,6 +291,93 @@ export default function PositionCard({ position }) {
       console.error("Error removing liquidity:", error);
       setRemoveError(`Error removing liquidity: ${error.message}`);
       setIsRemoving(false);
+    }
+  };
+
+  // Function to handle closing position
+  const handleClosePosition = async (shouldBurn) => {
+    if (!adapter) {
+      setCloseError("No adapter available for this position");
+      return;
+    }
+
+    setCloseError(null);
+    setCloseSuccess(false);
+    setIsClosing(true);
+
+    try {
+      await adapter.closePosition({
+        position,
+        provider,
+        address,
+        chainId,
+        poolData,
+        token0Data,
+        token1Data,
+        collectFees: true, // Collect fees as part of closing
+        burnPosition: shouldBurn, // Whether to burn the position NFT
+        dispatch,
+        onStart: () => setIsClosing(true),
+        onFinish: () => setIsClosing(false),
+        onSuccess: () => {
+          setCloseSuccess(true);
+          setShowClosePositionModal(false);
+          setShowActionsModal(false);
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setCloseError(`Failed to close position: ${errorMessage}`);
+          setShowClosePositionModal(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error closing position:", error);
+      setCloseError(`Error closing position: ${error.message}`);
+      setIsClosing(false);
+    }
+  };
+
+  // Function to handle adding liquidity
+  const handleAddLiquidity = async (params) => {
+    if (!adapter) {
+      setAddError("No adapter available for this position");
+      return;
+    }
+
+    setAddError(null);
+    setAddSuccess(false);
+    setIsAdding(true);
+
+    try {
+      await adapter.addLiquidity({
+        position,
+        token0Amount: params.token0Amount,
+        token1Amount: params.token1Amount,
+        slippageTolerance: params.slippageTolerance,
+        provider,
+        address,
+        chainId,
+        poolData,
+        token0Data,
+        token1Data,
+        dispatch,
+        onStart: () => setIsAdding(true),
+        onFinish: () => setIsAdding(false),
+        onSuccess: () => {
+          setAddSuccess(true);
+          setShowAddLiquidityModal(false);
+          setShowActionsModal(false);
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setAddError(`Failed to add liquidity: ${errorMessage}`);
+          setShowAddLiquidityModal(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error adding liquidity:", error);
+      setAddError(`Error adding liquidity: ${error.message}`);
+      setIsAdding(false);
     }
   };
 
@@ -435,9 +536,15 @@ export default function PositionCard({ position }) {
 
               <Button
                 variant="outline-primary"
-                disabled
+                disabled={isAdding}
+                onClick={() => {
+                  setShowActionsModal(false);
+                  setTimeout(() => {
+                    setShowAddLiquidityModal(true);
+                  }, 100);
+                }}
               >
-                Add Liquidity
+                {isAdding ? "Adding..." : "Add Liquidity"}
               </Button>
 
               <Button
@@ -458,21 +565,30 @@ export default function PositionCard({ position }) {
 
               <Button
                 variant="outline-danger"
-                disabled
+                disabled={isClosing}
+                onClick={() => {
+                  setShowActionsModal(false);
+                  setTimeout(() => {
+                    setShowClosePositionModal(true);
+                  }, 100);
+                }}
               >
-                Close Position
+                {isClosing ? "Closing..." : "Close Position"}
               </Button>
             </div>
 
-            {(claimError || removeError) && (
+            {(claimError || removeError || closeError || addError) && (
               <div className="alert alert-danger mt-2 p-2 small" role="alert">
-                {claimError || removeError}
+                {claimError || removeError || closeError || addError}
               </div>
             )}
 
-            {(claimSuccess || removeSuccess) && (
+            {(claimSuccess || removeSuccess || closeSuccess || addSuccess) && (
               <div className="alert alert-success mt-2 p-2 small" role="alert">
-                {claimSuccess ? "Successfully claimed fees!" : "Successfully removed liquidity!"}
+                {claimSuccess ? "Successfully claimed fees!" :
+                 removeSuccess ? "Successfully removed liquidity!" :
+                 closeSuccess ? "Successfully closed position!" :
+                 "Successfully added liquidity!"}
               </div>
             )}
           </Modal.Body>
@@ -493,6 +609,41 @@ export default function PositionCard({ position }) {
           isRemoving={isRemoving}
           onRemoveLiquidity={handleRemoveLiquidity}
           errorMessage={removeError}
+        />,
+        document.body
+      )}
+
+      {/* ClosePositionModal - also rendered using portal */}
+      {ReactDOM.createPortal(
+        <ClosePositionModal
+          show={showClosePositionModal}
+          onHide={() => setShowClosePositionModal(false)}
+          position={position}
+          tokenBalances={tokenBalances}
+          uncollectedFees={uncollectedFees}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          isClosing={isClosing}
+          onClosePosition={handleClosePosition}
+          errorMessage={closeError}
+        />,
+        document.body
+      )}
+
+      {/* AddLiquidityModal - also rendered using portal */}
+      {ReactDOM.createPortal(
+        <AddLiquidityModal
+          show={showAddLiquidityModal}
+          onHide={() => setShowAddLiquidityModal(false)}
+          position={position}
+          poolData={poolData}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          isProcessing={isAdding}
+          onAddLiquidity={handleAddLiquidity}
+          errorMessage={addError}
         />,
         document.body
       )}

@@ -24,6 +24,7 @@
 # misc
 .DS_Store
 *.pem
+/docs/LP_101.pdf
 
 # debug
 npm-debug.log*

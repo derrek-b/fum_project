@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from "react";
-import { Row, Col, Alert, Spinner } from "react-bootstrap";
+import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import PositionCard from "./PositionCard";
 import RefreshControls from "./RefreshControls";
 import PlatformFilter from "./PlatformFilter";
+import AddLiquidityModal from "./AddLiquidityModal";
 import { AdapterFactory } from "../adapters";
 import config from "../utils/config.js";
 import { setPositions } from "../redux/positionsSlice";
@@ -19,10 +20,16 @@ export default function PositionContainer() {
   const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
-  const [positions, setLocalPositions] = useState([]);
+  const { positions } = useSelector((state) => state.positions);
+  const [localPositions, setLocalPositions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const timerRef = useRef(null);
+
+  // State for create position modal
+  const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
+  const [isCreatingPosition, setIsCreatingPosition] = useState(false);
+  const [createPositionError, setCreatePositionError] = useState(null);
 
   // Set up auto-refresh timer
   useEffect(() => {
@@ -144,6 +151,42 @@ export default function PositionContainer() {
     fetchAllPositions();
   }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
 
+  // Handle create position
+  const handleCreatePosition = async (params) => {
+    setCreatePositionError(null);
+    setIsCreatingPosition(true);
+
+    try {
+      // Get adapter for the selected platform
+      const adapter = AdapterFactory.getAdapter(params.platformId, provider);
+
+      if (!adapter) {
+        throw new Error(`No adapter available for platform: ${params.platformId}`);
+      }
+
+      await adapter.createPosition({
+        ...params,
+        provider,
+        address,
+        chainId,
+        dispatch,
+        onStart: () => setIsCreatingPosition(true),
+        onFinish: () => setIsCreatingPosition(false),
+        onSuccess: () => {
+          setShowCreatePositionModal(false);
+          dispatch(triggerUpdate()); // Refresh to show new position
+        },
+        onError: (errorMessage) => {
+          setCreatePositionError(`Failed to create position: ${errorMessage}`);
+        }
+      });
+    } catch (error) {
+      console.error("Error creating position:", error);
+      setCreatePositionError(`Error creating position: ${error.message}`);
+      setIsCreatingPosition(false);
+    }
+  };
+
   // Filter active positions (with liquidity > 0)
   // Apply platform filter if selected
   const activePositions = positions
@@ -181,9 +224,27 @@ export default function PositionContainer() {
       ) : (
         <>
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <p className="text-muted mb-0">
-              Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
-            </p>
+            <div className="d-flex align-items-center">
+              <p className="text-muted mb-0 me-3">
+                Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
+              </p>
+
+              {/* Create position button */}
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setShowCreatePositionModal(true)}
+                disabled={!isConnected || isCreatingPosition}
+              >
+                {isCreatingPosition ?
+                  <>
+                    <Spinner size="sm" animation="border" className="me-1" />
+                    Creating...
+                  </> :
+                  <>+ Create Position</>
+                }
+              </Button>
+            </div>
 
             <div className="d-flex align-items-center">
               {isUpdatingPositions && (
@@ -208,6 +269,16 @@ export default function PositionContainer() {
           </Row>
         </>
       )}
+
+      {/* Create Position Modal */}
+      <AddLiquidityModal
+        show={showCreatePositionModal}
+        onHide={() => setShowCreatePositionModal(false)}
+        position={null} // Null means we're creating a new position
+        isProcessing={isCreatingPosition}
+        onCreatePosition={handleCreatePosition}
+        errorMessage={createPositionError}
+      />
     </div>
   );
 }

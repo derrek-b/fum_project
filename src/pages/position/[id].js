@@ -11,6 +11,8 @@ import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
 import RefreshControls from "../../components/RefreshControls";
 import RemoveLiquidityModal from "../../components/RemoveLiquidityModal";
+import ClosePositionModal from "../../components/ClosePositionModal";
+import AddLiquidityModal from "../../components/AddLiquidityModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
@@ -49,6 +51,7 @@ export default function PositionDetailPage() {
   const [actionSuccess, setActionSuccess] = useState(null);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
+  const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
   const [forceUpdateCounter, setForceUpdateCounter] = useState(0);
 
   // Hacky way to force update since redux/state changes aren't triggering refresh
@@ -439,10 +442,6 @@ export default function PositionDetailPage() {
 
           // If we have updated position and pool data, update Redux
           if (result.updatedPosition && result.updatedPoolData) {
-            // Import Redux actions
-            // const { setPositions } = require('../redux/positionsSlice');
-            // const { setPools } = require('../redux/poolSlice');
-
             // Update the specific position in the positions array
             const updatedPositions = positions.map(p => {
               console.log('inside updatedPositions');
@@ -556,6 +555,49 @@ export default function PositionDetailPage() {
       console.error("Error closing position:", error);
       setActionError(`Error closing position: ${error.message}`);
       setIsClosing(false);
+    }
+  };
+
+  // Function to handle adding liquidity
+  const handleAddLiquidity = async (params) => {
+    if (!adapter) {
+      setActionError("No adapter available for this position");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setIsAdding(true);
+
+    try {
+      await adapter.addLiquidity({
+        position,
+        token0Amount: params.token0Amount,
+        token1Amount: params.token1Amount,
+        slippageTolerance: params.slippageTolerance,
+        provider,
+        address,
+        chainId,
+        poolData,
+        token0Data,
+        token1Data,
+        dispatch,
+        onStart: () => setIsAdding(true),
+        onFinish: () => setIsAdding(false),
+        onSuccess: () => {
+          setActionSuccess("Successfully added liquidity to position!");
+          setShowAddLiquidityModal(false);
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setActionError(`Failed to add liquidity: ${errorMessage}`);
+          setShowAddLiquidityModal(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error adding liquidity:", error);
+      setActionError(`Error adding liquidity: ${error.message}`);
+      setIsAdding(false);
     }
   };
 
@@ -871,6 +913,7 @@ export default function PositionDetailPage() {
                     variant="outline-primary"
                     className="w-100 mb-2"
                     disabled={isAdding}
+                    onClick={() => setShowAddLiquidityModal(true)}
                   >
                     {isAdding ? "Processing..." : "Add Liquidity"}
                   </Button>
@@ -890,6 +933,7 @@ export default function PositionDetailPage() {
                     variant="outline-danger"
                     className="w-100"
                     disabled={isClosing}
+                    onClick={() => setShowCloseModal(true)}
                   >
                     {isClosing ? "Processing..." : "Close Position"}
                   </Button>
@@ -945,6 +989,34 @@ export default function PositionDetailPage() {
           tokenPrices={tokenPrices}
           isRemoving={isRemoving}
           onRemoveLiquidity={handleRemoveLiquidity}
+          errorMessage={actionError}
+        />
+
+        <ClosePositionModal
+          show={showCloseModal}
+          onHide={() => setShowCloseModal(false)}
+          position={position}
+          tokenBalances={tokenBalances}
+          uncollectedFees={uncollectedFees}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          isClosing={isClosing}
+          onClosePosition={handleClosePosition}
+          errorMessage={actionError}
+        />
+
+        {/* Add Liquidity Modal */}
+        <AddLiquidityModal
+          show={showAddLiquidityModal}
+          onHide={() => setShowAddLiquidityModal(false)}
+          position={position}
+          poolData={poolData}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          isProcessing={isAdding}
+          onAddLiquidity={handleAddLiquidity}
           errorMessage={actionError}
         />
       </Container>

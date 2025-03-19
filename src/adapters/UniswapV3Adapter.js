@@ -13,6 +13,115 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     super(config, provider, "uniswapV3", "Uniswap V3");
   }
 
+  /**
+   * Calculate pool address for the given tokens and fee tier
+   * @param {Object} token0 - First token object with address, decimals, symbol, name
+   * @param {Object} token1 - Second token object with address, decimals, symbol, name
+   * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
+   * @returns {Promise<Object>} - Pool address and sorted tokens
+   */
+  async getPoolAddress(token0, token1, fee) {
+    if (!token0?.address || !token1?.address || fee === undefined ||
+        token0.decimals === undefined || token1.decimals === undefined) {
+      throw new Error("Missing required token information for pool address calculation");
+    }
+
+    // Sort tokens according to Uniswap V3 rules
+    let sortedToken0, sortedToken1;
+    const tokensSwapped = token0.address.toLowerCase() > token1.address.toLowerCase();
+
+    if (tokensSwapped) {
+      sortedToken0 = token1;
+      sortedToken1 = token0;
+    } else {
+      sortedToken0 = token0;
+      sortedToken1 = token1;
+    }
+
+    // Get chainId from provider
+    let chainId;
+    try {
+      const network = await this.provider.getNetwork();
+      // Handle ethers v6 where chainId might be a bigint
+      chainId = typeof network.chainId === 'bigint'
+        ? Number(network.chainId)
+        : network.chainId;
+    } catch (error) {
+      console.error("Failed to get network from provider:", error);
+      throw new Error("Could not determine chainId from provider");
+    }
+
+    if (!chainId) {
+      throw new Error("Invalid chainId from provider");
+    }
+
+    try {
+      // Use the Uniswap SDK to calculate pool address
+      const { Pool } = require('@uniswap/v3-sdk');
+      const { Token } = require('@uniswap/sdk-core');
+
+      const sdkToken0 = new Token(
+        chainId,
+        sortedToken0.address,
+        sortedToken0.decimals,
+        sortedToken0.symbol || "",
+        sortedToken0.name || ""
+      );
+
+      const sdkToken1 = new Token(
+        chainId,
+        sortedToken1.address,
+        sortedToken1.decimals,
+        sortedToken1.symbol || "",
+        sortedToken1.name || ""
+      );
+
+      const poolAddress = Pool.getAddress(sdkToken0, sdkToken1, fee);
+
+      return {
+        poolAddress,
+        sortedToken0,
+        sortedToken1,
+        tokensSwapped
+      };
+    } catch (error) {
+      console.error("Error calculating pool address:", error);
+      throw new Error(`Failed to calculate pool address: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if a pool exists for the given tokens and fee tier
+   * @param {Object} token0 - First token object with address and decimals
+   * @param {Object} token1 - Second token object with address and decimals
+   * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
+   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>}
+   */
+  async checkPoolExists(token0, token1, fee) {
+    try {
+      const { poolAddress } = await this.getPoolAddress(token0, token1, fee);
+
+      // Create a minimal pool contract to check if the pool exists
+      const poolABI = [
+        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
+      ];
+
+      const poolContract = new ethers.Contract(poolAddress, poolABI, this.provider);
+
+      try {
+        // Try to call slot0() to see if the pool exists
+        const slot0 = await poolContract.slot0();
+        return { exists: true, poolAddress, slot0 };
+      } catch (error) {
+        // If the call fails, the pool likely doesn't exist
+        return { exists: false, poolAddress, slot0: null };
+      }
+    } catch (error) {
+      console.error("Error checking pool existence:", error);
+      return { exists: false, poolAddress: null, slot0: null };
+    }
+  }
+
   async getPositions(address, chainId) {
     if (!address || !this.provider || !chainId) {
       return { positions: [], poolData: {}, tokenData: {} };
@@ -1088,4 +1197,401 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       onFinish && onFinish();
     }
   }
+
+/**
+ * Create a new liquidity position
+ * @param {Object} params - Parameters for creating a position
+ * @returns {Promise<Object>} - Transaction receipt and created position
+ */
+async createPosition(params) {
+  const {
+    token0Address,
+    token1Address,
+    feeTier,
+    tickLower,
+    tickUpper,
+    token0Amount,
+    token1Amount,
+    slippageTolerance = 0.5, // Default 0.5%
+    provider,
+    address,
+    chainId,
+    dispatch,
+    onStart,
+    onFinish,
+    onSuccess,
+    onError
+  } = params;
+
+  if (!provider || !address || !chainId) {
+    onError && onError("Wallet not connected");
+    return;
+  }
+
+  onStart && onStart();
+
+  try {
+    // Get chain configuration
+    const chainConfig = this.config.chains[chainId];
+    if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      throw new Error(`No configuration found for chainId: ${chainId}`);
+    }
+
+    const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+
+    // Get signer
+    const signer = await provider.getSigner();
+
+    // Import required libraries from Uniswap SDK
+    const { NonfungiblePositionManager, Pool, Position } = require('@uniswap/v3-sdk');
+    const { Token, CurrencyAmount, Percent } = require('@uniswap/sdk-core');
+    const { TickMath } = require('@uniswap/v3-sdk');
+
+    // Create contract instances for tokens
+    const tokenABI = [
+      'function decimals() external view returns (uint8)',
+      'function symbol() external view returns (string)',
+      'function name() external view returns (string)',
+      'function approve(address spender, uint amount) external returns (bool)',
+      'function balanceOf(address owner) external view returns (uint)'
+    ];
+
+    const token0Contract = new ethers.Contract(token0Address, tokenABI, signer);
+    const token1Contract = new ethers.Contract(token1Address, tokenABI, signer);
+
+    // Get token details
+    const [
+      token0Decimals,
+      token0Symbol,
+      token0Name,
+      token0Balance,
+      token1Decimals,
+      token1Symbol,
+      token1Name,
+      token1Balance
+    ] = await Promise.all([
+      token0Contract.decimals(),
+      token0Contract.symbol(),
+      token0Contract.name(),
+      token0Contract.balanceOf(address),
+      token1Contract.decimals(),
+      token1Contract.symbol(),
+      token1Contract.name(),
+      token1Contract.balanceOf(address)
+    ]);
+
+    // Create Token instances for the SDK
+    const token0 = new Token(
+      chainId,
+      token0Address,
+      Number(token0Decimals),
+      token0Symbol,
+      token0Name
+    );
+
+    const token1 = new Token(
+      chainId,
+      token1Address,
+      Number(token1Decimals),
+      token1Symbol,
+      token1Name
+    );
+
+    // We need pool data to create a position
+    // Get or create Pool instance using Factory
+    const poolAddress = Pool.getAddress(token0, token1, feeTier);
+    const poolContract = new ethers.Contract(
+      poolAddress,
+      [
+        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+        'function liquidity() external view returns (uint128)'
+      ],
+      provider
+    );
+
+    // Get pool data
+    const [slot0, liquidity] = await Promise.all([
+      poolContract.slot0(),
+      poolContract.liquidity()
+    ]);
+
+    const pool = new Pool(
+      token0,
+      token1,
+      Number(feeTier),
+      slot0.sqrtPriceX96.toString(),
+      liquidity.toString(),
+      Number(slot0.tick)
+    );
+
+    // Parse the amounts
+    const amount0Desired = ethers.parseUnits(token0Amount, token0Decimals);
+    const amount1Desired = ethers.parseUnits(token1Amount, token1Decimals);
+
+    // Convert to CurrencyAmount
+    const tokenAmount0 = CurrencyAmount.fromRawAmount(token0, amount0Desired.toString());
+    const tokenAmount1 = CurrencyAmount.fromRawAmount(token1, amount1Desired.toString());
+
+    // Create Position instance using fromAmounts method
+    const position = Position.fromAmounts({
+      pool,
+      tickLower,
+      tickUpper,
+      amount0: tokenAmount0.quotient.toString(),
+      amount1: tokenAmount1.quotient.toString(),
+      useFullPrecision: true
+    });
+
+    // Calculate minimum amounts based on slippage tolerance
+    const slippageFactor = new Percent(Math.floor(slippageTolerance * 100), 10000); // Convert to basis points
+
+    const [amount0Min, amount1Min] = position.mintAmountsWithSlippage(slippageFactor);
+
+    // First approve tokens
+    const positionManager = new ethers.Contract(
+      positionManagerAddress,
+      [
+        'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline)) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)'
+      ],
+      signer
+    );
+
+    console.log("Approving tokens for position creation...");
+
+    // Check if approval is needed
+    const approvalTxs = [];
+
+    const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+    if (token0Allowance < amount0Desired) {
+      const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
+      approvalTxs.push(tx0.wait());
+    }
+
+    const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+    if (token1Allowance < amount1Desired) {
+      const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
+      approvalTxs.push(tx1.wait());
+    }
+
+    // Wait for all approvals to complete
+    if (approvalTxs.length > 0) {
+      await Promise.all(approvalTxs);
+      console.log("Tokens approved");
+    }
+
+    // Create mint parameters
+    const mintParams = {
+      token0: token0Address,
+      token1: token1Address,
+      fee: feeTier,
+      tickLower,
+      tickUpper,
+      amount0Desired: amount0Desired.toString(),
+      amount1Desired: amount1Desired.toString(),
+      amount0Min: amount0Min.toString(),
+      amount1Min: amount1Min.toString(),
+      recipient: address,
+      deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
+    };
+
+    console.log("Creating position...");
+    const mintTx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
+
+    console.log("Transaction sent:", mintTx.hash);
+    const receipt = await mintTx.wait();
+    console.log("Position created!");
+
+    // Find the Transfer event to get the tokenId
+    const transferEvent = receipt.logs.find(log => {
+      try {
+        // A Transfer event has 3 topics: event signature + from + to
+        return log.topics.length === 4 &&
+               log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
+               log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
+               log.topics[2] === ethers.zeroPadValue(address.toLowerCase(), 32);
+      } catch (e) {
+        return false;
+      }
+    });
+
+    if (!transferEvent) {
+      throw new Error("Transfer event not found in transaction receipt");
+    }
+
+    // Extract tokenId from the event
+    const tokenId = ethers.toBigInt(transferEvent.topics[3]);
+    console.log(`Successfully minted position with ID: ${tokenId}`);
+
+    // Trigger update after successful creation
+    if (dispatch) {
+      const { triggerUpdate } = require('../redux/updateSlice');
+      dispatch(triggerUpdate());
+    }
+
+    onSuccess && onSuccess({
+      receipt,
+      tokenId: tokenId.toString(),
+      txHash: receipt.hash,
+      token0,
+      token1,
+      amount0,
+      amount1
+    });
+
+    return {
+      receipt,
+      tokenId: tokenId.toString(),
+      txHash: receipt.hash
+    };
+
+  } catch (error) {
+    console.error("Error creating position:", error);
+    onError && onError(error.message || "Unknown error");
+    throw error;
+  } finally {
+    onFinish && onFinish();
+  }
+}
+
+/**
+ * Add liquidity to an existing position
+ * @param {Object} params - Parameters for adding liquidity
+ * @returns {Promise<Object>} - Transaction receipt and updated position
+ */
+async addLiquidity(params) {
+  const {
+    position,
+    token0Amount,
+    token1Amount,
+    slippageTolerance = 0.5, // Default 0.5%
+    provider,
+    address,
+    chainId,
+    dispatch,
+    onStart,
+    onFinish,
+    onSuccess,
+    onError
+  } = params;
+
+  if (!provider || !address || !chainId) {
+    onError && onError("Wallet not connected");
+    return;
+  }
+
+  onStart && onStart();
+
+  try {
+    // Get chain configuration
+    const chainConfig = this.config.chains[chainId];
+    if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      throw new Error(`No configuration found for chainId: ${chainId}`);
+    }
+
+    const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+
+    // Get signer
+    const signer = await provider.getSigner();
+
+    // Create contract instances
+    const positionManager = new ethers.Contract(
+      positionManagerAddress,
+      [
+        'function positions(uint256 tokenId) external view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)',
+        'function increaseLiquidity(tuple(uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline)) external payable returns (uint128 liquidity, uint256 amount0, uint256 amount1)'
+      ],
+      signer
+    );
+
+    // Get position details
+    const positionInfo = await positionManager.positions(position.id);
+
+    // Create token contract instances
+    const tokenABI = [
+      'function decimals() external view returns (uint8)',
+      'function approve(address spender, uint amount) external returns (bool)',
+      'function allowance(address owner, address spender) external view returns (uint)'
+    ];
+
+    const token0Contract = new ethers.Contract(positionInfo.token0, tokenABI, signer);
+    const token1Contract = new ethers.Contract(positionInfo.token1, tokenABI, signer);
+
+    // Get token decimals
+    const token0Decimals = await token0Contract.decimals();
+    const token1Decimals = await token1Contract.decimals();
+
+    // Parse the amounts
+    const amount0Desired = ethers.parseUnits(token0Amount, token0Decimals);
+    const amount1Desired = ethers.parseUnits(token1Amount, token1Decimals);
+
+    // Calculate slippage tolerance for minimum amounts
+    const slippageFactor = 1 - (slippageTolerance / 100);
+    const amount0Min = BigInt(Math.floor(Number(amount0Desired) * slippageFactor));
+    const amount1Min = BigInt(Math.floor(Number(amount1Desired) * slippageFactor));
+
+    // Check token approvals and approve if needed
+    const approvalTxs = [];
+
+    const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+    if (token0Allowance < amount0Desired) {
+      const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
+      approvalTxs.push(tx0.wait());
+    }
+
+    const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+    if (token1Allowance < amount1Desired) {
+      const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
+      approvalTxs.push(tx1.wait());
+    }
+
+    // Wait for all approvals to complete
+    if (approvalTxs.length > 0) {
+      await Promise.all(approvalTxs);
+      console.log("Tokens approved");
+    }
+
+    // Create increaseLiquidity parameters
+    const increaseLiquidityParams = {
+      tokenId: position.id,
+      amount0Desired: amount0Desired.toString(),
+      amount1Desired: amount1Desired.toString(),
+      amount0Min: amount0Min.toString(),
+      amount1Min: amount1Min.toString(),
+      deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
+    };
+
+    console.log("Increasing liquidity for position", position.id);
+    const increaseTx = await positionManager.increaseLiquidity(increaseLiquidityParams, { gasLimit: 5000000 });
+
+    console.log("Transaction sent:", increaseTx.hash);
+    const receipt = await increaseTx.wait();
+    console.log("Liquidity increased!");
+
+    // Trigger update after successful addition
+    if (dispatch) {
+      const { triggerUpdate } = require('../redux/updateSlice');
+      dispatch(triggerUpdate());
+    }
+
+    onSuccess && onSuccess({
+      receipt,
+      txHash: receipt.hash,
+      tokenId: position.id,
+      increased: true
+    });
+
+    return {
+      receipt,
+      txHash: receipt.hash,
+      tokenId: position.id
+    };
+
+  } catch (error) {
+    console.error("Error adding liquidity:", error);
+    onError && onError(error.message || "Unknown error");
+    throw error;
+  } finally {
+    onFinish && onFinish();
+  }
+}
 }
