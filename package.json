@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "script": "tsx",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "hardhat test",
     "coverage": "hardhat coverage",
-    "test-contracts": "cd hardhat-testing && npx hardhat test"
+    "test-contracts": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat test'",
+    "test-contracts:coverage": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat coverage'",
+    "hardhat-node": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat node'"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.6.0",
