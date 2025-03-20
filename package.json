@@ -6,13 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "hardhat test",
+    "coverage": "hardhat coverage",
+    "test-contracts": "cd hardhat-testing && npx hardhat test"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.2.0",
     "@reduxjs/toolkit": "^2.6.0",
-    "@uniswap/v3-core": "^1.0.1",
-    "@uniswap/v3-periphery": "^1.4.4",
     "@uniswap/v3-sdk": "^3.24.1",
     "@web3modal/ethereum": "^2.7.1",
     "bootstrap": "^5.3.3",
@@ -24,12 +24,21 @@
     "react-redux": "^9.2.0"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@nomiclabs/hardhat-ethers": "^2.2.3",
-    "@nomiclabs/hardhat-waffle": "^2.0.6",
-    "@types/sinon-chai": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^1.0.0",
+    "@openzeppelin/contracts": "^5.2.0",
+    "@typechain/ethers-v6": "^0.4.0",
+    "@typechain/hardhat": "^8.0.0",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4",
     "chai": "^5.2.0",
-    "ethereum-waffle": "^4.0.10",
-    "hardhat": "^2.22.19"
+    "dotenv": "^16.4.7",
+    "hardhat": "^2.22.19",
+    "hardhat-gas-reporter": "^1.0.8",
+    "solidity-coverage": "^0.8.2",
+    "typechain": "^8.2.0"
   }
 }
