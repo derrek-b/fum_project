@@ -2,7 +2,7 @@
 
 # Define directories - modify as needed
 SOURCE_DIR="$(pwd)"
-TARGET_DIR="$HOME/temp-hardhat-test"
+TARGET_DIR="$HOME/code/fum_testing"
 ENV_FILE=".env.local"
 
 echo "Syncing from $SOURCE_DIR to $TARGET_DIR..."
@@ -12,7 +12,7 @@ mkdir -p "$TARGET_DIR"
 
 # Ensure contracts directory exists
 mkdir -p "$TARGET_DIR/contracts"
-mkdir -p "$TARGET_DIR/test/unit"
+mkdir -p "$TARGET_DIR/test/"
 
 # Preserve directory structure for contracts
 echo "Copying Solidity contracts..."
