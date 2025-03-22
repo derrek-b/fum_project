@@ -5,7 +5,8 @@ import poolReducer from "./poolSlice";
 import tokensReducer from "./tokensSlice";
 import walletReducer from "./walletSlice";
 import updatesReducer from "./updateSlice";
-import platformsReducer from "./platformsSlice"; // New platforms reducer
+import platformsReducer from "./platformsSlice";
+import vaultsReducer from "./vaultsSlice"; // Add vaults reducer
 
 export const store = configureStore({
   reducer: {
@@ -14,7 +15,8 @@ export const store = configureStore({
     tokens: tokensReducer,
     wallet: walletReducer,
     updates: updatesReducer,
-    platforms: platformsReducer, // Added platforms reducer
+    platforms: platformsReducer,
+    vaults: vaultsReducer, // Add vaults reducer
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
@@ -22,20 +24,23 @@ export const store = configureStore({
         // Add wallet/setProvider to the ignored actions
         ignoredActions: [
           "wallet/setWallet",
-          "wallet/setProvider", // Add this line
+          "wallet/setProvider",
           "positions/setPositions",
           "pools/setPools",
           "tokens/setTokens",
-          "platforms/setPlatforms"
+          "platforms/setPlatforms",
+          "vaults/setVaults",
+          "vaults/addVault"
         ],
         // Add wallet.provider to the ignored paths
         ignoredPaths: [
           "wallet.chainId",
-          "wallet.provider", // Add this line
+          "wallet.provider",
           "positions.positions",
           "pools",
           "tokens",
-          "platforms.supportedPlatforms"
+          "platforms.supportedPlatforms",
+          "vaults.userVaults"
         ],
       },
     }),

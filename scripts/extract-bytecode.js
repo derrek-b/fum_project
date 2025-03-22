@@ -13,6 +13,14 @@ const TEST_PROJECT_DIR = process.argv[2] ||
 
 const OUTPUT_DIR = path.join(__dirname, '../bytecode');
 
+// Contracts to extract
+const CONTRACTS_TO_EXTRACT = [
+  'VaultFactory',
+  'PositionVault',
+  'MockPositionNFT',
+  'MockERC20'
+];
+
 // Debug logging
 console.log(`Script directory: ${__dirname}`);
 console.log(`Test project directory: ${TEST_PROJECT_DIR}`);
@@ -28,58 +36,50 @@ if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 }
 
-// Contract to extract
-const CONTRACT_NAME = 'VaultFactory';
-const CONTRACT_PATH = path.join(TEST_PROJECT_DIR, 'artifacts/contracts',
-                              `${CONTRACT_NAME}.sol`, `${CONTRACT_NAME}.json`);
+// Process each contract
+let successCount = 0;
+let errorCount = 0;
 
-console.log(`Extracting bytecode from: ${CONTRACT_PATH}`);
+for (const contractName of CONTRACTS_TO_EXTRACT) {
+  const CONTRACT_PATH = path.join(TEST_PROJECT_DIR, 'artifacts/contracts',
+                                `${contractName}.sol`, `${contractName}.json`);
 
-// Check if the specific contract file exists
-if (!fs.existsSync(CONTRACT_PATH)) {
-  console.error(`Error: Contract artifact not found at ${CONTRACT_PATH}`);
-  console.error(`Check the following:`);
-  console.error(`1. Did the compilation succeed?`);
-  console.error(`2. Is the contract name correct? (Looking for ${CONTRACT_NAME}.sol)`);
-  console.error(`3. Is the path structure correct?`);
+  console.log(`\nExtracting bytecode from: ${CONTRACT_PATH}`);
 
-  // Let's check intermediate directories to help debug
-  const artifactsDir = path.join(TEST_PROJECT_DIR, 'artifacts');
-  const contractsDir = path.join(artifactsDir, 'contracts');
-  const solDir = path.join(contractsDir, `${CONTRACT_NAME}.sol`);
-
-  console.log(`Artifacts directory exists: ${fs.existsSync(artifactsDir)}`);
-  console.log(`Contracts directory exists: ${fs.existsSync(contractsDir)}`);
-  console.log(`${CONTRACT_NAME}.sol directory exists: ${fs.existsSync(solDir)}`);
-
-  if (fs.existsSync(solDir)) {
-    console.log(`Contents of ${solDir}:`);
-    fs.readdirSync(solDir).forEach(file => {
-      console.log(`  - ${file}`);
-    });
+  // Check if the specific contract file exists
+  if (!fs.existsSync(CONTRACT_PATH)) {
+    console.error(`Error: Contract artifact not found at ${CONTRACT_PATH}`);
+    errorCount++;
+    continue;
   }
 
-  process.exit(1);
+  try {
+    // Read the artifact
+    const artifact = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'));
+
+    // Extract bytecode (without 0x prefix)
+    const bytecode = artifact.bytecode.startsWith('0x')
+      ? artifact.bytecode.substring(2)
+      : artifact.bytecode;
+
+    // Save bytecode to file
+    const outputPath = path.join(OUTPUT_DIR, `${contractName}.bin`);
+    fs.writeFileSync(outputPath, bytecode);
+
+    console.log(`Bytecode extracted to: ${outputPath}`);
+    console.log(`Bytecode size: ${bytecode.length / 2} bytes`);
+    successCount++;
+
+  } catch (error) {
+    console.error(`Error extracting bytecode for ${contractName}: ${error.message}`);
+    errorCount++;
+  }
 }
 
-// Continue with the existing code...
-try {
-  // Read the artifact
-  const artifact = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'));
+console.log(`\nExtraction summary:`);
+console.log(`- Successfully extracted: ${successCount} contracts`);
+console.log(`- Failed to extract: ${errorCount} contracts`);
 
-  // Extract bytecode (without 0x prefix)
-  const bytecode = artifact.bytecode.startsWith('0x')
-    ? artifact.bytecode.substring(2)
-    : artifact.bytecode;
-
-  // Save bytecode to file
-  const outputPath = path.join(OUTPUT_DIR, `${CONTRACT_NAME}.bin`);
-  fs.writeFileSync(outputPath, bytecode);
-
-  console.log(`Bytecode extracted to: ${outputPath}`);
-  console.log(`Bytecode size: ${bytecode.length / 2} bytes`);
-
-} catch (error) {
-  console.error(`Error extracting bytecode: ${error.message}`);
+if (errorCount > 0) {
   process.exit(1);
 }

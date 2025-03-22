@@ -1,0 +1,9 @@
+{
+  "chainId": 1337,
+  "network": "Hardhat Forked Arbitrum",
+  "vaultAddress": "0xdf5dC89Ce473657c887287B6bF88AD9685b5C8eA",
+  "vaultName": "Test Vault 1742669580",
+  "mockNFTAddress": "0xf641e24cda0685Aabe2bb88eF14D085cc3d76134",
+  "positionId": 1,
+  "timestamp": "2025-03-22T18:53:16.684Z"
+}

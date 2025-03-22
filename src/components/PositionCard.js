@@ -11,7 +11,7 @@ import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../redux/updateSlice";
 
-export default function PositionCard({ position }) {
+export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
   const router = useRouter();
   const { address, chainId, provider } = useSelector((state) => state.wallet);
@@ -402,6 +402,28 @@ export default function PositionCard({ position }) {
     />
   );
 
+  // Get card styling based on vault status
+  const getCardStyle = () => {
+    const baseStyle = {
+      backgroundColor: "#f5f5f5",
+      borderColor: "#a30000",
+      cursor: "pointer"
+    };
+
+    // Add special styling for vault positions
+    if (inVault) {
+      return {
+        ...baseStyle,
+        borderWidth: "2px",
+        borderStyle: "solid",
+        borderColor: "#4b5efc", // Blue border for vault positions
+        boxShadow: "0 4px 6px rgba(75, 94, 252, 0.1)" // Subtle blue shadow
+      };
+    }
+
+    return baseStyle;
+  };
+
   if (!poolData || !token0Data || !token1Data) {
     return <Card><Card.Body>Loading position data or data unavailable...</Card.Body></Card>;
   }
@@ -410,11 +432,7 @@ export default function PositionCard({ position }) {
     <>
       <Card
         className="mb-3"
-        style={{
-          backgroundColor: "#f5f5f5",
-          borderColor: "#a30000",
-          cursor: "pointer"
-        }}
+        style={getCardStyle()}
         onClick={handleCardClick}
       >
         <Card.Body>
@@ -427,13 +445,20 @@ export default function PositionCard({ position }) {
                   {position.platformName}
                 </Badge>
               )}
+              {inVault && (
+                <Badge bg="primary" className="ms-2" style={{ fontSize: '0.7rem' }}>
+                  In Vault
+                </Badge>
+              )}
             </Card.Title>
             <div onClick={(e) => e.stopPropagation()}>
               <Button
                 variant="outline-secondary"
                 size="sm"
-                onClick={() => setShowActionsModal(true)}
+                onClick={() => !inVault && setShowActionsModal(true)}
                 aria-label="Position actions"
+                disabled={inVault} // Disable manual actions for vault positions
+                style={inVault ? { opacity: 0.5 } : {}} // Visual indicator it's disabled
               >
                 <span role="img" aria-label="menu">🔧</span>
               </Button>
@@ -488,11 +513,21 @@ export default function PositionCard({ position }) {
               </>
             ) : null}
           </div>
+
+          {/* Add info at bottom of card for vault positions */}
+          {inVault && (
+            <div className="mt-3 pt-2 border-top">
+              <small className="text-primary">
+                <i className="fa fa-info-circle me-1"></i>
+                This position is managed by a vault and cannot be manually modified.
+              </small>
+            </div>
+          )}
         </Card.Body>
       </Card>
 
       {/* The Actions Modal - rendered completely outside the Card component */}
-      {ReactDOM.createPortal(
+      {!inVault && ReactDOM.createPortal(
         <Modal
           show={showActionsModal}
           onHide={() => setShowActionsModal(false)}
@@ -597,7 +632,7 @@ export default function PositionCard({ position }) {
       )}
 
       {/* RemoveLiquidityModal - also rendered using portal */}
-      {ReactDOM.createPortal(
+      {!inVault && ReactDOM.createPortal(
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}
           onHide={() => setShowRemoveLiquidityModal(false)}
@@ -614,7 +649,7 @@ export default function PositionCard({ position }) {
       )}
 
       {/* ClosePositionModal - also rendered using portal */}
-      {ReactDOM.createPortal(
+      {!inVault && ReactDOM.createPortal(
         <ClosePositionModal
           show={showClosePositionModal}
           onHide={() => setShowClosePositionModal(false)}
@@ -632,7 +667,7 @@ export default function PositionCard({ position }) {
       )}
 
       {/* AddLiquidityModal - also rendered using portal */}
-      {ReactDOM.createPortal(
+      {!inVault && ReactDOM.createPortal(
         <AddLiquidityModal
           show={showAddLiquidityModal}
           onHide={() => setShowAddLiquidityModal(false)}
