@@ -12,7 +12,8 @@
     "coverage": "hardhat coverage",
     "test-contracts": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat test'",
     "test-contracts:coverage": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat coverage'",
-    "hardhat-node": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat node'"
+    "hardhat-node": "bash -c 'cd ~/code/fum_testing && npx hardhat node'",
+    "deploy-setup": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat compile && cd ~/code/fum && npm run script scripts/extract-bytecode.js'"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.6.0",
@@ -42,6 +43,7 @@
     "hardhat": "^2.22.19",
     "hardhat-gas-reporter": "^1.0.8",
     "solidity-coverage": "^0.8.2",
+    "tsx": "^4.19.3",
     "typechain": "^8.2.0"
   }
 }

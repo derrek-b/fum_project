@@ -18,6 +18,9 @@
 /.next/
 /out/
 
+# build artifacts
+/bytecode/
+
 # production
 /build
 
@@ -25,6 +28,7 @@
 .DS_Store
 *.pem
 /docs/LP_101.pdf
+/docs/SC_Dev_Plan.pdf
 
 # debug
 npm-debug.log*
