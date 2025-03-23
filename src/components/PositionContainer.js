@@ -1,4 +1,4 @@
-// src/components/PositionContainer.js - Updated to fetch vault data
+// src/components/PositionContainer.js - Fixed version
 import React, { useEffect, useState, useRef } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
@@ -8,16 +8,18 @@ import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { AdapterFactory } from "../adapters";
 import config from "../utils/config.js";
-import { getUserVaults, getVaultInfo, getVaultContract } from "../utils/contracts";
+import { getUserVaults, getVaultInfo } from "../utils/contracts";
 import { setPositions, addVaultPositions } from "../redux/positionsSlice";
 import { setPools, clearPools } from "../redux/poolSlice";
 import { setTokens, clearTokens } from "../redux/tokensSlice";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../redux/vaultsSlice";
+import { useToast } from "../context/ToastContext";
 
 export default function PositionContainer() {
   const dispatch = useDispatch();
+  const { showError, showSuccess } = useToast();
   const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
@@ -46,11 +48,16 @@ export default function PositionContainer() {
     // Only set up timer if auto-refresh is enabled and we're connected
     if (autoRefresh.enabled && isConnected && provider && address && chainId) {
       console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
-      timerRef.current = setInterval(() => {
-        console.log('Auto-refreshing data...');
-        dispatch(markAutoRefresh());
-        dispatch(triggerUpdate());
-      }, autoRefresh.interval);
+      try {
+        timerRef.current = setInterval(() => {
+          console.log('Auto-refreshing data...');
+          dispatch(markAutoRefresh());
+          dispatch(triggerUpdate());
+        }, autoRefresh.interval);
+      } catch (error) {
+        console.error("Error setting up auto-refresh timer:", error);
+        showError("Failed to set up auto-refresh. Please try toggling it off and on again.");
+      }
     }
 
     // Cleanup on unmount
@@ -80,11 +87,22 @@ export default function PositionContainer() {
         // For each vault, get detailed information
         const vaultsWithInfo = await Promise.all(
           vaultAddresses.map(async (vaultAddress) => {
-            const info = await getVaultInfo(vaultAddress, provider);
-            return {
-              address: vaultAddress,
-              ...info
-            };
+            try {
+              const info = await getVaultInfo(vaultAddress, provider);
+              return {
+                address: vaultAddress,
+                ...info
+              };
+            } catch (vaultError) {
+              console.error(`Error fetching info for vault ${vaultAddress}:`, vaultError);
+              // Return minimal info so we don't lose the vault completely
+              return {
+                address: vaultAddress,
+                name: "Unknown Vault",
+                creationTime: 0,
+                error: vaultError.message
+              };
+            }
           })
         );
 
@@ -93,6 +111,7 @@ export default function PositionContainer() {
       } catch (error) {
         console.error("Error fetching user vaults:", error);
         dispatch(setVaultError(`Failed to load vaults: ${error.message}`));
+        showError(`Failed to load your vaults: ${error.message}`);
       } finally {
         dispatch(setLoadingVaults(false));
       }
@@ -148,9 +167,16 @@ export default function PositionContainer() {
 
         // Fetch positions from all platforms in parallel
         const platformResults = await Promise.all(
-          adapters.map(adapter => {
-            console.log(`Fetching positions from ${adapter.platformName}`);
-            return adapter.getPositions(address, chainId);
+          adapters.map(async adapter => {
+            try {
+              console.log(`Fetching positions from ${adapter.platformName}`);
+              return await adapter.getPositions(address, chainId);
+            } catch (adapterError) {
+              console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
+              showError(`Failed to fetch positions from ${adapter.platformName}. Some data may be missing.`);
+              // Return empty result to avoid breaking the entire flow
+              return { positions: [], poolData: {}, tokenData: {} };
+            }
           })
         );
 
@@ -195,9 +221,12 @@ export default function PositionContainer() {
         dispatch(setPools(allPoolData));
         dispatch(setTokens(allTokenData));
 
+        // Success notification removed as per request - positions are visible on screen
+
       } catch (error) {
         console.error("Position fetching error:", error);
         setError(`Error fetching positions: ${error.message}`);
+        showError(`Failed to fetch your positions: ${error.message}`);
         setLocalPositions([]);
         dispatch(setPositions([]));
         // Do not clear pools or tokens on partial error—only on disconnect
@@ -233,9 +262,12 @@ export default function PositionContainer() {
         return;
       }
 
+      const vaultErrors = [];
+
       for (const vault of userVaults) {
         try {
           console.log(`Fetching positions from vault: ${vault.name} (${vault.address})`);
+          let vaultPositionsFound = 0;
 
           // For each vault, fetch positions from all platforms
           for (const adapter of adapters) {
@@ -244,6 +276,7 @@ export default function PositionContainer() {
               const result = await adapter.getPositions(vault.address, chainId);
 
               if (result && result.positions && result.positions.length > 0) {
+                vaultPositionsFound += result.positions.length;
                 console.log(`Found ${result.positions.length} ${adapter.platformName} positions in vault ${vault.name}`);
 
                 // Add these positions to Redux with vault flag
@@ -273,20 +306,33 @@ export default function PositionContainer() {
               }
             } catch (adapterError) {
               console.error(`Error fetching ${adapter.platformName} positions from vault ${vault.name}:`, adapterError);
+              vaultErrors.push(`${vault.name}: ${adapterError.message}`);
               // Continue with other adapters even if one fails
             }
           }
+
+          if (vaultPositionsFound > 0) {
+            console.log(`Successfully loaded ${vaultPositionsFound} positions from vault ${vault.name}`);
+          }
         } catch (vaultError) {
           console.error(`Error processing vault ${vault.name}:`, vaultError);
+          vaultErrors.push(`${vault.name}: ${vaultError.message}`);
           // Continue with other vaults even if one fails
         }
+      }
+
+      // Success notification removed as per request - vault positions are visible on screen
+
+      if (vaultErrors.length > 0) {
+        // Group errors to avoid too many toasts
+        showError(`Had trouble with some vaults: ${vaultErrors.slice(0, 2).join(', ')}${vaultErrors.length > 2 ? '...' : ''}`);
       }
 
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: false }));
     };
 
     fetchVaultPositions();
-}, [isConnected, address, provider, chainId, userVaults, lastUpdate, dispatch]);
+  }, [isConnected, address, provider, chainId, userVaults, lastUpdate, dispatch]);
 
   // Handle create position
   const handleCreatePosition = async (params) => {
@@ -309,17 +355,20 @@ export default function PositionContainer() {
         dispatch,
         onStart: () => setIsCreatingPosition(true),
         onFinish: () => setIsCreatingPosition(false),
-        onSuccess: () => {
+        onSuccess: (result) => {
           setShowCreatePositionModal(false);
+          showSuccess(`Successfully created new ${params.platformId} position!`, result?.txHash);
           dispatch(triggerUpdate()); // Refresh to show new position
         },
         onError: (errorMessage) => {
           setCreatePositionError(`Failed to create position: ${errorMessage}`);
+          showError(`Failed to create position: ${errorMessage}`);
         }
       });
     } catch (error) {
       console.error("Error creating position:", error);
       setCreatePositionError(`Error creating position: ${error.message}`);
+      showError(`Error creating position: ${error.message}`);
       setIsCreatingPosition(false);
     }
   };
@@ -377,7 +426,7 @@ export default function PositionContainer() {
 
               {/* Create position button */}
               <Button
-                variant="primary"
+                variant="outline-custom"
                 size="sm"
                 onClick={() => setShowCreatePositionModal(true)}
                 disabled={!isConnected || isCreatingPosition}

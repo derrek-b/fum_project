@@ -5,6 +5,7 @@ import { AdapterFactory } from '../adapters';
 import { formatPrice, formatFeeDisplay } from '../utils/formatHelpers';
 import { calculateUsdValue } from '../utils/coingeckoUtils';
 import { ethers } from 'ethers';
+import { useToast } from '../context/ToastContext';
 
 export default function AddLiquidityModal({
 show,
@@ -20,6 +21,7 @@ errorMessage = null,
 isProcessing = false
 }) {
 const dispatch = useDispatch();
+const { showError } = useToast();
 
 // Get auto-refresh state to manage pausing during liquidity addition
 const { autoRefresh } = useSelector(state => state.updates);
@@ -39,33 +41,22 @@ useEffect(() => {
     if (autoRefresh.enabled && isExistingPosition) {
       console.log("Auto-refresh is enabled, pausing it while modal is open");
 
-      // Store the current state before we change it
-      setOriginalAutoRefreshState(autoRefresh);
+      try {
+        // Store the current state before we change it
+        setOriginalAutoRefreshState(autoRefresh);
 
-      // Directly dispatch to the Redux store to disable auto-refresh
-      dispatch({
-        type: 'updates/setAutoRefresh',
-        payload: { ...autoRefresh, enabled: false }
-      });
+        // Directly dispatch to the Redux store to disable auto-refresh
+        dispatch({
+          type: 'updates/setAutoRefresh',
+          payload: { ...autoRefresh, enabled: false }
+        });
+      } catch (error) {
+        console.error("Error pausing auto-refresh:", error);
+        showError("Failed to pause background updates. You may experience issues with your transaction.");
+      }
     }
   }
-
-  // // When modal is closed, restore the original auto-refresh state
-  // return () => {
-  //   if (!show && originalAutoRefreshState?.enabled) {
-  //     console.log("Modal closed, restoring auto-refresh state:", originalAutoRefreshState);
-
-  //     // Restore the original state
-  //     dispatch({
-  //       type: 'updates/setAutoRefresh',
-  //       payload: originalAutoRefreshState
-  //     });
-
-  //     // Reset our tracking state
-  //     setOriginalAutoRefreshState(null);
-  //   }
-  // };
-}, [show, autoRefresh, dispatch, originalAutoRefreshState]);
+}, [show, autoRefresh, dispatch, originalAutoRefreshState, isExistingPosition, showError]);
 
 // State for price display direction - declare this early
 const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
@@ -115,9 +106,10 @@ const adapter = useMemo(() => {
     return AdapterFactory.getAdapter(selectedPlatform, provider);
   } catch (error) {
     console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
+    showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);
     return null;
   }
-}, [selectedPlatform, provider]);
+}, [selectedPlatform, provider, showError]);
 
 // Calculate USD values if token prices are available
 const token0UsdValue = useMemo(() => {
@@ -181,12 +173,17 @@ const handleClose = () => {
 
   // Restore auto-refresh to its original state if it was changed
   if (originalAutoRefreshState !== null) {
-    console.log("Restoring auto-refresh to:", originalAutoRefreshState);
-    dispatch({
-      type: 'updates/setAutoRefresh',
-      payload: originalAutoRefreshState
-    });
-    setOriginalAutoRefreshState(null);
+    try {
+      console.log("Restoring auto-refresh to:", originalAutoRefreshState);
+      dispatch({
+        type: 'updates/setAutoRefresh',
+        payload: originalAutoRefreshState
+      });
+      setOriginalAutoRefreshState(null);
+    } catch (error) {
+      console.error("Error restoring auto-refresh:", error);
+      showError("Failed to restore background updates. You may need to manually restart auto-refresh.");
+    }
   }
 
   // Call the onHide function from parent
@@ -196,68 +193,79 @@ const handleClose = () => {
 // Load common tokens when the modal opens
 useEffect(() => {
   if (show && !isExistingPosition) {
-    // In a real implementation, we would fetch common tokens from a service
-    // For now, let's use a hardcoded list
-    setCommonTokens([
-      { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
-      { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-      { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
-      { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', name: 'Dai Stablecoin', decimals: 18 },
-      { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', name: 'Wrapped Bitcoin', decimals: 8 }
-    ]);
+    try {
+      // In a real implementation, we would fetch common tokens from a service
+      // For now, let's use a hardcoded list
+      setCommonTokens([
+        { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
+        { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+        { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
+        { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', name: 'Dai Stablecoin', decimals: 18 },
+        { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', name: 'Wrapped Bitcoin', decimals: 8 }
+      ]);
+    } catch (error) {
+      console.error("Error loading token list:", error);
+      showError("Failed to load available tokens. Please try again later.");
+    }
   }
-}, [show, isExistingPosition]);
+}, [show, isExistingPosition, showError]);
 
 // Initialize values for existing position
 useEffect(() => {
   if (isExistingPosition && position && poolData && token0Data && token1Data) {
-    // Set price range from position
-    setPriceRange({
-      min: position.tickLower,
-      max: position.tickUpper,
-      current: poolData.tick
-    });
+    try {
+      // Set price range from position
+      setPriceRange({
+        min: position.tickLower,
+        max: position.tickUpper,
+        current: poolData.tick
+      });
 
-    // Set fee tier
-    setSelectedFeeTier(position.fee);
+      // Set fee tier
+      setSelectedFeeTier(position.fee);
 
-    // Set platform
-    setSelectedPlatform(position.platform);
+      // Set platform
+      setSelectedPlatform(position.platform);
 
-    // Set token addresses
-    if (token0Data.address) {
-      setToken0Address(token0Data.address);
-    }
-
-    if (token1Data.address) {
-      setToken1Address(token1Data.address);
-    }
-
-    // Get token balances
-    if (token0Data.address && token1Data.address && provider && address) {
-      fetchTokenBalances(token0Data.address, token1Data.address);
-    }
-
-    // Calculate current price for existing position
-    if (poolData.sqrtPriceX96 && adapter) {
-      try {
-        const calculatedPrice = adapter._calculatePriceFromSqrtPrice(
-          poolData.sqrtPriceX96,
-          token0Data.decimals,
-          token1Data.decimals
-        );
-        console.log("Setting current price for existing position:", calculatedPrice);
-        setCurrentPoolPrice(calculatedPrice);
-        setIsLoadingPrice(false);
-      } catch (error) {
-        console.error("Error calculating price from sqrtPriceX96:", error);
-        setCurrentPoolPrice(null);
-        setPriceLoadError("Failed to calculate current price");
-        setIsLoadingPrice(false);
+      // Set token addresses
+      if (token0Data.address) {
+        setToken0Address(token0Data.address);
       }
+
+      if (token1Data.address) {
+        setToken1Address(token1Data.address);
+      }
+
+      // Get token balances
+      if (token0Data.address && token1Data.address && provider && address) {
+        fetchTokenBalances(token0Data.address, token1Data.address);
+      }
+
+      // Calculate current price for existing position
+      if (poolData.sqrtPriceX96 && adapter) {
+        try {
+          const calculatedPrice = adapter._calculatePriceFromSqrtPrice(
+            poolData.sqrtPriceX96,
+            token0Data.decimals,
+            token1Data.decimals
+          );
+          console.log("Setting current price for existing position:", calculatedPrice);
+          setCurrentPoolPrice(calculatedPrice);
+          setIsLoadingPrice(false);
+        } catch (error) {
+          console.error("Error calculating price from sqrtPriceX96:", error);
+          setCurrentPoolPrice(null);
+          setPriceLoadError("Failed to calculate current price");
+          setIsLoadingPrice(false);
+          showError("Failed to calculate the current price. Some features may be limited.");
+        }
+      }
+    } catch (error) {
+      console.error("Error initializing position data:", error);
+      showError("Error loading position data. Please try again later.");
     }
   }
-}, [isExistingPosition, position, poolData, token0Data, token1Data, address, provider, adapter]);
+}, [isExistingPosition, position, poolData, token0Data, token1Data, address, provider, adapter, showError]);
 
 // Fetch token balances when token addresses change
 useEffect(() => {
@@ -300,12 +308,15 @@ useEffect(() => {
     setToken1Amount(calculatedAmount1.toFixed(6));
   } catch (error) {
     console.error("Error calculating paired amount:", error);
+    setToken1Error("Failed to calculate paired amount");
   }
 }, [token0Amount, currentPoolPrice, tokensSwapped]);
 
 // Handle token0 amount change with token1 calculation
 const handleToken0AmountChange = (value) => {
   setToken0Amount(value);
+  setToken0Error(null);
+
   if (!value || value === '0' || !currentPoolPrice) {
     return;
   }
@@ -331,12 +342,15 @@ const handleToken0AmountChange = (value) => {
     setToken1Amount(calculatedAmount1.toFixed(6));
   } catch (error) {
     console.error("Error calculating paired amount:", error);
+    setToken1Error("Failed to calculate paired amount");
   }
 };
 
 // Handle token1 amount change with token0 calculation
 const handleToken1AmountChange = (value) => {
   setToken1Amount(value);
+  setToken1Error(null);
+
   if (!value || value === '0' || !currentPoolPrice) {
     return;
   }
@@ -362,6 +376,7 @@ const handleToken1AmountChange = (value) => {
     setToken0Amount(calculatedAmount0.toFixed(6));
   } catch (error) {
     console.error("Error calculating paired amount:", error);
+    setToken0Error("Failed to calculate paired amount");
   }
 };
 
@@ -419,6 +434,7 @@ const fetchTokenBalances = async (address0, address1) => {
     // Clear balances on error
     setToken0Balance(null);
     setToken1Balance(null);
+    showError("Failed to fetch token balances. Please check your wallet connection.");
   }
 };
 
@@ -554,12 +570,14 @@ const fetchPoolPrice = async () => {
       }));
       setPriceLoadError("Pool does not exist for the selected tokens and fee tier");
       setIsLoadingPrice(false);
+      showError("This token pair doesn't have a pool with the selected fee tier. Try a different fee tier or token pair.");
     }
   } catch (error) {
     console.error("Error fetching pool price:", error);
     setCurrentPoolPrice(null);
     setPriceLoadError(`Failed to fetch pool price: ${error.message}`);
     setIsLoadingPrice(false);
+    showError(`Error loading pool data: ${error.message}`);
   }
 };
 
@@ -686,6 +704,7 @@ const handleRangeTypeChange = (type, currentTickOverride = null) => {
       max: type === 'narrow' ? 250 : (type === 'medium' ? 500 : 1000),
       current: currentTick
     });
+    showError("Failed to calculate price range. Using default values instead.");
   }
 };
 
@@ -710,6 +729,7 @@ const handleCustomMinPrice = (priceValue) => {
     });
   } catch (error) {
     console.error("Error setting custom min price:", error);
+    showError("Invalid minimum price value. Please enter a positive number.");
   }
 };
 
@@ -733,6 +753,7 @@ const handleCustomMaxPrice = (priceValue) => {
     });
   } catch (error) {
     console.error("Error setting custom max price:", error);
+    showError("Invalid maximum price value. Please enter a positive number.");
   }
 };
 
@@ -804,7 +825,7 @@ const handleSubmit = (e) => {
     }
   } catch (error) {
     console.error("Error submitting form:", error);
-    // Here you would typically set an error state and display it to the user
+    showError(error.message || "Failed to submit. Please check your inputs and try again.");
   }
 };
 

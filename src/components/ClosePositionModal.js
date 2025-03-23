@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form } from 'react-bootstrap';
 import { formatFeeDisplay } from '../utils/formatHelpers';
+import { useToast } from '../context/ToastContext';
 
 export default function ClosePositionModal({
   show,
@@ -15,6 +16,8 @@ export default function ClosePositionModal({
   onClosePosition,
   errorMessage
 }) {
+  const { showError } = useToast();
+
   // State for burn option
   const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended
 
@@ -22,20 +25,30 @@ export default function ClosePositionModal({
   const getUsdValue = (amount, tokenSymbol) => {
     if (!amount || amount === "0" || !tokenPrices) return null;
 
-    const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-    if (!price) return null;
+    try {
+      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
+      if (!price) return null;
 
-    return parseFloat(amount) * price;
+      return parseFloat(amount) * price;
+    } catch (error) {
+      console.error(`Error calculating USD value for ${tokenSymbol}:`, error);
+      return null;
+    }
   };
 
   // Calculate total USD value for tokens
   const calculateTotalUsdValue = (token0Amount, token1Amount) => {
     if (!token0Data || !token1Data || !tokenPrices) return null;
 
-    const token0UsdValue = getUsdValue(token0Amount, token0Data.symbol) || 0;
-    const token1UsdValue = getUsdValue(token1Amount, token1Data.symbol) || 0;
+    try {
+      const token0UsdValue = getUsdValue(token0Amount, token0Data.symbol) || 0;
+      const token1UsdValue = getUsdValue(token1Amount, token1Data.symbol) || 0;
 
-    return token0UsdValue + token1UsdValue;
+      return token0UsdValue + token1UsdValue;
+    } catch (error) {
+      console.error("Error calculating total USD value:", error);
+      return null;
+    }
   };
 
   // Total balance value
@@ -56,10 +69,33 @@ export default function ClosePositionModal({
   const hasFees = uncollectedFees &&
     (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
 
+  // Handle the close position action
+  const handleClosePosition = () => {
+    try {
+      if (!position) {
+        throw new Error("Position data is missing");
+      }
+
+      onClosePosition(shouldBurn);
+    } catch (error) {
+      console.error("Error initiating position close:", error);
+      showError(`Failed to close position: ${error.message}`);
+    }
+  };
+
+  // Handle modal close with safety checks
+  const handleModalClose = () => {
+    if (isClosing) {
+      showError("Cannot close this window while the transaction is in progress");
+      return;
+    }
+    onHide();
+  };
+
   return (
     <Modal
       show={show}
-      onHide={onHide}
+      onHide={handleModalClose}
       centered
       backdrop="static"
       keyboard={false} // Prevent Escape key from closing
@@ -190,12 +226,12 @@ export default function ClosePositionModal({
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onHide} disabled={isClosing}>
+        <Button variant="secondary" onClick={handleModalClose} disabled={isClosing}>
           Cancel
         </Button>
         <Button
           variant="danger"
-          onClick={() => onClosePosition(shouldBurn)}
+          onClick={handleClosePosition}
           disabled={isClosing}
         >
           {isClosing ? (

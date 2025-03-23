@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import ReactDOM from 'react-dom';
-import { Card, Button, Spinner, Badge, Modal } from "react-bootstrap";
+import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
 import Image from "next/image";
@@ -26,6 +26,12 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Reference for the card and dropdown state
   const cardRef = useRef(null);
   const [showActionsDropdown, setShowActionsDropdown] = useState(false);
+
+  // Toast state
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [showErrorToast, setShowErrorToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastTxHash, setToastTxHash] = useState("");
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
@@ -98,6 +104,45 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     loading: false,
     error: null
   });
+
+  // State for action processing
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+
+  // Toast helper functions
+  const showSuccessToastWithMessage = (message, txHash = "") => {
+    setToastMessage(message);
+    setToastTxHash(txHash);
+    setShowSuccessToast(true);
+
+    // Auto-close after 5 seconds
+    setTimeout(() => setShowSuccessToast(false), 5000);
+  };
+
+  const showErrorToastWithMessage = (errorMessage) => {
+    // Try to make error message user-friendly
+    let userFriendlyError = errorMessage;
+
+    // Common error mappings
+    if (errorMessage?.includes("user rejected transaction")) {
+      userFriendlyError = "Transaction was rejected in your wallet.";
+    } else if (errorMessage?.includes("insufficient funds")) {
+      userFriendlyError = "Insufficient funds for transaction.";
+    } else if (errorMessage?.includes("price slippage check")) {
+      userFriendlyError = "Price changed too much during transaction. Try again or increase slippage tolerance.";
+    } else if (errorMessage?.length > 100) {
+      // Truncate very long error messages
+      userFriendlyError = errorMessage.substring(0, 100) + "...";
+    }
+
+    setToastMessage(userFriendlyError);
+    setShowErrorToast(true);
+
+    // Auto-close after 5 seconds
+    setTimeout(() => setShowErrorToast(false), 5000);
+  };
 
   // Add click outside handler
   useEffect(() => {
@@ -260,32 +305,15 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const [showClosePositionModal, setShowClosePositionModal] = useState(false);
   const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
 
-  // State for claiming process
-  const [isClaiming, setIsClaiming] = useState(false);
-  const [claimError, setClaimError] = useState(null);
-  const [claimSuccess, setClaimSuccess] = useState(false);
-
-  // State for removing liquidity process
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [removeError, setRemoveError] = useState(null);
-  const [removeSuccess, setRemoveSuccess] = useState(false);
-
-  // State for closing position process
-  const [isClosing, setIsClosing] = useState(false);
-  const [closeError, setCloseError] = useState(null);
-  const [closeSuccess, setCloseSuccess] = useState(false);
-
-  // State for adding liquidity process
-  const [isAdding, setIsAdding] = useState(false);
-  const [addError, setAddError] = useState(null);
-  const [addSuccess, setAddSuccess] = useState(false);
-
   // Function to claim fees using the adapter
   const claimFees = async () => {
     if (!adapter) {
-      setClaimError("No adapter available for this position");
+      showErrorToastWithMessage("No adapter available for this position");
       return;
     }
+
+    setIsClaiming(true);
+    setShowActionsDropdown(false);
 
     adapter.claimFees({
       position,
@@ -298,17 +326,19 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
       dispatch,
       onStart: () => {
         setIsClaiming(true);
-        setClaimError(null);
-        setClaimSuccess(false);
       },
       onFinish: () => {
         setIsClaiming(false);
       },
-      onSuccess: () => {
-        setClaimSuccess(true);
+      onSuccess: (result) => {
+        // Show success toast with transaction hash if available
+        const txHash = result?.tx?.hash;
+        showSuccessToastWithMessage("Successfully claimed fees!", txHash);
+        dispatch(triggerUpdate()); // Refresh data
       },
       onError: (errorMessage) => {
-        setClaimError(`Failed to claim fees: ${errorMessage}`);
+        showErrorToastWithMessage(errorMessage);
+        setIsClaiming(false);
       }
     });
   };
@@ -316,12 +346,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Function to handle removing liquidity
   const handleRemoveLiquidity = async (percentage) => {
     if (!adapter) {
-      setRemoveError("No adapter available for this position");
+      showErrorToastWithMessage("No adapter available for this position");
       return;
     }
 
-    setRemoveError(null);
-    setRemoveSuccess(false);
     setIsRemoving(true);
 
     try {
@@ -338,18 +366,21 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         onStart: () => setIsRemoving(true),
         onFinish: () => setIsRemoving(false),
         onSuccess: (result) => {
-          setRemoveSuccess(true);
+          // Show success toast with transaction hash if available
+          const txHash = result?.decreaseReceipt?.hash || result?.collectReceipt?.hash;
+          showSuccessToastWithMessage(`Successfully removed ${percentage}% of liquidity!`, txHash);
           setShowRemoveLiquidityModal(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
-          setRemoveError(`Failed to remove liquidity: ${errorMessage}`);
+          showErrorToastWithMessage(errorMessage);
           setShowRemoveLiquidityModal(false);
+          setIsRemoving(false);
         }
       });
     } catch (error) {
       console.error("Error removing liquidity:", error);
-      setRemoveError(`Error removing liquidity: ${error.message}`);
+      showErrorToastWithMessage(error.message);
       setIsRemoving(false);
     }
   };
@@ -357,12 +388,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Function to handle closing position
   const handleClosePosition = async (shouldBurn) => {
     if (!adapter) {
-      setCloseError("No adapter available for this position");
+      showErrorToastWithMessage("No adapter available for this position");
       return;
     }
 
-    setCloseError(null);
-    setCloseSuccess(false);
     setIsClosing(true);
 
     try {
@@ -379,20 +408,22 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         dispatch,
         onStart: () => setIsClosing(true),
         onFinish: () => setIsClosing(false),
-        onSuccess: () => {
-          setCloseSuccess(true);
+        onSuccess: (result) => {
+          // Show success toast with transaction hash if available
+          const txHash = result?.burnReceipt?.hash || result?.liquidityResult?.decreaseReceipt?.hash;
+          showSuccessToastWithMessage("Successfully closed position!", txHash);
           setShowClosePositionModal(false);
-          setShowActionsDropdown(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
-          setCloseError(`Failed to close position: ${errorMessage}`);
+          showErrorToastWithMessage(errorMessage);
           setShowClosePositionModal(false);
+          setIsClosing(false);
         }
       });
     } catch (error) {
       console.error("Error closing position:", error);
-      setCloseError(`Error closing position: ${error.message}`);
+      showErrorToastWithMessage(error.message);
       setIsClosing(false);
     }
   };
@@ -400,12 +431,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Function to handle adding liquidity
   const handleAddLiquidity = async (params) => {
     if (!adapter) {
-      setAddError("No adapter available for this position");
+      showErrorToastWithMessage("No adapter available for this position");
       return;
     }
 
-    setAddError(null);
-    setAddSuccess(false);
     setIsAdding(true);
 
     try {
@@ -423,20 +452,22 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         dispatch,
         onStart: () => setIsAdding(true),
         onFinish: () => setIsAdding(false),
-        onSuccess: () => {
-          setAddSuccess(true);
+        onSuccess: (result) => {
+          // Show success toast with transaction hash if available
+          const txHash = result?.receipt?.hash || result?.txHash;
+          showSuccessToastWithMessage("Successfully added liquidity!", txHash);
           setShowAddLiquidityModal(false);
-          setShowActionsDropdown(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
-          setAddError(`Failed to add liquidity: ${errorMessage}`);
+          showErrorToastWithMessage(errorMessage);
           setShowAddLiquidityModal(false);
+          setIsAdding(false);
         }
       });
     } catch (error) {
       console.error("Error adding liquidity:", error);
-      setAddError(`Error adding liquidity: ${error.message}`);
+      showErrorToastWithMessage(error.message);
       setIsAdding(false);
     }
   };
@@ -444,6 +475,18 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Handle card click to navigate to detail page
   const handleCardClick = () => {
     router.push(`/position/${position.id}`);
+  };
+
+  // Get explorer URL based on chainId
+  const getExplorerUrl = (txHash) => {
+    if (!txHash || !chainId) return "#";
+
+    const explorers = {
+      1: "https://etherscan.io/tx/",
+      42161: "https://arbiscan.io/tx/"
+    };
+
+    return (explorers[chainId] || "#") + txHash;
   };
 
   // Get card styling based on vault status
@@ -483,10 +526,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const platformColor = position.platform && config.platformMetadata[position.platform]?.color
                        ? config.platformMetadata[position.platform].color
                        : '#6c757d';
-
-  // Debug log to verify color is being accessed correctly
-  console.log(`Platform: ${position.platform}, Platform Name: ${position.platformName}, Color: ${platformColor}`);
-  console.log(`Platform metadata:`, config.platformMetadata[position.platform]);
 
   return (
     <>
@@ -594,7 +633,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                 </Button>
               )}
 
-              {/* Actions Dropdown Menu */}
+              {/* Actions Dropdown Menu - Simplified with link-like elements */}
               {!inVault && showActionsDropdown && (
                 <div
                   style={{
@@ -611,67 +650,50 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    className="dropdown-item d-flex align-items-center"
+                  {/* Claim Fees Link */}
+                  <a
+                    className="dropdown-item"
                     style={{
+                      display: 'block',
                       width: '100%',
                       textAlign: 'left',
-                      padding: '0.25rem',
-                      border: 'none',
-                      background: 'none',
-                      fontSize: '14px',
-                      cursor: isClaiming || !uncollectedFees || feeLoadingError ||
+                      padding: '0.12rem 0.7rem',
+                      fontSize: '0.9rem',
+                      cursor: !uncollectedFees || feeLoadingError ||
                         (uncollectedFees &&
                           parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
                           parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 'not-allowed' : 'pointer',
-                      opacity: isClaiming || !uncollectedFees || feeLoadingError ||
+                      opacity: !uncollectedFees || feeLoadingError ||
                         (uncollectedFees &&
                           parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
                           parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 0.5 : 1,
-                      color: claimSuccess ? '#198754' : 'inherit',
+                      color: 'inherit',
+                      textDecoration: 'none'
                     }}
-                    disabled={isClaiming || !uncollectedFees || feeLoadingError ||
+                    onClick={!uncollectedFees || feeLoadingError ||
                       (uncollectedFees &&
                         parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                        parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
-                    onClick={claimFees}
+                        parseFloat(uncollectedFees.token1.formatted) < 0.0001)
+                      ? (e) => e.preventDefault()
+                      : claimFees}
+                    href="#"
                   >
-                    {isClaiming ? (
-                      <>
-                        <Spinner
-                          as="span"
-                          animation="border"
-                          size="sm"
-                          role="status"
-                          aria-hidden="true"
-                          className="me-2"
-                        />
-                        <span>Claiming Fees...</span>
-                      </>
-                    ) : claimSuccess ? (
-                      <>✓ Fees Claimed</>
-                    ) : feeLoadingError ? (
-                      <>Fee Data Unavailable</>
-                    ) : (
-                      <>Claim Fees</>
-                    )}
-                  </button>
+                    Claim Fees
+                  </a>
 
-                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
-
-                  <button
+                  {/* Add Liquidity Link */}
+                  <a
                     className="dropdown-item"
                     style={{
+                      display: 'block',
                       width: '100%',
                       textAlign: 'left',
-                      padding: '0.25rem',
-                      border: 'none',
-                      background: 'none',
-                      fontSize: '14px',
-                      cursor: isAdding ? 'not-allowed' : 'pointer',
-                      opacity: isAdding ? 0.5 : 1
+                      padding: '0.12rem 0.7rem',
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                      textDecoration: 'none'
                     }}
-                    disabled={isAdding}
+                    href="#"
                     onClick={() => {
                       setShowActionsDropdown(false);
                       setTimeout(() => {
@@ -679,59 +701,58 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                       }, 100);
                     }}
                   >
-                    {isAdding ? "Adding Liquidity..." : "Add Liquidity"}
-                  </button>
+                    Add Liquidity
+                  </a>
 
-                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
-
-                  <button
+                  {/* Remove Liquidity Link */}
+                  <a
                     className="dropdown-item"
                     style={{
+                      display: 'block',
                       width: '100%',
                       textAlign: 'left',
-                      padding: '0.25rem',
-                      border: 'none',
-                      background: 'none',
-                      fontSize: '14px',
-                      cursor: (isRemoving || !tokenBalances || balanceError ||
+                      padding: '0.12rem 0.7rem',
+                      fontSize: '0.9rem',
+                      cursor: !tokenBalances || balanceError ||
                         (tokenBalances &&
                           parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                          parseFloat(tokenBalances.token1.formatted) < 0.0001)) ? 'not-allowed' : 'pointer',
-                      opacity: (isRemoving || !tokenBalances || balanceError ||
+                          parseFloat(tokenBalances.token1.formatted) < 0.0001) ? 'not-allowed' : 'pointer',
+                      opacity: !tokenBalances || balanceError ||
                         (tokenBalances &&
                           parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                          parseFloat(tokenBalances.token1.formatted) < 0.0001)) ? 0.5 : 1
+                          parseFloat(tokenBalances.token1.formatted) < 0.0001) ? 0.5 : 1,
+                      textDecoration: 'none'
                     }}
-                    disabled={isRemoving || !tokenBalances || balanceError ||
+                    href="#"
+                    onClick={!tokenBalances || balanceError ||
                       (tokenBalances &&
                         parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                        parseFloat(tokenBalances.token1.formatted) < 0.0001)}
-                    onClick={() => {
-                      setShowActionsDropdown(false);
-                      setTimeout(() => {
-                        setShowRemoveLiquidityModal(true);
-                      }, 100);
-                    }}
+                        parseFloat(tokenBalances.token1.formatted) < 0.0001)
+                      ? (e) => e.preventDefault()
+                      : () => {
+                          setShowActionsDropdown(false);
+                          setTimeout(() => {
+                            setShowRemoveLiquidityModal(true);
+                          }, 100);
+                        }}
                   >
-                    {isRemoving ? "Removing Liquidity..." : "Remove Liquidity"}
-                  </button>
+                    Remove Liquidity
+                  </a>
 
-                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
-
-                  <button
+                  {/* Close Position Link */}
+                  <a
                     className="dropdown-item"
                     style={{
+                      display: 'block',
                       width: '100%',
                       textAlign: 'left',
-                      padding: '0.25rem',
-                      border: 'none',
-                      background: 'none',
-                      fontSize: '14px',
-                      cursor: isClosing ? 'not-allowed' : 'pointer',
-                      opacity: isClosing ? 0.5 : 1,
-                      color: '#dc3545'  // Red color for danger action
+                      padding: '0.12rem 0.7rem',
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                      color: '#dc3545',  // Red color for danger action
+                      textDecoration: 'none'
                     }}
-                    disabled={isClosing}
+                    href="#"
                     onClick={() => {
                       setShowActionsDropdown(false);
                       setTimeout(() => {
@@ -739,23 +760,8 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                       }, 100);
                     }}
                   >
-                    {isClosing ? "Closing Position..." : "Close Position"}
-                  </button>
-
-                  {(claimError || removeError || closeError || addError) && (
-                    <div className="alert alert-danger mt-2 mx-2 p-2 small" role="alert">
-                      {claimError || removeError || closeError || addError}
-                    </div>
-                  )}
-
-                  {(claimSuccess || removeSuccess || closeSuccess || addSuccess) && (
-                    <div className="alert alert-success mt-2 mx-2 p-2 small" role="alert">
-                      {claimSuccess ? "Successfully claimed fees!" :
-                      removeSuccess ? "Successfully removed liquidity!" :
-                      closeSuccess ? "Successfully closed position!" :
-                      "Successfully added liquidity!"}
-                    </div>
-                  )}
+                    Close Position
+                  </a>
                 </div>
               )}
             </div>
@@ -817,6 +823,55 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         </Card.Body>
       </Card>
 
+      {/* Toast Containers */}
+      <ToastContainer
+        className="position-fixed"
+        position="top-center"
+        style={{ zIndex: 2000 }}
+      >
+        {/* Success Toast */}
+        <Toast
+          show={showSuccessToast}
+          onClose={() => setShowSuccessToast(false)}
+          bg="success"
+          text="white"
+        >
+          <Toast.Header>
+            <strong className="me-auto">Success</strong>
+          </Toast.Header>
+          <Toast.Body>
+            {toastMessage}
+            {toastTxHash && (
+              <div className="mt-1">
+                <a
+                  href={getExplorerUrl(toastTxHash)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-white text-decoration-underline"
+                >
+                  View Transaction
+                </a>
+              </div>
+            )}
+          </Toast.Body>
+        </Toast>
+
+        {/* Error Toast */}
+        <Toast
+          show={showErrorToast}
+          onClose={() => setShowErrorToast(false)}
+          bg="danger"
+          text="white"
+        >
+          <Toast.Header>
+            <strong className="me-auto">Error</strong>
+          </Toast.Header>
+          <Toast.Body>
+            {toastMessage}
+          </Toast.Body>
+        </Toast>
+      </ToastContainer>
+
       {/* RemoveLiquidityModal */}
       {!inVault && ReactDOM.createPortal(
         <RemoveLiquidityModal
@@ -829,7 +884,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           tokenPrices={tokenPrices}
           isRemoving={isRemoving}
           onRemoveLiquidity={handleRemoveLiquidity}
-          errorMessage={removeError}
+          errorMessage={null} // No inline errors - using toasts now
         />,
         document.body
       )}
@@ -847,7 +902,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           tokenPrices={tokenPrices}
           isClosing={isClosing}
           onClosePosition={handleClosePosition}
-          errorMessage={closeError}
+          errorMessage={null} // No inline errors - using toasts now
         />,
         document.body
       )}
@@ -864,7 +919,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           tokenPrices={tokenPrices}
           isProcessing={isAdding}
           onAddLiquidity={handleAddLiquidity}
-          errorMessage={addError}
+          errorMessage={null} // No inline errors - using toasts now
         />,
         document.body
       )}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert } from "react-bootstrap";
+import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
 import Head from "next/head";
 import { AdapterFactory } from "../../adapters";
@@ -16,10 +17,48 @@ import AddLiquidityModal from "../../components/AddLiquidityModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
+import { useToast } from "../../context/ToastContext";
+
+// Fallback component to show when an error occurs
+function ErrorFallback({ error, resetErrorBoundary }) {
+  const { showError } = useToast();
+  const router = useRouter();
+
+  // Log the error and notify via toast
+  React.useEffect(() => {
+    console.error("Position detail page error:", error);
+    showError("There was a problem loading the position. Please try again.");
+  }, [error, showError]);
+
+  return (
+    <Alert variant="danger" className="my-4">
+      <Alert.Heading>Something went wrong</Alert.Heading>
+      <p>
+        We encountered an error while loading this position's details. You can try going back to the dashboard or refreshing the page.
+      </p>
+      <hr />
+      <div className="d-flex justify-content-between">
+        <Button
+          variant="outline-secondary"
+          onClick={() => router.push('/')}
+        >
+          Go to Dashboard
+        </Button>
+        <Button
+          variant="outline-danger"
+          onClick={resetErrorBoundary}
+        >
+          Try again
+        </Button>
+      </div>
+    </Alert>
+  );
+}
 
 export default function PositionDetailPage() {
   const dispatch = useDispatch();
   const router = useRouter();
+  const { showError, showSuccess } = useToast();
   const { id } = router.query;
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
@@ -60,8 +99,14 @@ export default function PositionDetailPage() {
   // Find the position by ID
   const position = useMemo(() => {
     if (!positions || !id) return null;
-    return positions.find((p) => p.id === id);
-  }, [positions, id]);
+    try {
+      return positions.find((p) => p.id === id);
+    } catch (error) {
+      console.error(`Error finding position with id ${id}:`, error);
+      showError("Error loading position data");
+      return null;
+    }
+  }, [positions, id, showError]);
 
   // Get pool and token data for the position - DEFINE THESE BEFORE USING THEM
   const poolData = position ? pools[position.poolAddress] : null;
@@ -78,9 +123,10 @@ export default function PositionDetailPage() {
       return AdapterFactory.getAdapter(position.platform, provider);
     } catch (error) {
       console.error(`Failed to get adapter for position ${id}:`, error);
+      showError(`Failed to get ${position.platform} adapter. Some features may be limited.`);
       return null;
     }
-  }, [position?.platform, provider, id]);
+  }, [position?.platform, provider, id, showError]);
 
   // Use adapter for position-specific calculations
   const isActive = useMemo(() => {
@@ -109,9 +155,10 @@ export default function PositionDetailPage() {
       );
     } catch (error) {
       console.error("Error calculating price:", error);
+      showError("Error calculating price information");
       return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
     }
-  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay]);
+  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay, showError]);
 
   // Extract values from priceInfo
   const { currentPrice, lowerPrice, upperPrice } = priceInfo;
@@ -126,12 +173,22 @@ export default function PositionDetailPage() {
   // Ensure lower price is always smaller than upper price (they swap when inverting)
   const displayLowerPrice = useMemo(() => {
     if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
-    return Math.min(parseFloat(lowerPrice), parseFloat(upperPrice));
+    try {
+      return Math.min(parseFloat(lowerPrice), parseFloat(upperPrice));
+    } catch (error) {
+      console.error("Error calculating display lower price:", error);
+      return "N/A";
+    }
   }, [lowerPrice, upperPrice]);
 
   const displayUpperPrice = useMemo(() => {
     if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
-    return Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
+    try {
+      return Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
+    } catch (error) {
+      console.error("Error calculating display upper price:", error);
+      return "N/A";
+    }
   }, [lowerPrice, upperPrice]);
 
   // Calculate position percentage for the progress bar
@@ -139,14 +196,22 @@ export default function PositionDetailPage() {
     if (displayLowerPrice === "N/A" || displayUpperPrice === "N/A" || currentPrice === "N/A")
       return 0;
 
-    const lower = parseFloat(displayLowerPrice);
-    const upper = parseFloat(displayUpperPrice);
-    const current = parseFloat(currentPrice);
+    try {
+      const lower = parseFloat(displayLowerPrice);
+      const upper = parseFloat(displayUpperPrice);
+      const current = parseFloat(currentPrice);
 
-    if (current < lower) return 0;
-    if (current > upper) return 100;
+      if (current < lower) return 0;
+      if (current > upper) return 100;
 
-    return Math.floor(((current - lower) / (upper - lower)) * 100);
+      // Handle possible division by zero
+      if (upper === lower) return 50;
+
+      return Math.floor(((current - lower) / (upper - lower)) * 100);
+    } catch (error) {
+      console.error("Error calculating price position percent:", error);
+      return 0;
+    }
   }, [displayLowerPrice, displayUpperPrice, currentPrice]);
 
   // Set up auto-refresh timer
@@ -159,13 +224,18 @@ export default function PositionDetailPage() {
 
     // Only set up timer if auto-refresh is enabled and we're connected
     if (autoRefresh.enabled && isConnected && provider && address && chainId) {
-      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
-      timerRef.current = setInterval(() => {
-        const timestamp = Date.now();
-        console.log(`Auto-refresh triggered at ${new Date(timestamp).toISOString()}`);
-        dispatch(markAutoRefresh());
-        dispatch(triggerUpdate()); // This should carry the timestamp
-      }, autoRefresh.interval);
+      try {
+        console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
+        timerRef.current = setInterval(() => {
+          const timestamp = Date.now();
+          console.log(`Auto-refresh triggered at ${new Date(timestamp).toISOString()}`);
+          dispatch(markAutoRefresh());
+          dispatch(triggerUpdate()); // This should carry the timestamp
+        }, autoRefresh.interval);
+      } catch (error) {
+        console.error("Error setting up auto-refresh timer:", error);
+        showError("Failed to set up auto-refresh. Please try toggling it off and on again.");
+      }
     }
 
     // Cleanup on unmount
@@ -175,70 +245,81 @@ export default function PositionDetailPage() {
         timerRef.current = null;
       }
     };
-  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch]);
+  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch, showError]);
 
   // Ensure we're actively tracking lastUpdate changes with a dedicated effect
   useEffect(() => {
     if (lastUpdate) {
       console.log("lastUpdate detected in position details:", new Date(lastUpdate).toISOString());
 
-      // Explicitly force re-fetches by clearing local state
-      setUncollectedFees(null);
-      setTokenBalances(null);
-      setIsLoadingFees(true);
-      setIsLoadingBalances(true);
+      try {
+        // Explicitly force re-fetches by clearing local state
+        setUncollectedFees(null);
+        setTokenBalances(null);
+        setIsLoadingFees(true);
+        setIsLoadingBalances(true);
 
-      // This is critical - we need to force a refresh of these calculations
-      if (adapter && position && poolData && token0Data && token1Data) {
-        // Force fee recalculation
-        adapter.calculateFees(position, poolData, token0Data, token1Data)
-          .then(fees => {
-            console.log("Refreshed fees:", fees);
-            setUncollectedFees(fees);
-            setIsLoadingFees(false);
-            forceUpdate(); // Force component re-render
-          })
-          .catch(error => {
-            console.error("Error refreshing fees:", error);
-            setFeeLoadingError(true);
-            setIsLoadingFees(false);
-          });
-
-        // Force token balances recalculation if we have chainId
-        if (chainId) {
-          adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
-            .then(balances => {
-              console.log("Refreshed balances:", balances);
-              setTokenBalances(balances);
-              setIsLoadingBalances(false);
+        // This is critical - we need to force a refresh of these calculations
+        if (adapter && position && poolData && token0Data && token1Data) {
+          // Force fee recalculation
+          adapter.calculateFees(position, poolData, token0Data, token1Data)
+            .then(fees => {
+              console.log("Refreshed fees:", fees);
+              setUncollectedFees(fees);
+              setIsLoadingFees(false);
               forceUpdate(); // Force component re-render
             })
             .catch(error => {
-              console.error("Error refreshing balances:", error);
-              setBalanceError(true);
-              setIsLoadingBalances(false);
+              console.error("Error refreshing fees:", error);
+              setFeeLoadingError(true);
+              setIsLoadingFees(false);
+              showError("Failed to load uncollected fees data");
             });
+
+          // Force token balances recalculation if we have chainId
+          if (chainId) {
+            adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
+              .then(balances => {
+                console.log("Refreshed balances:", balances);
+                setTokenBalances(balances);
+                setIsLoadingBalances(false);
+                forceUpdate(); // Force component re-render
+              })
+              .catch(error => {
+                console.error("Error refreshing balances:", error);
+                setBalanceError(true);
+                setIsLoadingBalances(false);
+                showError("Failed to load token balance data");
+              });
+          }
         }
+      } catch (error) {
+        console.error("Error processing lastUpdate in position details:", error);
+        showError("Error refreshing position data");
       }
     }
-  }, [lastUpdate, adapter, position, poolData, token0Data, token1Data, chainId]);
+  }, [lastUpdate, adapter, position, poolData, token0Data, token1Data, chainId, showError]);
 
   // Mark resources as updating when lastUpdate changes
   useEffect(() => {
     if (id && lastUpdate) {
-      console.log("Position detail update triggered:", new Date().toISOString());
+      try {
+        console.log("Position detail update triggered:", new Date().toISOString());
 
-      // Force state resets to trigger recalculations
-      setUncollectedFees(null);
-      setTokenBalances(null);
-      setIsLoadingFees(true);
-      setIsLoadingBalances(true);
-      setFeeLoadingError(false);
-      setBalanceError(false);
-      setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
+        // Force state resets to trigger recalculations
+        setUncollectedFees(null);
+        setTokenBalances(null);
+        setIsLoadingFees(true);
+        setIsLoadingBalances(true);
+        setFeeLoadingError(false);
+        setBalanceError(false);
+        setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
 
-      // Mark resources as updating in Redux
-      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
+        // Mark resources as updating in Redux
+        dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
+      } catch (error) {
+        console.error("Error marking resources as updating:", error);
+      }
     }
   }, [lastUpdate, id, dispatch]);
 
@@ -246,45 +327,51 @@ export default function PositionDetailPage() {
   useEffect(() => {
     // Only run when lastUpdate changes and we have necessary context
     if (lastUpdate && adapter && provider && address && chainId && id) {
-      console.log("Refreshing position data due to lastUpdate change:", new Date(lastUpdate).toISOString());
+      try {
+        console.log("Refreshing position data due to lastUpdate change:", new Date(lastUpdate).toISOString());
 
-      // Track the latest refresh timestamp to avoid duplicate refreshes
-      const refreshTimestamp = lastUpdate;
+        // Track the latest refresh timestamp to avoid duplicate refreshes
+        const refreshTimestamp = lastUpdate;
 
-      // Fetch fresh data from blockchain
-      adapter.getPositions(address, chainId).then(result => {
-        // Check if this is still the latest refresh (prevents race conditions)
-        if (refreshTimestamp !== lastUpdate) return;
+        // Fetch fresh data from blockchain
+        adapter.getPositions(address, chainId).then(result => {
+          // Check if this is still the latest refresh (prevents race conditions)
+          if (refreshTimestamp !== lastUpdate) return;
 
-        // Find our specific position
-        const freshPosition = result.positions.find(p => p.id === id);
-        if (freshPosition) {
-          // Get fresh pool data
-          const freshPoolData = result.poolData[freshPosition.poolAddress];
-          const freshTokenData = result.tokenData;
+          // Find our specific position
+          const freshPosition = result.positions.find(p => p.id === id);
+          if (freshPosition) {
+            // Get fresh pool data
+            const freshPoolData = result.poolData[freshPosition.poolAddress];
+            const freshTokenData = result.tokenData;
 
-          // Update Redux with fresh data (without creating reference cycles)
-          if (positions && positions.length > 0) {
-            // Create a new array to avoid reference issues
-            const updatedPositions = [...positions];
-            // Find and replace the specific position
-            const posIndex = updatedPositions.findIndex(p => p.id === id);
-            if (posIndex >= 0) {
-              updatedPositions[posIndex] = freshPosition;
-              dispatch(setPositions(updatedPositions));
+            // Update Redux with fresh data (without creating reference cycles)
+            if (positions && positions.length > 0) {
+              // Create a new array to avoid reference issues
+              const updatedPositions = [...positions];
+              // Find and replace the specific position
+              const posIndex = updatedPositions.findIndex(p => p.id === id);
+              if (posIndex >= 0) {
+                updatedPositions[posIndex] = freshPosition;
+                dispatch(setPositions(updatedPositions));
+              }
+            }
+
+            // Update the specific pool
+            if (freshPoolData) {
+              dispatch(setPools({ [freshPosition.poolAddress]: freshPoolData }));
             }
           }
-
-          // Update the specific pool
-          if (freshPoolData) {
-            dispatch(setPools({ [freshPosition.poolAddress]: freshPoolData }));
-          }
-        }
-      }).catch(error => {
-        console.error("Error refreshing position data:", error);
-      });
+        }).catch(error => {
+          console.error("Error refreshing position data:", error);
+          showError("Failed to refresh position data from blockchain");
+        });
+      } catch (error) {
+        console.error("Error in position refresh effect:", error);
+        showError("Error updating position data");
+      }
     }
-  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch]); // Remove positions from deps
+  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, positions, showError]); // Remove positions from deps
 
   // Fetch fee data using the adapter
   useEffect(() => {
@@ -315,6 +402,7 @@ export default function PositionDetailPage() {
         if (isMounted) {
           setFeeLoadingError(true);
           setIsLoadingFees(false);
+          showError("Failed to calculate uncollected fees");
         }
       }
     };
@@ -325,7 +413,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id]); // Make sure lastUpdate is included here
+  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id, showError]); // Make sure lastUpdate is included here
 
   // Fetch token balances using the adapter
   useEffect(() => {
@@ -358,6 +446,7 @@ export default function PositionDetailPage() {
         if (isMounted) {
           setBalanceError(true);
           setIsLoadingBalances(false);
+          showError("Failed to calculate token balances");
         }
       }
     };
@@ -367,7 +456,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate]); // Make sure lastUpdate is included here
+  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate, showError]); // Make sure lastUpdate is included here
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
@@ -395,29 +484,42 @@ export default function PositionDetailPage() {
           loading: false,
           error: "Failed to fetch token prices"
         }));
+        showError("Failed to fetch token prices");
       }
     };
 
     getPrices();
-  }, [token0Data, token1Data, lastUpdate]);
+  }, [token0Data, token1Data, lastUpdate, showError]);
 
   // Function to manually refresh data
   const refreshData = () => {
-    dispatch(triggerUpdate());
+    try {
+      dispatch(triggerUpdate());
+      showSuccess("Refreshing position data...");
+    } catch (error) {
+      console.error("Error triggering manual refresh:", error);
+      showError("Failed to refresh data");
+    }
   };
 
   // Calculate USD values
   const getUsdValue = (amount, tokenSymbol) => {
     if (!amount || amount === "0" || tokenPrices.loading || tokenPrices.error) return null;
 
-    const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-    return calculateUsdValue(amount, price);
+    try {
+      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
+      return calculateUsdValue(amount, price);
+    } catch (error) {
+      console.error("Error calculating USD value:", error);
+      return null;
+    }
   };
 
   // Function to claim fees using the adapter
   const claimFees = async () => {
     if (!adapter) {
       setActionError("No adapter available for this position");
+      showError("No adapter available for this position");
       return;
     }
 
@@ -439,35 +541,43 @@ export default function PositionDetailPage() {
         onFinish: () => setIsClaiming(false),
         onSuccess: (result) => {
           setActionSuccess("Successfully claimed fees!");
+          showSuccess("Successfully claimed fees!");
 
           // If we have updated position and pool data, update Redux
           if (result.updatedPosition && result.updatedPoolData) {
-            // Update the specific position in the positions array
-            const updatedPositions = positions.map(p => {
-              console.log('inside updatedPositions');
-              return p.id === position.id ? result.updatedPosition : p
-            });
+            try {
+              // Update the specific position in the positions array
+              const updatedPositions = positions.map(p => {
+                console.log('inside updatedPositions');
+                return p.id === position.id ? result.updatedPosition : p
+              });
 
-            // Update Redux store with the new data
-            dispatch(setPositions(updatedPositions));
+              // Update Redux store with the new data
+              dispatch(setPositions(updatedPositions));
 
-            // Create a pool data update object with just the updated pool
-            const poolUpdate = {
-              [position.poolAddress]: result.updatedPoolData
-            };
-            dispatch(setPools(poolUpdate));
+              // Create a pool data update object with just the updated pool
+              const poolUpdate = {
+                [position.poolAddress]: result.updatedPoolData
+              };
+              dispatch(setPools(poolUpdate));
 
-            // Force a re-fetch of uncollected fees with the updated data
-            setUncollectedFees(null);
-            setIsLoadingFees(true);
+              // Force a re-fetch of uncollected fees with the updated data
+              setUncollectedFees(null);
+              setIsLoadingFees(true);
+            } catch (updateError) {
+              console.error("Error updating state after claiming fees:", updateError);
+            }
           }
         },
-        onError: (errorMessage) => setActionError(`Failed to claim fees: ${errorMessage}`)
+        onError: (errorMessage) => {
+          setActionError(`Failed to claim fees: ${errorMessage}`);
+          showError(`Failed to claim fees: ${errorMessage}`);
+        }
       });
     } catch (error) {
       console.error("Error claiming fees:", error);
       setActionError(`Error claiming fees: ${error.message}`);
-    } finally {
+      showError(`Error claiming fees: ${error.message}`);
       setIsClaiming(false);
     }
   };
@@ -476,6 +586,7 @@ export default function PositionDetailPage() {
   const handleRemoveLiquidity = async (percentage) => {
     if (!adapter) {
       setActionError("No adapter available for this position");
+      showError("No adapter available for this position");
       return;
     }
 
@@ -498,17 +609,20 @@ export default function PositionDetailPage() {
         onFinish: () => setIsRemoving(false),
         onSuccess: (result) => {
           setActionSuccess(`Successfully removed ${percentage}% of liquidity!`);
+          showSuccess(`Successfully removed ${percentage}% of liquidity!`);
           setShowRemoveLiquidityModal(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
           setActionError(`Failed to remove liquidity: ${errorMessage}`);
+          showError(`Failed to remove liquidity: ${errorMessage}`);
           setShowRemoveLiquidityModal(false);
         }
       });
     } catch (error) {
       console.error("Error removing liquidity:", error);
       setActionError(`Error removing liquidity: ${error.message}`);
+      showError(`Error removing liquidity: ${error.message}`);
       setIsRemoving(false);
     }
   };
@@ -517,6 +631,7 @@ export default function PositionDetailPage() {
   const handleClosePosition = async (shouldBurn) => {
     if (!adapter) {
       setActionError("No adapter available for this position");
+      showError("No adapter available for this position");
       return;
     }
 
@@ -540,6 +655,7 @@ export default function PositionDetailPage() {
         onFinish: () => setIsClosing(false),
         onSuccess: () => {
           setActionSuccess("Position successfully closed!");
+          showSuccess("Position successfully closed!");
           setShowCloseModal(false);
           // Navigate back to the main dashboard after a short delay
           setTimeout(() => {
@@ -548,12 +664,14 @@ export default function PositionDetailPage() {
         },
         onError: (errorMessage) => {
           setActionError(`Failed to close position: ${errorMessage}`);
+          showError(`Failed to close position: ${errorMessage}`);
           setShowCloseModal(false);
         }
       });
     } catch (error) {
       console.error("Error closing position:", error);
       setActionError(`Error closing position: ${error.message}`);
+      showError(`Error closing position: ${error.message}`);
       setIsClosing(false);
     }
   };
@@ -562,6 +680,7 @@ export default function PositionDetailPage() {
   const handleAddLiquidity = async (params) => {
     if (!adapter) {
       setActionError("No adapter available for this position");
+      showError("No adapter available for this position");
       return;
     }
 
@@ -586,17 +705,20 @@ export default function PositionDetailPage() {
         onFinish: () => setIsAdding(false),
         onSuccess: () => {
           setActionSuccess("Successfully added liquidity to position!");
+          showSuccess("Successfully added liquidity to position!");
           setShowAddLiquidityModal(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
           setActionError(`Failed to add liquidity: ${errorMessage}`);
+          showError(`Failed to add liquidity: ${errorMessage}`);
           setShowAddLiquidityModal(false);
         }
       });
     } catch (error) {
       console.error("Error adding liquidity:", error);
       setActionError(`Error adding liquidity: ${error.message}`);
+      showError(`Error adding liquidity: ${error.message}`);
       setIsAdding(false);
     }
   };
@@ -619,6 +741,13 @@ export default function PositionDetailPage() {
               {position && (!poolData || !token0Data || !token1Data) && (
                 <p>Missing pool or token data for this position.</p>
               )}
+              <Button
+                variant="primary"
+                onClick={refreshData}
+                className="mt-3"
+              >
+                Refresh Data
+              </Button>
             </Card.Body>
           </Card>
         </Container>
@@ -640,344 +769,352 @@ export default function PositionDetailPage() {
           </Button>
         </Link>
 
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <h1 className="mb-0">
-            Position #{position.id}
-            <span
-              style={{
-                display: 'inline-block',
-                width: '14px',
-                height: '14px',
-                borderRadius: '50%',
-                backgroundColor: isActive ? '#28a745' : '#dc3545',
-                marginLeft: '12px',
-                marginRight: '8px'
-              }}
-              title={isActive ? "In range" : "Out of range"}
-            />
-            {position.platformName && (
-              <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
-                {position.platformName}
-              </Badge>
-            )}
-          </h1>
+        <ErrorBoundary
+          FallbackComponent={ErrorFallback}
+          onReset={() => {
+            // Reset the state that triggered the error
+            refreshData();
+          }}
+        >
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h1 className="mb-0">
+              Position #{position.id}
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '14px',
+                  height: '14px',
+                  borderRadius: '50%',
+                  backgroundColor: isActive ? '#28a745' : '#dc3545',
+                  marginLeft: '12px',
+                  marginRight: '8px'
+                }}
+                title={isActive ? "In range" : "Out of range"}
+              />
+              {position.platformName && (
+                <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
+                  {position.platformName}
+                </Badge>
+              )}
+            </h1>
 
-          <div className="d-flex align-items-center">
-            {isUpdating && (
-              <div className="d-flex align-items-center me-3">
-                <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
-                <small className="text-muted">Refreshing...</small>
-              </div>
-            )}
-            <RefreshControls />
+            <div className="d-flex align-items-center">
+              {isUpdating && (
+                <div className="d-flex align-items-center me-3">
+                  <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
+                  <small className="text-muted">Refreshing...</small>
+                </div>
+              )}
+              <RefreshControls />
+            </div>
           </div>
-        </div>
 
-        <Row>
-          <Col lg={8}>
-            <Card className="mb-4">
-              <Card.Header>
-                <h5 className="mb-0">Position Overview</h5>
-              </Card.Header>
-              <Card.Body>
-                <Row>
-                  <Col md={6}>
-                    <div className="mb-3">
-                      <strong>Token Pair:</strong> {position.tokenPair}
-                    </div>
-                    <div className="mb-3">
-                      <strong>Fee Tier:</strong> {position.fee / 10000}%
-                    </div>
-                    <div className="mb-3">
-                      <strong>Status:</strong>{" "}
-                      <Badge bg={isActive ? "success" : "danger"}>
-                        {isActive ? "In Range (Active)" : "Out of Range (Inactive)"}
-                      </Badge>
-                    </div>
-                  </Col>
-                  <Col md={6}>
-                    <div className="mb-3">
-                      <strong>Price Direction:</strong>{" "}
-                      <span>
-                        {priceLabel}
-                        <Button
-                          variant="link"
-                          className="p-0 ms-2"
-                          size="sm"
-                          onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
-                          title="Switch price direction"
-                        >
-                          <span role="img" aria-label="switch">⇄</span>
-                        </Button>
-                      </span>
-                    </div>
-                    {/* Token balances now in the Overview section */}
-                    <div className="mb-3">
-                      <strong>Token Balances:</strong>
-                      {balanceError ? (
-                        <div className="text-danger small">Error calculating balances</div>
-                      ) : isLoadingBalances ? (
-                        <div className="d-flex align-items-center">
-                          <Spinner animation="border" size="sm" className="me-2" />
-                          <span className="small">Loading...</span>
+          <Row>
+            <Col lg={8}>
+              <Card className="mb-4">
+                <Card.Header>
+                  <h5 className="mb-0">Position Overview</h5>
+                </Card.Header>
+                <Card.Body>
+                  <Row>
+                    <Col md={6}>
+                      <div className="mb-3">
+                        <strong>Token Pair:</strong> {position.tokenPair}
+                      </div>
+                      <div className="mb-3">
+                        <strong>Fee Tier:</strong> {position.fee / 10000}%
+                      </div>
+                      <div className="mb-3">
+                        <strong>Status:</strong>{" "}
+                        <Badge bg={isActive ? "success" : "danger"}>
+                          {isActive ? "In Range (Active)" : "Out of Range (Inactive)"}
+                        </Badge>
+                      </div>
+                    </Col>
+                    <Col md={6}>
+                      <div className="mb-3">
+                        <strong>Price Direction:</strong>{" "}
+                        <span>
+                          {priceLabel}
+                          <Button
+                            variant="link"
+                            className="p-0 ms-2"
+                            size="sm"
+                            onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
+                            title="Switch price direction"
+                          >
+                            <span role="img" aria-label="switch">⇄</span>
+                          </Button>
+                        </span>
+                      </div>
+                      {/* Token balances now in the Overview section */}
+                      <div className="mb-3">
+                        <strong>Token Balances:</strong>
+                        {balanceError ? (
+                          <div className="text-danger small">Error calculating balances</div>
+                        ) : isLoadingBalances ? (
+                          <div className="d-flex align-items-center">
+                            <Spinner animation="border" size="sm" className="me-2" />
+                            <span className="small">Loading...</span>
+                          </div>
+                        ) : tokenBalances ? (
+                          <div className="mt-2">
+                            <div className="mb-1 ps-1">
+                              <div className="d-flex justify-content-between align-items-center">
+                                <Badge bg="light" text="dark" className="px-2 py-1">
+                                  {tokenBalances.token0.formatted} {token0Data.symbol}
+                                </Badge>
+                                {tokenPrices.token0 && (
+                                  <span className="text-muted small">
+                                    ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="ps-1">
+                              <div className="d-flex justify-content-between align-items-center">
+                                <Badge bg="light" text="dark" className="px-2 py-1">
+                                  {tokenBalances.token1.formatted} {token1Data.symbol}
+                                </Badge>
+                                {tokenPrices.token1 && (
+                                  <span className="text-muted small">
+                                    ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {tokenPrices.token0 && tokenPrices.token1 && (
+                              <div className="mt-2 text-center small text-muted border-top pt-1">
+                                Total Value: ${(
+                                  (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
+                                  (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
+                                ).toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-muted small">Not available</div>
+                        )}
+                      </div>
+                    </Col>
+                  </Row>
+                </Card.Body>
+              </Card>
+
+              <Card className="mb-4">
+                <Card.Header>
+                  <h5 className="mb-0">Price Range</h5>
+                </Card.Header>
+                <Card.Body>
+                  <div className="mb-3">
+                    <div className="d-flex justify-content-between mb-2">
+                      <div>
+                        <small>Min Price</small>
+                        <div>
+                          <strong>{displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)}</strong>
                         </div>
-                      ) : tokenBalances ? (
-                        <div className="mt-2">
-                          <div className="mb-1 ps-1">
-                            <div className="d-flex justify-content-between align-items-center">
-                              <Badge bg="light" text="dark" className="px-2 py-1">
-                                {tokenBalances.token0.formatted} {token0Data.symbol}
-                              </Badge>
-                              {tokenPrices.token0 && (
-                                <span className="text-muted small">
-                                  ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
-                            </div>
+                      </div>
+                      <div>
+                        <small>Current Price</small>
+                        <div className="text-center">
+                          <strong>{currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))}</strong>
+                        </div>
+                      </div>
+                      <div className="text-end">
+                        <small>Max Price</small>
+                        <div>
+                          <strong>{displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <ProgressBar
+                      now={pricePositionPercent}
+                      variant={isActive ? "success" : "danger"}
+                      style={{ height: "10px" }}
+                    />
+                    <div className="text-center mt-2">
+                      <small className="text-muted">{priceLabel}</small>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 mb-3" style={{ height: "200px" }}>
+                    {/* Using the PriceRangeChart component with real data */}
+                    {displayLowerPrice !== "N/A" && displayUpperPrice !== "N/A" && currentPrice !== "N/A" ? (
+                      <PriceRangeChart
+                        lowerPrice={parseFloat(displayLowerPrice)}
+                        upperPrice={parseFloat(displayUpperPrice)}
+                        currentPrice={parseFloat(currentPrice)}
+                        token0Symbol={token0Data.symbol}
+                        token1Symbol={token1Data.symbol}
+                        isInverted={invertPriceDisplay}
+                        isActive={isActive}
+                      />
+                    ) : (
+                      <div className="text-center pt-5">
+                        <p className="text-muted">Cannot display chart due to missing price data</p>
+                      </div>
+                    )}
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
+
+            <Col lg={4}>
+              <Card className="mb-4">
+                <Card.Header>
+                  <h5 className="mb-0">Position Actions</h5>
+                </Card.Header>
+                <Card.Body>
+                  <div className="mb-4">
+                    <h6>Uncollected Fees</h6>
+                    <div className="mb-3">
+                      {feeLoadingError ? (
+                        <div className="text-danger small w-100">
+                          <i className="me-1">⚠️</i>
+                          Unable to load fee data. Please try refreshing.
+                        </div>
+                      ) : isLoadingFees ? (
+                        <div className="text-secondary text-center py-2">
+                          <Spinner animation="border" size="sm" className="me-2" />
+                          Loading fee data...
+                        </div>
+                      ) : uncollectedFees ? (
+                        <div className="border rounded p-2 bg-light">
+                          <div className="d-flex justify-content-between align-items-center mb-2">
+                            <Badge bg="white" text="dark" className="px-3 py-2">
+                              {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+                            </Badge>
+                            {tokenPrices.token0 && (
+                              <span className="text-muted small">
+                                ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                              </span>
+                            )}
                           </div>
-                          <div className="ps-1">
-                            <div className="d-flex justify-content-between align-items-center">
-                              <Badge bg="light" text="dark" className="px-2 py-1">
-                                {tokenBalances.token1.formatted} {token1Data.symbol}
-                              </Badge>
-                              {tokenPrices.token1 && (
-                                <span className="text-muted small">
-                                  ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
-                            </div>
+                          <div className="d-flex justify-content-between align-items-center mb-1">
+                            <Badge bg="white" text="dark" className="px-3 py-2">
+                              {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+                            </Badge>
+                            {tokenPrices.token1 && (
+                              <span className="text-muted small">
+                                ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                              </span>
+                            )}
                           </div>
+
                           {tokenPrices.token0 && tokenPrices.token1 && (
-                            <div className="mt-2 text-center small text-muted border-top pt-1">
+                            <div className="text-center small border-top pt-2 mt-2 fw-bold">
                               Total Value: ${(
-                                (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
-                                (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
+                                (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
+                                (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
                               ).toFixed(2)}
                             </div>
                           )}
                         </div>
                       ) : (
-                        <div className="text-muted small">Not available</div>
+                        <div className="text-muted small text-center py-2">
+                          No fee data available
+                        </div>
                       )}
                     </div>
-                  </Col>
-                </Row>
-              </Card.Body>
-            </Card>
 
-            <Card className="mb-4">
-              <Card.Header>
-                <h5 className="mb-0">Price Range</h5>
-              </Card.Header>
-              <Card.Body>
-                <div className="mb-3">
-                  <div className="d-flex justify-content-between mb-2">
-                    <div>
-                      <small>Min Price</small>
-                      <div>
-                        <strong>{displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)}</strong>
-                      </div>
-                    </div>
-                    <div>
-                      <small>Current Price</small>
-                      <div className="text-center">
-                        <strong>{currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))}</strong>
-                      </div>
-                    </div>
-                    <div className="text-end">
-                      <small>Max Price</small>
-                      <div>
-                        <strong>{displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)}</strong>
-                      </div>
-                    </div>
+                    <Button
+                      variant="primary"
+                      className="w-100 mb-3"
+                      disabled={isClaiming || feeLoadingError || !uncollectedFees ||
+                                (uncollectedFees &&
+                                parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                                parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
+                      onClick={claimFees}
+                    >
+                      {isClaiming ? (
+                        <>
+                          <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                          />
+                          Claiming...
+                        </>
+                      ) : "Claim Fees"}
+                    </Button>
                   </div>
 
-                  <ProgressBar
-                    now={pricePositionPercent}
-                    variant={isActive ? "success" : "danger"}
-                    style={{ height: "10px" }}
-                  />
-                  <div className="text-center mt-2">
-                    <small className="text-muted">{priceLabel}</small>
+                  <div className="mb-4">
+                    <h6>Liquidity Management</h6>
+                    <Button
+                      variant="outline-primary"
+                      className="w-100 mb-2"
+                      disabled={isAdding}
+                      onClick={() => setShowAddLiquidityModal(true)}
+                    >
+                      {isAdding ? "Processing..." : "Add Liquidity"}
+                    </Button>
+                    <Button
+                      variant="outline-primary"
+                      className="w-100 mb-3"
+                      disabled={isRemoving}
+                      onClick={() => setShowRemoveLiquidityModal(true)}
+                    >
+                      {isRemoving ? "Processing..." : "Remove Liquidity"}
+                    </Button>
                   </div>
-                </div>
 
-                <div className="mt-4 mb-3" style={{ height: "200px" }}>
-                  {/* Using the PriceRangeChart component with real data */}
-                  {displayLowerPrice !== "N/A" && displayUpperPrice !== "N/A" && currentPrice !== "N/A" ? (
-                    <PriceRangeChart
-                      lowerPrice={parseFloat(displayLowerPrice)}
-                      upperPrice={parseFloat(displayUpperPrice)}
-                      currentPrice={parseFloat(currentPrice)}
-                      token0Symbol={token0Data.symbol}
-                      token1Symbol={token1Data.symbol}
-                      isInverted={invertPriceDisplay}
-                      isActive={isActive}
-                    />
-                  ) : (
-                    <div className="text-center pt-5">
-                      <p className="text-muted">Cannot display chart due to missing price data</p>
-                    </div>
+                  <div>
+                    <h6>Position Management</h6>
+                    <Button
+                      variant="outline-danger"
+                      className="w-100"
+                      disabled={isClosing}
+                      onClick={() => setShowCloseModal(true)}
+                    >
+                      {isClosing ? "Processing..." : "Close Position"}
+                    </Button>
+                  </div>
+
+                  {actionError && (
+                    <Alert variant="danger" className="mt-3 mb-0 p-2 small">
+                      {actionError}
+                    </Alert>
                   )}
-                </div>
-              </Card.Body>
-            </Card>
-          </Col>
 
-          <Col lg={4}>
-            <Card className="mb-4">
-              <Card.Header>
-                <h5 className="mb-0">Position Actions</h5>
-              </Card.Header>
-              <Card.Body>
-                <div className="mb-4">
-                  <h6>Uncollected Fees</h6>
-                  <div className="mb-3">
-                    {feeLoadingError ? (
-                      <div className="text-danger small w-100">
-                        <i className="me-1">⚠️</i>
-                        Unable to load fee data. Please try refreshing.
-                      </div>
-                    ) : isLoadingFees ? (
-                      <div className="text-secondary text-center py-2">
-                        <Spinner animation="border" size="sm" className="me-2" />
-                        Loading fee data...
-                      </div>
-                    ) : uncollectedFees ? (
-                      <div className="border rounded p-2 bg-light">
-                        <div className="d-flex justify-content-between align-items-center mb-2">
-                          <Badge bg="white" text="dark" className="px-3 py-2">
-                            {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
-                          </Badge>
-                          {tokenPrices.token0 && (
-                            <span className="text-muted small">
-                              ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="d-flex justify-content-between align-items-center mb-1">
-                          <Badge bg="white" text="dark" className="px-3 py-2">
-                            {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
-                          </Badge>
-                          {tokenPrices.token1 && (
-                            <span className="text-muted small">
-                              ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                            </span>
-                          )}
-                        </div>
+                  {actionSuccess && (
+                    <Alert variant="success" className="mt-3 mb-0 p-2 small">
+                      {actionSuccess}
+                    </Alert>
+                  )}
+                </Card.Body>
+              </Card>
 
-                        {tokenPrices.token0 && tokenPrices.token1 && (
-                          <div className="text-center small border-top pt-2 mt-2 fw-bold">
-                            Total Value: ${(
-                              (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
-                              (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
-                            ).toFixed(2)}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-muted small text-center py-2">
-                        No fee data available
-                      </div>
-                    )}
+              <Card>
+                <Card.Header>
+                  <h5 className="mb-0">Technical Details</h5>
+                </Card.Header>
+                <Card.Body>
+                  <div className="mb-2">
+                    <strong>Tick Range:</strong>{" "}
+                    <code>{position.tickLower}</code> to <code>{position.tickUpper}</code>
                   </div>
-
-                  <Button
-                    variant="primary"
-                    className="w-100 mb-3"
-                    disabled={isClaiming || feeLoadingError || !uncollectedFees ||
-                              (uncollectedFees &&
-                               parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                               parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
-                    onClick={claimFees}
-                  >
-                    {isClaiming ? (
-                      <>
-                        <Spinner
-                          as="span"
-                          animation="border"
-                          size="sm"
-                          role="status"
-                          aria-hidden="true"
-                          className="me-2"
-                        />
-                        Claiming...
-                      </>
-                    ) : "Claim Fees"}
-                  </Button>
-                </div>
-
-                <div className="mb-4">
-                  <h6>Liquidity Management</h6>
-                  <Button
-                    variant="outline-primary"
-                    className="w-100 mb-2"
-                    disabled={isAdding}
-                    onClick={() => setShowAddLiquidityModal(true)}
-                  >
-                    {isAdding ? "Processing..." : "Add Liquidity"}
-                  </Button>
-                  <Button
-                    variant="outline-primary"
-                    className="w-100 mb-3"
-                    disabled={isRemoving}
-                    onClick={() => setShowRemoveLiquidityModal(true)}
-                  >
-                    {isRemoving ? "Processing..." : "Remove Liquidity"}
-                  </Button>
-                </div>
-
-                <div>
-                  <h6>Position Management</h6>
-                  <Button
-                    variant="outline-danger"
-                    className="w-100"
-                    disabled={isClosing}
-                    onClick={() => setShowCloseModal(true)}
-                  >
-                    {isClosing ? "Processing..." : "Close Position"}
-                  </Button>
-                </div>
-
-                {actionError && (
-                  <Alert variant="danger" className="mt-3 mb-0 p-2 small">
-                    {actionError}
-                  </Alert>
-                )}
-
-                {actionSuccess && (
-                  <Alert variant="success" className="mt-3 mb-0 p-2 small">
-                    {actionSuccess}
-                  </Alert>
-                )}
-              </Card.Body>
-            </Card>
-
-            <Card>
-              <Card.Header>
-                <h5 className="mb-0">Technical Details</h5>
-              </Card.Header>
-              <Card.Body>
-                <div className="mb-2">
-                  <strong>Tick Range:</strong>{" "}
-                  <code>{position.tickLower}</code> to <code>{position.tickUpper}</code>
-                </div>
-                <div className="mb-2">
-                  <strong>Chain ID:</strong> {chainId}
-                </div>
-                <div className="mb-2">
-                  <strong>Liquidity:</strong> {position.liquidity.toLocaleString()}
-                </div>
-                <div>
-                  <strong>Pool Address:</strong><br />
-                  <small className="text-muted">
-                    <code>{position.poolAddress}</code>
-                  </small>
-                </div>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
+                  <div className="mb-2">
+                    <strong>Chain ID:</strong> {chainId}
+                  </div>
+                  <div className="mb-2">
+                    <strong>Liquidity:</strong> {position.liquidity.toLocaleString()}
+                  </div>
+                  <div>
+                    <strong>Pool Address:</strong><br />
+                    <small className="text-muted">
+                      <code>{position.poolAddress}</code>
+                    </small>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+        </ErrorBoundary>
 
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}

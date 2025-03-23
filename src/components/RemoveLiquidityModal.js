@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col } from 'react-bootstrap';
+import { useToast } from '../context/ToastContext';
 
 export default function RemoveLiquidityModal({
   show,
@@ -13,6 +14,7 @@ export default function RemoveLiquidityModal({
   onRemoveLiquidity,
   errorMessage
 }) {
+  const { showError } = useToast();
   // State for the percentage slider
   const [percentage, setPercentage] = useState(100);
   const [estimatedBalances, setEstimatedBalances] = useState(null);
@@ -20,16 +22,21 @@ export default function RemoveLiquidityModal({
   // Calculate estimated token amounts based on percentage
   useEffect(() => {
     if (tokenBalances) {
-      setEstimatedBalances({
-        token0: {
-          raw: tokenBalances.token0.raw * BigInt(percentage) / BigInt(100),
-          formatted: (parseFloat(tokenBalances.token0.formatted) * percentage / 100).toFixed(6)
-        },
-        token1: {
-          raw: tokenBalances.token1.raw * BigInt(percentage) / BigInt(100),
-          formatted: (parseFloat(tokenBalances.token1.formatted) * percentage / 100).toFixed(6)
-        }
-      });
+      try {
+        setEstimatedBalances({
+          token0: {
+            raw: tokenBalances.token0.raw * BigInt(percentage) / BigInt(100),
+            formatted: (parseFloat(tokenBalances.token0.formatted) * percentage / 100).toFixed(6)
+          },
+          token1: {
+            raw: tokenBalances.token1.raw * BigInt(percentage) / BigInt(100),
+            formatted: (parseFloat(tokenBalances.token1.formatted) * percentage / 100).toFixed(6)
+          }
+        });
+      } catch (error) {
+        console.error("Error calculating estimated balances:", error);
+        setEstimatedBalances(null);
+      }
     }
   }, [percentage, tokenBalances]);
 
@@ -37,10 +44,15 @@ export default function RemoveLiquidityModal({
   const getUsdValue = (amount, tokenSymbol) => {
     if (!amount || amount === "0" || !tokenPrices) return null;
 
-    const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-    if (!price) return null;
+    try {
+      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
+      if (!price) return null;
 
-    return parseFloat(amount) * price;
+      return parseFloat(amount) * price;
+    } catch (error) {
+      console.error(`Error calculating USD value for ${tokenSymbol}:`, error);
+      return null;
+    }
   };
 
   // Calculate total USD value
@@ -51,18 +63,46 @@ export default function RemoveLiquidityModal({
 
   // Handle slider change
   const handleSliderChange = (e) => {
-    setPercentage(parseInt(e.target.value, 10));
+    try {
+      const newPercentage = parseInt(e.target.value, 10);
+      setPercentage(newPercentage);
+    } catch (error) {
+      console.error("Error updating percentage:", error);
+      showError("Invalid percentage value");
+    }
   };
 
   // Handle remove liquidity
   const handleRemove = () => {
-    onRemoveLiquidity(percentage);
+    try {
+      if (!position) {
+        throw new Error("Position data is missing");
+      }
+
+      if (percentage <= 0 || percentage > 100) {
+        throw new Error("Invalid percentage value (must be between 1-100%)");
+      }
+
+      onRemoveLiquidity(percentage);
+    } catch (error) {
+      console.error("Error initiating liquidity removal:", error);
+      showError(`Failed to remove liquidity: ${error.message}`);
+    }
+  };
+
+  // Handle modal close with safety checks
+  const handleModalClose = () => {
+    if (isRemoving) {
+      showError("Cannot close this window while the transaction is in progress");
+      return;
+    }
+    onHide();
   };
 
   return (
     <Modal
       show={show}
-      onHide={onHide}
+      onHide={handleModalClose}
       centered
       backdrop="static"
       keyboard={false} // Prevent Escape key from closing
@@ -182,7 +222,7 @@ export default function RemoveLiquidityModal({
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onHide} disabled={isRemoving}>
+        <Button variant="secondary" onClick={handleModalClose} disabled={isRemoving}>
           Cancel
         </Button>
         <Button

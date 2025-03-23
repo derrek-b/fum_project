@@ -1,24 +1,31 @@
-// src/components/RefreshControls.js
+// src/components/RefreshControls.js - simplified version
 import React from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button, Form } from 'react-bootstrap';
 import { setAutoRefresh, triggerUpdate } from '../redux/updateSlice';
+import { useToast } from '../context/ToastContext';
 
 export default function RefreshControls() {
   const dispatch = useDispatch();
+  const { showError } = useToast();
   const { autoRefresh, isUpdating } = useSelector(state => state.updates);
 
   const toggleAutoRefresh = () => {
-    dispatch(setAutoRefresh({ enabled: !autoRefresh.enabled }));
+    try {
+      dispatch(setAutoRefresh({ enabled: !autoRefresh.enabled }));
+    } catch (error) {
+      console.error("Error toggling auto-refresh:", error);
+      showError("Failed to toggle auto-refresh setting");
+    }
   };
 
-  // const changeInterval = (event) => {
-  //   const interval = parseInt(event.target.value) * 1000; // Convert seconds to ms
-  //   dispatch(setAutoRefresh({ interval }));
-  // };
-
   const handleManualRefresh = () => {
-    dispatch(triggerUpdate());
+    try {
+      dispatch(triggerUpdate());
+    } catch (error) {
+      console.error("Error triggering manual refresh:", error);
+      showError("Failed to refresh data. Please try again.");
+    }
   };
 
   return (

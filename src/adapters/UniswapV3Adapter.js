@@ -814,6 +814,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       console.error("Error claiming fees:", error);
       onError && onError(error.message || "Unknown error");
+      return;
     } finally {
       onFinish && onFinish();
     }

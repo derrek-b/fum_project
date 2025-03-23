@@ -33,3 +33,7 @@ a:hover {
 .btn-outline-custom:disabled {
   opacity: 0.5;
 }
+
+.dropdown-item:hover {
+  text-decoration: underline !important;
+}
