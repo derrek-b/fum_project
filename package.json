@@ -13,7 +13,8 @@
     "test-contracts": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat test'",
     "test-contracts:coverage": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat coverage'",
     "hardhat-node": "bash -c 'cd ~/code/fum_testing && npx hardhat node'",
-    "deploy-setup": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat compile && cd ~/code/fum && npm run script scripts/extract-bytecode.js'"
+    "deploy-setup": "bash -c './sync-contracts.sh && cd ~/code/fum_testing && npx hardhat compile && cd ~/code/fum && npm run script scripts/extract-bytecode.js'",
+    "seed-localhost": "bash -c 'npm run script scripts/deploy.js --network=localhost && npm run script scripts/create-test-vault.js --network=localhost && npm run script scripts/seed.js --network=localhost'"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.6.0",

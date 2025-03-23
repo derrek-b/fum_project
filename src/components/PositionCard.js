@@ -157,20 +157,56 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     calculateBalances();
   }, [adapter, position, poolData, token0Data, token1Data, chainId]);
 
+  // Calculate uncollected fees
   useEffect(() => {
     let isMounted = true;
     setIsLoadingFees(true);
     setFeeLoadingError(false);
 
-    if (!adapter) {
-      setFeeLoadingError(true);
-      setIsLoadingFees(false);
+    // Only attempt to load fees if we have all the necessary data
+    if (!adapter || !position || !poolData || !token0Data || !token1Data) {
+      console.error("Missing required data for fee calculation:", {
+        adapter: !!adapter,
+        position: !!position,
+        poolData: !!poolData,
+        token0Data: !!token0Data,
+        token1Data: !!token1Data
+      });
+
+      if (isMounted) {
+        setFeeLoadingError(true);
+        setIsLoadingFees(false);
+      }
       return;
     }
 
     const loadFees = async () => {
       try {
+        // Log detailed information before calculation
+        console.log(`FEES ATTEMPT: Calculating fees for position ${position.id} (${position.inVault ? 'vault' : 'wallet'})`);
+
+        // Check if poolData has ticks
+        console.log(`Pool data for position ${position.id} has ticks:`,
+          poolData && poolData.ticks ? `Yes (${Object.keys(poolData.ticks).length} ticks)` : 'No'
+        );
+
+        // Check if position's specific ticks exist in poolData
+        const hasLowerTick = poolData?.ticks && poolData.ticks[position.tickLower];
+        const hasUpperTick = poolData?.ticks && poolData.ticks[position.tickUpper];
+        console.log(`Position ${position.id} ticks existence:`,
+          `Lower tick (${position.tickLower}): ${hasLowerTick ? 'Yes' : 'No'}, ` +
+          `Upper tick (${position.tickUpper}): ${hasUpperTick ? 'Yes' : 'No'}`
+        );
+
+        // Global fee growth data
+        console.log(`Pool ${position.poolAddress} fee growth data:`,
+          `Global0: ${poolData?.feeGrowthGlobal0X128 ? 'Yes' : 'No'}, ` +
+          `Global1: ${poolData?.feeGrowthGlobal1X128 ? 'Yes' : 'No'}`
+        );
+
         const fees = await adapter.calculateFees(position, poolData, token0Data, token1Data);
+
+        console.log(`FEES SUCCESS: Calculated for position ${position.id}:`, fees);
 
         // Only update state if component is still mounted
         if (isMounted) {
@@ -178,7 +214,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           setIsLoadingFees(false);
         }
       } catch (error) {
-        console.error("Error calculating fees for position", position.id, ":", error);
+        console.error(`FEES ERROR: Failed for position ${position.id}:`, error);
         if (isMounted) {
           setFeeLoadingError(true);
           setIsLoadingFees(false);
@@ -414,10 +450,17 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     if (inVault) {
       return {
         ...baseStyle,
-        borderWidth: "2px",
+        borderWidth: "1px",
         borderStyle: "solid",
-        borderColor: "#4b5efc", // Blue border for vault positions
-        boxShadow: "0 4px 6px rgba(75, 94, 252, 0.1)" // Subtle blue shadow
+        borderColor: "black", // Gold border
+        // Multi-layered box shadow for a glowing effect
+        boxShadow: `
+          0 0 7px rgba(255, 255, 255, 0.7),
+          0 0 10px rgba(255, 215, 0, 0.6),
+          0 0 21px rgba(255, 215, 0, 0.4)
+        `,
+        // Add subtle transition for hover effects
+        transition: "all 0.2s ease-in-out"
       };
     }
 
@@ -452,16 +495,26 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
               )}
             </Card.Title>
             <div onClick={(e) => e.stopPropagation()}>
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                onClick={() => !inVault && setShowActionsModal(true)}
-                aria-label="Position actions"
-                disabled={inVault} // Disable manual actions for vault positions
-                style={inVault ? { opacity: 0.5 } : {}} // Visual indicator it's disabled
-              >
-                <span role="img" aria-label="menu">🔧</span>
-              </Button>
+              {inVault ? (
+                <Button
+                  variant="outline-secondary"
+                  size="sm"
+                  onClick={() => router.push(`/position/${position.id}`)}
+                  aria-label="Vault position details"
+                  title="Go to vault or details?"
+                >
+                  <span role="img" aria-label="vault">🤖</span>
+                </Button>
+              ) : (
+                <Button
+                  variant="outline-secondary"
+                  size="sm"
+                  onClick={() => setShowActionsModal(true)}
+                  aria-label="Position actions"
+                >
+                  <span role="img" aria-label="menu">🔧</span>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -495,7 +548,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
             {feeLoadingError ? (
               <div className="text-danger small">
                 <i className="me-1">⚠️</i>
-                Unable to load fee data. Please try refreshing.
+                Unable to load fee data
               </div>
             ) : isLoadingFees ? (
               <div className="text-secondary small">
@@ -511,18 +564,13 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                   {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
                 </Badge>
               </>
-            ) : null}
+            ) : (
+              // No fee data available, but not an error
+              <div className="text-secondary small">
+                Fee data unavailable
+              </div>
+            )}
           </div>
-
-          {/* Add info at bottom of card for vault positions */}
-          {inVault && (
-            <div className="mt-3 pt-2 border-top">
-              <small className="text-primary">
-                <i className="fa fa-info-circle me-1"></i>
-                This position is managed by a vault and cannot be manually modified.
-              </small>
-            </div>
-          )}
         </Card.Body>
       </Card>
 
