@@ -10,3 +10,26 @@ a {
 a:hover {
   color: #7a0000;
 }
+
+/* Custom button styling */
+.btn-outline-custom {
+  border-color: #a30000;
+  color: #a30000;
+  background-color: white;
+}
+
+.btn-outline-custom:hover {
+  background-color: #a30000;
+  color: white;
+  border-color: #a30000;
+}
+
+.btn-outline-custom:active {
+  background-color: black !important;
+  color: white !important;
+  border-color: black !important;
+}
+
+.btn-outline-custom:disabled {
+  opacity: 0.5;
+}

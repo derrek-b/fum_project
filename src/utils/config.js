@@ -55,7 +55,7 @@ const config = {
     uniswapV3: {
       id: "uniswapV3",
       name: "Uniswap V3",
-      logo: "/logos/uniswap.svg", // Add logo path if you have it
+      logo: "/Platform_Logos/uniswap.svg", // Updated path reference from public directory
       color: "#FF007A", // Uniswap pink
       description: "Uniswap V3 concentrated liquidity positions",
     },

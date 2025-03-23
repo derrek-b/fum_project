@@ -1,8 +1,9 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import ReactDOM from 'react-dom';
 import { Card, Button, Spinner, Badge, Modal } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
+import Image from "next/image";
 import { AdapterFactory } from "../adapters";
 import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
 import { fetchTokenPrices } from "../utils/coingeckoUtils";
@@ -10,6 +11,7 @@ import RemoveLiquidityModal from "./RemoveLiquidityModal";
 import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../redux/updateSlice";
+import config from "../utils/config";
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
@@ -20,6 +22,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const poolData = pools[position.poolAddress];
   const token0Data = poolData?.token0 ? tokens[poolData.token0] : null;
   const token1Data = poolData?.token1 ? tokens[poolData.token1] : null;
+
+  // Reference for the card and dropdown state
+  const cardRef = useRef(null);
+  const [showActionsDropdown, setShowActionsDropdown] = useState(false);
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
@@ -92,6 +98,25 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     loading: false,
     error: null
   });
+
+  // Add click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showActionsDropdown &&
+          cardRef.current &&
+          !cardRef.current.contains(event.target)) {
+        setShowActionsDropdown(false);
+      }
+    };
+
+    if (showActionsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showActionsDropdown]);
 
   // Fetch token prices
   useEffect(() => {
@@ -231,7 +256,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   }, [adapter, position, poolData, token0Data, token1Data]);
 
   // State for modals
-  const [showActionsModal, setShowActionsModal] = useState(false);
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
   const [showClosePositionModal, setShowClosePositionModal] = useState(false);
   const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
@@ -358,7 +382,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         onSuccess: () => {
           setCloseSuccess(true);
           setShowClosePositionModal(false);
-          setShowActionsModal(false);
+          setShowActionsDropdown(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
@@ -402,7 +426,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         onSuccess: () => {
           setAddSuccess(true);
           setShowAddLiquidityModal(false);
-          setShowActionsModal(false);
+          setShowActionsDropdown(false);
           dispatch(triggerUpdate()); // Refresh data
         },
         onError: (errorMessage) => {
@@ -421,22 +445,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const handleCardClick = () => {
     router.push(`/position/${position.id}`);
   };
-
-  // Prepare activity badge
-  const activityIndicator = (
-    <span
-      style={{
-        display: 'inline-block',
-        width: '10px',
-        height: '10px',
-        borderRadius: '50%',
-        backgroundColor: isActive ? '#28a745' : '#dc3545',
-        marginLeft: '8px',
-        marginRight: '4px'
-      }}
-      title={isActive ? "In range" : "Out of range"}
-    />
-  );
 
   // Get card styling based on vault status
   const getCardStyle = () => {
@@ -471,30 +479,97 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     return <Card><Card.Body>Loading position data or data unavailable...</Card.Body></Card>;
   }
 
+  // Get the platform color directly from config
+  const platformColor = position.platform && config.platformMetadata[position.platform]?.color
+                       ? config.platformMetadata[position.platform].color
+                       : '#6c757d';
+
+  // Debug log to verify color is being accessed correctly
+  console.log(`Platform: ${position.platform}, Platform Name: ${position.platformName}, Color: ${platformColor}`);
+  console.log(`Platform metadata:`, config.platformMetadata[position.platform]);
+
   return (
     <>
       <Card
         className="mb-3"
         style={getCardStyle()}
         onClick={handleCardClick}
+        ref={cardRef}
       >
         <Card.Body>
           <div className="d-flex justify-content-between align-items-center mb-2">
-            <Card.Title>
-              Position #{position.id} - {position.tokenPair}
-              {activityIndicator}
-              {position.platformName && (
-                <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
-                  {position.platformName}
-                </Badge>
+            <Card.Title className="d-flex align-items-center">
+              {/* Activity indicator at beginning of line */}
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  backgroundColor: isActive ? '#28a745' : '#dc3545',
+                  marginRight: '8px'
+                }}
+                title={isActive ? "In range" : "Out of range"}
+              />
+
+              {/* Position ID and token pair */}
+              <span>Position #{position.id} - {position.tokenPair}</span>
+
+              {/* Conditional display of either logo or badge */}
+              {position.platform && (
+                config.platformMetadata[position.platform]?.logo ? (
+                  // Show logo if available
+                  <div
+                    className="ms-2 d-inline-flex align-items-center justify-content-center"
+                    style={{
+                      height: '20px',
+                      width: '20px'
+                    }}
+                  >
+                    <Image
+                      src={config.platformMetadata[position.platform].logo}
+                      alt={position.platformName || position.platform}
+                      width={20}
+                      height={20}
+                      title={position.platformName || position.platform}
+                    />
+                  </div>
+                ) : (
+                  // Show colored badge if no logo - with explicit color override
+                  <Badge
+                    className="ms-2 d-inline-flex align-items-center"
+                    pill  // Add pill shape to match design
+                    bg="" // Important! Set this to empty string to prevent default bg color
+                    style={{
+                      fontSize: '0.75rem',
+                      backgroundColor: platformColor,
+                      padding: '0.25em 0.5em',
+                      color: 'white',
+                      border: 'none'
+                    }}
+                  >
+                    {position.platformName}
+                  </Badge>
+                )
               )}
+
+              {/* Vault indicator with icon instead of badge */}
               {inVault && (
-                <Badge bg="primary" className="ms-2" style={{ fontSize: '0.7rem' }}>
-                  In Vault
-                </Badge>
+                <div
+                  className="ms-2 d-inline-flex align-items-center justify-content-center"
+                  title="Position is in a vault"
+                >
+                  <span
+                    role="img"
+                    aria-label="vault"
+                    style={{ fontSize: '1rem' }}
+                  >
+                    🏦
+                  </span>
+                </div>
               )}
             </Card.Title>
-            <div onClick={(e) => e.stopPropagation()}>
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative' }}>
               {inVault ? (
                 <Button
                   variant="outline-secondary"
@@ -509,11 +584,179 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                 <Button
                   variant="outline-secondary"
                   size="sm"
-                  onClick={() => setShowActionsModal(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowActionsDropdown(!showActionsDropdown);
+                  }}
                   aria-label="Position actions"
                 >
                   <span role="img" aria-label="menu">🔧</span>
                 </Button>
+              )}
+
+              {/* Actions Dropdown Menu */}
+              {!inVault && showActionsDropdown && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '35px',  // Position below the button
+                    right: '0px', // Align with the right side of the card
+                    zIndex: 1000,
+                    width: '130px',
+                    backgroundColor: 'white',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    borderRadius: '0.375rem',
+                    padding: '0.5rem 0',
+                    border: '1px solid rgba(0,0,0,0.1)'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    className="dropdown-item d-flex align-items-center"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.25rem',
+                      border: 'none',
+                      background: 'none',
+                      fontSize: '14px',
+                      cursor: isClaiming || !uncollectedFees || feeLoadingError ||
+                        (uncollectedFees &&
+                          parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                          parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 'not-allowed' : 'pointer',
+                      opacity: isClaiming || !uncollectedFees || feeLoadingError ||
+                        (uncollectedFees &&
+                          parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                          parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 0.5 : 1,
+                      color: claimSuccess ? '#198754' : 'inherit',
+                    }}
+                    disabled={isClaiming || !uncollectedFees || feeLoadingError ||
+                      (uncollectedFees &&
+                        parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                        parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
+                    onClick={claimFees}
+                  >
+                    {isClaiming ? (
+                      <>
+                        <Spinner
+                          as="span"
+                          animation="border"
+                          size="sm"
+                          role="status"
+                          aria-hidden="true"
+                          className="me-2"
+                        />
+                        <span>Claiming Fees...</span>
+                      </>
+                    ) : claimSuccess ? (
+                      <>✓ Fees Claimed</>
+                    ) : feeLoadingError ? (
+                      <>Fee Data Unavailable</>
+                    ) : (
+                      <>Claim Fees</>
+                    )}
+                  </button>
+
+                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
+
+                  <button
+                    className="dropdown-item"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.25rem',
+                      border: 'none',
+                      background: 'none',
+                      fontSize: '14px',
+                      cursor: isAdding ? 'not-allowed' : 'pointer',
+                      opacity: isAdding ? 0.5 : 1
+                    }}
+                    disabled={isAdding}
+                    onClick={() => {
+                      setShowActionsDropdown(false);
+                      setTimeout(() => {
+                        setShowAddLiquidityModal(true);
+                      }, 100);
+                    }}
+                  >
+                    {isAdding ? "Adding Liquidity..." : "Add Liquidity"}
+                  </button>
+
+                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
+
+                  <button
+                    className="dropdown-item"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.25rem',
+                      border: 'none',
+                      background: 'none',
+                      fontSize: '14px',
+                      cursor: (isRemoving || !tokenBalances || balanceError ||
+                        (tokenBalances &&
+                          parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
+                          parseFloat(tokenBalances.token1.formatted) < 0.0001)) ? 'not-allowed' : 'pointer',
+                      opacity: (isRemoving || !tokenBalances || balanceError ||
+                        (tokenBalances &&
+                          parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
+                          parseFloat(tokenBalances.token1.formatted) < 0.0001)) ? 0.5 : 1
+                    }}
+                    disabled={isRemoving || !tokenBalances || balanceError ||
+                      (tokenBalances &&
+                        parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
+                        parseFloat(tokenBalances.token1.formatted) < 0.0001)}
+                    onClick={() => {
+                      setShowActionsDropdown(false);
+                      setTimeout(() => {
+                        setShowRemoveLiquidityModal(true);
+                      }, 100);
+                    }}
+                  >
+                    {isRemoving ? "Removing Liquidity..." : "Remove Liquidity"}
+                  </button>
+
+                  <hr className="dropdown-divider my-1" style={{ margin: '0.25rem 0' }}/>
+
+                  <button
+                    className="dropdown-item"
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.25rem',
+                      border: 'none',
+                      background: 'none',
+                      fontSize: '14px',
+                      cursor: isClosing ? 'not-allowed' : 'pointer',
+                      opacity: isClosing ? 0.5 : 1,
+                      color: '#dc3545'  // Red color for danger action
+                    }}
+                    disabled={isClosing}
+                    onClick={() => {
+                      setShowActionsDropdown(false);
+                      setTimeout(() => {
+                        setShowClosePositionModal(true);
+                      }, 100);
+                    }}
+                  >
+                    {isClosing ? "Closing Position..." : "Close Position"}
+                  </button>
+
+                  {(claimError || removeError || closeError || addError) && (
+                    <div className="alert alert-danger mt-2 mx-2 p-2 small" role="alert">
+                      {claimError || removeError || closeError || addError}
+                    </div>
+                  )}
+
+                  {(claimSuccess || removeSuccess || closeSuccess || addSuccess) && (
+                    <div className="alert alert-success mt-2 mx-2 p-2 small" role="alert">
+                      {claimSuccess ? "Successfully claimed fees!" :
+                      removeSuccess ? "Successfully removed liquidity!" :
+                      closeSuccess ? "Successfully closed position!" :
+                      "Successfully added liquidity!"}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -574,112 +817,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         </Card.Body>
       </Card>
 
-      {/* The Actions Modal - rendered completely outside the Card component */}
-      {!inVault && ReactDOM.createPortal(
-        <Modal
-          show={showActionsModal}
-          onHide={() => setShowActionsModal(false)}
-          size="sm"
-          centered
-          backdrop="static"
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>Position #{position.id} Actions</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <div className="d-grid gap-2">
-              <Button
-                variant={claimSuccess ? "success" : "primary"}
-                disabled={isClaiming || !uncollectedFees || feeLoadingError ||
-                        (uncollectedFees &&
-                          parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                          parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
-                onClick={claimFees}
-              >
-                {isClaiming ? (
-                  <>
-                    <Spinner
-                      as="span"
-                      animation="border"
-                      size="sm"
-                      role="status"
-                      aria-hidden="true"
-                      className="me-2"
-                    />
-                    Claiming...
-                  </>
-                ) : claimSuccess ? (
-                  <>✓ Fees Claimed</>
-                ) : feeLoadingError ? (
-                  <>Fee Data Unavailable</>
-                ) : (
-                  <>Claim Fees</>
-                )}
-              </Button>
-
-              <Button
-                variant="outline-primary"
-                disabled={isAdding}
-                onClick={() => {
-                  setShowActionsModal(false);
-                  setTimeout(() => {
-                    setShowAddLiquidityModal(true);
-                  }, 100);
-                }}
-              >
-                {isAdding ? "Adding..." : "Add Liquidity"}
-              </Button>
-
-              <Button
-                variant="outline-primary"
-                disabled={isRemoving || !tokenBalances || balanceError ||
-                        (tokenBalances &&
-                          parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                          parseFloat(tokenBalances.token1.formatted) < 0.0001)}
-                onClick={() => {
-                  setShowActionsModal(false);
-                  setTimeout(() => {
-                    setShowRemoveLiquidityModal(true);
-                  }, 100);
-                }}
-              >
-                {isRemoving ? "Removing..." : "Remove Liquidity"}
-              </Button>
-
-              <Button
-                variant="outline-danger"
-                disabled={isClosing}
-                onClick={() => {
-                  setShowActionsModal(false);
-                  setTimeout(() => {
-                    setShowClosePositionModal(true);
-                  }, 100);
-                }}
-              >
-                {isClosing ? "Closing..." : "Close Position"}
-              </Button>
-            </div>
-
-            {(claimError || removeError || closeError || addError) && (
-              <div className="alert alert-danger mt-2 p-2 small" role="alert">
-                {claimError || removeError || closeError || addError}
-              </div>
-            )}
-
-            {(claimSuccess || removeSuccess || closeSuccess || addSuccess) && (
-              <div className="alert alert-success mt-2 p-2 small" role="alert">
-                {claimSuccess ? "Successfully claimed fees!" :
-                 removeSuccess ? "Successfully removed liquidity!" :
-                 closeSuccess ? "Successfully closed position!" :
-                 "Successfully added liquidity!"}
-              </div>
-            )}
-          </Modal.Body>
-        </Modal>,
-        document.body
-      )}
-
-      {/* RemoveLiquidityModal - also rendered using portal */}
+      {/* RemoveLiquidityModal */}
       {!inVault && ReactDOM.createPortal(
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}
@@ -696,7 +834,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         document.body
       )}
 
-      {/* ClosePositionModal - also rendered using portal */}
+      {/* ClosePositionModal */}
       {!inVault && ReactDOM.createPortal(
         <ClosePositionModal
           show={showClosePositionModal}
@@ -714,7 +852,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         document.body
       )}
 
-      {/* AddLiquidityModal - also rendered using portal */}
+      {/* AddLiquidityModal */}
       {!inVault && ReactDOM.createPortal(
         <AddLiquidityModal
           show={showAddLiquidityModal}

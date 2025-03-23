@@ -7,7 +7,7 @@ const updateSlice = createSlice({
     lastUpdate: Date.now(),
     isUpdating: false,
     autoRefresh: {
-      enabled: true,
+      enabled: false,
       interval: 30000, // 30 seconds in milliseconds
       lastAutoRefresh: null
     },
