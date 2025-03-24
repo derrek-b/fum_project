@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col } from 'react-bootstrap';
+import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col, InputGroup } from 'react-bootstrap';
 import { useToast } from '../context/ToastContext';
 
 export default function RemoveLiquidityModal({
@@ -17,6 +17,7 @@ export default function RemoveLiquidityModal({
   const { showError } = useToast();
   // State for the percentage slider
   const [percentage, setPercentage] = useState(100);
+  const [slippageTolerance, setSlippageTolerance] = useState(0.5);
   const [estimatedBalances, setEstimatedBalances] = useState(null);
 
   // Calculate estimated token amounts based on percentage
@@ -83,7 +84,11 @@ export default function RemoveLiquidityModal({
         throw new Error("Invalid percentage value (must be between 1-100%)");
       }
 
-      onRemoveLiquidity(percentage);
+      if (slippageTolerance < 0.1 || slippageTolerance > 5) {
+        throw new Error("Slippage tolerance must be between 0.1% and 5%");
+      }
+
+      onRemoveLiquidity(percentage, slippageTolerance);
     } catch (error) {
       console.error("Error initiating liquidity removal:", error);
       showError(`Failed to remove liquidity: ${error.message}`);
@@ -167,6 +172,30 @@ export default function RemoveLiquidityModal({
                 <Badge bg="primary">{percentage}%</Badge>
               </Col>
             </Row>
+          </Form.Group>
+        </div>
+
+        {/* Add slippage tolerance input after the percentage slider */}
+        <div className="mb-4">
+          <h6 className="border-bottom pb-2">Slippage Tolerance</h6>
+          <Form.Group>
+            <InputGroup size="sm">
+              <Form.Control
+                type="number"
+                placeholder="Enter slippage tolerance"
+                value={slippageTolerance}
+                onChange={(e) => setSlippageTolerance(parseFloat(e.target.value) || 0.5)}
+                min="0.1"
+                max="5"
+                step="0.1"
+                required
+                disabled={isRemoving}
+              />
+              <InputGroup.Text>%</InputGroup.Text>
+            </InputGroup>
+            <Form.Text className="text-muted small">
+              Maximum allowed price change during transaction (0.1% to 5%)
+            </Form.Text>
           </Form.Group>
         </div>
 

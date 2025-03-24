@@ -534,9 +534,14 @@ async function main() {
     wallet
   );
 
+  // Get the current nonce
+  let currentNonce = await provider.getTransactionCount(wallet.address);
+  console.log(`Current nonce: ${currentNonce}`);
+
   // Deposit 5 ETH to get WETH
   const wrapTx = await wethContractWithABI.deposit({
-    value: ethers.parseEther('10')
+    value: ethers.parseEther('10'),
+    nonce: currentNonce++
   });
 
   console.log(`Wrap transaction sent: ${wrapTx.hash}`);
@@ -546,10 +551,16 @@ async function main() {
   // Step 2: Approve Uniswap router to spend our WETH
   const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router on Arbitrum
 
+  currentNonce = await provider.getTransactionCount(wallet.address);
+  console.log(`Nonce after previous transaction: ${currentNonce}`);
+
   console.log(`Approving Uniswap Router to spend WETH...`);
   const approveTx = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('5')
+    ethers.parseEther('5'),
+    {
+      nonce: currentNonce++
+    }
   );
 
   console.log(`Approve transaction sent: ${approveTx.hash}`);
@@ -580,7 +591,8 @@ async function main() {
     deadline: deadline,
     amountIn: ethers.parseEther('5'),
     amountOutMinimum: 0, // For testing, we accept any amount out (in production, set a min)
-    sqrtPriceLimitX96: 0 // No price limit
+    sqrtPriceLimitX96: 0,
+    nonce: currentNonce++
   });
 
   console.log(`Swap transaction sent: ${swapTx.hash}`);
@@ -828,31 +840,46 @@ async function main() {
     // Execute the actual minting process
     console.log('\n--- Executing Position Creation ---');
 
+    currentNonce = await provider.getTransactionCount(wallet.address);
+    console.log(`Nonce after previous transaction: ${currentNonce}`);
+
     // STEP 1: Approve the position manager to spend our WETH
     console.log(`Approving position manager to spend WETH...`);
     const approveWethTx = await wethContract.approve(
       positionManagerAddress,
-      position.amount0.quotient.toString()
+      position.amount0.quotient.toString(),
+      {
+        nonce: currentNonce++
+      }
     );
     console.log(`WETH approval transaction sent: ${approveWethTx.hash}`);
     await approveWethTx.wait();
     console.log(`WETH approval confirmed`);
 
+    currentNonce = await provider.getTransactionCount(wallet.address);
+    console.log(`Nonce after previous transaction: ${currentNonce}`);
+
     // STEP 2: Approve the position manager to spend our USDC
     console.log(`Approving position manager to spend USDC...`);
     const approveUsdcTx = await usdcContract.approve(
       positionManagerAddress,
-      position.amount1.quotient.toString()
+      position.amount1.quotient.toString(),
+      {
+        nonce: currentNonce++
+      }
     );
     console.log(`USDC approval transaction sent: ${approveUsdcTx.hash}`);
     await approveUsdcTx.wait();
     console.log(`USDC approval confirmed`);
 
+    currentNonce = await provider.getTransactionCount(wallet.address);
+    console.log(`Nonce after previous transaction: ${currentNonce}`);
+
     // STEP 3: Execute the mint transaction
     console.log(`Minting new liquidity position...`);
     const mintTx = await positionManager.mint(
       mintParams,
-      { gasLimit: 5000000 } // Adding gas limit for safety
+      { gasLimit: 5000000, nonce: currentNonce++ } // Adding gas limit for safety
     );
     console.log(`Mint transaction sent: ${mintTx.hash}`);
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Button, Spinner, Alert, Badge, Form } from 'react-bootstrap';
+import { Modal, Button, Spinner, Alert, Badge, Form, InputGroup } from 'react-bootstrap';
 import { formatFeeDisplay } from '../utils/formatHelpers';
 import { useToast } from '../context/ToastContext';
 
@@ -20,6 +20,9 @@ export default function ClosePositionModal({
 
   // State for burn option
   const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended
+
+  // Add state for slippage tolerance with default of 0.5%
+  const [slippageTolerance, setSlippageTolerance] = useState(0.5);
 
   // Calculate USD values
   const getUsdValue = (amount, tokenSymbol) => {
@@ -76,7 +79,13 @@ export default function ClosePositionModal({
         throw new Error("Position data is missing");
       }
 
-      onClosePosition(shouldBurn);
+      // Validate slippage tolerance
+      if (slippageTolerance < 0.1 || slippageTolerance > 5) {
+        throw new Error("Slippage tolerance must be between 0.1% and 5%");
+      }
+
+      // Pass both shouldBurn and slippageTolerance to the handler
+      onClosePosition(shouldBurn, slippageTolerance);
     } catch (error) {
       console.error("Error initiating position close:", error);
       showError(`Failed to close position: ${error.message}`);
@@ -201,6 +210,30 @@ export default function ClosePositionModal({
             </div>
           </div>
         )}
+
+        {/* Add slippage tolerance input */}
+        <div className="border-top pt-3 mt-3 mb-3">
+          <h6 className="mb-2">Slippage Tolerance</h6>
+          <Form.Group>
+            <InputGroup size="sm">
+              <Form.Control
+                type="number"
+                placeholder="Enter slippage tolerance"
+                value={slippageTolerance}
+                onChange={(e) => setSlippageTolerance(parseFloat(e.target.value) || 0.5)}
+                min="0.1"
+                max="5"
+                step="0.1"
+                required
+                disabled={isClosing}
+              />
+              <InputGroup.Text>%</InputGroup.Text>
+            </InputGroup>
+            <Form.Text className="text-muted small">
+              Maximum allowed price change during transaction (0.1% to 5%)
+            </Form.Text>
+          </Form.Group>
+        </div>
 
         {/* Burn Option */}
         <div className="border-top pt-3 mt-3">

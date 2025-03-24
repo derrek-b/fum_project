@@ -386,7 +386,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   };
 
   // Function to handle closing position
-  const handleClosePosition = async (shouldBurn) => {
+  const handleClosePosition = async (shouldBurn, slippageTolerance = 0.5) => {
     if (!adapter) {
       showErrorToastWithMessage("No adapter available for this position");
       return;
@@ -403,8 +403,9 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         poolData,
         token0Data,
         token1Data,
-        collectFees: true, // Collect fees as part of closing
+        collectFees: true, // Always collect fees when closing a position
         burnPosition: shouldBurn, // Whether to burn the position NFT
+        slippageTolerance, // Add slippage tolerance parameter
         dispatch,
         onStart: () => setIsClosing(true),
         onFinish: () => setIsClosing(false),
@@ -454,7 +455,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         onFinish: () => setIsAdding(false),
         onSuccess: (result) => {
           // Show success toast with transaction hash if available
-          const txHash = result?.receipt?.hash || result?.txHash;
+          const txHash = result?.tx?.hash;
           showSuccessToastWithMessage("Successfully added liquidity!", txHash);
           setShowAddLiquidityModal(false);
           dispatch(triggerUpdate()); // Refresh data
