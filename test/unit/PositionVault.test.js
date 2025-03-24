@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("PositionVault - 0.2.0", function() {
+describe("PositionVault - 0.2.1", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;

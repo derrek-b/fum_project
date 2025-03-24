@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Future changes that are not yet released will be added here
+### Added
+- BatchExecutor contract for atomically executing multiple transactions
+- Transaction data generator pattern in adapter layer
+- Support for batched transaction execution in PlatformAdapter base class
+- Separation of transaction data generation from execution in adapters
+
+## [0.2.1] - 2025-03-22
+### Changed
+- Enhanced error handling across the application
+- Improved input validation with detailed error messages
+- Added better transaction error reporting for UI
+
+### Added
+- Comprehensive error callbacks for all transaction methods
+- User-friendly error messages for common blockchain errors
+- Consistent error handling pattern across adapters
 
 ## [0.2.0] - 2025-03-21
 ### Changed

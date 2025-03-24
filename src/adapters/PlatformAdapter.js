@@ -59,6 +59,16 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Generate transaction data for claiming fees from a position
+   * @param {Object} params - Parameters for generating claim fees data
+   * @returns {Promise<Object>} Transaction data object with `to`, `data`, `value` properties
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
+   */
+  async generateClaimFeesData(params) {
+    throw new Error("generateClaimFeesData must be implemented by subclasses");
+  }
+
+  /**
    * Claim fees for a position
    * @param {Object} params - Parameters for claiming fees
    * @returns {Promise<Object>} - Transaction receipt
@@ -102,42 +112,4 @@ export default class PlatformAdapter {
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     throw new Error("calculateTokenAmounts must be implemented by subclasses");
   }
-
-  /**
-   * Close a position
-   * @param {Object} params - Parameters for closing the position
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async closePosition(params) {
-    throw new Error("closePosition must be implemented by subclasses");
-  }
-
-  /**
-   * Decrease liquidity for a position
-   * @param {Object} params - Parameters for decreasing liquidity
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async decreaseLiquidity(params) {
-    throw new Error("decreaseLiquidity must be implemented by subclasses");
-  }
-
-  /**
-   * Create a new liquidity position
-   * @param {Object} params - Parameters for creating a position
-   * @returns {Promise<Object>} - Transaction receipt and created position
-   */
-  async createPosition(params) {
-    throw new Error("createPosition must be implemented by subclasses");
-  }
-
-  /**
-   * Add liquidity to an existing position
-   * @param {Object} params - Parameters for adding liquidity
-   * @returns {Promise<Object>} - Transaction receipt and updated position
-   */
-  async addLiquidity(params) {
-    throw new Error("addLiquidity must be implemented by subclasses");
-  }
 }
-
-

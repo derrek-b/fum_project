@@ -18,7 +18,8 @@ const CONTRACTS_TO_EXTRACT = [
   'VaultFactory',
   'PositionVault',
   'MockPositionNFT',
-  'MockERC20'
+  'MockERC20',
+  'BatchExecutor'
 ];
 
 // Debug logging

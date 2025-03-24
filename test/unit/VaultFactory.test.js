@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("VaultFactory - 0.2.0", function() {
+describe("VaultFactory - 0.2.1", function() {
   let VaultFactory;
   let PositionVault;
   let factory;

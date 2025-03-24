@@ -18,6 +18,8 @@ const __dirname = path.dirname(__filename);
 const args = process.argv.slice(2);
 const networkArg = args.find(arg => arg.startsWith('--network='));
 const networkName = networkArg ? networkArg.split('=')[1] : 'localhost';
+const contractArg = args.find(arg => arg.startsWith('--contract='));
+const contractName = contractArg ? contractArg.split('=')[1] : 'all'; // Default to deploying all contracts
 
 // Get chainId from network name
 function getChainId(networkName) {
@@ -84,60 +86,116 @@ async function deploy() {
 
   // Load contract ABIs from contracts.json
   const contractsPath = path.join(__dirname, '../src/abis/contracts.json');
-  const contractsData = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
+  let contractsData;
 
-  // For deployment, we need bytecode - extract it once from your test environment
-  const bytecodePath = path.join(__dirname, '../bytecode/VaultFactory.bin');
-
-  if (!fs.existsSync(bytecodePath)) {
-    throw new Error(`Bytecode file not found at ${bytecodePath}. Please extract bytecode from your test environment first.`);
+  try {
+    contractsData = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
+  } catch (error) {
+    console.log("contracts.json not found or invalid, creating new file");
+    contractsData = {};
   }
 
-  const bytecode = '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
-  const abi = contractsData.VaultFactory.abi;
+  // Deployment results to track what was deployed
+  const deploymentResults = {};
 
-  // Deploy the contract
-  console.log('Deploying VaultFactory...');
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+  // Define a function to deploy a single contract
+  const deployContract = async (contractName) => {
+    console.log(`\nDeploying ${contractName}...`);
 
-  // Deploy using the wallet address as the owner parameter
-  const contract = await factory.deploy(wallet.address);
-  console.log(`Transaction hash: ${contract.deploymentTransaction().hash}`);
+    // For deployment, we need bytecode - extract it from your test environment
+    const bytecodePath = path.join(__dirname, `../bytecode/${contractName}.bin`);
 
-  // Wait for deployment to complete
-  console.log('Waiting for deployment to be confirmed...');
-  await contract.deploymentTransaction().wait();
+    if (!fs.existsSync(bytecodePath)) {
+      throw new Error(`Bytecode file not found at ${bytecodePath}. Please extract bytecode from your test environment first.`);
+    }
 
-  const vaultFactoryAddress = await contract.getAddress();
-  console.log(`VaultFactory deployed to: ${vaultFactoryAddress}`);
+    const bytecode = '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
 
-  // Update contracts.json with the new address for this network
-  if (!contractsData.VaultFactory.addresses) {
-    contractsData.VaultFactory.addresses = {};
+    // Look for existing ABI or create a minimal entry
+    let abi = [];
+    if (contractsData[contractName] && contractsData[contractName].abi) {
+      abi = contractsData[contractName].abi;
+    } else {
+      console.warn(`No ABI found for ${contractName}, using empty array`);
+      contractsData[contractName] = {
+        abi: [],
+        addresses: {}
+      };
+    }
+
+    // Deploy the contract
+    const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+
+    // Check if the contract has constructor parameters
+    let contract;
+    if (contractName === "VaultFactory") {
+      // Deploy using the wallet address as the owner parameter
+      contract = await factory.deploy(wallet.address);
+    } else {
+      // No constructor parameters for other contracts
+      contract = await factory.deploy();
+    }
+
+    console.log(`Transaction hash: ${contract.deploymentTransaction().hash}`);
+
+    // Wait for deployment to complete
+    console.log('Waiting for deployment to be confirmed...');
+    await contract.deploymentTransaction().wait();
+
+    const contractAddress = await contract.getAddress();
+    console.log(`${contractName} deployed to: ${contractAddress}`);
+
+    // Update contracts.json with the new address for this network
+    if (!contractsData[contractName]) {
+      contractsData[contractName] = {
+        abi: abi,
+        addresses: {}
+      };
+    }
+
+    if (!contractsData[contractName].addresses) {
+      contractsData[contractName].addresses = {};
+    }
+
+    contractsData[contractName].addresses[chainId] = contractAddress;
+
+    // Save results for deployment info
+    deploymentResults[contractName] = contractAddress;
+
+    return contractAddress;
+  };
+
+  // Determine which contracts to deploy
+  let contractsToDeploy = [];
+  if (contractName === 'all') {
+    // Deploy all contracts
+    contractsToDeploy = ['BatchExecutor', 'VaultFactory'];
+  } else {
+    // Deploy only the specified contract
+    contractsToDeploy = [contractName];
   }
-  contractsData.VaultFactory.addresses[chainId] = vaultFactoryAddress;
+
+  // Deploy each contract
+  for (const contract of contractsToDeploy) {
+    await deployContract(contract);
+  }
+
+  // Update contracts.json with all deployed addresses
   fs.writeFileSync(contractsPath, JSON.stringify(contractsData, null, 2));
-  console.log(`Updated contracts.json with new address for network ${chainId}`);
+  console.log(`Updated contracts.json with new addresses for network ${chainId}`);
 
   // Save deployment info to deployments directory
   const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
   const deploymentInfo = {
-    version: "0.2.0",
+    version: "0.2.1",
     timestamp,
     network: {
       name: networkConfig.name,
       chainId
     },
-    contracts: {
-      VaultFactory: vaultFactoryAddress
-    },
+    contracts: deploymentResults,
     deployer: wallet.address
   };
-
-  if(chainId === 1337) {
-    console.log('No deployments log for localhost')
-    return
-  }
 
   console.log('Saving deployment info...')
 
@@ -147,6 +205,11 @@ async function deploy() {
     fs.mkdirSync(deploymentsDir, { recursive: true });
   }
 
+  if(chainId !== 1337) {// Save deployment info
+    const deploymentPath = path.join(deploymentsDir, `${chainId}-${timestamp}.json`);
+    fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
+    return
+  }
   // Save deployment info
   const deploymentPath = path.join(deploymentsDir, `${chainId}-${timestamp}.json`);
   fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));

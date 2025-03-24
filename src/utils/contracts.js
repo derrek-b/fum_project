@@ -6,7 +6,7 @@ import contractData from '../abis/contracts.json';
 
 /**
  * Gets the contract factory for a contract, using the appropriate address for the current network
- * @param {string} contractName - Name of the contract (e.g., "VaultFactory" or "PositionVault")
+ * @param {string} contractName - Name of the contract (e.g., "VaultFactory", "PositionVault", or "BatchExecutor")
  * @param {ethers.JsonRpcProvider} provider - Ethers provider
  * @param {ethers.Signer} [signer] - Optional signer for write operations
  * @returns {ethers.Contract} The contract instance
@@ -70,12 +70,31 @@ export function getVaultFactory(provider, signer) {
 }
 
 /**
+ * Gets the BatchExecutor contract for the current network
+ * @param {ethers.JsonRpcProvider} provider - Ethers provider
+ * @param {ethers.Signer} [signer] - Optional signer for write operations
+ * @returns {ethers.Contract} The BatchExecutor contract instance
+ */
+export function getBatchExecutor(provider, signer) {
+  return getContract('BatchExecutor', provider, signer);
+}
+
+/**
  * Gets the address of the VaultFactory for a specific network
  * @param {number|string} chainId - Chain ID of the network
  * @returns {string|null} Address of the VaultFactory on the specified network, or null if not deployed
  */
 export function getVaultFactoryAddress(chainId) {
   return contractData.VaultFactory.addresses?.[chainId.toString()] || null;
+}
+
+/**
+ * Gets the address of the BatchExecutor for a specific network
+ * @param {number|string} chainId - Chain ID of the network
+ * @returns {string|null} Address of the BatchExecutor on the specified network, or null if not deployed
+ */
+export function getBatchExecutorAddress(chainId) {
+  return contractData.BatchExecutor.addresses?.[chainId.toString()] || null;
 }
 
 /**
@@ -172,4 +191,55 @@ export async function executeVaultTransactions(vaultAddress, transactions, signe
     });
 
   return executionEvents.map(event => event.success);
+}
+
+/**
+ * Executes a batch of transactions through the BatchExecutor
+ * @param {Array<{to: string, data: string, value: string}>} transactions - Array of transactions to execute
+ * @param {ethers.Signer} signer - Signer for the transaction
+ * @returns {Promise<{successes: boolean[], results: string[]}>} Results of the batch execution
+ */
+export async function executeBatchTransactions(transactions, signer) {
+  const batchExecutor = getBatchExecutor(signer.provider, signer);
+
+  const targets = transactions.map(tx => tx.to);
+  const data = transactions.map(tx => tx.data);
+  const values = transactions.map(tx => tx.value || 0);
+
+  // Calculate total ETH value needed
+  const totalValue = values.reduce((sum, val) =>
+    sum + (typeof val === 'bigint' ? val : BigInt(val.toString())),
+    BigInt(0)
+  );
+
+  const tx = await batchExecutor.executeBatch(targets, data, values, {
+    value: totalValue
+  });
+
+  const receipt = await tx.wait();
+
+  // Parse events to get execution results
+  const executionEvents = receipt.logs
+    .filter(log => {
+      try {
+        return batchExecutor.interface.parseLog(log)?.name === 'TransactionExecuted';
+      } catch (e) {
+        return false;
+      }
+    })
+    .map(log => {
+      const parsed = batchExecutor.interface.parseLog(log);
+      return {
+        target: parsed.args[0],
+        data: parsed.args[1],
+        success: parsed.args[2],
+        returnData: parsed.args[3]
+      };
+    });
+
+  // Return the successful transactions and their results
+  return {
+    successes: executionEvents.map(event => event.success),
+    results: executionEvents.map(event => event.returnData)
+  };
 }

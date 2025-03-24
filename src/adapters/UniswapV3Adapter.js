@@ -558,8 +558,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       return BigInt(0);
     };
 
-    console.log(token0, token1)
-
     // Position data extraction
     const tickLowerValue = Number(position.tickLower);
     const tickUpperValue = Number(position.tickUpper);
@@ -650,7 +648,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const token1Decimals = token1.decimals;
 
     // Return both raw and formatted values for flexibility
-    const returnTokens =  {
+    return {
       token0: {
         raw: uncollectedFees0Raw,
         // Convert to string for safer handling in UI
@@ -661,163 +659,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         formatted: formatUnits(uncollectedFees1Raw, token1Decimals)
       }
     };
-
-
-    console.log(returnTokens, returnTokens)
-
-    return returnTokens
-
-  }
-
-  /**
-   * Claim fees for a position
-   * @param {Object} params - Parameters for claiming fees
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async claimFees(params) {
-    const { position, provider, address, chainId, poolData, token0Data, token1Data, dispatch, onStart, onSuccess, onError, onFinish } = params;
-
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    onStart && onStart();
-
-    try {
-      // Dynamically get the positionManagerAddress
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Import necessary modules
-      const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
-      const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
-
-      // Create contract instance to get position data
-      const nftManager = new ethers.Contract(
-        positionManagerAddress,
-        nonfungiblePositionManagerABI.abi,
-        provider
-      );
-
-      // Get current position data directly from contract
-      const positionData = await nftManager.positions(position.id);
-
-      // Create Token instances for the SDK
-      const token0 = new Token(
-        chainId,
-        poolData.token0,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
-      );
-
-      const token1 = new Token(
-        chainId,
-        poolData.token1,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
-      );
-
-      // Create collectOptions object as per Uniswap docs
-      const collectOptions = {
-        tokenId: position.id,
-        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
-          token0,
-          positionData.tokensOwed0.toString()
-        ),
-        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
-          token1,
-          positionData.tokensOwed1.toString()
-        ),
-        recipient: address
-      };
-
-      // Use SDK to generate calldata and value
-      const { calldata, value } = NonfungiblePositionManager.collectCallParameters(collectOptions);
-
-      // Construct transaction
-      const transaction = {
-        data: calldata,
-        to: positionManagerAddress,
-        value: value,
-        from: address,
-        gasLimit: 300000
-      };
-
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      await tx.wait();
-
-      // IMPORTANT: After claiming fees, fetch the updated position data
-      try {
-        // Get the updated position directly from the contract
-        const updatedPositionData = await nftManager.positions(position.id);
-
-        // Create an updated position object that reflects the fee claim
-        const updatedPosition = {
-          ...position,
-          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
-          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
-          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
-        };
-
-        // Also get fresh pool data for fee calculation
-        const poolContract = new ethers.Contract(
-          position.poolAddress,
-          IUniswapV3PoolABI.abi,
-          provider
-        );
-
-        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
-        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
-
-        // Update the pool data with fresh fee growth values
-        const updatedPoolData = {
-          ...poolData,
-          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
-          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
-        };
-
-        if (dispatch) {
-          // Import the necessary actions
-          const { setPositions } = require('../redux/positionsSlice');
-          const { setPools } = require('../redux/poolSlice');
-          const { triggerUpdate } = require('../redux/updateSlice');
-
-          // This is passed to the component to update Redux
-          onSuccess && onSuccess({
-            success: true,
-            tx,
-            updatedPosition,
-            updatedPoolData
-          });
-
-          // Also trigger an update to refresh the UI
-          dispatch(triggerUpdate());
-        } else {
-          onSuccess && onSuccess({ success: true, tx });
-        }
-      } catch (updateError) {
-        console.error("Error fetching updated position data:", updateError);
-        // Still consider the claim successful even if the update fails
-        onSuccess && onSuccess({ success: true, tx });
-      }
-    } catch (error) {
-      console.error("Error claiming fees:", error);
-      onError && onError(error.message || "Unknown error");
-      return;
-    } finally {
-      onFinish && onFinish();
-    }
   }
 
   /**
@@ -827,7 +668,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} token0Data - Token0 data
    * @param {Object} token1Data - Token1 data
    * @param {number} chainId - Chain ID from the wallet
-   * @returns {Object} - Token amounts
+   * @returns {Promise<Object>} - Token amounts
    */
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     try {
@@ -902,846 +743,294 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Decrease liquidity for a position
-   * @param {Object} params - Parameters for decreasing liquidity
-   * @returns {Promise<Object>} - Transaction receipt
+   * Generate transaction data for claiming fees from a position
+   * @param {Object} params - Parameters for generating claim fees data
+   * @param {Object} params.position - Position object with ID and other properties
+   * @param {Object} params.provider - Ethers provider
+   * @param {string} params.address - User's wallet address
+   * @param {number} params.chainId - Chain ID
+   * @param {Object} params.poolData - Pool data for the position
+   * @param {Object} params.token0Data - Token0 data
+   * @param {Object} params.token1Data - Token1 data
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
-  async decreaseLiquidity(params) {
-    const {
-      position,
-      provider,
-      address,
-      chainId,
-      percentage = 100,
-      slippageTolerance = 0.5,
-      dispatch,
-      onStart,
-      onFinish,
-      onSuccess,
-      onError
-    } = params;
+  async generateClaimFeesData(params) {
+    const { position, provider, address, chainId, poolData, token0Data, token1Data } = params;
 
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
+    // Input validation
+    if (!position || !position.id) {
+      throw new Error("Invalid position data");
     }
 
-    onStart && onStart();
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (!address) {
+      throw new Error("Wallet address is required");
+    }
+
+    if (!chainId) {
+      throw new Error("Chain ID is required");
+    }
+
+    if (!poolData || !poolData.token0 || !poolData.token1) {
+      throw new Error("Invalid pool data");
+    }
+
+    if (!token0Data || !token0Data.decimals || !token0Data.symbol) {
+      throw new Error("Invalid token0 data");
+    }
+
+    if (!token1Data || !token1Data.decimals || !token1Data.symbol) {
+      throw new Error("Invalid token1 data");
+    }
 
     try {
-      // Get chain configuration
+      // Get position manager address from chain config
       const chainConfig = this.config.chains[chainId];
       if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-
       const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
 
-      // Get signer
-      const signer = await provider.getSigner();
+      // Import necessary modules
+      const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
+      const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
 
-      // Create contract instance for the position manager
-      const positionManager = new ethers.Contract(
+      // Create contract instance to get position data
+      const nftManager = new ethers.Contract(
         positionManagerAddress,
         nonfungiblePositionManagerABI.abi,
-        signer
+        provider
       );
 
-      // Calculate liquidity to remove based on percentage
-      const liquidityToRemove = percentage === 100
-        ? BigInt(position.liquidity.toString())
-        : BigInt(Math.floor(position.liquidity * percentage / 100)).toString();
-
-      console.log(`Decreasing ${percentage}% liquidity (${liquidityToRemove} of ${position.liquidity}) for position ${position.id}`);
-
-      // Only proceed if the position has liquidity
-      if (position.liquidity <= 0) {
-        throw new Error("Position has no liquidity to remove");
-      }
-
-      // Calculate minimum amounts based on current amounts and slippage tolerance
-      // This requires first getting the current amounts
-      const { token0Data, token1Data } = params;
-      let amount0Min, amount1Min;
-
-      try {
-        // Use the SDK to calculate expected amounts
-        const { Position, Pool } = require("@uniswap/v3-sdk");
-        const { Token } = require("@uniswap/sdk-core");
-
-        // Create Token objects
-        const token0 = new Token(
-          chainId,
-          token0Data.address,
-          token0Data.decimals,
-          token0Data.symbol,
-          token0Data.name || token0Data.symbol
-        );
-
-        const token1 = new Token(
-          chainId,
-          token1Data.address,
-          token1Data.decimals,
-          token1Data.symbol,
-          token1Data.name || token1Data.symbol
-        );
-
-        // Create Pool instance from position data
-        const poolData = params.poolData;
-        const pool = new Pool(
-          token0,
-          token1,
-          poolData.fee,
-          poolData.sqrtPriceX96,
-          poolData.liquidity,
-          poolData.tick
-        );
-
-        // Create Position instance
-        const positionInstance = new Position({
-          pool,
-          liquidity: liquidityToRemove.toString(),
-          tickLower: position.tickLower,
-          tickUpper: position.tickUpper
-        });
-
-        // Get expected amounts
-        const amount0 = positionInstance.amount0;
-        const amount1 = positionInstance.amount1;
-
-        // Apply slippage tolerance
-        const slippageFactor = 1 - slippageTolerance/100;
-        amount0Min = BigInt(Math.floor(Number(amount0.quotient.toString()) * slippageFactor));
-        amount1Min = BigInt(Math.floor(Number(amount1.quotient.toString()) * slippageFactor));
-
-        console.log(`Expected amounts: ${amount0.toSignificant(6)} ${token0.symbol}, ${amount1.toSignificant(6)} ${token1.symbol}`);
-        console.log(`Minimum amounts (with ${slippageTolerance}% slippage): ${amount0Min} ${token0.symbol}, ${amount1Min} ${token1.symbol}`);
-      } catch (error) {
-        // NO FALLBACKS - If we can't calculate minimum amounts, throw an error
-        console.error("Error calculating minimum amounts:", error);
-        throw new Error(`Failed to calculate minimum token amounts for safe removal: ${error.message}`);
-      }
-
-      // Create decreaseLiquidity parameters
-      const decreaseLiquidityParams = {
-        tokenId: position.id,
-        liquidity: liquidityToRemove.toString(),
-        amount0Min: amount0Min.toString(),
-        amount1Min: amount1Min.toString(),
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
-      };
-
-      // Execute liquidity decrease
-      const decreaseTx = await positionManager.decreaseLiquidity(decreaseLiquidityParams);
-      const decreaseReceipt = await decreaseTx.wait();
-      console.log(`Liquidity decreased for position ${position.id}`);
-
-      // After decreasing liquidity, we need to collect the tokens
-      // The issue is with this collect parameters
-      const collectTokensParams = {
-        tokenId: position.id,
-        recipient: address,
-        // FIXED: Use the right parameter names
-        amount0Max: BigInt("0xffffffffffffffffffffffffffffffff"),
-        amount1Max: BigInt("0xffffffffffffffffffffffffffffffff")
-      };
-
-      const collectTokensTx = await positionManager.collect(collectTokensParams);
-      const collectReceipt = await collectTokensTx.wait();
-      console.log(`Tokens collected for position ${position.id}`);
-
-      // Trigger update after successful transaction
-      if (dispatch) {
-        const { triggerUpdate } = require('../redux/updateSlice');
-        dispatch(triggerUpdate());
-      }
-
-      onSuccess && onSuccess({
-        decreaseReceipt,
-        collectReceipt,
-        percentage
-      });
-
-      return {
-        decreaseReceipt,
-        collectReceipt
-      };
-    } catch (error) {
-      console.error("Error decreasing liquidity:", error);
-      onError && onError(error.message || "Unknown error");
-      throw error;
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Close a position - removes liquidity and optionally burns the position NFT
-   * @param {Object} params - Parameters for closing the position
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async closePosition(params) {
-    const {
-      position,
-      provider,
-      address,
-      chainId,
-      collectFees = true,
-      burnPosition = true,
-      dispatch,
-      onStart,
-      onFinish,
-      onSuccess,
-      onError
-    } = params;
-
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    onStart && onStart();
-
-    try {
-      // Step 1: If requested, collect any uncollected fees
-      let feeReceipt = null;
-      if (collectFees) {
-        console.log(`Collecting fees for position ${position.id} before closing`);
-
-        try {
-          const feeResult = await this.claimFees({
-            position,
-            provider,
-            address,
-            chainId,
-            poolData: params.poolData,
-            token0Data: params.token0Data,
-            token1Data: params.token1Data,
-            dispatch
-          });
-
-          if (feeResult && feeResult.success) {
-            feeReceipt = feeResult;
-            console.log(`Fees collected for position ${position.id}`);
-          } else {
-            // If fee collection failed but we're still proceeding, log it clearly
-            console.warn("Fee collection failed but continuing with position closure");
-          }
-        } catch (error) {
-          // Don't silently continue - inform the user there was an error
-          console.error(`Error collecting fees: ${error.message}`);
-          throw new Error(`Fee collection failed: ${error.message}. Please try again or collect fees separately first.`);
-        }
-      }
-
-      // Step 2: Remove all liquidity using our decreaseLiquidity method
-      // This will fail properly if there's an issue - no fallbacks
-      const liquidityResult = await this.decreaseLiquidity({
-        position,
-        provider,
-        address,
-        chainId,
-        percentage: 100, // Remove all liquidity
-        poolData: params.poolData,
-        token0Data: params.token0Data,
-        token1Data: params.token1Data,
-        dispatch
-      });
-
-      console.log(`Liquidity removed for position ${position.id}`);
-
-      // Step 3: If requested, burn the position NFT
-      let burnReceipt = null;
-      if (burnPosition) {
-        console.log(`Burning position NFT ${position.id}`);
-
-        const positionManagerAddress = this.config.chains[chainId].platforms.uniswapV3.positionManagerAddress;
-        const signer = await provider.getSigner();
-        const positionManager = new ethers.Contract(
-          positionManagerAddress,
-          nonfungiblePositionManagerABI.abi,
-          signer
-        );
-
-        const burnTx = await positionManager.burn(position.id);
-        burnReceipt = await burnTx.wait();
-
-        console.log(`Position ${position.id} successfully burned. Transaction hash: ${burnReceipt.hash}`);
-      } else {
-        console.log(`Position ${position.id} closed (liquidity removed) but not burned as requested`);
-      }
-
-      // Trigger update after successful transaction
-      if (dispatch) {
-        const { triggerUpdate } = require('../redux/updateSlice');
-        dispatch(triggerUpdate());
-      }
-
-      onSuccess && onSuccess({
-        feeReceipt,
-        liquidityResult,
-        burnReceipt,
-        fullyBurned: burnPosition
-      });
-
-      return {
-        feeReceipt,
-        liquidityResult,
-        burnReceipt,
-        fullyBurned: burnPosition
-      };
-    } catch (error) {
-      console.error("Error closing position:", error);
-      onError && onError(error.message || "Unknown error");
-      throw error;
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Create a new liquidity position using proper Uniswap SDK calculations
-   * @param {Object} params - Parameters for creating a position
-   * @returns {Promise<Object>} - Transaction receipt and created position
-   */
-  async createPosition(params) {
-    const {
-      token0Address,
-      token1Address,
-      feeTier,
-      tickLower,
-      tickUpper,
-      token0Amount,
-      token1Amount,
-      slippageTolerance = 0.5, // Default 0.5%
-      provider,
-      address,
-      chainId,
-      dispatch,
-      onStart,
-      onFinish,
-      onSuccess,
-      onError
-    } = params;
-
-    // Parameter validation
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    onStart && onStart();
-
-    try {
-      // Get chain configuration
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-      console.log(`Position Manager Address: ${positionManagerAddress}`);
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Import required libraries from Uniswap SDK
-      const { Pool, Position } = require('@uniswap/v3-sdk');
-      const { Token, CurrencyAmount, Percent } = require('@uniswap/sdk-core');
-
-      // Create contract instances for tokens
-      const tokenABI = [
-        'function decimals() external view returns (uint8)',
-        'function symbol() external view returns (string)',
-        'function name() external view returns (string)',
-        'function approve(address spender, uint amount) external returns (bool)',
-        'function allowance(address owner, address spender) external view returns (uint)',
-        'function balanceOf(address owner) external view returns (uint)'
-      ];
-
-      const token0Contract = new ethers.Contract(token0Address, tokenABI, signer);
-      const token1Contract = new ethers.Contract(token1Address, tokenABI, signer);
-
-      // Get token details
-      const [
-        token0Decimals,
-        token0Symbol,
-        token0Name,
-        token0Balance,
-        token1Decimals,
-        token1Symbol,
-        token1Name,
-        token1Balance
-      ] = await Promise.all([
-        token0Contract.decimals(),
-        token0Contract.symbol(),
-        token0Contract.name(),
-        token0Contract.balanceOf(address),
-        token1Contract.decimals(),
-        token1Contract.symbol(),
-        token1Contract.name(),
-        token1Contract.balanceOf(address)
-      ]);
-
-      console.log(`Token0: ${token0Symbol} (${token0Address}), Decimals: ${token0Decimals}`);
-      console.log(`Token1: ${token1Symbol} (${token1Address}), Decimals: ${token1Decimals}`);
+      // Get current position data directly from contract
+      const positionData = await nftManager.positions(position.id);
 
       // Create Token instances for the SDK
       const token0 = new Token(
         chainId,
-        token0Address,
-        Number(token0Decimals),
-        token0Symbol,
-        token0Name
+        poolData.token0,
+        token0Data.decimals,
+        token0Data.symbol,
+        token0Data.name || token0Data.symbol
       );
 
       const token1 = new Token(
         chainId,
-        token1Address,
-        Number(token1Decimals),
-        token1Symbol,
-        token1Name
+        poolData.token1,
+        token1Data.decimals,
+        token1Data.symbol,
+        token1Data.name || token1Data.symbol
       );
 
-      // Check if token0 address is less than token1 address
-      const needSwap = token0Address.toLowerCase() > token1Address.toLowerCase();
-      console.log(`Token address order check - Need to swap? ${needSwap}`);
-
-      // Get properly ordered tokens
-      const sortedToken0 = needSwap ? token1 : token0;
-      const sortedToken1 = needSwap ? token0 : token1;
-      const sortedToken0Symbol = needSwap ? token1Symbol : token0Symbol;
-      const sortedToken1Symbol = needSwap ? token0Symbol : token1Symbol;
-
-      // Get pool information to check that the pool exists and get the current tick
-      const poolAddress = Pool.getAddress(sortedToken0, sortedToken1, feeTier);
-      console.log(`Calculated pool address: ${poolAddress}`);
-
-      // Create a pool contract to verify the pool exists and get data
-      const poolABI = [
-        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
-        'function liquidity() external view returns (uint128)',
-        'function tickSpacing() external view returns (int24)'
-      ];
-
-      const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
-
-      // Check if pool exists and get pool data
-      let slot0, liquidity, tickSpacing;
-      try {
-        [slot0, liquidity, tickSpacing] = await Promise.all([
-          poolContract.slot0(),
-          poolContract.liquidity(),
-          poolContract.tickSpacing()
-        ]);
-        console.log(`Pool exists at ${poolAddress}`);
-        console.log(`Current tick: ${Number(slot0.tick)}`);
-        console.log(`Tick spacing: ${Number(tickSpacing)}`);
-      } catch (error) {
-        console.error("Error fetching pool data:", error);
-        throw new Error(`Pool does not exist for ${token0Symbol}/${token1Symbol} with fee tier ${feeTier/10000}%. Please choose different tokens or fee tier.`);
-      }
-
-      // Ensure ticks are multiples of tickSpacing
-      const actualTickSpacing = Number(tickSpacing);
-
-      // Round tickLower down to the nearest multiple of tickSpacing
-      const adjustedTickLower = Math.floor(tickLower / actualTickSpacing) * actualTickSpacing;
-
-      // Round tickUpper up to the nearest multiple of tickSpacing
-      const adjustedTickUpper = Math.ceil(tickUpper / actualTickSpacing) * actualTickSpacing;
-
-      console.log(`Original ticks: [${tickLower}, ${tickUpper}]`);
-      console.log(`Adjusted ticks: [${adjustedTickLower}, ${adjustedTickUpper}]`);
-
-      // Create Pool instance
-      const pool = new Pool(
-        sortedToken0,
-        sortedToken1,
-        Number(feeTier),
-        slot0.sqrtPriceX96.toString(),
-        liquidity.toString(),
-        Number(slot0.tick)
-      );
-
-      // Parse the input amounts
-      const amount0Raw = token0Amount ? ethers.parseUnits(token0Amount, token0Decimals) : 0n;
-      const amount1Raw = token1Amount ? ethers.parseUnits(token1Amount, token1Decimals) : 0n;
-
-      console.log(`Input amounts: ${token0Amount} ${token0Symbol}, ${token1Amount} ${token1Symbol}`);
-
-      // Create the position
-      // We'll use one of two approaches depending on which token has a non-zero amount
-      let position;
-
-      // Convert to CurrencyAmount for the SDK
-      const token0CurrencyAmount = CurrencyAmount.fromRawAmount(
-        needSwap ? sortedToken1 : sortedToken0,
-        (needSwap ? amount1Raw : amount0Raw).toString()
-      );
-
-      const token1CurrencyAmount = CurrencyAmount.fromRawAmount(
-        needSwap ? sortedToken0 : sortedToken1,
-        (needSwap ? amount0Raw : amount1Raw).toString()
-      );
-
-      // Create position based on the non-zero amount
-      if ((needSwap ? amount1Raw : amount0Raw) > 0n) {
-        console.log(`Creating position using ${needSwap ? sortedToken1Symbol : sortedToken0Symbol} amount`);
-        position = Position.fromAmount0({
-          pool,
-          tickLower: adjustedTickLower,
-          tickUpper: adjustedTickUpper,
-          amount0: token0CurrencyAmount.quotient.toString(),
-          useFullPrecision: true
-        });
-      } else if ((needSwap ? amount0Raw : amount1Raw) > 0n) {
-        console.log(`Creating position using ${needSwap ? sortedToken0Symbol : sortedToken1Symbol} amount`);
-        position = Position.fromAmount1({
-          pool,
-          tickLower: adjustedTickLower,
-          tickUpper: adjustedTickUpper,
-          amount1: token1CurrencyAmount.quotient.toString(),
-          useFullPrecision: true
-        });
-      } else {
-        throw new Error("At least one token amount must be non-zero");
-      }
-
-      // Log calculated amounts
-      console.log("Position calculated by SDK:");
-      console.log(`- Liquidity: ${position.liquidity.toString()}`);
-      console.log(`- ${sortedToken0Symbol} amount: ${position.amount0.toSignificant(6)}`);
-      console.log(`- ${sortedToken1Symbol} amount: ${position.amount1.toSignificant(6)}`);
-
-      // Calculate minimum amounts with slippage tolerance
-      const slippageTolerancePercent = new Percent(Math.floor(slippageTolerance * 100), 10000);
-      const { amount0: amount0Min, amount1: amount1Min } = position.mintAmountsWithSlippage(slippageTolerancePercent);
-
-      console.log(`Minimum amounts with ${slippageTolerance}% slippage:`);
-      console.log(`- Min ${sortedToken0Symbol}: ${amount0Min.toString()}`);
-      console.log(`- Min ${sortedToken1Symbol}: ${amount1Min.toString()}`);
-
-      // Get desired amounts from position
-      const amount0Desired = position.amount0.quotient.toString();
-      const amount1Desired = position.amount1.quotient.toString();
-
-      // Approve tokens if needed
-      const approvalTxs = [];
-
-      // We need to use the original token contracts with the proper token order for approvals
-      if (BigInt(amount0Desired) > 0n) {
-        const sortedToken0Contract = new ethers.Contract(sortedToken0.address, tokenABI, signer);
-        const token0Allowance = await sortedToken0Contract.allowance(address, positionManagerAddress);
-
-        if (token0Allowance < BigInt(amount0Desired)) {
-          console.log(`Approving ${sortedToken0Symbol}...`);
-          const tx0 = await sortedToken0Contract.approve(positionManagerAddress, amount0Desired);
-          approvalTxs.push(tx0.wait());
-        } else {
-          console.log(`${sortedToken0Symbol} already has sufficient approval`);
-        }
-      }
-
-      if (BigInt(amount1Desired) > 0n) {
-        const sortedToken1Contract = new ethers.Contract(sortedToken1.address, tokenABI, signer);
-        const token1Allowance = await sortedToken1Contract.allowance(address, positionManagerAddress);
-
-        if (token1Allowance < BigInt(amount1Desired)) {
-          console.log(`Approving ${sortedToken1Symbol}...`);
-          const tx1 = await sortedToken1Contract.approve(positionManagerAddress, amount1Desired);
-          approvalTxs.push(tx1.wait());
-        } else {
-          console.log(`${sortedToken1Symbol} already has sufficient approval`);
-        }
-      }
-
-      // Wait for all approvals to complete
-      if (approvalTxs.length > 0) {
-        await Promise.all(approvalTxs);
-        console.log("All token approvals completed");
-      }
-
-      // Create the position manager contract
-      const positionManager = new ethers.Contract(
-        positionManagerAddress,
-        nonfungiblePositionManagerABI.abi,
-        signer
-      );
-
-      // Create mint parameters
-      const mintParams = {
-        token0: sortedToken0.address,
-        token1: sortedToken1.address,
-        fee: feeTier,
-        tickLower: adjustedTickLower,
-        tickUpper: adjustedTickUpper,
-        amount0Desired: amount0Desired,
-        amount1Desired: amount1Desired,
-        amount0Min: amount0Min.toString(),
-        amount1Min: amount1Min.toString(),
-        recipient: address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes from now
+      // Create collectOptions object as per Uniswap docs
+      const collectOptions = {
+        tokenId: position.id,
+        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
+          token0,
+          positionData.tokensOwed0.toString()
+        ),
+        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
+          token1,
+          positionData.tokensOwed1.toString()
+        ),
+        recipient: address
       };
 
-      console.log("Creating position with parameters:", {
-        token0: sortedToken0Symbol,
-        token1: sortedToken1Symbol,
-        fee: feeTier,
-        tickLower: adjustedTickLower,
-        tickUpper: adjustedTickUpper,
-        amount0Desired: ethers.formatUnits(amount0Desired, sortedToken0.decimals),
-        amount1Desired: ethers.formatUnits(amount1Desired, sortedToken1.decimals),
-        amount0Min: ethers.formatUnits(amount0Min.toString(), sortedToken0.decimals),
-        amount1Min: ethers.formatUnits(amount1Min.toString(), sortedToken1.decimals)
-      });
+      // Use SDK to generate calldata and value
+      const { calldata, value } = NonfungiblePositionManager.collectCallParameters(collectOptions);
 
-      // Execute the mint transaction
-      console.log("Sending mint transaction...");
-      try {
-        const mintTx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
-        console.log("Transaction sent:", mintTx.hash);
-
-        const receipt = await mintTx.wait();
-        console.log("Position created!");
-
-        // Find the Transfer event to get the tokenId
-        const transferEvent = receipt.logs.find(log => {
-          try {
-            return log.topics.length === 4 &&
-                  log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-                  log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
-                  log.topics[2] === ethers.zeroPadValue(address.toLowerCase(), 32);
-          } catch (e) {
-            return false;
-          }
-        });
-
-        if (!transferEvent) {
-          throw new Error("Transfer event not found in transaction receipt");
-        }
-
-        // Extract tokenId from the event
-        const tokenId = ethers.toBigInt(transferEvent.topics[3]);
-        console.log(`Successfully minted position with ID: ${tokenId}`);
-
-        // Trigger update after successful creation
-        if (dispatch) {
-          const { triggerUpdate } = require('../redux/updateSlice');
-          dispatch(triggerUpdate());
-        }
-
-        onSuccess && onSuccess({
-          receipt,
-          tokenId: tokenId.toString(),
-          txHash: receipt.hash,
-          token0Symbol: needSwap ? token1Symbol : token0Symbol,
-          token1Symbol: needSwap ? token0Symbol : token1Symbol
-        });
-
-        return {
-          receipt,
-          tokenId: tokenId.toString(),
-          txHash: receipt.hash
-        };
-      } catch (error) {
-        console.error("Mint transaction failed with error:", error);
-
-        // Better error handling
-        if (error.message) {
-          if (error.message.includes("Price slippage check")) {
-            const detailedError = "Transaction failed due to price movement. Try increasing the slippage tolerance or try again.";
-            onError && onError(detailedError);
-          } else if (error.message.includes("insufficient funds")) {
-            onError && onError("Insufficient ETH for gas fees");
-          } else {
-            onError && onError(`Transaction failed: ${error.message}`);
-          }
-        } else {
-          onError && onError("Unknown error occurred");
-        }
-
-        throw error;
-      }
+      // Return transaction data
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value
+      };
     } catch (error) {
-      console.error("Error creating position:", error);
-      onError && onError(error.message || "Unknown error");
-      throw error;
-    } finally {
-      onFinish && onFinish();
+      console.error("Error generating claim fees data:", error);
+      throw new Error(`Failed to generate claim fees data: ${error.message}`);
     }
   }
 
   /**
-   * Add liquidity to an existing position
-   * @param {Object} params - Parameters for adding liquidity
-   * @returns {Promise<Object>} - Transaction receipt and updated position
+   * Claim fees for a position
+   * @param {Object} params - Parameters for claiming fees
+   * @param {Object} params.position - Position object with ID and other properties
+   * @param {Object} params.provider - Ethers provider
+   * @param {string} params.address - User's wallet address
+   * @param {number} params.chainId - Chain ID
+   * @param {Object} params.poolData - Pool data for the position
+   * @param {Object} params.token0Data - Token0 data
+   * @param {Object} params.token1Data - Token1 data
+   * @param {Function} params.dispatch - Redux dispatch function
+   * @param {Function} params.onStart - Callback function called when transaction starts
+   * @param {Function} params.onSuccess - Callback function called on successful transaction
+   * @param {Function} params.onError - Callback function called on error
+   * @param {Function} params.onFinish - Callback function called when process finishes
+   * @returns {Promise<Object>} Transaction receipt and updated data
    */
-  async addLiquidity(params) {
-  const {
-    position,
-    token0Amount,
-    token1Amount,
-    slippageTolerance = 0.5, // Default 0.5%
-    provider,
-    address,
-    chainId,
-    dispatch,
-    onStart,
-    onFinish,
-    onSuccess,
-    onError
-  } = params;
+  async claimFees(params) {
+    const { position, provider, address, chainId, poolData, token0Data, token1Data, dispatch, onStart, onSuccess, onError, onFinish } = params;
 
-  if (!provider || !address || !chainId) {
-    onError && onError("Wallet not connected");
-    return;
-  }
-
-  onStart && onStart();
-
-  try {
-    // Get chain configuration
-    const chainConfig = this.config.chains[chainId];
-    if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
-      throw new Error(`No configuration found for chainId: ${chainId}`);
+    // Input validation
+    if (!provider || !address || !chainId) {
+      onError && onError("Wallet not connected");
+      return;
     }
 
-    const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+    // Notify start of operation
+    onStart && onStart();
 
-    // Get signer
-    const signer = await provider.getSigner();
+    try {
+      // Generate transaction data
+      const txData = await this.generateClaimFeesData({
+        position,
+        provider,
+        address,
+        chainId,
+        poolData,
+        token0Data,
+        token1Data
+      });
 
-    // Create contract instances
-    const positionManager = new ethers.Contract(
-      positionManagerAddress,
-      nonfungiblePositionManagerABI.abi, // Use the full ABI from the imported JSON
-      signer
-    );
+      // Get signer
+      const signer = await provider.getSigner();
 
-    // Get position details
-    const positionInfo = await positionManager.positions(position.id);
+      // Construct transaction
+      const transaction = {
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        from: address,
+        gasLimit: 300000
+      };
 
-    // Create token contract instances
-    const tokenABI = [
-      'function decimals() external view returns (uint8)',
-      'function approve(address spender, uint amount) external returns (bool)',
-      'function allowance(address owner, address spender) external view returns (uint)'
-    ];
+      // Send transaction
+      const tx = await signer.sendTransaction(transaction);
+      const receipt = await tx.wait();
 
-    const token0Contract = new ethers.Contract(positionInfo.token0, tokenABI, signer);
-    const token1Contract = new ethers.Contract(positionInfo.token1, tokenABI, signer);
+      // IMPORTANT: Fetch updated position data after claiming fees
+      try {
+        // Get position manager address from chain config
+        const chainConfig = this.config.chains[chainId];
+        const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
 
-    // Get token decimals
-    const token0Decimals = await token0Contract.decimals();
-    const token1Decimals = await token1Contract.decimals();
+        // Create contract instances for fetching updated data
+        const nftManager = new ethers.Contract(
+          positionManagerAddress,
+          nonfungiblePositionManagerABI.abi,
+          provider
+        );
 
-    // Parse the amounts
-    const amount0Desired = token0Amount ? ethers.parseUnits(token0Amount, token0Decimals) : 0n;
-    const amount1Desired = token1Amount ? ethers.parseUnits(token1Amount, token1Decimals) : 0n;
+        const poolContract = new ethers.Contract(
+          position.poolAddress,
+          IUniswapV3PoolABI.abi,
+          provider
+        );
 
-    // Calculate slippage tolerance for minimum amounts
-    const slippageFactor = 1 - (slippageTolerance / 100);
-    const amount0Min = amount0Desired === 0n ? 0n : BigInt(Math.floor(Number(amount0Desired) * slippageFactor));
-    const amount1Min = amount1Desired === 0n ? 0n : BigInt(Math.floor(Number(amount1Desired) * slippageFactor));
+        // Get the updated position directly from the contract
+        const updatedPositionData = await nftManager.positions(position.id);
 
-    // Check token approvals and approve if needed
-    const approvalTxs = [];
+        // Create an updated position object that reflects the fee claim
+        const updatedPosition = {
+          ...position,
+          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
+          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
+          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
+        };
 
-    if (amount0Desired > 0n) {
-      const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
-      if (token0Allowance < amount0Desired) {
-        console.log("Approving token0...");
-        const tx0 = await token0Contract.approve(positionManagerAddress, amount0Desired);
-        approvalTxs.push(tx0.wait());
-      }
-    }
+        // Get fresh pool data for fee calculation
+        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
+        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
 
-    if (amount1Desired > 0n) {
-      const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
-      if (token1Allowance < amount1Desired) {
-        console.log("Approving token1...");
-        const tx1 = await token1Contract.approve(positionManagerAddress, amount1Desired);
-        approvalTxs.push(tx1.wait());
-      }
-    }
+        // Update the pool data with fresh fee growth values
+        const updatedPoolData = {
+          ...poolData,
+          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
+          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
+        };
 
-    // Wait for all approvals to complete
-    if (approvalTxs.length > 0) {
-      await Promise.all(approvalTxs);
-      console.log("Tokens approved");
-    }
+        // Update Redux state if dispatch function is provided
+        if (dispatch) {
+          // Import the necessary actions from Redux
+          const { setPositions } = require('../redux/positionsSlice');
+          const { setPools } = require('../redux/poolSlice');
+          const { triggerUpdate } = require('../redux/updateSlice');
 
-    // CRITICAL CHANGE: The increaseLiquidity function expects an array-like parameter, not an object
-    // Create the correct parameter format for increaseLiquidity
-    // This is the key fix: The contract expects this specific format
-    const increaseLiquidityParams = [
-      position.id,
-      amount0Desired.toString(),
-      amount1Desired.toString(),
-      amount0Min.toString(),
-      amount1Min.toString(),
-      Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
-    ];
+          try {
+            // Get positions from Redux store
+            const positions = require('../redux/store').store.getState().positions.positions;
 
-    console.log("Increasing liquidity for position", position.id, "with params:", increaseLiquidityParams);
+            // Update the specific position in the positions array
+            const updatedPositions = positions.map(p =>
+              p.id === position.id ? updatedPosition : p
+            );
 
-    // Send the transaction
-    const increaseTx = await positionManager.increaseLiquidity(increaseLiquidityParams, {
-      gasLimit: 5000000
-    });
+            // Update positions in Redux
+            dispatch(setPositions(updatedPositions));
 
-    console.log("Transaction sent:", increaseTx.hash);
-    const receipt = await increaseTx.wait();
-    console.log("Liquidity increased!");
+            // Update pool data in Redux
+            dispatch(setPools({ [position.poolAddress]: updatedPoolData }));
 
-    // Trigger update after successful addition
-    if (dispatch) {
-      const { triggerUpdate } = require('../redux/updateSlice');
-      dispatch(triggerUpdate());
-    }
+            // Trigger UI update
+            dispatch(triggerUpdate());
+          } catch (reduxError) {
+            console.error("Error updating Redux state:", reduxError);
+            // Continue with success callback even if Redux update fails
+          }
 
-    onSuccess && onSuccess({
-      receipt,
-      txHash: receipt.hash,
-      tokenId: position.id,
-      increased: true
-    });
-
-    return {
-      receipt,
-      txHash: receipt.hash,
-      tokenId: position.id
-    };
-
-  } catch (error) {
-    console.error("Error adding liquidity:", error);
-
-    // Try to extract more specific error information
-    let errorMessage = "Unknown error";
-
-    if (error.message) {
-      if (error.message.includes("insufficient funds")) {
-        errorMessage = "Insufficient ETH for transaction";
-      } else if (error.message.includes("price slippage check")) {
-        errorMessage = "Price slippage too high. Try increasing slippage tolerance.";
-      } else if (error.message.includes("execution reverted")) {
-        // Try to extract the revert reason
-        const revertMatch = error.message.match(/reason="([^"]+)"/);
-        if (revertMatch && revertMatch[1]) {
-          errorMessage = `Transaction reverted: ${revertMatch[1]}`;
+          // Call success callback with updated data
+          onSuccess && onSuccess({
+            success: true,
+            tx: receipt,
+            updatedPosition,
+            updatedPoolData
+          });
         } else {
-          errorMessage = "Transaction reverted by the contract";
+          // If no dispatch function provided, just call success callback
+          onSuccess && onSuccess({
+            success: true,
+            tx: receipt
+          });
+        }
+      } catch (updateError) {
+        console.error("Error fetching updated position data:", updateError);
+        // Still consider the claim successful even if the update fails
+        onSuccess && onSuccess({
+          success: true,
+          tx: receipt,
+          warning: "Position was updated but failed to fetch new data"
+        });
+      }
+    } catch (error) {
+      console.error("Error claiming fees:", error);
+
+      // Provide more detailed error information based on error code
+      let errorMessage = "Unknown error";
+
+      if (error.code) {
+        // Handle ethers/provider specific error codes
+        switch(error.code) {
+          case 4001:
+            errorMessage = "Transaction rejected by user";
+            break;
+          case -32603:
+            errorMessage = "Internal JSON-RPC error";
+            break;
+          default:
+            errorMessage = error.message || `Error code: ${error.code}`;
         }
       } else {
-        errorMessage = error.message;
+        errorMessage = error.message || "Unknown error";
       }
-    }
 
-    onError && onError(errorMessage);
-    throw error;
-  } finally {
-    onFinish && onFinish();
+      onError && onError(errorMessage);
+    } finally {
+      onFinish && onFinish();
+    }
   }
-}
 }
