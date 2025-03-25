@@ -7,6 +7,7 @@ import Image from "next/image";
 import { AdapterFactory } from "../adapters";
 import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
 import { fetchTokenPrices } from "../utils/coingeckoUtils";
+import ClaimFeesModal from "./ClaimFeesModal";
 import RemoveLiquidityModal from "./RemoveLiquidityModal";
 import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
@@ -301,6 +302,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   }, [adapter, position, poolData, token0Data, token1Data]);
 
   // State for modals
+  const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
   const [showClosePositionModal, setShowClosePositionModal] = useState(false);
   const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
@@ -343,136 +345,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     });
   };
 
-  // Function to handle removing liquidity
-  const handleRemoveLiquidity = async (percentage) => {
-    if (!adapter) {
-      showErrorToastWithMessage("No adapter available for this position");
-      return;
-    }
-
-    setIsRemoving(true);
-
-    try {
-      await adapter.decreaseLiquidity({
-        position,
-        provider,
-        address,
-        chainId,
-        percentage,
-        poolData,
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsRemoving(true),
-        onFinish: () => setIsRemoving(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.decreaseReceipt?.hash || result?.collectReceipt?.hash;
-          showSuccessToastWithMessage(`Successfully removed ${percentage}% of liquidity!`, txHash);
-          setShowRemoveLiquidityModal(false);
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          showErrorToastWithMessage(errorMessage);
-          setShowRemoveLiquidityModal(false);
-          setIsRemoving(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error removing liquidity:", error);
-      showErrorToastWithMessage(error.message);
-      setIsRemoving(false);
-    }
-  };
-
-  // Function to handle closing position
-  const handleClosePosition = async (shouldBurn, slippageTolerance = 0.5) => {
-    if (!adapter) {
-      showErrorToastWithMessage("No adapter available for this position");
-      return;
-    }
-
-    setIsClosing(true);
-
-    try {
-      await adapter.closePosition({
-        position,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        collectFees: true, // Always collect fees when closing a position
-        burnPosition: shouldBurn, // Whether to burn the position NFT
-        slippageTolerance, // Add slippage tolerance parameter
-        dispatch,
-        onStart: () => setIsClosing(true),
-        onFinish: () => setIsClosing(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.burnReceipt?.hash || result?.liquidityResult?.decreaseReceipt?.hash;
-          showSuccessToastWithMessage("Successfully closed position!", txHash);
-          setShowClosePositionModal(false);
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          showErrorToastWithMessage(errorMessage);
-          setShowClosePositionModal(false);
-          setIsClosing(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error closing position:", error);
-      showErrorToastWithMessage(error.message);
-      setIsClosing(false);
-    }
-  };
-
-  // Function to handle adding liquidity
-  const handleAddLiquidity = async (params) => {
-    if (!adapter) {
-      showErrorToastWithMessage("No adapter available for this position");
-      return;
-    }
-
-    setIsAdding(true);
-
-    try {
-      await adapter.addLiquidity({
-        position,
-        token0Amount: params.token0Amount,
-        token1Amount: params.token1Amount,
-        slippageTolerance: params.slippageTolerance,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsAdding(true),
-        onFinish: () => setIsAdding(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.tx?.hash;
-          showSuccessToastWithMessage("Successfully added liquidity!", txHash);
-          setShowAddLiquidityModal(false);
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          showErrorToastWithMessage(errorMessage);
-          setShowAddLiquidityModal(false);
-          setIsAdding(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error adding liquidity:", error);
-      showErrorToastWithMessage(error.message);
-      setIsAdding(false);
-    }
-  };
-
   // Handle card click to navigate to detail page
   const handleCardClick = () => {
     router.push(`/position/${position.id}`);
@@ -507,9 +379,9 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         borderColor: "black", // Gold border
         // Multi-layered box shadow for a glowing effect
         boxShadow: `
-          0 0 7px rgba(255, 255, 255, 0.7),
-          0 0 10px rgba(255, 215, 0, 0.6),
-          0 0 21px rgba(255, 215, 0, 0.4)
+          0 0 7px rgba(163, 0, 0, 0.4),
+          0 0 10px rgba(163, 0, 0, 0.6),
+          0 0 21px rgba(255, 255, 255, 0.9)
         `,
         // Add subtle transition for hover effects
         transition: "all 0.2s ease-in-out"
@@ -616,7 +488,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                   size="sm"
                   onClick={() => router.push(`/position/${position.id}`)}
                   aria-label="Vault position details"
-                  title="Go to vault or details?"
+                  title="Go to vault"
                 >
                   <span role="img" aria-label="vault">🤖</span>
                 </Button>
@@ -629,6 +501,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                     setShowActionsDropdown(!showActionsDropdown);
                   }}
                   aria-label="Position actions"
+                  title="Position actions"
                 >
                   <span role="img" aria-label="menu">🔧</span>
                 </Button>
@@ -676,7 +549,12 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                         parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
                         parseFloat(uncollectedFees.token1.formatted) < 0.0001)
                       ? (e) => e.preventDefault()
-                      : claimFees}
+                      : () => {
+                          setShowActionsDropdown(false);
+                          setTimeout(() => {
+                            setShowClaimFeesModal(true);
+                          }, 100);
+                        }}
                     href="#"
                   >
                     Claim Fees
@@ -873,24 +751,37 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         </Toast>
       </ToastContainer>
 
-      {/* RemoveLiquidityModal */}
+      {/* ClaimFeesModal - for consistent fee claiming experience */}
       {!inVault && ReactDOM.createPortal(
-        <RemoveLiquidityModal
-          show={showRemoveLiquidityModal}
-          onHide={() => setShowRemoveLiquidityModal(false)}
+        <ClaimFeesModal
+          show={showClaimFeesModal}
+          onHide={() => setShowClaimFeesModal(false)}
           position={position}
-          tokenBalances={tokenBalances}
+          uncollectedFees={uncollectedFees}
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
-          isRemoving={isRemoving}
-          onRemoveLiquidity={handleRemoveLiquidity}
-          errorMessage={null} // No inline errors - using toasts now
+          poolData={poolData}
         />,
         document.body
       )}
 
-      {/* ClosePositionModal */}
+      {/* RemoveLiquidityModal */}
+      {!inVault && ReactDOM.createPortal(
+        <RemoveLiquidityModal
+        show={showRemoveLiquidityModal}
+        onHide={() => setShowRemoveLiquidityModal(false)}
+        position={position}
+        tokenBalances={tokenBalances}
+        token0Data={token0Data}
+        token1Data={token1Data}
+        tokenPrices={tokenPrices}
+        poolData={poolData}
+      />,
+      document.body
+      )}
+
+      {/* ClosePositionModal - refactored to handle the adapter calls directly */}
       {!inVault && ReactDOM.createPortal(
         <ClosePositionModal
           show={showClosePositionModal}
@@ -901,28 +792,23 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
-          isClosing={isClosing}
-          onClosePosition={handleClosePosition}
-          errorMessage={null} // No inline errors - using toasts now
+          poolData={poolData}
         />,
         document.body
       )}
 
-      {/* AddLiquidityModal */}
+      {/* AddLiquidityModal - refactored to handle the adapter calls directly */}
       {!inVault && ReactDOM.createPortal(
-        <AddLiquidityModal
-          show={showAddLiquidityModal}
-          onHide={() => setShowAddLiquidityModal(false)}
-          position={position}
-          poolData={poolData}
-          token0Data={token0Data}
-          token1Data={token1Data}
-          tokenPrices={tokenPrices}
-          isProcessing={isAdding}
-          onAddLiquidity={handleAddLiquidity}
-          errorMessage={null} // No inline errors - using toasts now
-        />,
-        document.body
+      <AddLiquidityModal
+        show={showAddLiquidityModal}
+        onHide={() => setShowAddLiquidityModal(false)}
+        position={position}
+        poolData={poolData}
+        token0Data={token0Data}
+        token1Data={token1Data}
+        tokenPrices={tokenPrices}
+      />,
+      document.body
       )}
     </>
   );

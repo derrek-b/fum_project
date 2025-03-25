@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
+import Image from "next/image";
 import Link from "next/link";
 import Head from "next/head";
 import { AdapterFactory } from "../../adapters";
@@ -11,13 +12,15 @@ import { fetchTokenPrices, calculateUsdValue } from "../../utils/coingeckoUtils"
 import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
 import RefreshControls from "../../components/RefreshControls";
+import AddLiquidityModal from "../../components/AddLiquidityModal";
 import RemoveLiquidityModal from "../../components/RemoveLiquidityModal";
 import ClosePositionModal from "../../components/ClosePositionModal";
-import AddLiquidityModal from "../../components/AddLiquidityModal";
+import ClaimFeesModal from "../../components/ClaimFeesModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
 import { useToast } from "../../context/ToastContext";
+import config from "../../utils/config";
 
 // Fallback component to show when an error occurs
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -82,15 +85,13 @@ export default function PositionDetailPage() {
     loading: false,
     error: null
   });
-  const [isClaiming, setIsClaiming] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-  const [actionError, setActionError] = useState(null);
-  const [actionSuccess, setActionSuccess] = useState(null);
-  const [showCloseModal, setShowCloseModal] = useState(false);
-  const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
+
+  // State for modals
+  const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
   const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
+  const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
+  const [showClosePositionModal, setShowClosePositionModal] = useState(false);
+
   const [forceUpdateCounter, setForceUpdateCounter] = useState(0);
 
   // Hacky way to force update since redux/state changes aren't triggering refresh
@@ -108,7 +109,7 @@ export default function PositionDetailPage() {
     }
   }, [positions, id, showError]);
 
-  // Get pool and token data for the position - DEFINE THESE BEFORE USING THEM
+  // Get pool and token data for the position
   const poolData = position ? pools[position.poolAddress] : null;
   const token0Data = poolData?.token0 ? tokens[poolData.token0] : null;
   const token1Data = poolData?.token1 ? tokens[poolData.token1] : null;
@@ -371,7 +372,7 @@ export default function PositionDetailPage() {
         showError("Error updating position data");
       }
     }
-  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, positions, showError]); // Remove positions from deps
+  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, positions, showError]);
 
   // Fetch fee data using the adapter
   useEffect(() => {
@@ -413,7 +414,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id, showError]); // Make sure lastUpdate is included here
+  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id, showError]);
 
   // Fetch token balances using the adapter
   useEffect(() => {
@@ -456,7 +457,7 @@ export default function PositionDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate, showError]); // Make sure lastUpdate is included here
+  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate, showError]);
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
@@ -515,213 +516,24 @@ export default function PositionDetailPage() {
     }
   };
 
-  // Function to claim fees using the adapter
-  const claimFees = async () => {
-    if (!adapter) {
-      setActionError("No adapter available for this position");
-      showError("No adapter available for this position");
-      return;
+  // Get the platform color directly from config
+  const getPlatformColor = () => {
+    if (position && position.platform && config.platformMetadata[position.platform]?.color) {
+      return config.platformMetadata[position.platform].color;
     }
-
-    setIsClaiming(true);
-    setActionError(null);
-    setActionSuccess(null);
-
-    try {
-      await adapter.claimFees({
-        position,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsClaiming(true),
-        onFinish: () => setIsClaiming(false),
-        onSuccess: (result) => {
-          setActionSuccess("Successfully claimed fees!");
-          showSuccess("Successfully claimed fees!");
-
-          // If we have updated position and pool data, update Redux
-          if (result.updatedPosition && result.updatedPoolData) {
-            try {
-              // Update the specific position in the positions array
-              const updatedPositions = positions.map(p => {
-                console.log('inside updatedPositions');
-                return p.id === position.id ? result.updatedPosition : p
-              });
-
-              // Update Redux store with the new data
-              dispatch(setPositions(updatedPositions));
-
-              // Create a pool data update object with just the updated pool
-              const poolUpdate = {
-                [position.poolAddress]: result.updatedPoolData
-              };
-              dispatch(setPools(poolUpdate));
-
-              // Force a re-fetch of uncollected fees with the updated data
-              setUncollectedFees(null);
-              setIsLoadingFees(true);
-            } catch (updateError) {
-              console.error("Error updating state after claiming fees:", updateError);
-            }
-          }
-        },
-        onError: (errorMessage) => {
-          setActionError(`Failed to claim fees: ${errorMessage}`);
-          showError(`Failed to claim fees: ${errorMessage}`);
-        }
-      });
-    } catch (error) {
-      console.error("Error claiming fees:", error);
-      setActionError(`Error claiming fees: ${error.message}`);
-      showError(`Error claiming fees: ${error.message}`);
-      setIsClaiming(false);
-    }
+    return '#6c757d'; // Default gray color
   };
 
-  // Add handler function for removing liquidity
-  const handleRemoveLiquidity = async (percentage) => {
-    if (!adapter) {
-      setActionError("No adapter available for this position");
-      showError("No adapter available for this position");
-      return;
+  // Get platform logo if available
+  const getPlatformLogo = () => {
+    if (position && position.platform && config.platformMetadata[position.platform]?.logo) {
+      return config.platformMetadata[position.platform].logo;
     }
-
-    setActionError(null);
-    setActionSuccess(null);
-    setIsRemoving(true);
-
-    try {
-      await adapter.decreaseLiquidity({
-        position,
-        provider,
-        address,
-        chainId,
-        percentage,
-        poolData,
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsRemoving(true),
-        onFinish: () => setIsRemoving(false),
-        onSuccess: (result) => {
-          setActionSuccess(`Successfully removed ${percentage}% of liquidity!`);
-          showSuccess(`Successfully removed ${percentage}% of liquidity!`);
-          setShowRemoveLiquidityModal(false);
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setActionError(`Failed to remove liquidity: ${errorMessage}`);
-          showError(`Failed to remove liquidity: ${errorMessage}`);
-          setShowRemoveLiquidityModal(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error removing liquidity:", error);
-      setActionError(`Error removing liquidity: ${error.message}`);
-      showError(`Error removing liquidity: ${error.message}`);
-      setIsRemoving(false);
-    }
+    return null;
   };
 
-  // Update handleClosePosition to accept the shouldBurn parameter
-  const handleClosePosition = async (shouldBurn) => {
-    if (!adapter) {
-      setActionError("No adapter available for this position");
-      showError("No adapter available for this position");
-      return;
-    }
-
-    setActionError(null);
-    setActionSuccess(null);
-    setIsClosing(true);
-
-    try {
-      await adapter.closePosition({
-        position,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        collectFees: true, // Collect fees as part of closing
-        burnPosition: shouldBurn, // Use the value from the modal
-        dispatch,
-        onStart: () => setIsClosing(true),
-        onFinish: () => setIsClosing(false),
-        onSuccess: () => {
-          setActionSuccess("Position successfully closed!");
-          showSuccess("Position successfully closed!");
-          setShowCloseModal(false);
-          // Navigate back to the main dashboard after a short delay
-          setTimeout(() => {
-            router.push('/');
-          }, 2000);
-        },
-        onError: (errorMessage) => {
-          setActionError(`Failed to close position: ${errorMessage}`);
-          showError(`Failed to close position: ${errorMessage}`);
-          setShowCloseModal(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error closing position:", error);
-      setActionError(`Error closing position: ${error.message}`);
-      showError(`Error closing position: ${error.message}`);
-      setIsClosing(false);
-    }
-  };
-
-  // Function to handle adding liquidity
-  const handleAddLiquidity = async (params) => {
-    if (!adapter) {
-      setActionError("No adapter available for this position");
-      showError("No adapter available for this position");
-      return;
-    }
-
-    setActionError(null);
-    setActionSuccess(null);
-    setIsAdding(true);
-
-    try {
-      await adapter.addLiquidity({
-        position,
-        token0Amount: params.token0Amount,
-        token1Amount: params.token1Amount,
-        slippageTolerance: params.slippageTolerance,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsAdding(true),
-        onFinish: () => setIsAdding(false),
-        onSuccess: () => {
-          setActionSuccess("Successfully added liquidity to position!");
-          showSuccess("Successfully added liquidity to position!");
-          setShowAddLiquidityModal(false);
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setActionError(`Failed to add liquidity: ${errorMessage}`);
-          showError(`Failed to add liquidity: ${errorMessage}`);
-          setShowAddLiquidityModal(false);
-        }
-      });
-    } catch (error) {
-      console.error("Error adding liquidity:", error);
-      setActionError(`Error adding liquidity: ${error.message}`);
-      showError(`Error adding liquidity: ${error.message}`);
-      setIsAdding(false);
-    }
-  };
+  // Check if platform has a logo
+  const hasPlatformLogo = !!getPlatformLogo();
 
   // If we're still loading the position or it doesn't exist
   if (!position || !poolData || !token0Data || !token1Data) {
@@ -777,8 +589,9 @@ export default function PositionDetailPage() {
           }}
         >
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <h1 className="mb-0">
-              Position #{position.id}
+            {/* Updated header to match PositionCard styling */}
+            <h1 className="mb-0 d-flex align-items-center">
+              {/* Activity indicator dot */}
               <span
                 style={{
                   display: 'inline-block',
@@ -786,15 +599,45 @@ export default function PositionDetailPage() {
                   height: '14px',
                   borderRadius: '50%',
                   backgroundColor: isActive ? '#28a745' : '#dc3545',
-                  marginLeft: '12px',
-                  marginRight: '8px'
+                  marginRight: '12px'
                 }}
                 title={isActive ? "In range" : "Out of range"}
               />
-              {position.platformName && (
-                <Badge bg="secondary" className="ms-2" style={{ fontSize: '0.7rem' }}>
-                  {position.platformName}
-                </Badge>
+
+              {/* Position ID */}
+              <span>Position #{position.id}</span>
+
+              {/* Platform indicator - logo or colored badge */}
+              {position.platform && (
+                hasPlatformLogo ? (
+                  <div
+                    className="ms-2 d-inline-flex align-items-center justify-content-center"
+                    style={{ height: '24px', width: '24px' }}
+                  >
+                    <Image
+                      src={getPlatformLogo()}
+                      alt={position.platformName || position.platform}
+                      width={24}
+                      height={24}
+                      title={position.platformName || position.platform}
+                    />
+                  </div>
+                ) : (
+                  <Badge
+                    className="ms-2 d-inline-flex align-items-center"
+                    pill
+                    bg=""
+                    style={{
+                      fontSize: '0.75rem',
+                      backgroundColor: getPlatformColor(),
+                      padding: '0.25em 0.8em',
+                      color: 'white',
+                      border: 'none'
+                    }}
+                  >
+                    {position.platformName}
+                  </Badge>
+                )
               )}
             </h1>
 
@@ -1021,25 +864,13 @@ export default function PositionDetailPage() {
                     <Button
                       variant="primary"
                       className="w-100 mb-3"
-                      disabled={isClaiming || feeLoadingError || !uncollectedFees ||
+                      disabled={feeLoadingError || !uncollectedFees ||
                                 (uncollectedFees &&
                                 parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
                                 parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
-                      onClick={claimFees}
+                      onClick={() => setShowClaimFeesModal(true)}
                     >
-                      {isClaiming ? (
-                        <>
-                          <Spinner
-                            as="span"
-                            animation="border"
-                            size="sm"
-                            role="status"
-                            aria-hidden="true"
-                            className="me-2"
-                          />
-                          Claiming...
-                        </>
-                      ) : "Claim Fees"}
+                      Claim Fees
                     </Button>
                   </div>
 
@@ -1048,18 +879,16 @@ export default function PositionDetailPage() {
                     <Button
                       variant="outline-primary"
                       className="w-100 mb-2"
-                      disabled={isAdding}
                       onClick={() => setShowAddLiquidityModal(true)}
                     >
-                      {isAdding ? "Processing..." : "Add Liquidity"}
+                      Add Liquidity
                     </Button>
                     <Button
                       variant="outline-primary"
                       className="w-100 mb-3"
-                      disabled={isRemoving}
                       onClick={() => setShowRemoveLiquidityModal(true)}
                     >
-                      {isRemoving ? "Processing..." : "Remove Liquidity"}
+                      Remove Liquidity
                     </Button>
                   </div>
 
@@ -1068,24 +897,11 @@ export default function PositionDetailPage() {
                     <Button
                       variant="outline-danger"
                       className="w-100"
-                      disabled={isClosing}
-                      onClick={() => setShowCloseModal(true)}
+                      onClick={() => setShowClosePositionModal(true)}
                     >
-                      {isClosing ? "Processing..." : "Close Position"}
+                      Close Position
                     </Button>
                   </div>
-
-                  {actionError && (
-                    <Alert variant="danger" className="mt-3 mb-0 p-2 small">
-                      {actionError}
-                    </Alert>
-                  )}
-
-                  {actionSuccess && (
-                    <Alert variant="success" className="mt-3 mb-0 p-2 small">
-                      {actionSuccess}
-                    </Alert>
-                  )}
                 </Card.Body>
               </Card>
 
@@ -1116,6 +932,18 @@ export default function PositionDetailPage() {
           </Row>
         </ErrorBoundary>
 
+        {/* Add the modals using our updated components */}
+        <ClaimFeesModal
+          show={showClaimFeesModal}
+          onHide={() => setShowClaimFeesModal(false)}
+          position={position}
+          uncollectedFees={uncollectedFees}
+          token0Data={token0Data}
+          token1Data={token1Data}
+          tokenPrices={tokenPrices}
+          poolData={poolData}
+        />
+
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}
           onHide={() => setShowRemoveLiquidityModal(false)}
@@ -1124,26 +952,19 @@ export default function PositionDetailPage() {
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
-          isRemoving={isRemoving}
-          onRemoveLiquidity={handleRemoveLiquidity}
-          errorMessage={actionError}
         />
 
         <ClosePositionModal
-          show={showCloseModal}
-          onHide={() => setShowCloseModal(false)}
+          show={showClosePositionModal}
+          onHide={() => setShowClosePositionModal(false)}
           position={position}
           tokenBalances={tokenBalances}
           uncollectedFees={uncollectedFees}
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
-          isClosing={isClosing}
-          onClosePosition={handleClosePosition}
-          errorMessage={actionError}
         />
 
-        {/* Add Liquidity Modal */}
         <AddLiquidityModal
           show={showAddLiquidityModal}
           onHide={() => setShowAddLiquidityModal(false)}
@@ -1152,9 +973,6 @@ export default function PositionDetailPage() {
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
-          isProcessing={isAdding}
-          onAddLiquidity={handleAddLiquidity}
-          errorMessage={actionError}
         />
       </Container>
     </>

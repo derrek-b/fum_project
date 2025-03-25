@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col, InputGroup } from 'react-bootstrap';
+import { useSelector, useDispatch } from 'react-redux';
 import { useToast } from '../context/ToastContext';
+import { AdapterFactory } from '../adapters';
+import { triggerUpdate } from '../redux/updateSlice';
 
 export default function RemoveLiquidityModal({
   show,
@@ -10,15 +13,21 @@ export default function RemoveLiquidityModal({
   token0Data,
   token1Data,
   tokenPrices,
-  isRemoving,
-  onRemoveLiquidity,
-  errorMessage
+  errorMessage,
+  poolData
 }) {
-  const { showError } = useToast();
+  const dispatch = useDispatch();
+  const { showError, showSuccess } = useToast();
+  const { address, chainId, provider } = useSelector(state => state.wallet);
+
   // State for the percentage slider
   const [percentage, setPercentage] = useState(100);
   const [slippageTolerance, setSlippageTolerance] = useState(0.5);
   const [estimatedBalances, setEstimatedBalances] = useState(null);
+
+  // State for operation status
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [operationError, setOperationError] = useState(null);
 
   // Calculate estimated token amounts based on percentage
   useEffect(() => {
@@ -73,6 +82,53 @@ export default function RemoveLiquidityModal({
     }
   };
 
+  // Function to remove liquidity using the adapter
+  const removeLiquidity = async (percentage, slippageTolerance) => {
+    // Get the appropriate adapter
+    const adapter = AdapterFactory.getAdapter(position.platform, provider);
+
+    if (!adapter) {
+      throw new Error("No adapter available for this position");
+    }
+
+    setIsRemoving(true);
+    setOperationError(null);
+
+    try {
+      await adapter.decreaseLiquidity({
+        position,
+        provider,
+        address,
+        chainId,
+        percentage,
+        poolData, // Will be fetched by the adapter if needed
+        token0Data,
+        token1Data,
+        dispatch,
+        slippageTolerance,
+        onStart: () => setIsRemoving(true),
+        onFinish: () => setIsRemoving(false),
+        onSuccess: (result) => {
+          // Show success toast with transaction hash if available
+          const txHash = result?.decreaseReceipt?.hash || result?.collectReceipt?.hash;
+          showSuccess(`Successfully removed ${percentage}% of liquidity!`, txHash);
+          onHide();
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setOperationError(errorMessage);
+          showError(errorMessage);
+          setIsRemoving(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error removing liquidity:", error);
+      setOperationError(error.message);
+      showError(error.message);
+      setIsRemoving(false);
+    }
+  };
+
   // Handle remove liquidity
   const handleRemove = () => {
     try {
@@ -88,7 +144,7 @@ export default function RemoveLiquidityModal({
         throw new Error("Slippage tolerance must be between 0.1% and 5%");
       }
 
-      onRemoveLiquidity(percentage, slippageTolerance);
+      removeLiquidity(percentage, slippageTolerance);
     } catch (error) {
       console.error("Error initiating liquidity removal:", error);
       showError(`Failed to remove liquidity: ${error.message}`);
@@ -101,6 +157,9 @@ export default function RemoveLiquidityModal({
       showError("Cannot close this window while the transaction is in progress");
       return;
     }
+    // Reset state
+    setOperationError(null);
+    setIsRemoving(false);
     onHide();
   };
 
@@ -243,8 +302,15 @@ export default function RemoveLiquidityModal({
           for this position.
         </Alert>
 
-        {/* Error Message */}
-        {errorMessage && (
+        {/* Operation Error Message */}
+        {operationError && (
+          <Alert variant="danger" className="mt-3 mb-0">
+            {operationError}
+          </Alert>
+        )}
+
+        {/* Legacy Error Message - for backward compatibility */}
+        {errorMessage && !operationError && (
           <Alert variant="danger" className="mt-3 mb-0">
             {errorMessage}
           </Alert>

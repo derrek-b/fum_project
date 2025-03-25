@@ -1,4 +1,4 @@
-// src/components/PositionContainer.js - Fixed version
+// src/components/PositionContainer.js - Updated version with modal adapter calls
 import React, { useEffect, useState, useRef } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
@@ -34,8 +34,6 @@ export default function PositionContainer() {
 
   // State for create position modal
   const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
-  const [isCreatingPosition, setIsCreatingPosition] = useState(false);
-  const [createPositionError, setCreatePositionError] = useState(null);
 
   // Set up auto-refresh timer
   useEffect(() => {
@@ -334,45 +332,6 @@ export default function PositionContainer() {
     fetchVaultPositions();
   }, [isConnected, address, provider, chainId, userVaults, lastUpdate, dispatch]);
 
-  // Handle create position
-  const handleCreatePosition = async (params) => {
-    setCreatePositionError(null);
-    setIsCreatingPosition(true);
-
-    try {
-      // Get adapter for the selected platform
-      const adapter = AdapterFactory.getAdapter(params.platformId, provider);
-
-      if (!adapter) {
-        throw new Error(`No adapter available for platform: ${params.platformId}`);
-      }
-
-      await adapter.createPosition({
-        ...params,
-        provider,
-        address,
-        chainId,
-        dispatch,
-        onStart: () => setIsCreatingPosition(true),
-        onFinish: () => setIsCreatingPosition(false),
-        onSuccess: (result) => {
-          setShowCreatePositionModal(false);
-          showSuccess(`Successfully created new ${params.platformId} position!`, result?.txHash);
-          dispatch(triggerUpdate()); // Refresh to show new position
-        },
-        onError: (errorMessage) => {
-          setCreatePositionError(`Failed to create position: ${errorMessage}`);
-          showError(`Failed to create position: ${errorMessage}`);
-        }
-      });
-    } catch (error) {
-      console.error("Error creating position:", error);
-      setCreatePositionError(`Error creating position: ${error.message}`);
-      showError(`Error creating position: ${error.message}`);
-      setIsCreatingPosition(false);
-    }
-  };
-
   // Filter active positions (with liquidity > 0)
   // Apply platform filter if selected
   const activePositions = positions
@@ -429,15 +388,9 @@ export default function PositionContainer() {
                 variant="outline-custom"
                 size="sm"
                 onClick={() => setShowCreatePositionModal(true)}
-                disabled={!isConnected || isCreatingPosition}
+                disabled={!isConnected}
               >
-                {isCreatingPosition ?
-                  <>
-                    <Spinner size="sm" animation="border" className="me-1" />
-                    Creating...
-                  </> :
-                  <>+ Create Position</>
-                }
+                + Create Position
               </Button>
             </div>
 
@@ -472,14 +425,11 @@ export default function PositionContainer() {
         </>
       )}
 
-      {/* Create Position Modal */}
+      {/* Create Position Modal - Updated to use the refactored AddLiquidityModal */}
       <AddLiquidityModal
         show={showCreatePositionModal}
         onHide={() => setShowCreatePositionModal(false)}
         position={null} // Null means we're creating a new position
-        isProcessing={isCreatingPosition}
-        onCreatePosition={handleCreatePosition}
-        errorMessage={createPositionError}
       />
     </div>
   );

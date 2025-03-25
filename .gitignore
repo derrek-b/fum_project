@@ -29,6 +29,7 @@
 *.pem
 /docs/LP_101.pdf
 /docs/SC_Dev_Plan.pdf
+ToDo
 
 # debug
 npm-debug.log*

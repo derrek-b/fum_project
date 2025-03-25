@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form, InputGroup } from 'react-bootstrap';
+import { useSelector, useDispatch } from 'react-redux';
 import { formatFeeDisplay } from '../utils/formatHelpers';
 import { useToast } from '../context/ToastContext';
+import { AdapterFactory } from '../adapters';
+import { triggerUpdate } from '../redux/updateSlice';
 
 export default function ClosePositionModal({
   show,
@@ -12,17 +15,22 @@ export default function ClosePositionModal({
   token0Data,
   token1Data,
   tokenPrices,
-  isClosing,
-  onClosePosition,
-  errorMessage
+  errorMessage,
+  poolData
 }) {
-  const { showError } = useToast();
+  const dispatch = useDispatch();
+  const { showError, showSuccess } = useToast();
+  const { address, chainId, provider } = useSelector(state => state.wallet);
 
   // State for burn option
   const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended
 
   // Add state for slippage tolerance with default of 0.5%
   const [slippageTolerance, setSlippageTolerance] = useState(0.5);
+
+  // State for operation status
+  const [isClosing, setIsClosing] = useState(false);
+  const [operationError, setOperationError] = useState(null);
 
   // Calculate USD values
   const getUsdValue = (amount, tokenSymbol) => {
@@ -72,6 +80,54 @@ export default function ClosePositionModal({
   const hasFees = uncollectedFees &&
     (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
 
+  // Function to close position using the adapter
+  const closePosition = async (shouldBurn, slippageTolerance) => {
+    // Get the appropriate adapter
+    const adapter = AdapterFactory.getAdapter(position.platform, provider);
+
+    if (!adapter) {
+      throw new Error("No adapter available for this position");
+    }
+
+    setIsClosing(true);
+    setOperationError(null);
+
+    try {
+      await adapter.closePosition({
+        position,
+        provider,
+        address,
+        chainId,
+        poolData, // Will be fetched by the adapter if needed
+        token0Data,
+        token1Data,
+        collectFees: true, // Always collect fees when closing a position
+        burnPosition: shouldBurn, // Whether to burn the position NFT
+        slippageTolerance, // Add slippage tolerance parameter
+        dispatch,
+        onStart: () => setIsClosing(true),
+        onFinish: () => setIsClosing(false),
+        onSuccess: (result) => {
+          // Show success toast with transaction hash if available
+          const txHash = result?.burnReceipt?.hash || result?.liquidityResult?.decreaseReceipt?.hash;
+          showSuccess("Successfully closed position!", txHash);
+          onHide();
+          dispatch(triggerUpdate()); // Refresh data
+        },
+        onError: (errorMessage) => {
+          setOperationError(errorMessage);
+          showError(errorMessage);
+          setIsClosing(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error closing position:", error);
+      setOperationError(error.message);
+      showError(error.message);
+      setIsClosing(false);
+    }
+  };
+
   // Handle the close position action
   const handleClosePosition = () => {
     try {
@@ -84,8 +140,8 @@ export default function ClosePositionModal({
         throw new Error("Slippage tolerance must be between 0.1% and 5%");
       }
 
-      // Pass both shouldBurn and slippageTolerance to the handler
-      onClosePosition(shouldBurn, slippageTolerance);
+      // Call the function that interacts with the adapter
+      closePosition(shouldBurn, slippageTolerance);
     } catch (error) {
       console.error("Error initiating position close:", error);
       showError(`Failed to close position: ${error.message}`);
@@ -98,6 +154,9 @@ export default function ClosePositionModal({
       showError("Cannot close this window while the transaction is in progress");
       return;
     }
+    // Reset state
+    setOperationError(null);
+    setIsClosing(false);
     onHide();
   };
 
@@ -251,8 +310,15 @@ export default function ClosePositionModal({
           </Form.Text>
         </div>
 
-        {/* Error Message */}
-        {errorMessage && (
+        {/* Operation Error Message */}
+        {operationError && (
+          <Alert variant="danger" className="mt-3 mb-0">
+            {operationError}
+          </Alert>
+        )}
+
+        {/* Legacy Error Message - for backward compatibility */}
+        {errorMessage && !operationError && (
           <Alert variant="danger" className="mt-3 mb-0">
             {errorMessage}
           </Alert>
