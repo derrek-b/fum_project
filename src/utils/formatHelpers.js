@@ -63,3 +63,36 @@ export function formatFeeDisplay(value) {
   if (numValue < 0.0001) return "< 0.0001";
   return numValue.toFixed(4).replace(/\.?0+$/, "");
 }
+
+/**
+ * Format a timestamp in a human-readable format
+ * @param {number} timestamp - Unix timestamp in milliseconds or seconds
+ * @returns {string} - Formatted date and time string
+ */
+export function formatTimestamp(timestamp) {
+  if (!timestamp) return "N/A";
+
+  // Convert to milliseconds if in seconds
+  const timestampMs = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+
+  try {
+    const date = new Date(timestampMs);
+
+    // Check if the date is valid
+    if (isNaN(date.getTime())) {
+      return "Invalid Date";
+    }
+
+    // Format: "Mar 25, 2023, 14:30"
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch (error) {
+    console.error("Error formatting timestamp:", error);
+    return "Error";
+  }
+}

@@ -551,7 +551,6 @@ async function main() {
   // Step 2: Approve Uniswap router to spend our WETH
   const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router on Arbitrum
 
-  currentNonce = await provider.getTransactionCount(wallet.address);
   console.log(`Nonce after previous transaction: ${currentNonce}`);
 
   console.log(`Approving Uniswap Router to spend WETH...`);
@@ -856,7 +855,6 @@ async function main() {
     await approveWethTx.wait();
     console.log(`WETH approval confirmed`);
 
-    currentNonce = await provider.getTransactionCount(wallet.address);
     console.log(`Nonce after previous transaction: ${currentNonce}`);
 
     // STEP 2: Approve the position manager to spend our USDC
@@ -872,7 +870,6 @@ async function main() {
     await approveUsdcTx.wait();
     console.log(`USDC approval confirmed`);
 
-    currentNonce = await provider.getTransactionCount(wallet.address);
     console.log(`Nonce after previous transaction: ${currentNonce}`);
 
     // STEP 3: Execute the mint transaction
