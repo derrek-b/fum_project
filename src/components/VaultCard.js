@@ -1,25 +1,19 @@
 // src/components/VaultCard.js
-import React, { useState, useEffect, useRef } from "react";
+import React from "react";
 import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
-import { useSelector, useDispatch } from "react-redux";
+import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
-import { useToast } from "../context/ToastContext";
-import { updateVaultMetrics } from "../redux/vaultsSlice";
 
 export default function VaultCard({ vault }) {
   const router = useRouter();
-  const dispatch = useDispatch();
-  const { showError } = useToast();
   const { address } = useSelector((state) => state.wallet);
-  const { positions } = useSelector((state) => state.positions);
-  const { vaultMetrics } = useSelector((state) => state.vaults);
   const { activeStrategies, strategyPerformance } = useSelector((state) => state.strategies);
 
-  // Get metrics for this vault
-  const metrics = vaultMetrics[vault.address] || { tvl: 0, positionCount: 0 };
+  // Use metrics directly from the vault object
+  const metrics = vault.metrics || { tvl: 0, positionCount: 0 };
 
-  // Filter positions that are in this vault
-  const vaultPositions = positions.filter(p => p.inVault && p.vaultAddress === vault.address);
+  // Get position count from the vault's positions array
+  const positionCount = vault.positions ? vault.positions.length : 0;
 
   // Get strategy information for this vault
   const vaultStrategy = activeStrategies?.[vault.address];
@@ -27,90 +21,6 @@ export default function VaultCard({ vault }) {
 
   // Format the creation time
   const formattedDate = new Date(vault.creationTime * 1000).toLocaleDateString();
-
-  // Calculate total value locked in the vault
-  const [calculatingTVL, setCalculatingTVL] = useState(false);
-
-  // Get token prices from the store
-  const { tokenPrices } = useSelector((state) => state.tokens);
-  const { poolData } = useSelector((state) => state.pools);
-
-  // Calculate total value locked
-  useEffect(() => {
-    const calculateVaultTVL = async () => {
-      // Don't recalculate if already calculating
-      if (calculatingTVL) return;
-
-      setCalculatingTVL(true);
-
-      try {
-        // Real TVL calculation using position data from the store
-        let totalTVL = 0;
-        let hasError = false;
-
-        // Iterate through vault positions to calculate TVL
-        for (const position of vaultPositions) {
-          try {
-            // Get position-related data
-            const pool = poolData[position.poolAddress];
-
-            if (!pool || !pool.token0 || !pool.token1) {
-              console.error(`Missing pool data for position ${position.id}`);
-              continue;
-            }
-
-            // Get token data for this position
-            const token0Price = tokenPrices[pool.token0];
-            const token1Price = tokenPrices[pool.token1];
-
-            if (!token0Price || !token1Price) {
-              console.error(`Missing price data for tokens in position ${position.id}`);
-              continue;
-            }
-
-            // Get token amounts for position (would use proper SDK calculations in production)
-            const token0Amount = parseFloat(position.amount0 || 0);
-            const token1Amount = parseFloat(position.amount1 || 0);
-
-            // Calculate value in USD
-            const value0USD = token0Amount * token0Price;
-            const value1USD = token1Amount * token1Price;
-            const positionValue = value0USD + value1USD;
-
-            // Add to total
-            totalTVL += isNaN(positionValue) ? 0 : positionValue;
-          } catch (positionError) {
-            console.error(`Error calculating value for position ${position.id}:`, positionError);
-            hasError = true;
-            continue;
-          }
-        }
-
-        // Only dispatch update if we have valid TVL
-        if (!hasError || totalTVL > 0) {
-          dispatch(updateVaultMetrics({
-            vaultAddress: vault.address,
-            metrics: {
-              tvl: totalTVL,
-              positionCount: vaultPositions.length,
-              lastCalculated: Date.now(),
-              hasPartialData: hasError
-            }
-          }));
-        }
-      } catch (error) {
-        console.error(`Error calculating TVL for vault ${vault.address}:`, error);
-        // Don't update metrics with invalid data
-      } finally {
-        setCalculatingTVL(false);
-      }
-    };
-
-    // Only calculate TVL if we have positions and required data
-    if (vaultPositions.length > 0 && tokenPrices && poolData) {
-      calculateVaultTVL();
-    }
-  }, [vault.address, vaultPositions, dispatch, tokenPrices, poolData, calculatingTVL]);
 
   // Handle card click to navigate to detail page
   const handleCardClick = () => {
@@ -158,15 +68,15 @@ export default function VaultCard({ vault }) {
           </div>
           <div>
             <small className="text-muted">Positions</small>
-            <div className="text-center">{vaultPositions.length}</div>
+            <div className="text-center">{positionCount}</div>
           </div>
           <div>
             <small className="text-muted">TVL</small>
             <div className="text-end">
-              {calculatingTVL ? (
+              {metrics.loading ? (
                 <Spinner animation="border" size="sm" />
               ) : metrics.tvl !== undefined ? (
-                `${metrics.tvl.toFixed(2)}`
+                `$${metrics.tvl.toFixed(2)}`
               ) : (
                 <span className="text-danger">N/A</span>
               )}

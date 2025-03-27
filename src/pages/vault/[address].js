@@ -1,5 +1,5 @@
 // src/pages/vault/[address].js
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table } from "react-bootstrap";
@@ -11,8 +11,7 @@ import PositionCard from "../../components/PositionCard";
 import StrategyConfigPanel from "../../components/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
-import { getVaultInfo, getVaultContract } from "../../utils/contracts";
-import { updateVault, updateVaultMetrics } from "../../redux/vaultsSlice";
+import { useVaultDetailData } from "../../hooks/useVaultDetailData";
 import { triggerUpdate } from "../../redux/updateSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
 
@@ -58,145 +57,33 @@ export default function VaultDetailPage() {
   const { showError, showSuccess } = useToast();
   const { address: vaultAddress } = router.query;
 
-  // Redux state
-  const { isConnected, address: userAddress, chainId, provider } = useSelector((state) => state.wallet);
-  const { userVaults, vaultMetrics } = useSelector((state) => state.vaults);
-  const { positions } = useSelector((state) => state.positions);
+  // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
 
+  // Use our custom hook for vault details
+  const { vault, vaultPositions, isLoading, isOwner, error, loadData } = useVaultDetailData(vaultAddress);
+
   // Component state
-  const [vault, setVault] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('positions');
-  const [isOwner, setIsOwner] = useState(false);
 
-  // Get vault data from userVaults
-  const vaultFromRedux = useMemo(() => {
-    if (!userVaults || !vaultAddress) return null;
-    return userVaults.find(v => v.address === vaultAddress);
-  }, [userVaults, vaultAddress]);
+  // Get strategy data from Redux
+  const strategyConfig = strategyConfigs?.[vaultAddress];
+  const strategyActive = activeStrategies?.[vaultAddress]?.isActive || false;
+  const performance = strategyPerformance?.[vaultAddress];
+  const history = executionHistory?.[vaultAddress] || [];
 
-  // Get vault positions
-  const vaultPositions = useMemo(() => {
-    if (!positions || !vaultAddress) return [];
-    return positions.filter(p => p.inVault && p.vaultAddress === vaultAddress);
-  }, [positions, vaultAddress]);
-
-  // Get vault metrics
-  const metrics = useMemo(() => {
-    if (!vaultMetrics || !vaultAddress) return { tvl: 0, positionCount: 0 };
-    return vaultMetrics[vaultAddress] || { tvl: 0, positionCount: 0 };
-  }, [vaultMetrics, vaultAddress]);
-
-  // Get strategy data
-  const strategyConfig = useMemo(() => {
-    if (!strategyConfigs || !vaultAddress) return null;
-    return strategyConfigs[vaultAddress];
-  }, [strategyConfigs, vaultAddress]);
-
-  const strategyActive = useMemo(() => {
-    if (!activeStrategies || !vaultAddress) return false;
-    return activeStrategies[vaultAddress]?.isActive || false;
-  }, [activeStrategies, vaultAddress]);
-
-  const performance = useMemo(() => {
-    if (!strategyPerformance || !vaultAddress) return null;
-    return strategyPerformance[vaultAddress];
-  }, [strategyPerformance, vaultAddress]);
-
-  const history = useMemo(() => {
-    if (!executionHistory || !vaultAddress) return [];
-    return executionHistory[vaultAddress] || [];
-  }, [executionHistory, vaultAddress]);
-
-  // Fetch vault data on mount - SPLIT INTO TWO EFFECTS TO AVOID LOOP
+  // Load data when component mounts or dependencies change
   useEffect(() => {
-    if (!vaultAddress || !provider) {
-      return;
+    if (vaultAddress) {
+      loadData();
     }
-
-    const fetchVaultData = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        // Fetch vault info from contracts
-        const vaultInfo = await getVaultInfo(vaultAddress, provider);
-
-        // Create vault object
-        const vaultData = {
-          address: vaultAddress,
-          ...vaultInfo
-        };
-
-        // Check if user is the owner
-        setIsOwner(userAddress && vaultInfo.owner && userAddress.toLowerCase() === vaultInfo.owner.toLowerCase());
-
-        // Update local state
-        setVault(vaultData);
-
-        // Update Redux if vault info changed
-        if (vaultFromRedux) {
-          // Check if we need to update
-          const needsUpdate =
-            vaultFromRedux.name !== vaultData.name ||
-            vaultFromRedux.owner !== vaultData.owner;
-
-          if (needsUpdate) {
-            dispatch(updateVault({
-              vaultAddress,
-              vaultData
-            }));
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching vault data:", err);
-        setError("Failed to load vault details: " + err.message);
-        showError("Error loading vault details");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchVaultData();
-  }, [vaultAddress, provider, vaultFromRedux, dispatch, userAddress, showError]);
-
-  // Separate effect for position count updates to avoid infinite loops
-  useEffect(() => {
-    if (!vaultAddress || !provider || !vault) {
-      return;
-    }
-
-    const updatePositionMetrics = () => {
-      try {
-        // Calculate metrics
-        const calculatedPositionCount = vaultPositions.length;
-
-        // Only update if the value is different from what's in Redux
-        // This prevents unnecessary updates that could cause loops
-        if (metrics.positionCount !== calculatedPositionCount) {
-          dispatch(updateVaultMetrics({
-            vaultAddress,
-            metrics: {
-              positionCount: calculatedPositionCount,
-              // Don't update other metrics that may be set elsewhere
-              lastCalculated: Date.now()
-            }
-          }));
-        }
-      } catch (err) {
-        console.error("Error updating position metrics:", err);
-      }
-    };
-
-    updatePositionMetrics();
-  }, [vaultAddress, vault, vaultPositions.length, dispatch]);
+  }, [vaultAddress, loadData]);
 
   // Handle refresh
   const handleRefresh = () => {
     try {
       dispatch(triggerUpdate());
+      loadData();
       showSuccess("Refreshing vault data...");
     } catch (error) {
       console.error("Error triggering refresh:", error);
@@ -206,7 +93,7 @@ export default function VaultDetailPage() {
 
   // Handle withdraw position from vault
   const handleWithdrawPosition = async (positionId) => {
-    if (!isOwner || !provider) {
+    if (!isOwner) {
       showError("Only the vault owner can withdraw positions");
       return;
     }
@@ -228,7 +115,7 @@ export default function VaultDetailPage() {
 
   // Handle strategy activation toggle
   const handleStrategyToggle = async (active) => {
-    if (!isOwner || !provider) {
+    if (!isOwner) {
       showError("Only the vault owner can control strategies");
       return;
     }
@@ -249,7 +136,7 @@ export default function VaultDetailPage() {
   };
 
   // If still loading
-  if (loading && !vault) {
+  if (isLoading && !vault) {
     return (
       <>
         <Navbar />
@@ -269,7 +156,7 @@ export default function VaultDetailPage() {
   }
 
   // If error or vault not found
-  if (!vault && !loading) {
+  if (!vault && !isLoading) {
     return (
       <>
         <Navbar />
@@ -340,10 +227,10 @@ export default function VaultDetailPage() {
                 </Col>
                 <Col md={4}>
                   <div className="mb-3">
-                    <strong>Positions:</strong> {metrics.positionCount || 0}
+                    <strong>Positions:</strong> {vaultPositions.length}
                   </div>
                   <div className="mb-3">
-                    <strong>Total Value Locked:</strong> ${metrics.tvl ? metrics.tvl.toFixed(2) : '0.00'}
+                    <strong>Total Value Locked:</strong> ${vault.metrics?.tvl ? vault.metrics.tvl.toFixed(2) : '0.00'}
                   </div>
                 </Col>
                 <Col md={4}>

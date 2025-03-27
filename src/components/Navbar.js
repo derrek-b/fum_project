@@ -15,15 +15,15 @@ export default function Navbar() {
   return (
     <BSNavbar bg="dark" variant="dark" expand="lg" className="mb-4">
       <Container>
-        <BSNavbar.Brand href="/">
+        <BSNavbar.Brand style={{ marginRight: "75px"}} href="/">
           <img
             src="/Logo.svg"
             alt="D-fied Logo"
-            width="30"
-            height="30"
+            width="50"
+            height="50"
             className="d-inline-block align-top"
-          />{" "}
-          -fied
+          />
+          <span style={{ fontSize: "30px"}}>-fied</span>
         </BSNavbar.Brand>
 
         <BSNavbar.Toggle aria-controls="main-navbar-nav" />

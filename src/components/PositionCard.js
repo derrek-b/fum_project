@@ -13,6 +13,7 @@ import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../redux/updateSlice";
 import config from "../utils/config";
+import Logo from "../../public/Logo.svg"
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
@@ -366,7 +367,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const getCardStyle = () => {
     const baseStyle = {
       backgroundColor: "#f5f5f5",
-      borderColor: "#a30000",
+      borderColor: "rgb(0, 128, 128)",
       cursor: "pointer"
     };
 
@@ -379,8 +380,8 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         borderColor: "black", // Gold border
         // Multi-layered box shadow for a glowing effect
         boxShadow: `
-          0 0 7px rgba(163, 0, 0, 0.4),
-          0 0 10px rgba(163, 0, 0, 0.6),
+          0 0 7px rgba(0, 128, 128, 0.4),
+          0 0 10px rgba(0, 128, 128, 0.6),
           0 0 21px rgba(255, 255, 255, 0.9)
         `,
         // Add subtle transition for hover effects
@@ -468,15 +469,13 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
               {/* Vault indicator with icon instead of badge */}
               {inVault && (
                 <div
-                  className="ms-2 d-inline-flex align-items-center justify-content-center"
+                  className="ms-2 d-inline-flex align-items-center pb-1"
                   title="Position is in a vault"
                 >
                   <span
-                    role="img"
-                    aria-label="vault"
-                    style={{ fontSize: '1rem' }}
+
                   >
-                    🏦
+                    <Image width={18} height={18} alt="Vault indicator" src={Logo} />
                   </span>
                 </div>
               )}
@@ -486,7 +485,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                 <Button
                   variant="outline-secondary"
                   size="sm"
-                  onClick={() => router.push(`/position/${position.id}`)}
+                  onClick={() => router.push(`/vault/${position.vaultAddress}`)}
                   aria-label="Vault position details"
                   title="Go to vault"
                 >

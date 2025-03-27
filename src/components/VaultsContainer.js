@@ -5,10 +5,11 @@ import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
-import { getUserVaults, getVaultInfo, createVault } from "../utils/contracts";
-import { setVaults, setLoadingVaults, setVaultError, addVault } from "../redux/vaultsSlice";
-import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../redux/updateSlice";
+import { createVault } from "../utils/contracts";
+import { addVault } from "../redux/vaultsSlice";
+import { triggerUpdate, markAutoRefresh } from "../redux/updateSlice";
 import { useToast } from "../context/ToastContext";
+import { useVaultData } from "../hooks/useVaultData";
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -41,9 +42,14 @@ function ErrorFallback({ error, resetErrorBoundary }) {
 export default function VaultsContainer() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
+
+  // Get wallet and update data from Redux
   const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
   const { userVaults, isLoadingVaults, vaultError } = useSelector((state) => state.vaults);
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
+
+  // Use our custom hook for loading vault data
+  const { isLoading, error, loadData } = useVaultData();
 
   // State for create vault modal
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false);
@@ -54,6 +60,14 @@ export default function VaultsContainer() {
   const lastRefreshTimeRef = useRef(Date.now());
   const timerRef = useRef(null);
 
+  // Load data when component mounts or dependencies change
+  useEffect(() => {
+    if (isConnected && address && provider && chainId) {
+      loadData();
+    }
+  // lastUpdate is the only value that should trigger a reload once connected
+  }, [isConnected, address, provider, chainId, lastUpdate, loadData]);
+
   // Set up auto-refresh timer for vaults
   useEffect(() => {
     // Clear any existing timer
@@ -61,7 +75,6 @@ export default function VaultsContainer() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-
 
     // Only set up timer if auto-refresh is enabled and we're connected
     if (autoRefresh.enabled && isConnected && provider && address && chainId) {
@@ -99,61 +112,6 @@ export default function VaultsContainer() {
     };
   }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch, showError]);
 
-  // Fetch vaults when wallet is connected or lastUpdate changes
-  useEffect(() => {
-    if (!isConnected || !address || !provider || !chainId) {
-      dispatch(setVaults([]));
-      return;
-    }
-
-    const fetchVaults = async () => {
-      dispatch(setLoadingVaults(true));
-      dispatch(setVaultError(null));
-      dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: true }));
-
-      try {
-        console.log("Fetching user vaults...");
-        // Get all vaults for the user
-        const vaultAddresses = await getUserVaults(address, provider);
-        console.log(`Found ${vaultAddresses.length} vault addresses for user ${address}`);
-
-        // For each vault, get detailed information
-        const vaultsWithInfo = await Promise.all(
-          vaultAddresses.map(async (vaultAddress) => {
-            try {
-              const info = await getVaultInfo(vaultAddress, provider);
-              return {
-                address: vaultAddress,
-                ...info
-              };
-            } catch (vaultError) {
-              console.error(`Error fetching info for vault ${vaultAddress}:`, vaultError);
-              // Return minimal info so we don't lose the vault completely
-              return {
-                address: vaultAddress,
-                name: "Unknown Vault",
-                creationTime: 0,
-                error: vaultError.message
-              };
-            }
-          })
-        );
-
-        dispatch(setVaults(vaultsWithInfo));
-        console.log(`Successfully loaded ${vaultsWithInfo.length} vaults`);
-      } catch (error) {
-        console.error("Error fetching user vaults:", error);
-        dispatch(setVaultError(`Failed to load vaults: ${error.message}`));
-        showError(`Failed to load your vaults: ${error.message}`);
-      } finally {
-        dispatch(setLoadingVaults(false));
-        dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: false }));
-      }
-    };
-
-    fetchVaults();
-  }, [isConnected, address, provider, chainId, lastUpdate, dispatch, showError]);
-
   // Handle vault creation
   const handleCreateVault = async (vaultName) => {
     setIsCreatingVault(true);
@@ -176,20 +134,11 @@ export default function VaultsContainer() {
       console.log(`Creating new vault: ${vaultName}`);
       const newVaultAddress = await createVault(vaultName, signer);
 
-      // Get vault info to add to state
-      const vaultInfo = await getVaultInfo(newVaultAddress, provider);
-      const newVault = {
-        address: newVaultAddress,
-        ...vaultInfo
-      };
+      // Use our hook to reload data which will fetch the new vault too
+      loadData();
 
-      // Add new vault to state
-      dispatch(addVault(newVault));
       showSuccess(`Successfully created vault: ${vaultName}`);
       setShowCreateVaultModal(false);
-
-      // Trigger a global refresh
-      dispatch(triggerUpdate());
     } catch (error) {
       console.error("Error creating vault:", error);
       setCreateVaultError(error.message);
@@ -202,6 +151,9 @@ export default function VaultsContainer() {
   // Get the refreshing state
   const isUpdatingVaults = resourcesUpdating?.vaults || false;
 
+  // Determine the overall loading state
+  const showLoading = isLoading || (isLoadingVaults && userVaults.length === 0);
+
   return (
     <div className="mb-5">
       <h2 className="mb-3">Your Vaults</h2>
@@ -209,22 +161,22 @@ export default function VaultsContainer() {
       <ErrorBoundary
         FallbackComponent={ErrorFallback}
         onReset={() => {
-          dispatch(triggerUpdate());
+          loadData();
         }}
       >
         {!isConnected ? (
           <Alert variant="info" className="text-center">
             Connect your wallet to view your vaults
           </Alert>
-        ) : isLoadingVaults && userVaults.length === 0 ? (
+        ) : showLoading ? (
           <div className="text-center py-4">
             <Spinner animation="border" variant="primary" role="status" />
             <p className="mt-3">Loading your vaults...</p>
           </div>
-        ) : vaultError && userVaults.length === 0 ? (
+        ) : error || (vaultError && userVaults.length === 0) ? (
           <Alert variant="danger">
             <Alert.Heading>Error Loading Vaults</Alert.Heading>
-            <p>{vaultError}</p>
+            <p>{error || vaultError}</p>
           </Alert>
         ) : userVaults.length === 0 ? (
           <Alert variant="warning" className="text-center">
