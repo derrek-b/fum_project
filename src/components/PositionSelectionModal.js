@@ -1,24 +1,68 @@
 // src/components/PositionSelectionModal.js
 import React, { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-bootstrap";
+import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../context/ToastContext";
+import config from "../utils/config";
+import { AdapterFactory } from "@/adapters";
 
 export default function PositionSelectionModal({
   show,
   onHide,
   vault,
+  pools,
+  tokens,
+  chainId,
   mode // 'add' or 'remove'
 }) {
   const { showError } = useToast();
   const dispatch = useDispatch();
+
+  // Get data from Redux store
   const { positions } = useSelector((state) => state.positions);
-  const { pools } = useSelector((state) => state.pools);
-  const { tokens } = useSelector((state) => state.tokens);
+  const { provider } = useSelector((state) => state.wallet.provider);
+  // const { pools = {} } = useSelector((state) => state.pools);
+  // const { tokens = {} } = useSelector((state) => state.tokens);
 
   // State for selected positions
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Check if we have the necessary data
+  const poolsLoaded = Object.keys(pools).length > 0;
+  const tokensLoaded = Object.keys(tokens).length > 0;
+
+  // Debug logs
+  useEffect(() => {
+    if (show) {
+      console.log("Modal opened with data:");
+      console.log(`- Total positions: ${positions.length}`);
+      console.log(`- Pools loaded: ${poolsLoaded} (${Object.keys(pools).length} pools)`);
+      console.log(`- Tokens loaded: ${tokensLoaded} (${Object.keys(tokens).length} tokens)`);
+
+      // Log some position details to help debug
+      const directWalletPositions = positions.filter(p => !p.inVault);
+      const vaultPositions = positions.filter(p => p.inVault && p.vaultAddress === vault.address);
+
+      console.log(`- Direct wallet positions: ${directWalletPositions.length}`);
+      console.log(`- Positions in this vault: ${vaultPositions.length}`);
+
+      // Check for pool addresses
+      const uniquePoolAddresses = new Set();
+      positions.forEach(pos => {
+        if (pos.poolAddress) uniquePoolAddresses.add(pos.poolAddress);
+      });
+      console.log(`- Unique pool addresses in positions: ${uniquePoolAddresses.size}`);
+
+      // Check which pools are missing
+      const missingPools = Array.from(uniquePoolAddresses).filter(addr => !pools[addr]);
+      if (missingPools.length > 0) {
+        console.warn(`- Missing ${missingPools.length} pools in the store`);
+        console.warn(`- First missing pool: ${missingPools[0]}`);
+      }
+    }
+  }, [show, positions, tokens, vault.address, poolsLoaded, tokensLoaded]);
 
   // Filter positions based on mode using useMemo to avoid unnecessary recalculations
   const filteredPositions = useMemo(() => {
@@ -48,15 +92,31 @@ export default function PositionSelectionModal({
     }
   }, [show, mode]);
 
-  // Log the state of positions when they change
+  // Log the state of pools and tokens when they change
   useEffect(() => {
     if (show) {
-      console.log(`Available positions for ${mode}:`, filteredPositions.length);
-      console.log(`Total positions in store: ${positions.length}`);
-    }
-  }, [show, filteredPositions.length, positions.length, mode]);
+      console.log(`Pools object available: ${!!pools}`);
+      if (pools) {
+        console.log(`Pool keys: ${Object.keys(pools).length}`);
+      }
 
-  // Handle checkbox change
+      console.log(`Tokens object available: ${!!tokens}`);
+      if (tokens) {
+        console.log(`Token keys: ${Object.keys(tokens).length}`);
+      }
+
+      // Check if any positions have pool addresses that don't exist in pools
+      const missingPools = positions
+        .filter(p => p.poolAddress && !pools[p.poolAddress])
+        .map(p => ({ id: p.id, poolAddress: p.poolAddress }));
+
+      if (missingPools.length > 0) {
+        console.warn('Positions with missing pool data:', missingPools);
+      }
+    }
+  }, [show, tokens, positions]);
+
+  // Handle position toggle
   const handlePositionToggle = (positionId) => {
     setSelectedPositions(prev => {
       if (prev.includes(positionId)) {
@@ -92,46 +152,50 @@ export default function PositionSelectionModal({
 
   // Get position details for display
   const getPositionDetails = (position) => {
-    try {
-      // First try to use the position's tokenPair if available
-      const defaultPair = position.tokenPair || 'Unknown Pair';
+    // Use position's tokenPair
+    const tokenPair = position.tokenPair;
 
-      // Try to get more detailed info from pool data
-      const poolData = pools[position.poolAddress];
-      if (!poolData) return { pair: defaultPair, isInRange: false };
+    // Fee tier from position
+    const feeTier = `${position.fee / 10000}%`;
 
-      const token0Data = tokens[poolData.token0];
-      const token1Data = tokens[poolData.token1];
+    // Get the platform color directly from config
+    const platformColor = position.platform && config.platformMetadata[position.platform]?.color
+                         ? config.platformMetadata[position.platform].color
+                         : '#6c757d';
 
-      // If we can't get token data, use what we have
-      if (!token0Data || !token1Data) return { pair: defaultPair, isInRange: false };
 
-      // Check if position is in range using the pool's current tick
-      let isInRange = false;
-      try {
-        if (poolData.tick !== undefined && poolData.tick !== null) {
-          // Basic calculation: position is in range if current tick is between tickLower and tickUpper
-          isInRange = poolData.tick >= position.tickLower && poolData.tick <= position.tickUpper;
-        }
-      } catch (rangeError) {
-        console.error(`Error calculating range status for position ${position.id}:`, rangeError);
-      }
+    // // If pool data isn't in the store yet
+    // if (!pools[position.poolAddress]) {
+    //   console.log(`Pool not found for position ${position.id}, address: ${position.poolAddress}`);
 
-      // Format the pair string from token symbols
-      const pairStr = token0Data.symbol && token1Data.symbol
-        ? `${token0Data.symbol}/${token1Data.symbol}`
-        : defaultPair;
+    //   token0 = { raw: 0n, formatted: "N/A" },
+    //   token1 = { raw: 0n, formatted: "N/A" }
 
-      // Return formatted details
-      return {
-        pair: pairStr,
-        feeTier: position.fee ? `${position.fee / 10000}%` : 'N/A',
-        isInRange
-      };
-    } catch (error) {
-      console.error(`Error getting details for position ${position.id}:`, error);
-      return { pair: position.tokenPair || 'Unknown Pair', isInRange: false };
-    }
+    //   return { pair: tokenPair, feeTier, platformColor, token0, token1 };
+    // } else {
+    //   const adapter = AdapterFactory.getAdapter(position.platform, provider)
+    //   const poolData = pools[position.poolAddress]
+
+    //   const token0Full = tokens[poolData.token0]
+    //   const token0Data = {
+    //     address: token0Full.address,
+    //     decimals: token0Full.decimals,
+    //     symbol: token0Full.symbol,
+    //     name: token0Full.name,
+    //   }
+
+    //   const token1Full = tokens[poolData.token1]
+    //   const token1Data = {
+    //     address: token1Full.address,
+    //     decimals: token1Full.decimals,
+    //     symbol: token1Full.symbol,
+    //     name: token1Full.name,
+    //   }
+
+    //   const { token0, token1 } = await adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
+    // }
+
+    return { pair: tokenPair, feeTier, platformColor };
   };
 
   return (
@@ -156,6 +220,12 @@ export default function PositionSelectionModal({
             : 'Select the positions you want to remove from this vault:'}
         </p>
 
+        {Object.keys(pools).length === 0 && (
+          <Alert variant="warning">
+            Loading pool data... Position details may be limited until data is loaded.
+          </Alert>
+        )}
+
         {positions.length === 0 ? (
           <Alert variant="warning">
             No positions found in the system. Please ensure your wallet is connected and you have positions.
@@ -169,7 +239,8 @@ export default function PositionSelectionModal({
         ) : (
           <ListGroup className="mb-3">
             {filteredPositions.map(position => {
-              const details = getPositionDetails(position);
+              const details =  getPositionDetails(position);
+
               return (
                 <ListGroup.Item
                   key={position.id}
@@ -188,14 +259,43 @@ export default function PositionSelectionModal({
                     onChange={() => handlePositionToggle(position.id)}
                     disabled={isProcessing}
                   />
-                  <div>
-                    <Badge bg={details.isInRange ? "success" : "danger"} className="me-2">
-                      {details.isInRange ? "In Range" : "Out of Range"}
-                    </Badge>
-                    {position.platform && (
-                      <Badge bg="info">{position.platformName || position.platform}</Badge>
-                    )}
-                  </div>
+                  {/* Conditional display of either logo or badge */}
+                  {position.platform && (
+                    config.platformMetadata[position.platform]?.logo ? (
+                      // Show logo if available
+                      <div
+                        className="ms-2 d-inline-flex align-items-center justify-content-center"
+                        style={{
+                          height: '20px',
+                          width: '20px'
+                        }}
+                      >
+                        <Image
+                          src={config.platformMetadata[position.platform].logo}
+                          alt={position.platformName || position.platform}
+                          width={40}
+                          height={40}
+                          title={position.platformName || position.platform}
+                        />
+                      </div>
+                    ) : (
+                      // Show colored badge if no logo - with explicit color override
+                      <Badge
+                        className="ms-2 d-inline-flex align-items-center"
+                        pill  // Add pill shape to match design
+                        bg="" // Important! Set this to empty string to prevent default bg color
+                        style={{
+                          fontSize: '0.75rem',
+                          backgroundColor: details.platformColor,
+                          padding: '0.25em 0.5em',
+                          color: 'white',
+                          border: 'none'
+                        }}
+                      >
+                        {position.platformName}
+                      </Badge>
+                    )
+                  )}
                 </ListGroup.Item>
               );
             })}

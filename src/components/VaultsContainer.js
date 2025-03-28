@@ -119,7 +119,11 @@ export default function VaultsContainer() {
                 result.positions.forEach(position => {
                   vaultPositionIds.push(position.id);
                   currentVaultPositions.push(position);
-                  vaultPositions.push(position);
+                  vaultPositions.push({
+                    ...position,
+                    inVault: true,
+                    vaultAddress: vault.address
+                  });
                 });
 
                 // Collect pool and token data
@@ -164,14 +168,23 @@ export default function VaultsContainer() {
             // Use getAllUserPositions instead of getNonVaultPositions
             // (assuming this method exists on the adapter)
             const result = await adapter.getPositions(address, chainId);
+            console.log('RESULT', result.poolData)
 
             if (result && result.positions && result.positions.length > 0) {
               console.log(`Found ${result.positions.length} total ${adapter.platformName} positions`);
 
               // Filter to only include positions not already in vaults
-              const nonVaultPositions = result.positions.filter(
+              let nonVaultPositions = result.positions.filter(
                 position => !vaultPositionIds.includes(position.id)
               );
+
+              nonVaultPositions = nonVaultPositions.map((pos) => {
+                return {
+                  ...pos,
+                  inVault: false,
+                  vaultAddress: null
+                }
+              })
 
               console.log(`${nonVaultPositions.length} positions are not in vaults`);
 
@@ -193,15 +206,13 @@ export default function VaultsContainer() {
           }
         }
 
+        console.log('ALL POOL DATA', allPoolData)
+
         // Update Redux with ALL positions (vault and non-vault)
         dispatch(setPositions(allPositions));
 
-        // Also specifically mark which positions are in vaults
-        if (vaultPositions.length > 0) {
-          dispatch(addVaultPositions({ positions: vaultPositions }));
-        }
-
         if (Object.keys(allPoolData).length > 0) {
+          console.log("DISPATCHING POOLS")
           dispatch(setPools(allPoolData));
         }
 
@@ -314,7 +325,7 @@ export default function VaultsContainer() {
             metrics: {
               tvl: totalTVL,
               hasPartialData,
-              lastTVLUpdate: Date.now()
+              lastTVLUpdate: Date.now() + 1
             }
           }));
         }
@@ -335,6 +346,10 @@ export default function VaultsContainer() {
     // Execute the data loading function
     loadData();
   }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
+
+
+
+  console.log(useSelector((state) => state.pools))
 
   // Handle vault creation
   const handleCreateVault = async (vaultName) => {

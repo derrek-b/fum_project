@@ -673,6 +673,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     try {
       if (!position || !poolData || !token0Data || !token1Data || !chainId) {
+        console.log('pos', position)
+        console.log('chain', chainId)
         throw new Error("Missing data for token amount calculation");
       }
 
