@@ -1,236 +1,464 @@
 // src/components/VaultsContainer.js
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
-import { ErrorBoundary } from "react-error-boundary";
+import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-bootstrap";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
-import { createVault } from "../utils/contracts";
-import { addVault } from "../redux/vaultsSlice";
-import { triggerUpdate, markAutoRefresh } from "../redux/updateSlice";
-import { useToast } from "../context/ToastContext";
-import { useVaultData } from "../hooks/useVaultData";
-
-// Error Fallback Component
-function ErrorFallback({ error, resetErrorBoundary }) {
-  const { showError } = useToast();
-
-  React.useEffect(() => {
-    console.error("Vaults error:", error);
-    showError("There was a problem loading your vaults. Please try again.");
-  }, [error, showError]);
-
-  return (
-    <Alert variant="danger" className="my-4">
-      <Alert.Heading>Error Loading Vaults</Alert.Heading>
-      <p>
-        We encountered an error while loading your vaults. Please try refreshing.
-      </p>
-      <hr />
-      <div className="d-flex justify-content-end">
-        <Button
-          variant="outline-danger"
-          onClick={resetErrorBoundary}
-        >
-          Try again
-        </Button>
-      </div>
-    </Alert>
-  );
-}
+import { createVault, getUserVaults, getVaultInfo } from "../utils/contracts";
+import { triggerUpdate } from "../redux/updateSlice";
+import { AdapterFactory } from '../adapters';
+import { setVaults, setLoadingVaults, setVaultError, updateVaultPositions, updateVaultMetrics } from '../redux/vaultsSlice';
+import { addVaultPositions, setPositions } from '../redux/positionsSlice';
+import { setPools } from '../redux/poolSlice';
+import { setTokens } from '../redux/tokensSlice';
+import { setResourceUpdating } from '../redux/updateSlice';
+import { fetchTokenPrices, calculateUsdValue } from '../utils/coingeckoUtils';
 
 export default function VaultsContainer() {
   const dispatch = useDispatch();
-  const { showError, showSuccess } = useToast();
 
-  // Get wallet and update data from Redux
+  // Redux state
   const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
-  const { userVaults, isLoadingVaults, vaultError } = useSelector((state) => state.vaults);
-  const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
+  const { userVaults } = useSelector((state) => state.vaults);
+  const { lastUpdate } = useSelector((state) => state.updates);
 
-  // Use our custom hook for loading vault data
-  const { isLoading, error, loadData } = useVaultData();
-
-  // State for create vault modal
+  // Local state
+  const [isLoading, setIsLoading] = useState(true);
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false);
   const [isCreatingVault, setIsCreatingVault] = useState(false);
   const [createVaultError, setCreateVaultError] = useState(null);
+  const [error, setError] = useState(null);
+  const [notifications, setNotifications] = useState([]);
 
-  // Track the last refresh time to prevent excessive updates
-  const lastRefreshTimeRef = useRef(Date.now());
-  const timerRef = useRef(null);
+  // Local notification handling
+  const addNotification = (message, variant = 'success') => {
+    const id = Date.now();
+    setNotifications(prev => [...prev, { id, message, variant }]);
 
-  // Load data when component mounts or dependencies change
+    // Auto-remove after 5 seconds without causing re-renders of the main component
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  const removeNotification = (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
+  // Load data effect
   useEffect(() => {
-    if (isConnected && address && provider && chainId) {
-      loadData();
-    }
-  // lastUpdate is the only value that should trigger a reload once connected
-  }, [isConnected, address, provider, chainId, lastUpdate, loadData]);
-
-  // Set up auto-refresh timer for vaults
-  useEffect(() => {
-    // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+    // Skip if not connected
+    if (!isConnected || !address || !provider || !chainId) {
+      setIsLoading(false);
+      return;
     }
 
-    // Only set up timer if auto-refresh is enabled and we're connected
-    if (autoRefresh.enabled && isConnected && provider && address && chainId) {
+    console.log("Starting vault data loading");
+    setIsLoading(true);
+    setError(null);
+
+    async function loadData() {
       try {
-        console.log(`Setting up vaults auto-refresh timer with interval: ${autoRefresh.interval}ms`);
-        timerRef.current = setInterval(() => {
-          const now = Date.now();
-          const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+        // 1. Load basic vault data
+        console.log("Fetching user vaults...");
+        dispatch(setLoadingVaults(true));
+        dispatch(setVaultError(null));
+        dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: true }));
 
-          // Enforce a minimum time between refreshes (5 seconds)
-          // This prevents rapid-fire updates that could cause loops
-          if (timeSinceLastRefresh >= 5000) {
-            console.log(`Vaults auto-refresh triggered at ${new Date(now).toISOString()}`);
-            lastRefreshTimeRef.current = now;
+        const vaultAddresses = await getUserVaults(address, provider);
+        console.log(`Found ${vaultAddresses.length} vault addresses`);
 
-            // Dispatch refresh actions
-            dispatch(markAutoRefresh());
-            dispatch(triggerUpdate(now));
-          } else {
-            console.log(`Skipping auto-refresh - too soon (${timeSinceLastRefresh}ms since last refresh)`);
+        // Get details for each vault
+        const vaultsWithInfo = await Promise.all(
+          vaultAddresses.map(async (vaultAddress) => {
+            try {
+              const info = await getVaultInfo(vaultAddress, provider);
+              return {
+                address: vaultAddress,
+                ...info,
+                positions: [],
+                metrics: { tvl: 0, positionCount: 0 }
+              };
+            } catch (error) {
+              console.error(`Error fetching vault info: ${error.message}`);
+              return {
+                address: vaultAddress,
+                name: "Unknown Vault",
+                creationTime: 0,
+                positions: [],
+                metrics: { tvl: 0, positionCount: 0 }
+              };
+            }
+          })
+        );
+
+        // Update Redux with vault info
+        dispatch(setVaults(vaultsWithInfo));
+
+        // 2. Fetch positions for each vault
+        const vaultPositions = [];
+        const allPoolData = {};
+        const allTokenData = {};
+        const positionsByVault = {};
+
+        const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+
+        for (const vault of vaultsWithInfo) {
+          console.log(`Fetching positions for vault: ${vault.address}`);
+
+          const vaultPositionIds = [];
+          const currentVaultPositions = [];
+
+          for (const adapter of adapters) {
+            try {
+              const result = await adapter.getPositions(vault.address, chainId);
+
+              if (result && result.positions && result.positions.length > 0) {
+                console.log(`Found ${result.positions.length} positions`);
+
+                result.positions.forEach(position => {
+                  vaultPositionIds.push(position.id);
+                  currentVaultPositions.push(position);
+                  vaultPositions.push(position);
+                });
+
+                // Collect pool and token data
+                if (result.poolData) {
+                  Object.assign(allPoolData, result.poolData);
+                }
+
+                if (result.tokenData) {
+                  Object.assign(allTokenData, result.tokenData);
+                }
+              }
+            } catch (error) {
+              console.error(`Error fetching positions: ${error.message}`);
+              // Continue with other adapters
+            }
           }
-        }, autoRefresh.interval);
+
+          // Store positions for this vault
+          if (vaultPositionIds.length > 0) {
+            dispatch(updateVaultPositions({
+              vaultAddress: vault.address,
+              positionIds: vaultPositionIds,
+              operation: 'replace'
+            }));
+
+            dispatch(updateVaultMetrics({
+              vaultAddress: vault.address,
+              metrics: { positionCount: vaultPositionIds.length }
+            }));
+
+            positionsByVault[vault.address] = currentVaultPositions;
+          }
+        }
+
+        // 3. Fetch ALL positions (including non-vault positions)
+        console.log("Fetching all positions including non-vault positions");
+        const allPositions = [...vaultPositions]; // Start with vault positions
+        const vaultPositionIds = vaultPositions.map(pos => pos.id);
+
+        for (const adapter of adapters) {
+          try {
+            // Use getAllUserPositions instead of getNonVaultPositions
+            // (assuming this method exists on the adapter)
+            const result = await adapter.getPositions(address, chainId);
+
+            if (result && result.positions && result.positions.length > 0) {
+              console.log(`Found ${result.positions.length} total ${adapter.platformName} positions`);
+
+              // Filter to only include positions not already in vaults
+              const nonVaultPositions = result.positions.filter(
+                position => !vaultPositionIds.includes(position.id)
+              );
+
+              console.log(`${nonVaultPositions.length} positions are not in vaults`);
+
+              // Add non-vault positions to allPositions
+              allPositions.push(...nonVaultPositions);
+
+              // Collect additional pool and token data
+              if (result.poolData) {
+                Object.assign(allPoolData, result.poolData);
+              }
+
+              if (result.tokenData) {
+                Object.assign(allTokenData, result.tokenData);
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching all positions from ${adapter.platformName}: ${fallbackError.message}`);
+            // Continue with other adapters
+          }
+        }
+
+        // Update Redux with ALL positions (vault and non-vault)
+        dispatch(setPositions(allPositions));
+
+        // Also specifically mark which positions are in vaults
+        if (vaultPositions.length > 0) {
+          dispatch(addVaultPositions({ positions: vaultPositions }));
+        }
+
+        if (Object.keys(allPoolData).length > 0) {
+          dispatch(setPools(allPoolData));
+        }
+
+        if (Object.keys(allTokenData).length > 0) {
+          dispatch(setTokens(allTokenData));
+        }
+
+        // 4. Calculate TVL for each vault
+        console.log("Calculating TVL for all vaults...");
+
+        for (const vault of vaultsWithInfo) {
+          const vaultPositions = positionsByVault[vault.address] || [];
+
+          if (vaultPositions.length === 0) {
+            console.log(`No positions for vault ${vault.address}, skipping TVL calculation`);
+            continue;
+          }
+
+          console.log(`Calculating TVL for vault ${vault.address} with ${vaultPositions.length} positions`);
+
+          // Get unique token symbols and collect data
+          const tokenSymbols = new Set();
+          const positionData = [];
+
+          // Process each position
+          for (const position of vaultPositions) {
+            try {
+              if (!position.poolAddress || !allPoolData[position.poolAddress]) continue;
+
+              const poolData = allPoolData[position.poolAddress];
+              if (!poolData.token0 || !poolData.token1) continue;
+
+              const token0Data = allTokenData[poolData.token0];
+              const token1Data = allTokenData[poolData.token1];
+
+              if (!token0Data?.symbol || !token1Data?.symbol) continue;
+
+              tokenSymbols.add(token0Data.symbol);
+              tokenSymbols.add(token1Data.symbol);
+
+              positionData.push({
+                position,
+                poolData,
+                token0Data,
+                token1Data
+              });
+            } catch (error) {
+              console.error(`Error processing position data: ${error.message}`);
+            }
+          }
+
+          if (positionData.length === 0) {
+            console.log(`No valid position data for vault ${vault.address}`);
+            continue;
+          }
+
+          // Fetch token prices
+          let tokenPrices = {};
+          let pricesFetchFailed = false;
+
+          try {
+            tokenPrices = await fetchTokenPrices(Array.from(tokenSymbols));
+          } catch (error) {
+            console.error(`Error fetching token prices: ${error.message}`);
+            pricesFetchFailed = true;
+          }
+
+          // Calculate TVL
+          let totalTVL = 0;
+          let hasPartialData = pricesFetchFailed;
+
+          for (const data of positionData) {
+            try {
+              const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+              if (!adapter) continue;
+
+              const tokenBalances = await adapter.calculateTokenAmounts(
+                data.position,
+                data.poolData,
+                data.token0Data,
+                data.token1Data,
+                chainId
+              );
+
+              if (!tokenBalances) continue;
+
+              const token0UsdValue = calculateUsdValue(
+                tokenBalances.token0.formatted,
+                tokenPrices[data.token0Data.symbol]
+              );
+
+              const token1UsdValue = calculateUsdValue(
+                tokenBalances.token1.formatted,
+                tokenPrices[data.token1Data.symbol]
+              );
+
+              if (token0UsdValue) totalTVL += token0UsdValue;
+              if (token1UsdValue) totalTVL += token1UsdValue;
+            } catch (error) {
+              console.error(`Error calculating position value: ${error.message}`);
+              hasPartialData = true;
+            }
+          }
+
+          console.log(`Final TVL for vault ${vault.address}: ${totalTVL.toFixed(2)}`);
+
+          // Update vault metrics with TVL
+          dispatch(updateVaultMetrics({
+            vaultAddress: vault.address,
+            metrics: {
+              tvl: totalTVL,
+              hasPartialData,
+              lastTVLUpdate: Date.now()
+            }
+          }));
+        }
+
+        console.log("All vault data loaded successfully");
       } catch (error) {
-        console.error("Error setting up vaults auto-refresh timer:", error);
-        showError("Failed to set up auto-refresh for vaults. Please try toggling it off and on again.");
+        console.error(`Error loading vault data: ${error.message}`);
+        setError(`Failed to load vaults: ${error.message}`);
+        dispatch(setVaultError(`Failed to load vaults: ${error.message}`));
+        addNotification(`Failed to load your vaults: ${error.message}`, 'danger');
+      } finally {
+        dispatch(setLoadingVaults(false));
+        dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: false }));
+        setIsLoading(false);
       }
     }
 
-    // Cleanup on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch, showError]);
+    // Execute the data loading function
+    loadData();
+  }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName) => {
+    if (!vaultName || !provider || !address) return;
+
     setIsCreatingVault(true);
     setCreateVaultError(null);
 
     try {
-      // Validate
-      if (!vaultName || vaultName.trim() === '') {
-        throw new Error("Vault name is required");
-      }
-
-      if (!provider || !address) {
-        throw new Error("Wallet connection required");
-      }
-
-      // Get signer
       const signer = await provider.getSigner();
+      await createVault(vaultName, signer);
 
-      // Create the vault - this will call our VaultFactory contract
-      console.log(`Creating new vault: ${vaultName}`);
-      const newVaultAddress = await createVault(vaultName, signer);
+      // Trigger a reload by dispatching an update
+      dispatch(triggerUpdate(Date.now()));
 
-      // Use our hook to reload data which will fetch the new vault too
-      loadData();
-
-      showSuccess(`Successfully created vault: ${vaultName}`);
+      // Add a success notification
+      addNotification(`Successfully created vault: ${vaultName}`);
       setShowCreateVaultModal(false);
     } catch (error) {
-      console.error("Error creating vault:", error);
       setCreateVaultError(error.message);
-      showError(`Failed to create vault: ${error.message}`);
+      // Add an error notification
+      addNotification(`Failed to create vault: ${error.message}`, 'danger');
     } finally {
       setIsCreatingVault(false);
     }
   };
 
-  // Get the refreshing state
-  const isUpdatingVaults = resourcesUpdating?.vaults || false;
-
-  // Determine the overall loading state
-  const showLoading = isLoading || (isLoadingVaults && userVaults.length === 0);
-
+  // Render component
   return (
     <div className="mb-5">
       <h2 className="mb-3">Your Vaults</h2>
 
-      <ErrorBoundary
-        FallbackComponent={ErrorFallback}
-        onReset={() => {
-          loadData();
-        }}
-      >
-        {!isConnected ? (
-          <Alert variant="info" className="text-center">
-            Connect your wallet to view your vaults
-          </Alert>
-        ) : showLoading ? (
-          <div className="text-center py-4">
-            <Spinner animation="border" variant="primary" role="status" />
-            <p className="mt-3">Loading your vaults...</p>
-          </div>
-        ) : error || (vaultError && userVaults.length === 0) ? (
-          <Alert variant="danger">
-            <Alert.Heading>Error Loading Vaults</Alert.Heading>
-            <p>{error || vaultError}</p>
-          </Alert>
-        ) : userVaults.length === 0 ? (
-          <Alert variant="warning" className="text-center">
-            <p className="mb-0">You don't have any vaults yet.</p>
-            <p className="mt-2">
-              <Button
-                variant="primary"
-                onClick={() => setShowCreateVaultModal(true)}
-              >
-                Create Your First Vault
-              </Button>
-            </p>
-          </Alert>
-        ) : (
-          <>
-            <div className="d-flex justify-content-between align-items-center mb-3">
-              <div>
-                <p className="text-muted mb-0">
-                  Found {userVaults.length} vault{userVaults.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <div className="d-flex align-items-center">
-                {isUpdatingVaults && (
-                  <div className="d-flex align-items-center me-3">
-                    <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
-                    <small className="text-muted">Refreshing...</small>
-                  </div>
-                )}
-                <Button
-                  variant="outline-primary"
-                  size="sm"
-                  onClick={() => setShowCreateVaultModal(true)}
-                  disabled={isCreatingVault}
-                >
-                  {isCreatingVault ? (
-                    <>
-                      <Spinner size="sm" animation="border" className="me-1" />
-                      Creating...
-                    </>
-                  ) : '+ Create Vault'}
-                </Button>
-              </div>
-            </div>
+      {/* Bootstrap Toast Notifications */}
+      <ToastContainer position="top-end" className="p-3" style={{ zIndex: 1100 }}>
+        {notifications.map(notification => (
+          <Toast
+            key={notification.id}
+            onClose={() => removeNotification(notification.id)}
+            show={true}
+            bg={notification.variant}
+            className="mb-2"
+            delay={5000}
+            autohide
+          >
+            <Toast.Header closeButton>
+              <strong className="me-auto">
+                {notification.variant === 'danger' ? 'Error' : 'Success'}
+              </strong>
+            </Toast.Header>
+            <Toast.Body className={notification.variant === 'danger' ? 'text-white' : ''}>
+              {notification.message}
+            </Toast.Body>
+          </Toast>
+        ))}
+      </ToastContainer>
 
-            <Row>
-              {userVaults.map((vault) => (
-                <Col md={6} key={vault.address}>
-                  <VaultCard vault={vault} />
-                </Col>
-              ))}
-            </Row>
-          </>
-        )}
-      </ErrorBoundary>
+      {!isConnected ? (
+        <Alert variant="info" className="text-center">
+          Connect your wallet to view your vaults
+        </Alert>
+      ) : isLoading ? (
+        <div className="text-center py-4">
+          <Spinner animation="border" variant="primary" role="status" />
+          <p className="mt-3">Loading your vaults...</p>
+        </div>
+      ) : error ? (
+        <Alert variant="danger">
+          <Alert.Heading>Error Loading Vaults</Alert.Heading>
+          <p>{error}</p>
+          <Button
+            variant="outline-danger"
+            size="sm"
+            onClick={() => dispatch(triggerUpdate(Date.now()))}
+            className="mt-2"
+          >
+            Try Again
+          </Button>
+        </Alert>
+      ) : userVaults.length === 0 ? (
+        <Alert variant="warning" className="text-center">
+          <p className="mb-0">You don't have any vaults yet.</p>
+          <p className="mt-2">
+            <Button
+              variant="primary"
+              onClick={() => setShowCreateVaultModal(true)}
+            >
+              Create Your First Vault
+            </Button>
+          </p>
+        </Alert>
+      ) : (
+        <>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <p className="text-muted mb-0">
+                Found {userVaults.length} vault{userVaults.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <div>
+              <Button
+                variant="outline-primary"
+                size="sm"
+                onClick={() => setShowCreateVaultModal(true)}
+                disabled={isCreatingVault}
+              >
+                {isCreatingVault ? (
+                  <>
+                    <Spinner size="sm" animation="border" className="me-1" />
+                    Creating...
+                  </>
+                ) : '+ Create Vault'}
+              </Button>
+            </div>
+          </div>
+
+          <Row>
+            {userVaults.map((vault) => (
+              <Col md={6} key={vault.address}>
+                <VaultCard vault={vault} />
+              </Col>
+            ))}
+          </Row>
+        </>
+      )}
 
       {/* Create Vault Modal */}
       <CreateVaultModal

@@ -75,15 +75,19 @@ export default function VaultCard({ vault }) {
             <div className="text-end">
               {metrics.loading ? (
                 <Spinner animation="border" size="sm" />
+              ) : metrics.errorMessage ? (
+                <span className="text-danger">Error</span>
               ) : metrics.tvl !== undefined ? (
-                `$${metrics.tvl.toFixed(2)}`
+                `${metrics.tvl.toFixed(2)}`
               ) : (
                 <span className="text-danger">N/A</span>
               )}
               {metrics.hasPartialData && (
                 <OverlayTrigger
                   placement="top"
-                  overlay={<Tooltip>Some position data is missing or incomplete</Tooltip>}
+                  overlay={<Tooltip>
+                    {metrics.errorMessage || "Some position data or price information is missing or incomplete"}
+                  </Tooltip>}
                 >
                   <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
                 </OverlayTrigger>
