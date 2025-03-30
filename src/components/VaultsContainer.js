@@ -347,12 +347,8 @@ export default function VaultsContainer() {
     loadData();
   }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
 
-
-
-  console.log(useSelector((state) => state.pools))
-
   // Handle vault creation
-  const handleCreateVault = async (vaultName) => {
+  const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
     if (!vaultName || !provider || !address) return;
 
     setIsCreatingVault(true);
@@ -360,13 +356,33 @@ export default function VaultsContainer() {
 
     try {
       const signer = await provider.getSigner();
-      await createVault(vaultName, signer);
+
+      // Step 1: Create the vault - this remains the same for now
+      const newVaultAddress = await createVault(vaultName, signer);
+
+      // Log strategy config for future implementation
+      if (strategyConfig) {
+        console.log("Strategy config for vault:", newVaultAddress, strategyConfig);
+        /*
+        // This will be implemented in a future update:
+        await configureVaultStrategy(
+          newVaultAddress,
+          strategyConfig.strategyId,
+          strategyConfig.parameters,
+          signer
+        );
+        */
+      }
 
       // Trigger a reload by dispatching an update
       dispatch(triggerUpdate(Date.now()));
 
       // Add a success notification
       addNotification(`Successfully created vault: ${vaultName}`);
+      if (strategyConfig) {
+        addNotification(`Strategy configuration saved. Will be activated in future update.`);
+      }
+
       setShowCreateVaultModal(false);
     } catch (error) {
       setCreateVaultError(error.message);
