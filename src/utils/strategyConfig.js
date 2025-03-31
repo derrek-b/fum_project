@@ -4,7 +4,171 @@ import { getAllTokens, getStablecoins } from "./tokenConfig";
 
 // Strategies registry
 const strategies = {
-  // Basic strategy for beginners
+  // None strategy (manual management)
+  "none": {
+    id: "none",
+    name: "Manual Management",
+    subtitle: "No Automated Strategy",
+    description: "Manually manage your positions without automation",
+    supportedTokens: getAllTokens(), // All tokens supported
+    totalParameterSteps: 2, // Just 2 steps: Asset Deposits and Create Position
+    parameterGroups: [
+      {
+        name: "Token Deposits",
+        description: "Add tokens to your vault"
+      },
+      {
+        name: "Position Transfers",
+        description: "Transfer existing positions to your vault"
+      },
+      {
+        name: "Position Creation",
+        description: "Create new liquidity positions"
+      }
+    ],
+    layouts: {
+      // Step 3: Asset Deposits
+      3: {
+        tokenDeposits: {
+          groupId: 0,
+          title: "Token Deposits",
+          description: "Select tokens to deposit into your vault",
+          sections: [
+            {
+              layout: "standard",
+              items: [
+                {
+                  type: "content-block",
+                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam auctor, nisl eget ultricies tincidunt, nisl nisl aliquam nisl, eget aliquam nisl nisl eget nisl. Nullam auctor, nisl eget ultricies tincidunt, nisl nisl aliquam nisl, eget aliquam nisl nisl eget nisl.",
+                  className: "mb-3"
+                },
+                {
+                  type: "content-block",
+                  content: "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+                  className: "mb-3"
+                }
+              ]
+            }
+          ]
+        },
+
+        positionDeposits: {
+          groupId: 1,
+          title: "Position Transfers",
+          description: "Transfer existing positions to your vault",
+          sections: [
+            {
+              layout: "standard",
+              items: [
+                {
+                  type: "content-block",
+                  content: "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+                  className: "mb-3"
+                },
+                {
+                  type: "content-block",
+                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+                  className: "mb-3"
+                }
+              ]
+            }
+          ]
+        }
+      },
+
+      // Step 4: Create New Position
+      4: {
+        createPosition: {
+          groupId: 2,
+          title: "Create New Position",
+          description: "Create a new liquidity position in your vault",
+          sections: [
+            {
+              layout: "standard",
+              items: [
+                {
+                  type: "content-block",
+                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus lacinia odio vitae vestibulum vestibulum. Cras porttitor metus vitae hendrerit rhoncus. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Nullam gravida justo nec sapien tristique, nec aliquam nisl condimentum.",
+                  className: "mb-3"
+                },
+                {
+                  type: "content-block",
+                  content: "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+                  className: "mb-3"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    parameters: {
+      // Step 3: Asset Deposit parameters
+      depositTokens: {
+        name: "Token Selections",
+        description: "Tokens to deposit into the vault",
+        type: "custom", // This will need special handling in the UI
+        defaultValue: [],
+        group: 0,
+        wizardStep: 3
+      },
+
+      depositPositions: {
+        name: "Position Selections",
+        description: "Positions to transfer to the vault",
+        type: "custom", // This will need special handling in the UI
+        defaultValue: [],
+        group: 1,
+        wizardStep: 3
+      },
+
+      // Step 4: Create Position parameters
+      createPositionPair: {
+        name: "Token Pair",
+        description: "Select the token pair for your new position",
+        type: "custom",
+        defaultValue: {},
+        group: 2,
+        wizardStep: 4
+      },
+
+      createPositionFee: {
+        name: "Fee Tier",
+        description: "Select the fee tier for your new position",
+        type: "select",
+        options: [
+          { value: "100", label: "0.01% - Very low fee" },
+          { value: "500", label: "0.05% - Low fee" },
+          { value: "3000", label: "0.3% - Medium fee" },
+          { value: "10000", label: "1% - High fee" }
+        ],
+        defaultValue: "3000",
+        group: 2,
+        wizardStep: 4
+      },
+
+      createPositionRange: {
+        name: "Price Range",
+        description: "Set the price range for your new position",
+        type: "custom",
+        defaultValue: { min: 0, max: 0 },
+        group: 2,
+        wizardStep: 4
+      },
+
+      createPositionAmounts: {
+        name: "Token Amounts",
+        description: "Amount of each token to deposit in the new position",
+        type: "custom",
+        defaultValue: {},
+        group: 2,
+        wizardStep: 4
+      }
+    },
+    templates: []
+  },
+
+  // Basic strategy for beginners - KEEPING ALL ORIGINAL CONFIGURATION
   "parris": {
     id: "parris",
     name: "Parris Island",
@@ -13,6 +177,7 @@ const strategies = {
     supportedTokens: getAllTokens(), // Common tokens for beginners
     minTokens: 2, // Need at least a pair
     requireTokenSelection: true,
+    totalParameterSteps: 2, // Corresponds to step 3 and 4 in the wizard
     parameterGroups: [
       {
         name: "Range Settings",
@@ -31,10 +196,10 @@ const strategies = {
         description: "Fine-tune your strategy behavior"
       }
     ],
-    // Layout definitions for different wizard steps
+    // Keep all your original layouts - just updating the step numbers
     layouts: {
-      // Step 2 layouts
-      2: {
+      // Step 3 layouts (was step 2)
+      3: {
         // Range Settings
         rangeSettings: {
           groupId: 0,
@@ -91,7 +256,7 @@ const strategies = {
           ]
         },
 
-        // Risk Management (Step 2 portion)
+        // Risk Management (Step 3 portion)
         riskManagement: {
           groupId: 2,
           title: "Risk Management",
@@ -170,10 +335,9 @@ const strategies = {
               layout: "regular",
               items: [
                 {
-                  type: "feature-toggle", // Change this from "field-row" to "feature-toggle"
+                  type: "feature-toggle",
                   id: "adaptiveRanges",
                   label: "Enable Adaptive Ranges"
-                  // Remove the width and className properties
                 },
                 {
                   type: "conditional-fields",
@@ -257,8 +421,8 @@ const strategies = {
         }
       },
 
-      // Step 5 layouts
-      5: {
+      // Step 4 layouts (was step 5)
+      4: {
         // Position Sizing
         positionSizing: {
           groupId: 2,
@@ -364,8 +528,109 @@ const strategies = {
         }
       }
     },
+    // Templates for Parris Island (new)
+    templates: [
+      {
+        id: "conservative",
+        name: "Conservative",
+        description: "Lower risk position management with wider ranges and fewer rebalances",
+        defaults: {
+          // Keep ALL parameters from your original config with conservative values
+          targetRangeUpper: 3.0,
+          targetRangeLower: 3.0,
+          rebalanceThresholdUpper: 1.5,
+          rebalanceThresholdLower: 1.5,
+          maxVaultUtilization: 60,
+          adaptiveRanges: false,
+          maxSlippage: 0.3,
+          emergencyExitTrigger: 20,
+          oracleSource: "chainlink",
+          priceDeviationTolerance: 0.5,
+          maxPositionSizePercent: 20,
+          minPositionSize: 200,
+          targetUtilization: 15,
+          feeReinvestment: false,
+          platformSelectionCriteria: "highest_tvl",
+          minPoolLiquidity: 200000
+        }
+      },
+      {
+        id: "moderate",
+        name: "Moderate",
+        description: "Balanced approach to risk and yield",
+        defaults: {
+          // All parameters with moderate values
+          targetRangeUpper: 5.0,
+          targetRangeLower: 5.0,
+          rebalanceThresholdUpper: 1.0,
+          rebalanceThresholdLower: 1.0,
+          maxVaultUtilization: 80,
+          adaptiveRanges: true,
+          rebalanceCountThresholdHigh: 3,
+          rebalanceCountThresholdLow: 1,
+          adaptiveTimeframeHigh: 7,
+          adaptiveTimeframeLow: 7,
+          rangeAdjustmentPercentHigh: 20,
+          thresholdAdjustmentPercentHigh: 15,
+          rangeAdjustmentPercentLow: 20,
+          thresholdAdjustmentPercentLow: 15,
+          maxSlippage: 0.5,
+          emergencyExitTrigger: 15,
+          oracleSource: "dex",
+          priceDeviationTolerance: 1.0,
+          maxPositionSizePercent: 30,
+          minPositionSize: 100,
+          targetUtilization: 20,
+          feeReinvestment: true,
+          reinvestmentTrigger: 50,
+          reinvestmentRatio: 80,
+          platformSelectionCriteria: "highest_volume",
+          minPoolLiquidity: 100000
+        }
+      },
+      {
+        id: "aggressive",
+        name: "Aggressive",
+        description: "Optimized for maximum fee generation with tighter ranges",
+        defaults: {
+          // All parameters with aggressive values
+          targetRangeUpper: 8.0,
+          targetRangeLower: 8.0,
+          rebalanceThresholdUpper: 0.8,
+          rebalanceThresholdLower: 0.8,
+          maxVaultUtilization: 95,
+          adaptiveRanges: true,
+          rebalanceCountThresholdHigh: 4,
+          rebalanceCountThresholdLow: 1,
+          adaptiveTimeframeHigh: 5,
+          adaptiveTimeframeLow: 5,
+          rangeAdjustmentPercentHigh: 30,
+          thresholdAdjustmentPercentHigh: 20,
+          rangeAdjustmentPercentLow: 30,
+          thresholdAdjustmentPercentLow: 20,
+          maxSlippage: 1.0,
+          emergencyExitTrigger: 10,
+          oracleSource: "twap",
+          priceDeviationTolerance: 2.0,
+          maxPositionSizePercent: 50,
+          minPositionSize: 50,
+          targetUtilization: 30,
+          feeReinvestment: true,
+          reinvestmentTrigger: 25,
+          reinvestmentRatio: 100,
+          platformSelectionCriteria: "highest_rewards",
+          minPoolLiquidity: 50000
+        }
+      },
+      {
+        id: "custom",
+        name: "Custom",
+        description: "Fully customized parameter configuration"
+      }
+    ],
+    // KEEPING ALL YOUR ORIGINAL PARAMETERS - just updating wizardStep values
     parameters: {
-      // Range and Rebalance Parameters - Step 2
+      // Range and Rebalance Parameters - Step 3 (was 2)
       targetRangeUpper: {
         name: "Upper Range",
         description: "Range percentage above current price",
@@ -376,7 +641,7 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       targetRangeLower: {
         name: "Lower Range",
@@ -388,7 +653,7 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       rebalanceThresholdUpper: {
         name: "Upper Rebalance Trigger",
@@ -400,7 +665,7 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       rebalanceThresholdLower: {
         name: "Lower Rebalance Trigger",
@@ -412,7 +677,7 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       maxVaultUtilization: {
         name: "Max Vault Utilization",
@@ -424,17 +689,17 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 2,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
 
-      // Adaptive Range Parameters - Step 2
+      // Adaptive Range Parameters - Step 3 (was 2)
       adaptiveRanges: {
         name: "Adaptive Ranges",
         description: "Automatically adjust ranges based on rebalance frequency",
         type: "boolean",
         defaultValue: true,
         group: 3,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       rebalanceCountThresholdHigh: {
         name: "High Rebalance Count",
@@ -445,7 +710,7 @@ const strategies = {
         max: 20,
         step: 1,
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -458,7 +723,7 @@ const strategies = {
         max: 10,
         step: 1,
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -472,7 +737,7 @@ const strategies = {
         step: 1,
         suffix: " days",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -486,7 +751,7 @@ const strategies = {
         step: 1,
         suffix: " days",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -500,7 +765,7 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -514,7 +779,7 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -528,7 +793,7 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
@@ -542,12 +807,12 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 3,
-        wizardStep: 2,
+        wizardStep: 3,  // Changed from 2 to 3
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
 
-      // Risk Parameters - Step 2
+      // Risk Parameters - Step 3 (was 2)
       maxSlippage: {
         name: "Max Slippage",
         description: "Maximum acceptable slippage when executing trades",
@@ -558,7 +823,7 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 2,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       emergencyExitTrigger: {
         name: "Emergency Exit",
@@ -570,10 +835,10 @@ const strategies = {
         step: 1,
         suffix: "%",
         group: 2,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
 
-      // Oracle Parameters - Step 2
+      // Oracle Parameters - Step 3 (was 2)
       oracleSource: {
         name: "Price Oracle",
         description: "Source of price data for strategy decisions",
@@ -585,7 +850,7 @@ const strategies = {
         ],
         defaultValue: "dex",
         group: 3,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       priceDeviationTolerance: {
         name: "Oracle Deviation Tolerance",
@@ -597,10 +862,10 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 3,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
 
-      // Position Sizing Parameters - Step 5
+      // Position Sizing Parameters - Step 4 (was 5)
       maxPositionSizePercent: {
         name: "Max Position Size",
         description: "Maximum percentage of vault assets to allocate to any single position",
@@ -611,7 +876,7 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 2,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
       minPositionSize: {
         name: "Min Position Size",
@@ -623,7 +888,7 @@ const strategies = {
         step: 10,
         prefix: "$",
         group: 2,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
       targetUtilization: {
         name: "Target Utilization",
@@ -635,17 +900,17 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 0,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
 
-      // Fee Parameters - Step 5
+      // Fee Parameters - Step 4 (was 5)
       feeReinvestment: {
         name: "Reinvest Fees",
         description: "Automatically reinvest collected fees",
         type: "boolean",
         defaultValue: true,
         group: 1,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
@@ -657,7 +922,7 @@ const strategies = {
         step: 10,
         prefix: "$",
         group: 1,
-        wizardStep: 5,
+        wizardStep: 4,  // Changed from 5 to 4
         conditionalOn: "feeReinvestment",
         conditionalValue: true
       },
@@ -671,12 +936,12 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 1,
-        wizardStep: 5,
+        wizardStep: 4,  // Changed from 5 to 4
         conditionalOn: "feeReinvestment",
         conditionalValue: true
       },
 
-      // Platform Parameters - Step 5
+      // Platform Parameters - Step 4 (was 5)
       platformSelectionCriteria: {
         name: "Platform Selection",
         description: "Criteria for selecting which platform to use for a position",
@@ -689,7 +954,7 @@ const strategies = {
         ],
         defaultValue: "highest_volume",
         group: 3,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
       minPoolLiquidity: {
         name: "Min Pool Liquidity",
@@ -701,7 +966,7 @@ const strategies = {
         step: 10000,
         prefix: "$",
         group: 2,
-        wizardStep: 5
+        wizardStep: 4  // Changed from 5 to 4
       },
     }
   },
@@ -715,6 +980,49 @@ const strategies = {
     supportedTokens: getStablecoins(), // Stablecoins only
     minTokens: 2,
     requireTokenSelection: true,
+    totalParameterSteps: 1, // Only one parameter step (step 3)
+    // Templates for The Fed
+    templates: [
+      {
+        id: "stability",
+        name: "Stability Focus",
+        description: "Prioritize maintaining peg with minimal deviation",
+        defaults: {
+          targetRange: 0.3,
+          rebalanceThreshold: 0.2,
+          feeReinvestment: true,
+          maxSlippage: 0.1
+        }
+      },
+      {
+        id: "yield",
+        name: "Yield Optimized",
+        description: "Balance peg maintenance with fee generation",
+        defaults: {
+          targetRange: 0.5,
+          rebalanceThreshold: 0.3,
+          feeReinvestment: true,
+          maxSlippage: 0.3
+        }
+      },
+      {
+        id: "defense",
+        name: "Peg Defense",
+        description: "React quickly to peg deviations",
+        defaults: {
+          targetRange: 0.2,
+          rebalanceThreshold: 0.1,
+          feeReinvestment: false,
+          maxSlippage: 0.5
+        }
+      },
+      {
+        id: "custom",
+        name: "Custom",
+        description: "Fully customized parameter configuration"
+      }
+    ],
+    // Keep original parameters - just update step numbers
     parameters: {
       targetRange: {
         name: "Range",
@@ -725,7 +1033,7 @@ const strategies = {
         max: 5.0,
         step: 0.1,
         suffix: "%",
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       rebalanceThreshold: {
         name: "Rebalance Trigger",
@@ -736,14 +1044,14 @@ const strategies = {
         max: 10.0,
         step: 0.1,
         suffix: "%",
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       feeReinvestment: {
         name: "Reinvest Fees",
         description: "Automatically reinvest collected fees",
         type: "boolean",
         defaultValue: true,
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       },
       maxSlippage: {
         name: "Max Slippage",
@@ -754,24 +1062,26 @@ const strategies = {
         max: 5.0,
         step: 0.1,
         suffix: "%",
-        wizardStep: 2
+        wizardStep: 3  // Changed from 2 to 3
       }
     }
   }
 };
 
 /**
- * Get the list of available strategy configs
+ * Get the list of available strategy configs (excluding the "none" strategy)
  * @returns {Array} Array of strategy objects with id, name, and subtitle
  */
 export function getAvailableStrategies() {
-  return Object.values(strategies).map(strategy => ({
-    id: strategy.id,
-    name: strategy.name,
-    subtitle: strategy.subtitle,
-    description: strategy.description,
-    comingSoon: strategy.comingSoon || false
-  }));
+  return Object.values(strategies)
+    .filter(strategy => strategy.id !== "none")
+    .map(strategy => ({
+      id: strategy.id,
+      name: strategy.name,
+      subtitle: strategy.subtitle,
+      description: strategy.description,
+      comingSoon: strategy.comingSoon || false
+    }));
 }
 
 /**
@@ -786,13 +1096,55 @@ export function getStrategyDetails(strategyId) {
   return {
     id: strategy.id,
     name: strategy.name,
+    subtitle: strategy.subtitle,
     description: strategy.description,
     supportedTokens: strategy.supportedTokens,
     minTokens: strategy.minTokens,
     maxTokens: strategy.maxTokens,
     requireTokenSelection: strategy.requireTokenSelection,
-    parameterGroups: strategy.parameterGroups || []
+    parameterGroups: strategy.parameterGroups || [],
+    totalParameterSteps: strategy.totalParameterSteps || 0
   };
+}
+
+/**
+ * Get templates for a specific strategy
+ * @param {string} strategyId - ID of the strategy
+ * @returns {Array} Array of template objects
+ */
+export function getStrategyTemplates(strategyId) {
+  const strategy = strategies[strategyId];
+  if (!strategy || !strategy.templates) return [];
+
+  return strategy.templates;
+}
+
+/**
+ * Get default parameters for a specific template
+ * @param {string} strategyId - ID of the strategy
+ * @param {string} templateId - ID of the template
+ * @returns {Object} Default parameter values for the template
+ */
+export function getTemplateDefaults(strategyId, templateId) {
+  const strategy = strategies[strategyId];
+  if (!strategy || !strategy.templates) return {};
+
+  // For custom template or when no specific template is selected
+  if (templateId === "custom" || !templateId) {
+    return Object.entries(strategy.parameters || {}).reduce((defaults, [paramId, paramConfig]) => {
+      defaults[paramId] = paramConfig.defaultValue;
+      return defaults;
+    }, {});
+  }
+
+  // Find the specific template
+  const template = strategy.templates.find(t => t.id === templateId);
+  if (!template || !template.defaults) {
+    // Fallback to strategy defaults
+    return getTemplateDefaults(strategyId, "custom");
+  }
+
+  return template.defaults;
 }
 
 /**
@@ -801,17 +1153,7 @@ export function getStrategyDetails(strategyId) {
  * @returns {Object} Object with default parameter values
  */
 export function getDefaultParams(strategyId) {
-  const strategy = strategies[strategyId];
-  if (!strategy) return {};
-
-  const defaultParams = {};
-
-  // Extract default values from each parameter definition
-  Object.entries(strategy.parameters).forEach(([paramId, paramConfig]) => {
-    defaultParams[paramId] = paramConfig.defaultValue;
-  });
-
-  return defaultParams;
+  return getTemplateDefaults(strategyId, "custom");
 }
 
 /**
@@ -845,33 +1187,6 @@ export function getStrategyParametersByStep(strategyId, step) {
   });
 
   return stepParams;
-}
-
-/**
- * Get available layouts for a strategy and step
- * @param {string} strategyId - ID of the strategy
- * @param {number} step - Wizard step number
- * @returns {Object} Available layouts for the step
- */
-export function getStrategyLayouts(strategyId, step) {
-  const strategy = strategies[strategyId];
-  if (!strategy || !strategy.layouts || !strategy.layouts[step]) {
-    return {};
-  }
-  return strategy.layouts[step];
-}
-
-/**
- * Check if a layout should be rendered based on its condition
- * @param {Object} layout - Layout configuration
- * @param {Object} params - Current parameter values
- * @returns {boolean} Whether the layout should be rendered
- */
-export function shouldRenderLayout(layout, params) {
-  if (!layout.condition) return true;
-
-  const { param, value } = layout.condition;
-  return params[param] === value;
 }
 
 /**
@@ -941,25 +1256,12 @@ export function validateStrategyParams(strategyId, params) {
 
   // Strategy-specific validations
   if (strategyId === "parris") {
-    // Adaptive range values should make sense
-    if (params.adaptiveRanges) {
-      if (params.rebalanceCountThresholdHigh <= params.rebalanceCountThresholdLow) {
-        errors.rebalanceCountThresholdHigh = "High count must be greater than low count";
-      }
-    }
-
-    // Upper/lower range values should be positive
+    // Validate upper and lower ranges
     if (params.targetRangeUpper <= 0) {
       errors.targetRangeUpper = "Upper range must be greater than 0";
     }
-
     if (params.targetRangeLower <= 0) {
       errors.targetRangeLower = "Lower range must be greater than 0";
-    }
-
-    // Reinvestment ratio should be between 0-100%
-    if (params.feeReinvestment && (params.reinvestmentRatio < 0 || params.reinvestmentRatio > 100)) {
-      errors.reinvestmentRatio = "Reinvestment ratio must be between 0 and 100%";
     }
   }
 
@@ -969,7 +1271,33 @@ export function validateStrategyParams(strategyId, params) {
   };
 }
 
-// Export all necessary functions
+/**
+ * Get available layouts for a strategy and step
+ * @param {string} strategyId - ID of the strategy
+ * @param {number} step - Wizard step number
+ * @returns {Object} Available layouts for the step
+ */
+export function getStrategyLayouts(strategyId, step) {
+  const strategy = strategies[strategyId];
+  if (!strategy || !strategy.layouts || !strategy.layouts[step]) {
+    return {};
+  }
+  return strategy.layouts[step];
+}
+
+/**
+ * Check if a layout should be rendered based on its condition
+ * @param {Object} layout - Layout configuration
+ * @param {Object} params - Current parameter values
+ * @returns {boolean} Whether the layout should be rendered
+ */
+export function shouldRenderLayout(layout, params) {
+  if (!layout.condition) return true;
+
+  const { param, value } = layout.condition;
+  return params[param] === value;
+}
+
 export default {
   getAvailableStrategies,
   getStrategyDetails,
@@ -977,6 +1305,8 @@ export default {
   getStrategyParameters,
   getStrategyParametersByStep,
   validateStrategyParams,
+  getStrategyTemplates,
+  getTemplateDefaults,
   getStrategyLayouts,
   shouldRenderLayout
 };

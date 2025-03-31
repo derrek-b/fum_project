@@ -268,7 +268,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xF58bDbD727B0248F00Fe8E3119B66B13C29B777B"
+      "1337": "0x86D76fA82b9e739745fc7e4866181E56E8d1dF07"
     }
   },
   "PositionVault": {
@@ -712,7 +712,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x4661508eE9ec329E6874F3b26023f18D0F356a28"
+      "1337": "0x178fc2B403Bb6F88dBa7A40003838C24e5dEeFC6"
     }
   }
 }

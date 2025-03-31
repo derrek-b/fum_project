@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Form, Spinner, Alert, ProgressBar, ListGroup, Badge, Card, Row, Col } from "react-bootstrap";
 import StrategyParameterForm from "./StrategyParameterForm.js";
+import TokenDepositsSection from '../components/TokenDepositsSection';
+import PositionDepositsSection from '../components/PositionDepositsSection';
 import { useSelector, useDispatch } from "react-redux";
 import Image from "next/image";
 import { useToast } from "../context/ToastContext";
@@ -11,9 +13,11 @@ import {
   getStrategyDetails,
   validateStrategyParams,
   getStrategyParameters,
-  getStrategyParametersByStep
+  getStrategyParametersByStep,
+  getStrategyTemplates,
+  getTemplateDefaults
 } from "../utils/strategyConfig";
-import { getTokenBySymbol } from "@/utils/tokenConfig";
+import { getTokenBySymbol, getAllTokens } from "@/utils/tokenConfig";
 import config from "../utils/config";
 import { createVault } from "../utils/contracts";
 import { triggerUpdate } from "../redux/updateSlice";
@@ -30,11 +34,12 @@ export default function CreateVaultModal({
   const { isConnected, chainId, provider, address } = useSelector((state) => state.wallet);
   const { positions } = useSelector((state) => state.positions);
 
-  // Available strategies - use useMemo to prevent recreation on each render
-  const availableStrategies = useMemo(() => getAvailableStrategies(), []);
-
-  // Track the current step (1: vault name, 2: strategy selection, 3: strategy parameters, 4: token deposit, 5: position settings)
+  // State for tracking wizard progress
   const [currentStep, setCurrentStep] = useState(1);
+  const [initialized, setInitialized] = useState(false);
+  const [isCreatingVault, setIsCreatingVault] = useState(false);
+  const [createdVaultAddress, setCreatedVaultAddress] = useState(null);
+  const [txError, setTxError] = useState("");
 
   // Form state for vault info
   const [vaultName, setVaultName] = useState("");
@@ -43,130 +48,97 @@ export default function CreateVaultModal({
   // Form state for strategy selection
   const [useStrategy, setUseStrategy] = useState(false);
   const [strategyId, setStrategyId] = useState("");
-  const [strategy, setStrategy] = useState({});
+  const [selectedTemplate, setSelectedTemplate] = useState("");
+
+  // Strategy parameters
   const [strategyParams, setStrategyParams] = useState({});
-
-  // Token selection state
-  const [selectedTokens, setSelectedTokens] = useState([]);
-  const [tokenSelectionError, setTokenSelectionError] = useState("");
-
-  // Platform selection state
-  const [selectedPlatforms, setSelectedPlatforms] = useState([]);
-  const [availablePlatforms, setAvailablePlatforms] = useState([]);
-  const [platformSelectionError, setPlatformSelectionError] = useState("");
-
-  // Position selection state
-  const [selectedPositions, setSelectedPositions] = useState([]);
-
-  // Transaction state
-  const [isCreatingVault, setIsCreatingVault] = useState(false);
-  const [createdVaultAddress, setCreatedVaultAddress] = useState(null);
-  const [txError, setTxError] = useState("");
-
-  // Validation state
   const [validated, setValidated] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
-  // Track if we've already initialized the parameters to avoid loops
-  const [initialized, setInitialized] = useState(false);
+  // Token and platform selection
+  const [selectedTokens, setSelectedTokens] = useState([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState([]);
+  const [tokenSelectionError, setTokenSelectionError] = useState("");
+  const [platformSelectionError, setPlatformSelectionError] = useState("");
 
-  // Get available platforms for the current chain
-  function getAvailablePlatforms(chainId) {
-    if (!chainId || !config.chains[chainId]) return [];
+  // Position selection
+  const [selectedPositions, setSelectedPositions] = useState([]);
 
-    const chainConfig = config.chains[chainId];
-    const platforms = [];
+  // Get currently selected strategy details
+  const selectedStrategy = useMemo(() => {
+    if (!strategyId) return null;
+    return getStrategyDetails(strategyId);
+  }, [strategyId]);
 
-    // Get enabled platforms from chain config
-    Object.values(chainConfig.platforms).forEach(platform => {
-      if (platform.enabled) {
-        // Merge platform info with metadata
-        const metadata = config.platformMetadata[platform.id] || {};
+  // Get available templates for selected strategy
+  const availableTemplates = useMemo(() => {
+    if (!strategyId) return [];
+    return getStrategyTemplates(strategyId);
+  }, [strategyId]);
 
-        platforms.push({
-          id: platform.id,
-          name: platform.name || metadata.name || platform.id,
-          factoryAddress: platform.factoryAddress,
-          positionManagerAddress: platform.positionManagerAddress,
-          logo: metadata.logo,
-          color: metadata.color || "#6c757d", // Default gray if no color specified
-          description: metadata.description || ""
-        });
-      }
-    });
-
-    return platforms;
-  }
-
-  // Get available positions for selection
-  const availablePositions = useMemo(() => {
-    return positions.filter(position => !position.inVault || !position.vaultAddress);
-  }, [positions]);
-
-  // Initialize available platforms
-  useEffect(() => {
-    if (chainId) {
-      const platforms = getAvailablePlatforms(chainId);
-      setAvailablePlatforms(platforms);
-    }
-  }, [chainId]);
-
-  // Calculate the total number of steps based on strategy
+  // Calculate total steps based on strategy and template selection
   const totalSteps = useMemo(() => {
-    // Base steps (vault info, strategy selection, final position selection)
-    let steps = 3;
+    // Always includes: 1. Vault info, 2. Strategy selection, n+1. Asset deposit, n+2. Summary
+    let steps = 4;
 
-    // Add step for strategy parameters if using a strategy
-    if (useStrategy && strategyId) {
-      // Find the highest step number in the strategy parameters
-      const parameters = getStrategyParameters(strategyId);
-      if (Object.keys(parameters).length > 0) {
-        const maxStep = Math.max(
-          ...Object.values(parameters).map(param => param.wizardStep || 2)
-        );
-        steps = Math.max(steps, maxStep);
-      }
+    // If using a strategy and it's not a pre-configured template
+    if (useStrategy && strategyId && selectedTemplate === "custom") {
+      // Add strategy-specific parameter steps
+      const strategySteps = selectedStrategy?.totalParameterSteps || 0;
+      steps += strategySteps;
     }
 
     return steps;
-  }, [useStrategy, strategyId]);
+  }, [useStrategy, strategyId, selectedTemplate, selectedStrategy]);
 
   // Initialize form on first render or when modal is shown
   useEffect(() => {
     if (show && !initialized) {
-      // Set first available strategy
-      const firstStrategy = availableStrategies[0]?.id || "";
-
-      // Get platforms for current chain
-      const platforms = getAvailablePlatforms(chainId);
-      setAvailablePlatforms(platforms);
-
-      // Reset platform selection (allow no platform selected)
-      setSelectedPlatforms([]);
-      setPlatformSelectionError("");
-
-      // Initialize state with defaults
+      // Reset all form state
       setCurrentStep(1);
       setVaultName("");
       setVaultDescription("");
       setUseStrategy(false);
-      setStrategyId(firstStrategy);
-      setStrategy(firstStrategy ? getStrategyDetails(firstStrategy) : {});
-      setStrategyParams(firstStrategy ? getDefaultParams(firstStrategy) : {});
+      setStrategyId("");
+      setSelectedTemplate("");
+      setStrategyParams({});
       setSelectedTokens([]);
+      setSelectedPlatforms([]);
       setTokenSelectionError("");
+      setPlatformSelectionError("");
+      setSelectedPositions([]);
       setValidated(false);
       setValidationErrors({});
       setCreatedVaultAddress(null);
       setIsCreatingVault(false);
       setTxError("");
-      setSelectedPositions([]);
       setInitialized(true);
     } else if (!show) {
       // Reset initialization flag when modal closes
       setInitialized(false);
     }
-  }, [show, initialized, availableStrategies, chainId]);
+  }, [show, initialized]);
+
+  // Update strategy parameters when template changes
+  useEffect(() => {
+    if (strategyId && selectedTemplate) {
+      if (selectedTemplate === "custom") {
+        // For custom, use default parameters
+        setStrategyParams(getDefaultParams(strategyId));
+      } else {
+        // For templates, use template-specific defaults
+        setStrategyParams(getTemplateDefaults(strategyId, selectedTemplate));
+      }
+    } else {
+      // Reset parameters when no strategy/template selected
+      setStrategyParams({});
+    }
+  }, [strategyId, selectedTemplate]);
+
+  // Get step progress percentage
+  const getStepProgress = () => {
+    return Math.round((currentStep / totalSteps) * 100);
+  };
 
   // Handle parameter change
   const handleParamChange = (paramId, value) => {
@@ -185,47 +157,47 @@ export default function CreateVaultModal({
     }
   };
 
-  // Get step progress percentage
-  const getStepProgress = () => {
-    return Math.round((currentStep / totalSteps) * 100);
+  // Handle strategy toggle
+  const handleStrategyToggle = (checked) => {
+    setUseStrategy(checked);
+
+    if (!checked) {
+      // If turning off strategy, reset strategy selections
+      setStrategyId("");
+      setSelectedTemplate("");
+      setStrategyParams({});
+    } else if (!strategyId) {
+      // If turning on strategy and none selected, default to first available
+      const firstStrategy = getAvailableStrategies()[0]?.id;
+      if (firstStrategy) {
+        setStrategyId(firstStrategy);
+      }
+    }
   };
 
   // Handle strategy selection change
-  const handleStrategyChange = (e) => {
-    const newStrategyId = e.target.value;
-    setStrategyId(newStrategyId);
+  const handleStrategyChange = (newStrategyId) => {
+    if (newStrategyId === strategyId) return;
 
-    // Reset parameters to defaults for the new strategy
-    if (newStrategyId) {
-      setStrategy(getStrategyDetails(newStrategyId));
-      setStrategyParams(getDefaultParams(newStrategyId));
-      // Reset token selection when strategy changes
-      setSelectedTokens([]);
-      setTokenSelectionError("");
+    setStrategyId(newStrategyId);
+    setSelectedTemplate(""); // Reset template when strategy changes
+    setStrategyParams({}); // Reset parameters
+    setValidationErrors({});
+  };
+
+  // Handle template selection
+  const handleTemplateChange = (templateId) => {
+    setSelectedTemplate(templateId);
+
+    // Load template-specific parameters
+    if (templateId === "custom") {
+      setStrategyParams(getDefaultParams(strategyId));
     } else {
-      setStrategy({});
-      setStrategyParams({});
+      setStrategyParams(getTemplateDefaults(strategyId, templateId));
     }
 
     // Clear validation errors
     setValidationErrors({});
-  };
-
-  // Handle platform selection toggle
-  const handlePlatformSelection = (platformId) => {
-    setSelectedPlatforms(prev => {
-      if (prev.includes(platformId)) {
-        // Allow deselecting platforms (including deselecting all)
-        return prev.filter(id => id !== platformId);
-      } else {
-        return [...prev, platformId];
-      }
-    });
-
-    // Clear any platform selection errors
-    if (platformSelectionError) {
-      setPlatformSelectionError("");
-    }
   };
 
   // Handle token selection
@@ -245,6 +217,22 @@ export default function CreateVaultModal({
     }
   };
 
+  // Validate token selection
+  const validateTokenSelection = () => {
+    if (useStrategy && selectedStrategy?.requireTokenSelection &&
+        (!selectedTokens.length || selectedTokens.length < (selectedStrategy.minTokens || 1))) {
+      setTokenSelectionError(`Please select at least ${selectedStrategy.minTokens || 1} token(s)`);
+      return false;
+    }
+
+    if (useStrategy && selectedStrategy?.maxTokens && selectedTokens.length > selectedStrategy.maxTokens) {
+      setTokenSelectionError(`Please select no more than ${selectedStrategy.maxTokens} token(s)`);
+      return false;
+    }
+
+    return true;
+  };
+
   // Handle position toggle
   const handlePositionToggle = (positionId) => {
     setSelectedPositions(prev => {
@@ -256,19 +244,95 @@ export default function CreateVaultModal({
     });
   };
 
-  // Validate token selection
-  const validateTokenSelection = () => {
-    if (useStrategy && strategy.requireTokenSelection && (!selectedTokens.length || selectedTokens.length < (strategy.minTokens || 1))) {
-      setTokenSelectionError(`Please select at least ${strategy.minTokens || 1} token(s)`);
-      return false;
+  // Handle next step
+  const handleNextStep = () => {
+    // Validate current step
+    if (currentStep === 1) {
+      // Validate vault info
+      if (!vaultName.trim()) {
+        showError("Please enter a vault name");
+        return;
+      }
+    } else if (currentStep === 2) {
+      // Validate strategy selection
+      if (useStrategy && !strategyId) {
+        showError("Please select a strategy");
+        return;
+      }
+
+      if (useStrategy && !selectedTemplate) {
+        showError("Please select a template or custom configuration");
+        return;
+      }
+
+      // Handle template selection - if a template is chosen (not custom),
+      // skip the parameter configuration steps
+      if (useStrategy && selectedTemplate !== "custom") {
+        // Skip to asset deposit step
+        setCurrentStep(totalSteps - 1); // Second-to-last step (asset deposit)
+        return;
+      }
+    } else if (useStrategy && strategyId && selectedTemplate === "custom") {
+      // For parameter configuration steps
+      const wizardStep = currentStep;
+
+      // Get parameters for current step
+      const stepParameters = getStrategyParametersByStep(strategyId, wizardStep);
+
+      // Validate parameters
+      const stepParamIds = Object.keys(stepParameters);
+      const { isValid, errors } = validateStrategyParams(strategyId, strategyParams);
+
+      // Filter errors to only show those for the current step
+      const currentStepErrors = {};
+      Object.entries(errors || {}).forEach(([paramId, error]) => {
+        if (stepParamIds.includes(paramId)) {
+          currentStepErrors[paramId] = error;
+        }
+      });
+
+      if (!isValid && Object.keys(currentStepErrors).length > 0) {
+        setValidationErrors(currentStepErrors);
+        return;
+      }
     }
 
-    if (useStrategy && strategy.maxTokens && selectedTokens.length > strategy.maxTokens) {
-      setTokenSelectionError(`Please select no more than ${strategy.maxTokens} token(s)`);
-      return false;
+    // Advance to next step
+    setCurrentStep(prev => prev + 1);
+  };
+
+  // Handle going back
+  const handleBack = () => {
+    // If we're at step 2, and we've already created a vault,
+    // don't allow going back to vault creation step
+    if (currentStep === 2 && createdVaultAddress) {
+      return; // Don't allow going back to vault creation
     }
 
-    return true;
+    // For template selection step, go back to strategy selection
+    if (currentStep === totalSteps - 1 && useStrategy && selectedTemplate !== "custom") {
+      setCurrentStep(2);
+    } else {
+      setCurrentStep(prev => prev - 1);
+    }
+  };
+
+  // Create vault
+  const handleCreateVault = async () => {
+    if (!provider || !address) {
+      showError("Wallet not connected");
+      return null;
+    }
+
+    try {
+      const signer = await provider.getSigner();
+      const vaultAddress = await createVault(vaultName, signer);
+      console.log(`Vault created at address: ${vaultAddress}`);
+      return vaultAddress;
+    } catch (error) {
+      console.error("Error creating vault:", error);
+      throw error;
+    }
   };
 
   // Handle first step submission (vault name)
@@ -314,129 +378,52 @@ export default function CreateVaultModal({
     }
   };
 
-  // Handle next step navigation
-  const handleNextStep = () => {
-    // Validate current step parameters
-    if (currentStep === 2) {
-      // Validate token selection if required
-      if (useStrategy && strategy.requireTokenSelection && !validateTokenSelection()) {
-        return;
-      }
-    }
-
-    // Strategy parameter validation for each step
-    if (useStrategy && strategyId && currentStep >= 2) {
-      // Get parameters for current step
-      const stepParams = getStrategyParametersByStep(strategyId, currentStep);
-
-      // Create a subset of params for validation
-      const currentStepParamIds = Object.keys(stepParams);
-      const stepParamValues = {};
-      currentStepParamIds.forEach(paramId => {
-        stepParamValues[paramId] = strategyParams[paramId];
-      });
-
-      // Validate this step's parameters
-      const { isValid, errors } = validateStrategyParams(strategyId, strategyParams);
-
-      // Filter errors to only show those for current step parameters
-      const currentStepErrors = {};
-      Object.entries(errors || {}).forEach(([paramId, error]) => {
-        if (currentStepParamIds.includes(paramId)) {
-          currentStepErrors[paramId] = error;
-        }
-      });
-
-      if (!isValid && Object.keys(currentStepErrors).length > 0) {
-        setValidationErrors(currentStepErrors);
-        return;
-      }
-    }
-
-    // Advance to next step
-    setCurrentStep(prev => prev + 1);
-  };
-
-  // Handle going back
-  const handleBack = () => {
-    setCurrentStep(prev => Math.max(1, prev - 1));
-  };
-
-  // Create vault directly from the modal
-  const handleCreateVault = async () => {
-    if (!provider || !address) {
-      showError("Wallet not connected");
-      return null;
-    }
-
+  // Handle submit (final step)
+  const handleSubmit = async () => {
     try {
-      const signer = await provider.getSigner();
-      const vaultAddress = await createVault(vaultName, signer);
-      console.log(`Vault created at address: ${vaultAddress}`);
-      return vaultAddress;
-    } catch (error) {
-      console.error("Error creating vault:", error);
-      throw error;
-    }
-  };
+      // Set loading state
+      setIsCreatingVault(true);
+      setTxError("");
 
-  // Handle vault submission
-  const handleSubmit = async (e) => {
-    if (e) e.preventDefault();
+      // Here we'd configure the already-created vault with strategy settings
+      // const vaultContract = getVaultContract(createdVaultAddress, provider, signer);
 
-    try {
-      // Validate strategy configuration if enabled
       if (useStrategy) {
-        // Validate token selection
-        if (!validateTokenSelection()) {
-          return;
-        }
+        // Configure strategy on the vault
+        console.log(`Configuring vault ${createdVaultAddress} with strategy ${strategyId} using template ${selectedTemplate}`);
 
-        // Validate all parameters
-        const { isValid, errors } = validateStrategyParams(strategyId, strategyParams);
-        if (!isValid) {
-          setValidationErrors(errors);
-          // Find which step has errors and go there (existing code)...
-        }
+        // Here you would:
+        // 1. Apply strategy parameters to the vault
+        // 2. Activate the strategy
+        // 3. Set up any needed authorizations
       }
 
-      // Now we just need to handle strategy activation
-      // since vault is already created
+      // Handle token deposits
+      if (selectedTokens.length > 0) {
+        console.log(`Adding tokens to vault: ${selectedTokens.join(', ')}`);
+        // Code to add tokens to vault
+      }
 
-      // Move to the final step
-      setCurrentStep(totalSteps);
+      // Handle position transfers
+      if (selectedPositions.length > 0) {
+        console.log(`Adding positions to vault: ${selectedPositions.join(', ')}`);
+        // Code to transfer positions to vault
+      }
 
       // Show success message
-      showSuccess(`Strategy configured successfully!`);
+      showSuccess(`Vault setup completed successfully!`);
+
+      // Refresh vaults data
+      dispatch(triggerUpdate(Date.now()));
+
+      // Move to the final success view
+      setCurrentStep(totalSteps);
     } catch (error) {
-      console.error("Error in strategy configuration:", error);
-      showError(error.message);
+      console.error("Error configuring vault:", error);
+      setTxError(error.message || "Transaction failed");
+    } finally {
+      setIsCreatingVault(false);
     }
-  };
-
-  // Handle position submission after vault creation
-  const handlePositionSubmit = async () => {
-    try {
-      // Here you would call a function to add positions to the vault
-      // Typically using the BatchedExecutor contract
-
-      showSuccess(`Added ${selectedPositions.length} position(s) to vault`);
-
-      // Close the modal after success
-      onHide();
-    } catch (error) {
-      console.error("Error adding positions:", error);
-      showError(error.message);
-    }
-  };
-
-  // Handle modal close with safety checks
-  const handleModalClose = () => {
-    if (isCreatingVault) {
-      showError("Cannot close this window while the transaction is in progress");
-      return;
-    }
-    onHide();
   };
 
   // Get the step title
@@ -446,39 +433,241 @@ export default function CreateVaultModal({
         return "Create New Vault";
       case 2:
         return "Strategy Selection";
-      case 3:
-        return "Strategy Parameters";
-      case 4:
-        return "Token Deposits";
-      case 5:
-        return "Position Settings";
-      case totalSteps:
-        if (totalSteps > 5) return "Position Settings";
-        return "Manage Positions";
+      case totalSteps - 1: // Asset deposit
+        return "Asset Deposits";
+      case totalSteps: // Final summary
+        return "Complete Setup";
       default:
+        // For strategy parameter steps
+        if (useStrategy && strategyId && selectedTemplate === "custom") {
+          const stepNum = currentStep - 2;
+          return `Strategy Configuration - Step ${stepNum}`;
+        }
         return "Configure Strategy";
     }
   };
 
   // Check if the current step is the final step
   const isFinalStep = () => {
-    return currentStep === totalSteps || (currentStep === 3 && totalSteps === 3);
+    return currentStep === totalSteps;
   };
 
-  // Render intermediate steps based on strategy parameters
-  const renderIntermediateStep = (step) => {
+  // Render step 1: Vault Information
+    const renderVaultInfoStep = () => {
+      return (
+        <Form noValidate validated={validated} onSubmit={handleVaultInfoSubmit}>
+          <Modal.Body>
+            <div className="mb-3">
+              <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
+              <h5>Vault Information</h5>
+              <p>
+                A vault allows you to group your DeFi positions and apply automated
+                strategies to them. You'll be able to deposit positions and configure
+                strategies after creation.
+              </p>
+            </div>
+
+            <Form.Group className="mb-3">
+              <Form.Label>Vault Name <span className="text-danger">*</span></Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="Enter a name for your vault"
+                value={vaultName}
+                onChange={(e) => setVaultName(e.target.value)}
+                disabled={isCreatingVault}
+                required
+                maxLength={50}
+              />
+              <Form.Control.Feedback type="invalid">
+                Please provide a name for your vault.
+              </Form.Control.Feedback>
+              <Form.Text className="text-muted">
+                Choose a meaningful name to help you identify this vault.
+              </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+              <Form.Label>Description (Optional)</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                placeholder="What is this vault for? (Optional)"
+                value={vaultDescription}
+                onChange={(e) => setVaultDescription(e.target.value)}
+                disabled={isCreatingVault}
+                maxLength={200}
+              />
+              <Form.Text className="text-muted">
+                Add context or notes about this vault's purpose.
+              </Form.Text>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={onHide} disabled={isCreatingVault}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              disabled={isCreatingVault || !vaultName.trim()}
+            >
+              {isCreatingVault ? (
+                <>
+                  <Spinner
+                    as="span"
+                    animation="border"
+                    size="sm"
+                    role="status"
+                    aria-hidden="true"
+                    className="me-2"
+                  />
+                  Creating Vault...
+                </>
+              ) : "Create Vault"}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      );
+    };
+
+  // Render step 2: Strategy Selection
+  const renderStrategySelectionStep = () => {
     return (
-      <Form noValidate onSubmit={(e) => e.preventDefault()}>
+      <Form noValidate onSubmit={(e) => {
+        e.preventDefault();
+        handleNextStep();
+      }}>
         <Modal.Body>
           <div className="mb-3">
             <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
-            <h5>Strategy Parameters - {getStepTitle()}</h5>
+            <h5>Strategy Selection</h5>
+            <p>
+              A strategy can automate management of your liquidity positions for optimal returns.
+              You can choose to activate a strategy now or later from the vault details page.
+            </p>
+          </div>
+
+          <Form.Group className="mb-4">
+            <Form.Check
+              type="switch"
+              id="use-strategy-switch"
+              label="Use an automated strategy"
+              checked={useStrategy}
+              onChange={(e) => handleStrategyToggle(e.target.checked)}
+              disabled={isCreatingVault}
+            />
+          </Form.Group>
+
+          {useStrategy && (
+            <>
+              <Form.Group className="mb-4">
+                <Form.Label>Strategy Type</Form.Label>
+                <Form.Select
+                  value={strategyId}
+                  onChange={(e) => handleStrategyChange(e.target.value)}
+                  disabled={isCreatingVault}
+                >
+                  {getAvailableStrategies().map(strategy => (
+                    <option
+                      key={strategy.id}
+                      value={strategy.id}
+                      disabled={strategy.comingSoon}
+                    >
+                      {strategy.name} - {strategy.subtitle}
+                      {strategy.comingSoon ? " (Coming Soon)" : ""}
+                    </option>
+                  ))}
+                </Form.Select>
+                <Form.Text className="text-muted">
+                  Select a strategy that matches your investment goals.
+                </Form.Text>
+              </Form.Group>
+
+              {strategyId && (
+                <Form.Group className="mb-4">
+                  <Form.Label>Configuration Template</Form.Label>
+                  <Form.Select
+                    value={selectedTemplate}
+                    onChange={(e) => handleTemplateChange(e.target.value)}
+                    disabled={isCreatingVault}
+                  >
+                    <option value="">Select a template...</option>
+                    {availableTemplates.map(template => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} - {template.description}
+                      </option>
+                    ))}
+                  </Form.Select>
+                  <Form.Text className="text-muted">
+                    Choose a preset template or select "Custom" for full control over all parameters.
+                  </Form.Text>
+                </Form.Group>
+              )}
+
+              {strategyId && selectedTemplate && (
+                <Alert variant={selectedTemplate === "custom" ? "info" : "success"}>
+                  {selectedTemplate === "custom" ? (
+                    <>
+                      <strong>Custom Configuration</strong>
+                      <p className="mb-0">You'll be guided through setting all strategy parameters in the next steps.</p>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{availableTemplates.find(t => t.id === selectedTemplate)?.name} Template</strong>
+                      <p className="mb-0">Preconfigured settings will be applied. You can modify these later from the vault dashboard.</p>
+                    </>
+                  )}
+                </Alert>
+              )}
+            </>
+          )}
+
+          {!useStrategy && (
+            <Alert variant="info">
+              <strong>Manual Management</strong>
+              <p className="mb-0">
+                You'll manually manage your positions without automation. You can always
+                activate a strategy later from the vault details page.
+              </p>
+            </Alert>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleBack} disabled={isCreatingVault}>
+            Back
+          </Button>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={isCreatingVault || (useStrategy && (!strategyId || !selectedTemplate))}
+          >
+            Next
+          </Button>
+        </Modal.Footer>
+      </Form>
+    );
+  };
+
+  // Render parameter configuration steps
+  const renderParameterStep = () => {
+    // Calculate the actual wizard step number as expected by the form
+    const wizardStep = currentStep;
+
+    return (
+      <Form noValidate onSubmit={(e) => {
+        e.preventDefault();
+        handleNextStep();
+      }}>
+        <Modal.Body>
+          <div className="mb-3">
+            <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
+            <h5>Strategy Parameters - Step {currentStep - 2}</h5>
             <p>Configure the detailed parameters for your selected strategy.</p>
           </div>
 
           <StrategyParameterForm
             strategyId={strategyId}
-            currentStep={step}
+            currentStep={wizardStep}
             params={strategyParams}
             onParamChange={handleParamChange}
             disabled={isCreatingVault}
@@ -491,434 +680,258 @@ export default function CreateVaultModal({
           </Button>
           <Button
             variant="primary"
-            onClick={isFinalStep() ? handleSubmit : handleNextStep}
+            type="submit"
             disabled={isCreatingVault}
           >
-            {isCreatingVault ? (
-              <>
-                <Spinner
-                  as="span"
-                  animation="border"
-                  size="sm"
-                  role="status"
-                  aria-hidden="true"
-                  className="me-2"
-                />
-                Processing...
-              </>
-            ) : isFinalStep() ? "Create Vault" : "Next"}
+            {isFinalStep() ? "Create Vault" : "Next"}
           </Button>
         </Modal.Footer>
       </Form>
     );
   };
 
-  // Render the appropriate step content
-  const renderStepContent = () => {
-    // If step is beyond the first two predefined steps and before the final position step
-    if (currentStep > 2 && currentStep < totalSteps) {
-      return renderIntermediateStep(currentStep);
-    }
+  // Render asset deposit step
+  const renderAssetDepositStep = () => {
+    return (
+      <Form noValidate onSubmit={(e) => {
+        e.preventDefault();
+        handleNextStep();
+      }}>
+        <Modal.Body>
+          <div className="mb-3">
+            <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
+            <h5>Asset Deposits</h5>
+            <p>
+              Add tokens and positions to your vault. You can add more later from the vault dashboard.
+            </p>
+          </div>
 
-    switch(currentStep) {
-      case 1:
-        return (
-          <Form noValidate validated={validated} onSubmit={handleVaultInfoSubmit}>
-            <Modal.Body>
-              <div className="mb-3">
-                <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
-                <h5>Vault Information</h5>
-                <p>
-                  A vault allows you to group your DeFi positions and apply automated
-                  strategies to them. You'll be able to deposit positions and configure
-                  strategies after creation.
+          <TokenDepositsSection
+            selectedTokens={selectedTokens}
+            setSelectedTokens={setSelectedTokens}
+            depositAmounts={strategyParams.depositAmounts || {}}
+            onAmountChange={(symbol, value) => {
+              const newDepositAmounts = {
+                ...(strategyParams.depositAmounts || {}),
+                [symbol]: value
+              };
+              handleParamChange('depositAmounts', newDepositAmounts);
+            }}
+            useStrategy={useStrategy}
+            strategyId={strategyId}
+          />
+
+          <PositionDepositsSection
+            selectedPositions={selectedPositions}
+            setSelectedPositions={setSelectedPositions}
+            useStrategy={useStrategy}
+            strategyId={strategyId}
+          />
+        </Modal.Body>
+
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleBack} disabled={isCreatingVault}>
+            Back
+          </Button>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={isCreatingVault}
+          >
+            Next
+          </Button>
+        </Modal.Footer>
+      </Form>
+    );
+  };
+
+  // Render final step
+  const renderFinalStep = () => {
+    return (
+      <>
+        <Modal.Body>
+          <div className="mb-3">
+            <ProgressBar now={isCreatingVault ? 75 : 100} label={isCreatingVault ? "Creating Vault..." : "Complete"} className="mb-3" />
+
+            {isCreatingVault ? (
+              <div className="text-center py-4">
+                <Spinner animation="border" role="status" className="mb-3">
+                  <span className="visually-hidden">Creating vault...</span>
+                </Spinner>
+                <h5>Creating Your Vault</h5>
+                <p className="text-muted">
+                  Please confirm the transaction in your wallet and wait for it to be processed.
                 </p>
               </div>
+            ) : txError ? (
+              <Alert variant="danger">
+                <Alert.Heading>Error Creating Vault</Alert.Heading>
+                <p>{txError}</p>
+                <p>Please try again or contact support if the issue persists.</p>
+              </Alert>
+            ) : createdVaultAddress ? (
+              <>
+                <Alert variant="success">
+                  <Alert.Heading>Vault Created Successfully!</Alert.Heading>
+                  <p>Your vault has been created at:</p>
+                  <code className="d-block mb-3">{createdVaultAddress}</code>
+                </Alert>
 
-              <Form.Group className="mb-3">
-                <Form.Label>Vault Name <span className="text-danger">*</span></Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="Enter a name for your vault"
-                  value={vaultName}
-                  onChange={(e) => setVaultName(e.target.value)}
-                  disabled={isCreatingVault}
-                  required
-                  maxLength={50}
-                />
-                <Form.Control.Feedback type="invalid">
-                  Please provide a name for your vault.
-                </Form.Control.Feedback>
-                <Form.Text className="text-muted">
-                  Choose a meaningful name to help you identify this vault.
-                </Form.Text>
-              </Form.Group>
+                <Card className="mb-4">
+                  <Card.Header>Vault Details</Card.Header>
+                  <Card.Body>
+                    <Row>
+                      <Col md={6}>
+                        <p><strong>Name:</strong> {vaultName}</p>
+                        {vaultDescription && <p><strong>Description:</strong> {vaultDescription}</p>}
+                        <p>
+                          <strong>Strategy:</strong> {useStrategy
+                            ? `${selectedStrategy?.name} (${availableTemplates.find(t => t.id === selectedTemplate)?.name})`
+                            : "Manual Management"}
+                        </p>
+                      </Col>
+                      <Col md={6}>
+                        <p><strong>Tokens:</strong> {selectedTokens.join(", ") || "None"}</p>
+                        <p><strong>Positions:</strong> {selectedPositions.length}</p>
+                      </Col>
+                    </Row>
+                  </Card.Body>
+                </Card>
 
-              <Form.Group className="mb-3">
-                <Form.Label>Description (Optional)</Form.Label>
-                <Form.Control
-                  as="textarea"
-                  rows={2}
-                  placeholder="What is this vault for? (Optional)"
-                  value={vaultDescription}
-                  onChange={(e) => setVaultDescription(e.target.value)}
-                  disabled={isCreatingVault}
-                  maxLength={200}
-                />
-                <Form.Text className="text-muted">
-                  Add context or notes about this vault's purpose.
-                </Form.Text>
-              </Form.Group>
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="secondary" onClick={handleModalClose} disabled={isCreatingVault}>
+                <div className="text-center">
+                  <p>Your vault is ready to use. You can now:</p>
+                  <ul className="text-start">
+                    <li>Add more positions</li>
+                    <li>Deposit additional tokens</li>
+                    <li>{useStrategy ? "Monitor your automated strategy" : "Activate a strategy"}</li>
+                  </ul>
+                </div>
+              </>
+            ) : (
+              <>
+                <h5>Review and Create</h5>
+                <p className="mb-3">
+                  Please review your vault configuration and click "Create Vault" to proceed.
+                </p>
+
+                <Card className="mb-4">
+                  <Card.Header>Vault Summary</Card.Header>
+                  <Card.Body>
+                    <p><strong>Name:</strong> {vaultName}</p>
+                    {vaultDescription && <p><strong>Description:</strong> {vaultDescription}</p>}
+                    <p>
+                      <strong>Strategy:</strong> {useStrategy
+                        ? `${selectedStrategy?.name} (${availableTemplates.find(t => t.id === selectedTemplate)?.name})`
+                        : "Manual Management"}
+                    </p>
+                    <p><strong>Tokens:</strong> {selectedTokens.join(", ") || "None"}</p>
+                    <p><strong>Positions:</strong> {selectedPositions.length}</p>
+
+                    {useStrategy && selectedTemplate !== "custom" && (
+                      <Alert variant="info" className="mt-3 mb-0">
+                        You've selected a preset template. The strategy will be configured with optimized parameters.
+                      </Alert>
+                    )}
+                  </Card.Body>
+                </Card>
+
+                <div className="d-grid">
+                  <Button
+                    variant="primary"
+                    onClick={handleSubmit}
+                    disabled={isCreatingVault}
+                  >
+                    {isCreatingVault ? (
+                      <>
+                        <Spinner
+                          as="span"
+                          animation="border"
+                          size="sm"
+                          role="status"
+                          aria-hidden="true"
+                          className="me-2"
+                        />
+                        Configuring Vault...
+                      </>
+                    ) : "Complete Setup"}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal.Body>
+
+        <Modal.Footer>
+          {isCreatingVault ? (
+            <div /> // No buttons during processing
+          ) : txError ? (
+            <>
+              <Button variant="secondary" onClick={onHide}>
                 Cancel
+              </Button>
+              <Button variant="primary" onClick={() => setCurrentStep(totalSteps - 1)}>
+                Try Again
+              </Button>
+            </>
+          ) : createdVaultAddress ? (
+            <>
+              <Button variant="secondary" onClick={onHide}>
+                Close
               </Button>
               <Button
                 variant="primary"
-                type="submit"
-                disabled={isCreatingVault || !vaultName.trim()}
+                onClick={() => window.location.href = `/vault/${createdVaultAddress}`}
               >
-                {isCreatingVault ? (
-                  <>
-                    <Spinner
-                      as="span"
-                      animation="border"
-                      size="sm"
-                      role="status"
-                      aria-hidden="true"
-                      className="me-2"
-                    />
-                    Creating Vault...
-                  </>
-                ) : "Create Vault"}
+                Go to Vault
               </Button>
-            </Modal.Footer>
-          </Form>
-        );
-
-      case 2:
-        return (
-          <Form noValidate onSubmit={(e) => e.preventDefault()}>
-            <Modal.Body>
-              <div className="mb-3">
-                <ProgressBar now={getStepProgress()} label={`Step ${currentStep} of ${totalSteps}`} className="mb-3" />
-                <h5>Strategy Selection</h5>
-                <p>
-                  A strategy can automate management of your liquidity positions for optimal returns.
-                  You can choose to activate a strategy now or later from the vault details page.
-                </p>
-              </div>
-
-              <Form.Group className="mb-4">
-                <Form.Check
-                  type="switch"
-                  id="use-strategy-switch"
-                  label="Use an automated strategy"
-                  checked={useStrategy}
-                  onChange={(e) => setUseStrategy(e.target.checked)}
-                  disabled={isCreatingVault}
-                />
-              </Form.Group>
-
-              {useStrategy && (
-                <>
-                  <Form.Group className="mb-4">
-                    <Form.Label>Strategy Type</Form.Label>
-                    <Form.Select
-                      value={strategyId}
-                      onChange={handleStrategyChange}
-                      disabled={isCreatingVault}
-                    >
-                      {availableStrategies.map(strategy => (
-                        <option
-                          key={strategy.id}
-                          value={strategy.id}
-                          disabled={strategy.comingSoon}
-                        >
-                          {strategy.name} - {strategy.subtitle}
-                          {strategy.comingSoon ? " (Coming Soon)" : ""}
-                        </option>
-                      ))}
-                    </Form.Select>
-                    <Form.Text className="text-muted">
-                      Select a strategy that matches your investment goals.
-                    </Form.Text>
-                  </Form.Group>
-
-                  {useStrategy && strategyId && (
-                    <Form.Group className="mb-4">
-                      <Form.Label>Select Platforms</Form.Label>
-                      <div className="d-flex flex-wrap">
-                        {availablePlatforms.map((platform) => {
-                          const isSelected = selectedPlatforms.includes(platform.id);
-
-                          return (
-                            <div
-                              key={platform.id}
-                              className={`border rounded p-2 m-1 d-flex align-items-center cursor-pointer ${isSelected ? 'bg-primary text-white' : ''}`}
-                              onClick={() => handlePlatformSelection(platform.id)}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              {platform.logo && (
-                                <div className="me-1"
-                                     style={{ width: '20px', height: '20px', position: 'relative' }}>
-                                  <Image
-                                    src={platform.logo}
-                                    alt={platform.name}
-                                    width={20}
-                                    height={20}
-                                  />
-                                </div>
-                              )}
-                              <span>{platform.name}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {platformSelectionError && (
-                        <div className="text-danger small mt-1">
-                          {platformSelectionError}
-                        </div>
-                      )}
-                      <Form.Text className="text-muted">
-                        Select one or more DeFi platforms for this vault. You can select none to use all available platforms.
-                      </Form.Text>
-                    </Form.Group>
-                  )}
-
-                  {useStrategy && strategyId && strategy.supportedTokens && (
-                    <Form.Group className="mb-4">
-                      <Form.Label>
-                        Select Tokens {strategy.requireTokenSelection && <span className="text-danger">*</span>}
-                      </Form.Label>
-                      <div className="d-flex flex-wrap">
-                        {Object.entries(strategy.supportedTokens).map(([symbol, tokenData]) => {
-                          const isSelected = selectedTokens.includes(symbol);
-
-                          return (
-                            <div
-                              key={symbol}
-                              className={`border rounded p-2 m-1 d-flex align-items-center cursor-pointer ${isSelected ? 'bg-primary text-white' : ''}`}
-                              onClick={() => handleTokenSelection(symbol)}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              {tokenData.logoURI && (
-                                <img
-                                  src={tokenData.logoURI}
-                                  alt={symbol}
-                                  width="20"
-                                  height="20"
-                                  className="me-1"
-                                />
-                              )}
-                              <span>{symbol}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {tokenSelectionError && (
-                        <div className="text-danger small mt-1">
-                          {tokenSelectionError}
-                        </div>
-                      )}
-                      <Form.Text className="text-muted">
-                        {strategy.minTokens && strategy.maxTokens
-                          ? `Select between ${strategy.minTokens} and ${strategy.maxTokens} tokens for this strategy.`
-                          : strategy.minTokens
-                              ? `Select at least ${strategy.minTokens} token(s) for this strategy.`
-                              : strategy.maxTokens
-                                ? `Select up to ${strategy.maxTokens} token(s) for this strategy.`
-                                : "Click to select the tokens you want to use with this strategy."}
-                      </Form.Text>
-                    </Form.Group>
-                  )}
-
-                  {/* Render strategy parameters for this step */}
-                  <StrategyParameterForm
-                    strategyId={strategyId}
-                    currentStep={currentStep}
-                    params={strategyParams}
-                    onParamChange={handleParamChange}
-                    disabled={isCreatingVault}
-                    validationErrors={validationErrors}
-                  />
-                </>
-              )}
-
-              {!useStrategy && (
-                <Alert variant="info">
-                  You can always activate a strategy later from the vault details page.
-                </Alert>
-              )}
-            </Modal.Body>
-            <Modal.Footer>
+            </>
+          ) : (
+            <>
               <Button variant="secondary" onClick={handleBack} disabled={isCreatingVault}>
                 Back
               </Button>
               <Button
                 variant="primary"
-                onClick={isFinalStep() ? handleSubmit : handleNextStep}
-                disabled={isCreatingVault || (useStrategy && strategy.requireTokenSelection && selectedTokens.length < (strategy.minTokens || 1))}
+                onClick={handleSubmit}
+                disabled={isCreatingVault}
               >
-                {isCreatingVault ? (
-                  <>
-                    <Spinner
-                      as="span"
-                      animation="border"
-                      size="sm"
-                      role="status"
-                      aria-hidden="true"
-                      className="me-2"
-                    />
-                    Creating...
-                  </>
-                ) : isFinalStep() ? "Start Strategy" : "Next"}
+                Create Vault
               </Button>
-            </Modal.Footer>
-          </Form>
-        );
+            </>
+          )}
+        </Modal.Footer>
+      </>
+    );
+  };
 
+  // Render the current step content
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 1:
+        return renderVaultInfoStep();
+      case 2:
+        return renderStrategySelectionStep();
+      case totalSteps - 1:
+        return renderAssetDepositStep();
       case totalSteps:
-        return (
-          <>
-            <Modal.Body>
-              <div className="mb-3">
-                <ProgressBar now={isCreatingVault ? 75 : 100} label={isCreatingVault ? "Creating Vault..." : `Step ${currentStep} of ${totalSteps}`} className="mb-3" />
-
-                {isCreatingVault ? (
-                  <div className="text-center py-4">
-                    <Spinner animation="border" role="status" className="mb-3">
-                      <span className="visually-hidden">Creating vault...</span>
-                    </Spinner>
-                    <h5>Creating Your Vault</h5>
-                    <p className="text-muted">
-                      Please confirm the transaction in your wallet and wait for it to be processed.
-                    </p>
-                  </div>
-                ) : txError ? (
-                  <Alert variant="danger">
-                    <Alert.Heading>Error Creating Vault</Alert.Heading>
-                    <p>{txError}</p>
-                    <p>Please try again or contact support if the issue persists.</p>
-                  </Alert>
-                ) : (
-                  <>
-                    <h5>Vault Created Successfully!</h5>
-                    <p className="mb-3">
-                      Your vault has been created at address: <code>{createdVaultAddress}</code>
-                    </p>
-
-                    <h5>Add Positions to Your Vault</h5>
-                    <p>
-                      Select the positions you want to add to this vault. You can also add positions later.
-                    </p>
-
-                    {availablePositions.length === 0 ? (
-                      <Alert variant="info">
-                        You don't have any wallet positions available to add to this vault.
-                      </Alert>
-                    ) : (
-                      <ListGroup className="mb-3">
-                        {availablePositions.map(position => {
-                          return (
-                            <ListGroup.Item
-                              key={position.id}
-                              className="d-flex justify-content-between align-items-center"
-                            >
-                              <Form.Check
-                                type="checkbox"
-                                id={`position-${position.id}`}
-                                label={
-                                  <div className="ms-2">
-                                    <div><strong>{position.tokenPair}</strong> - Position #{position.id}</div>
-                                    <div className="text-muted small">Fee: {position.fee / 10000}%</div>
-                                  </div>
-                                }
-                                checked={selectedPositions.includes(position.id)}
-                                onChange={() => handlePositionToggle(position.id)}
-                              />
-                              {position.platform && config.platformMetadata[position.platform] && (
-                                config.platformMetadata[position.platform].logo ? (
-                                  <div
-                                    className="ms-2 d-inline-flex align-items-center justify-content-center"
-                                    style={{
-                                      height: '20px',
-                                      width: '20px'
-                                    }}
-                                  >
-                                    <Image
-                                      src={config.platformMetadata[position.platform].logo}
-                                      alt={position.platformName || position.platform}
-                                      width={40}
-                                      height={40}
-                                      title={position.platformName || position.platform}
-                                    />
-                                  </div>
-                                ) : (
-                                  <Badge
-                                    className="ms-2 d-inline-flex align-items-center"
-                                    pill
-                                    bg=""
-                                    style={{
-                                      fontSize: '0.75rem',
-                                      backgroundColor: config.platformMetadata[position.platform]?.color || '#6c757d',
-                                      padding: '0.25em 0.5em',
-                                      color: 'white',
-                                      border: 'none'
-                                    }}
-                                  >
-                                    {position.platformName || position.platform}
-                                  </Badge>
-                                )
-                              )}
-                            </ListGroup.Item>
-                          );
-                        })}
-                      </ListGroup>
-                    )}
-                  </>
-                )}
-              </div>
-            </Modal.Body>
-
-            <Modal.Footer>
-              {isCreatingVault ? (
-                // No buttons during processing
-                <div />
-              ) : txError ? (
-                <>
-                  <Button variant="secondary" onClick={handleModalClose}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" onClick={() => setCurrentStep(totalSteps - 1)}>
-                    Try Again
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={handleModalClose}
-                  >
-                    Skip for Now
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handlePositionSubmit}
-                    disabled={selectedPositions.length === 0}
-                  >
-                    Add {selectedPositions.length} Position{selectedPositions.length !== 1 ? 's' : ''}
-                  </Button>
-                </>
-              )}
-            </Modal.Footer>
-          </>
-        );
-
+        return renderFinalStep();
       default:
-        return null;
+        // For parameter configuration steps (only if using custom)
+        if (useStrategy && selectedTemplate === "custom") {
+          return renderParameterStep();
+        }
+        // Fallback
+        return renderFinalStep();
     }
+  };
+
+  // Handle modal close
+  const handleModalClose = () => {
+    if (isCreatingVault) {
+      showError("Cannot close this window while the transaction is in progress");
+      return;
+    }
+    onHide();
   };
 
   return (
