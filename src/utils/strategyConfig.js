@@ -31,6 +31,339 @@ const strategies = {
         description: "Fine-tune your strategy behavior"
       }
     ],
+    // Layout definitions for different wizard steps
+    layouts: {
+      // Step 2 layouts
+      2: {
+        // Range Settings
+        rangeSettings: {
+          groupId: 0,
+          title: "Position Range Configuration",
+          description: "Define how your liquidity is distributed around the current price",
+          sections: [
+            {
+              layout: "grid",
+              items: [
+                {
+                  type: "field-group",
+                  title: "Range Boundaries",
+                  description: "Set the price range limits for your position",
+                  fields: [
+                    {
+                      id: "targetRangeUpper",
+                      label: "Upper Range",
+                      width: 6,
+                      suffix: "%",
+                      size: "md"
+                    },
+                    {
+                      id: "targetRangeLower",
+                      label: "Lower Range",
+                      width: 6,
+                      suffix: "%",
+                      size: "md"
+                    }
+                  ]
+                },
+                {
+                  type: "field-group",
+                  title: "Rebalance Triggers",
+                  description: "When price moves beyond these thresholds, your position will rebalance",
+                  fields: [
+                    {
+                      id: "rebalanceThresholdUpper",
+                      label: "Upper Trigger",
+                      width: 6,
+                      suffix: "%",
+                      size: "md"
+                    },
+                    {
+                      id: "rebalanceThresholdLower",
+                      label: "Lower Trigger",
+                      width: 6,
+                      suffix: "%",
+                      size: "md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+
+        // Risk Management (Step 2 portion)
+        riskManagement: {
+          groupId: 2,
+          title: "Risk Management",
+          description: "Set safeguards to protect your position",
+          sections: [
+            {
+              layout: "grid",
+              items: [
+                {
+                  type: "field-row",
+                  fields: [
+                    {
+                      id: "maxSlippage",
+                      label: "Maximum Slippage",
+                      width: 4,
+                      suffix: "%",
+                      description: "Maximum price slippage allowed when executing trades"
+                    },
+                    {
+                      id: "emergencyExitTrigger",
+                      label: "Emergency Exit",
+                      width: 4,
+                      suffix: "%",
+                      description: "Price change that triggers automatic position exit"
+                    },
+                    {
+                      id: "maxVaultUtilization",
+                      label: "Max Utilization",
+                      width: 4,
+                      suffix: "%",
+                      description: "Maximum percentage of vault assets to deploy"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+
+        // Advanced Settings Section
+        advancedSettings: {
+          groupId: 3,
+          title: "Advanced Settings",
+          description: "Fine-tune your strategy behavior",
+          sections: [
+            {
+              title: "Oracle Settings",
+              description: "Price data feed information ",
+              className: "subsection-title",
+              layout: "regular",
+              items: [
+                {
+                  type: "field-row",
+                  fields: [
+                    {
+                      id: "oracleSource",
+                      label: "Price Data Source",
+                      width: 6,
+                      type: "select"
+                    },
+                    {
+                      id: "priceDeviationTolerance",
+                      label: "Deviation Tolerance",
+                      width: 6,
+                      suffix: "%",
+                      description: "Maximum allowed deviation between price sources"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              title: "Adaptive Range Settings",
+              description: "Automatically adjust position ranges based on market activity",
+              className: "subsection-title",
+              layout: "regular",
+              items: [
+                {
+                  type: "feature-toggle", // Change this from "field-row" to "feature-toggle"
+                  id: "adaptiveRanges",
+                  label: "Enable Adaptive Ranges"
+                  // Remove the width and className properties
+                },
+                {
+                  type: "conditional-fields",
+                  condition: { param: "adaptiveRanges", value: true },
+                  items: [
+                    {
+                      type: "sentence-fields",
+                      template: "If more than {0} rebalances occur within {1} days",
+                      fields: [
+                        {
+                          id: "rebalanceCountThresholdHigh",
+                          width: "compact",
+                          suffix: ""
+                        },
+                        {
+                          id: "adaptiveTimeframeHigh",
+                          width: "compact",
+                          suffix: ""
+                        }
+                      ]
+                    },
+                    {
+                      type: "field-row",
+                      fields: [
+                        {
+                          id: "rangeAdjustmentPercentHigh",
+                          label: "Increase Range By",
+                          width: 6,
+                          suffix: "%",
+                          description: "Percentage to widen position ranges"
+                        },
+                        {
+                          id: "thresholdAdjustmentPercentHigh",
+                          label: "Increase Thresholds By",
+                          width: 6,
+                          suffix: "%",
+                          description: "Percentage to increase rebalance thresholds"
+                        }
+                      ]
+                    },
+                    {
+                      type: "sentence-fields",
+                      template: "If fewer than {0} rebalances occur within {1} days",
+                      fields: [
+                        {
+                          id: "rebalanceCountThresholdLow",
+                          width: "compact",
+                          suffix: ""
+                        },
+                        {
+                          id: "adaptiveTimeframeLow",
+                          width: "compact",
+                          suffix: ""
+                        }
+                      ]
+                    },
+                    {
+                      type: "field-row",
+                      fields: [
+                        {
+                          id: "rangeAdjustmentPercentLow",
+                          label: "Decrease Range By",
+                          width: 6,
+                          suffix: "%",
+                          description: "Percentage to narrow position ranges"
+                        },
+                        {
+                          id: "thresholdAdjustmentPercentLow",
+                          label: "Decrease Thresholds By",
+                          width: 6,
+                          suffix: "%",
+                          description: "Percentage to decrease rebalance thresholds"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+
+      // Step 5 layouts
+      5: {
+        // Position Sizing
+        positionSizing: {
+          groupId: 2,
+          title: "Position Sizing",
+          description: "Control how much capital is allocated to each position",
+          sections: [
+            {
+              layout: "grid",
+              items: [
+                {
+                  type: "field-row",
+                  fields: [
+                    {
+                      id: "targetUtilization",
+                      label: "Target Utilization",
+                      width: 4,
+                      suffix: "%",
+                      description: "Target percentage of vault assets to deploy per position"
+                    },
+                    {
+                      id: "maxPositionSizePercent",
+                      label: "Max Position Size",
+                      width: 4,
+                      suffix: "%",
+                      description: "Maximum percentage of vault assets for any single position"
+                    },
+                    {
+                      id: "minPositionSize",
+                      label: "Min Position Size",
+                      width: 4,
+                      prefix: "$",
+                      description: "Minimum USD value for creating a position"
+                    }
+                  ]
+                },
+                {
+                  type: "field-row",
+                  fields: [
+                    {
+                      id: "minPoolLiquidity",
+                      label: "Min Pool Liquidity",
+                      width: 6,
+                      prefix: "$",
+                      description: "Minimum pool liquidity threshold for valid positions"
+                    },
+                    {
+                      id: "platformSelectionCriteria",
+                      label: "Platform Selection",
+                      width: 6,
+                      type: "select",
+                      description: "How to choose which platform to use for positions"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+
+        // Fee Handling
+        feeSettings: {
+          groupId: 1,
+          title: "Fee Management",
+          description: "Configure how trading fees are handled",
+          sections: [
+            {
+              layout: "grid",
+              items: [
+                {
+                  type: "feature-toggle",
+                  id: "feeReinvestment",
+                  label: "Automatically Reinvest Fees",
+                  description: "When enabled, collected fees will be reinvested based on settings below"
+                },
+                {
+                  type: "conditional-fields",
+                  condition: { param: "feeReinvestment", value: true },
+                  items: [
+                    {
+                      type: "field-row",
+                      fields: [
+                        {
+                          id: "reinvestmentTrigger",
+                          label: "Reinvestment Threshold",
+                          width: 6,
+                          prefix: "$",
+                          description: "Minimum USD value of fees before reinvesting"
+                        },
+                        {
+                          id: "reinvestmentRatio",
+                          label: "Reinvestment Percentage",
+                          width: 6,
+                          suffix: "%",
+                          description: "Percentage of fees to reinvest vs. hold as reserve"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
     parameters: {
       // Range and Rebalance Parameters - Step 2
       targetRangeUpper: {
@@ -129,9 +462,9 @@ const strategies = {
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
-      adaptiveTimeframe: {
-        name: "Adaptive Timeframe",
-        description: "Days to look back when counting rebalances for adaptive adjustment",
+      adaptiveTimeframeHigh: {
+        name: "High Count Timeframe",
+        description: "Days to look back when counting rebalances for widening ranges",
         type: "number",
         defaultValue: 7,
         min: 1,
@@ -143,9 +476,23 @@ const strategies = {
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
-      rangeAdjustmentPercent: {
-        name: "Range Adjustment",
-        description: "Percentage to increase/decrease ranges during adaptation",
+      adaptiveTimeframeLow: {
+        name: "Low Count Timeframe",
+        description: "Days to look back when counting rebalances for tightening ranges",
+        type: "number",
+        defaultValue: 7,
+        min: 1,
+        max: 30,
+        step: 1,
+        suffix: " days",
+        group: 3,
+        wizardStep: 2,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      rangeAdjustmentPercentHigh: {
+        name: "Range Expansion Amount",
+        description: "Percentage to increase position ranges when too many rebalances occur",
         type: "number",
         defaultValue: 20,
         min: 5,
@@ -157,9 +504,37 @@ const strategies = {
         conditionalOn: "adaptiveRanges",
         conditionalValue: true
       },
-      thresholdAdjustmentPercent: {
-        name: "Threshold Adjustment",
-        description: "Percentage to increase/decrease rebalance thresholds during adaptation",
+      thresholdAdjustmentPercentHigh: {
+        name: "Threshold Expansion Amount",
+        description: "Percentage to increase rebalance thresholds when too many rebalances occur",
+        type: "number",
+        defaultValue: 15,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        wizardStep: 2,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      rangeAdjustmentPercentLow: {
+        name: "Range Contraction Amount",
+        description: "Percentage to decrease position ranges when too few rebalances occur",
+        type: "number",
+        defaultValue: 20,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        wizardStep: 2,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      thresholdAdjustmentPercentLow: {
+        name: "Threshold Contraction Amount",
+        description: "Percentage to decrease rebalance thresholds when too few rebalances occur",
         type: "number",
         defaultValue: 15,
         min: 5,
@@ -473,6 +848,33 @@ export function getStrategyParametersByStep(strategyId, step) {
 }
 
 /**
+ * Get available layouts for a strategy and step
+ * @param {string} strategyId - ID of the strategy
+ * @param {number} step - Wizard step number
+ * @returns {Object} Available layouts for the step
+ */
+export function getStrategyLayouts(strategyId, step) {
+  const strategy = strategies[strategyId];
+  if (!strategy || !strategy.layouts || !strategy.layouts[step]) {
+    return {};
+  }
+  return strategy.layouts[step];
+}
+
+/**
+ * Check if a layout should be rendered based on its condition
+ * @param {Object} layout - Layout configuration
+ * @param {Object} params - Current parameter values
+ * @returns {boolean} Whether the layout should be rendered
+ */
+export function shouldRenderLayout(layout, params) {
+  if (!layout.condition) return true;
+
+  const { param, value } = layout.condition;
+  return params[param] === value;
+}
+
+/**
  * Validate strategy parameters
  * @param {string} strategyId - ID of the strategy
  * @param {Object} params - Parameter values to validate
@@ -567,12 +969,14 @@ export function validateStrategyParams(strategyId, params) {
   };
 }
 
-// Export all functions
+// Export all necessary functions
 export default {
   getAvailableStrategies,
   getStrategyDetails,
   getDefaultParams,
   getStrategyParameters,
   getStrategyParametersByStep,
-  validateStrategyParams
+  validateStrategyParams,
+  getStrategyLayouts,
+  shouldRenderLayout
 };
