@@ -8,7 +8,7 @@ import Link from "next/link";
 import Head from "next/head";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/PositionCard";
-import StrategyConfigPanel from "../../components/StrategyConfigPanel";
+import StrategyConfigPanel from "../../components/vault_wizard/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { useVaultDetailData } from "../../hooks/useVaultDetailData";

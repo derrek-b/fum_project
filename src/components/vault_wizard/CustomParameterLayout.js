@@ -340,6 +340,8 @@ const CustomParameterLayout = ({
         return <div key={key}>{renderFeatureToggle(item, paramConfigs)}</div>;
       case 'conditional-fields':
         return <div key={key}>{renderConditionalItems(item, paramConfigs)}</div>;
+      case 'parameter-component':
+        return <div key={key}>{renderParameterComponent(item, paramConfigs)}</div>;
       default:
         return null;
     }
@@ -369,6 +371,13 @@ const CustomParameterLayout = ({
         </div>
       </div>
     );
+  };
+
+  const renderParameterComponent = (item, paramConfigs) => {
+    if (!item.paramId) return null;
+
+    // Just return null here - we'll handle rendering of these components in StrategyParameterForm
+    return null;
   };
 
   return (

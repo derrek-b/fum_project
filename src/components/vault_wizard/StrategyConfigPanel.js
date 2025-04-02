@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Card, Form, Button, Alert, Spinner, Row, Col, ProgressBar, OverlayTrigger, Tooltip } from "react-bootstrap";
-import { setStrategyConfig, setStrategyActive } from "../redux/strategiesSlice";
-import { useToast } from "../context/ToastContext";
-import { formatTimestamp } from "../utils/formatHelpers";
+import { setStrategyConfig, setStrategyActive } from "../../redux/strategiesSlice";
+import { useToast } from "../../context/ToastContext";
+import { formatTimestamp } from "../../utils/formatHelpers";
 
 // Helper component for parameter inputs
 const ParameterInput = ({

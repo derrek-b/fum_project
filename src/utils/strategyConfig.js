@@ -11,164 +11,33 @@ const strategies = {
     subtitle: "No Automated Strategy",
     description: "Manually manage your positions without automation",
     supportedTokens: getAllTokens(), // All tokens supported
-    totalParameterSteps: 2, // Just 2 steps: Asset Deposits and Create Position
+    totalParameterSteps: 1, // One parameter step for demonstration
     parameterGroups: [
       {
-        name: "Token Deposits",
-        description: "Add tokens to your vault"
-      },
-      {
-        name: "Position Transfers",
-        description: "Transfer existing positions to your vault"
-      },
-      {
-        name: "Position Creation",
-        description: "Create new liquidity positions"
+        name: "Basic Configuration",
+        description: "Configure basic vault options"
       }
     ],
-    layouts: {
-      // Step 3: Asset Deposits
-      3: {
-        tokenDeposits: {
-          groupId: 0,
-          title: "Token Deposits",
-          description: "Select tokens to deposit into your vault",
-          sections: [
-            {
-              layout: "standard",
-              items: [
-                {
-                  type: "content-block",
-                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam auctor, nisl eget ultricies tincidunt, nisl nisl aliquam nisl, eget aliquam nisl nisl eget nisl. Nullam auctor, nisl eget ultricies tincidunt, nisl nisl aliquam nisl, eget aliquam nisl nisl eget nisl.",
-                  className: "mb-3"
-                },
-                {
-                  type: "content-block",
-                  content: "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-                  className: "mb-3"
-                }
-              ]
-            }
-          ]
-        },
-
-        positionDeposits: {
-          groupId: 1,
-          title: "Position Transfers",
-          description: "Transfer existing positions to your vault",
-          sections: [
-            {
-              layout: "standard",
-              items: [
-                {
-                  type: "content-block",
-                  content: "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
-                  className: "mb-3"
-                },
-                {
-                  type: "content-block",
-                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-                  className: "mb-3"
-                }
-              ]
-            }
-          ]
-        }
-      },
-
-      // Step 4: Create New Position
-      4: {
-        createPosition: {
-          groupId: 2,
-          title: "Create New Position",
-          description: "Create a new liquidity position in your vault",
-          sections: [
-            {
-              layout: "standard",
-              items: [
-                {
-                  type: "content-block",
-                  content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus lacinia odio vitae vestibulum vestibulum. Cras porttitor metus vitae hendrerit rhoncus. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Nullam gravida justo nec sapien tristique, nec aliquam nisl condimentum.",
-                  className: "mb-3"
-                },
-                {
-                  type: "content-block",
-                  content: "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
-                  className: "mb-3"
-                }
-              ]
-            }
-          ]
-        }
-      }
-    },
     parameters: {
-      // Step 3: Asset Deposit parameters
-      depositTokens: {
-        name: "Token Selections",
-        description: "Tokens to deposit into the vault",
-        type: "custom", // This will need special handling in the UI
-        defaultValue: [],
+      tokenDeposits: {
+        name: "Token Deposits",
+        description: "Select tokens and amounts to deposit into your vault",
+        type: "token-deposits",
+        defaultValue: { tokens: [], amounts: {} },
         group: 0,
-        wizardStep: 3
-      },
-
-      depositPositions: {
-        name: "Position Selections",
-        description: "Positions to transfer to the vault",
-        type: "custom", // This will need special handling in the UI
-        defaultValue: [],
-        group: 1,
-        wizardStep: 3
-      },
-
-      // Step 4: Create Position parameters
-      createPositionPair: {
-        name: "Token Pair",
-        description: "Select the token pair for your new position",
-        type: "custom",
-        defaultValue: {},
-        group: 2,
-        wizardStep: 4
-      },
-
-      createPositionFee: {
-        name: "Fee Tier",
-        description: "Select the fee tier for your new position",
-        type: "select",
-        options: [
-          { value: "100", label: "0.01% - Very low fee" },
-          { value: "500", label: "0.05% - Low fee" },
-          { value: "3000", label: "0.3% - Medium fee" },
-          { value: "10000", label: "1% - High fee" }
-        ],
-        defaultValue: "3000",
-        group: 2,
-        wizardStep: 4
-      },
-
-      createPositionRange: {
-        name: "Price Range",
-        description: "Set the price range for your new position",
-        type: "custom",
-        defaultValue: { min: 0, max: 0 },
-        group: 2,
-        wizardStep: 4
-      },
-
-      createPositionAmounts: {
-        name: "Token Amounts",
-        description: "Amount of each token to deposit in the new position",
-        type: "custom",
-        defaultValue: {},
-        group: 2,
-        wizardStep: 4
+        wizardStep: 1
       }
     },
-    templates: []
+    templates: [
+      {
+        id: "custom",
+        name: "Custom",
+        description: "Fully customized parameter configuration"
+      }
+    ]
   },
 
-  // Basic strategy for beginners - KEEPING ALL ORIGINAL CONFIGURATION
+  // All other strategies remain unchanged
   "parris": {
     id: "parris",
     name: "Parris Island",
@@ -196,7 +65,6 @@ const strategies = {
         description: "Fine-tune your strategy behavior"
       }
     ],
-    // Keep all your original layouts - just updating the step numbers
     layouts: {
       // Step 3 layouts (was step 2)
       3: {

@@ -4,20 +4,21 @@ import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { Card, Form, InputGroup, Button, Alert, Spinner, Badge } from 'react-bootstrap';
 import Image from 'next/image';
-import { useToast } from '../context/ToastContext';
-import { getAllTokens } from '../utils/tokenConfig';
-import { formatUnits } from '../utils/formatHelpers';
+import { useToast } from '../../context/ToastContext';
+import { getAllTokens } from '../../utils/tokenConfig';
+import { formatUnits } from '../../utils/formatHelpers';
 
 /**
  * Component for selecting and depositing tokens into a vault
  */
 const TokenDepositsSection = ({
-  selectedTokens,
+  selectedTokens = [],
   setSelectedTokens,
-  depositAmounts,
+  depositAmounts = {},
   onAmountChange,
   useStrategy,
-  strategyId
+  strategyId,
+  hideSubsectionTitle = false
 }) => {
   const { address, provider, chainId } = useSelector((state) => state.wallet);
   const tokenConfigs = useSelector((state) => state.tokens);
@@ -28,7 +29,7 @@ const TokenDepositsSection = ({
 
   // Get supported tokens based on strategy
   const getSupportedTokens = () => {
-    if (useStrategy && strategyId) {
+    if (strategyId !== 'none') {
       // Get tokens supported by the selected strategy
       const strategy = useSelector((state) => state.strategies.availableStrategies[strategyId]);
       return strategy?.supportedTokens || getAllTokens();
@@ -109,19 +110,30 @@ const TokenDepositsSection = ({
     }
   };
 
-  // Toggle token selection
-  const handleTokenToggle = (symbol, isChecked) => {
+   // Toggle token selection
+  const handleTokenToggle=(symbol, isChecked) => {
+    // Calculate new tokens array
+    let newTokens;
     if (isChecked) {
-      // Add token to selected list
-      setSelectedTokens(prev => [...prev, symbol]);
-      // Initialize amount
-      onAmountChange(symbol, "0");
+      newTokens = [...selectedTokens, symbol];
     } else {
-      // Remove token from selected list
-      setSelectedTokens(prev => prev.filter(s => s !== symbol));
-      // Clear amount
-      onAmountChange(symbol, "");
+      newTokens = selectedTokens.filter(t => t !== symbol);
     }
+
+    // Calculate new amounts
+    let newAmounts = {...depositAmounts};
+    if (isChecked) {
+      newAmounts[symbol] = "0";
+    } else {
+      delete newAmounts[symbol];
+    }
+
+    // Update both in one go
+    onParamChange(paramId, {
+      ...(params[paramId] || {}),
+      tokens: newTokens,
+      amounts: newAmounts
+    });
   };
 
   return (
@@ -141,7 +153,9 @@ const TokenDepositsSection = ({
           </Alert>
         ) : (
           <>
-            <p className="mb-3">Select tokens and amounts to deposit into your vault:</p>
+            {!hideSubsectionTitle && (
+              <p className="mb-3">Select tokens and amounts to deposit into your vault:</p>
+            )}
 
             <div className="token-deposit-list">
               {Object.entries(tokenBalances).map(([symbol, data]) => (
