@@ -2391,6 +2391,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       tokensSwapped = false
     } = params;
 
+    console.log('Params in genCPD:', params)
+
     // Input validation
     if (!token0Address || !token1Address) {
       throw new Error("Token addresses are required");
@@ -2553,10 +2555,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         pool: configuredPool,
         tickLower: normalizedTickLower,
         tickUpper: normalizedTickUpper,
-        amount0: amount0,
-        amount1: amount1,
+        amount0: tokensSwapped ? amount1 : amount0,
+        amount1: tokensSwapped ? amount0 : amount1,
         useFullPrecision: true
       });
+
+      console.log('POSITION', position)
 
       console.log("Position created:", {
         tickLower: position.tickLower,

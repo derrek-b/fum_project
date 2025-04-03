@@ -1,5 +1,8 @@
 // src/utils/coingeckoUtils.js
 
+const apiKey = process.env.NEXT_PUBLIC_COINGECKO_API_KEY;
+const urlBase = `https://api.coingecko.com/api/v3/simple/price?x_cg_api_key=${apiKey}`;
+
 /**
  * Utility functions for interacting with the CoinGecko API
  */
@@ -55,7 +58,7 @@ export const fetchTokenPrices = async (tokenSymbols, currency = 'usd') => {
     const tokenIds = tokenSymbols.map(getCoingeckoId).join(',');
 
     // Build API URL
-    const apiUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${tokenIds}&vs_currencies=${currency}`;
+    const apiUrl = urlBase + `&ids=${tokenIds}&vs_currencies=${currency}`;
 
     // Fetch data
     const response = await fetch(apiUrl);

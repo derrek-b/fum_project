@@ -5,7 +5,11 @@ import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../context/ToastContext";
 import config from "../utils/config";
-import { AdapterFactory } from "@/adapters";
+import { triggerUpdate } from "../redux/updateSlice";
+import { setPositionVaultStatus } from "../redux/positionsSlice";
+import { addPositionToVault } from "../redux/vaultsSlice";
+import { getPlatformById } from "../utils/config";
+import { ethers } from "ethers";
 
 export default function PositionSelectionModal({
   show,
@@ -16,12 +20,13 @@ export default function PositionSelectionModal({
   chainId,
   mode // 'add' or 'remove'
 }) {
-  const { showError } = useToast();
+  const { showSuccess, showError } = useToast();
   const dispatch = useDispatch();
 
   // Get data from Redux store
   const { positions } = useSelector((state) => state.positions);
-  const { provider } = useSelector((state) => state.wallet.provider);
+  //const { provider } = useSelector((state) => state.wallet.provider);
+  const { address, provider } = useSelector((state) => state.wallet);
   // const { pools = {} } = useSelector((state) => state.pools);
   // const { tokens = {} } = useSelector((state) => state.tokens);
 
@@ -137,14 +142,97 @@ export default function PositionSelectionModal({
     setIsProcessing(true);
 
     try {
-      // Will be implemented in the next step
-      console.log(`${mode === 'add' ? 'Adding' : 'Removing'} positions:`, selectedPositions);
+      // Get the signer from the provider
+      const signer = await provider.getSigner();
 
-      // Placeholder for now - we'll implement the actual logic later
-      onHide(); // Close the modal after "completion"
+      // Process each selected position
+      const results = [];
+
+      for (const positionId of selectedPositions) {
+        try {
+          // Find the position object from the positions array
+          const position = positions.find(p => p.id === positionId);
+          if (!position) {
+            throw new Error(`Position #${positionId} data not found`);
+          }
+
+          console.log(`Transferring position #${positionId} (${position.platform}) to vault ${vault.address}`);
+
+          // Get the correct position manager address based on the position's platform
+          const platformInfo = getPlatformById(position.platform, chainId);
+          if (!platformInfo || !platformInfo.positionManagerAddress) {
+            throw new Error(`Position manager address not found for platform ${position.platform}`);
+          }
+
+          // Create contract instance for the NFT position manager
+          const nftPositionManager = new ethers.Contract(
+            platformInfo.positionManagerAddress,
+            [
+              'function safeTransferFrom(address from, address to, uint256 tokenId) external',
+              'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
+            ],
+            signer
+          );
+
+          // Use safeTransferFrom to transfer the position to the vault
+          const tx = await nftPositionManager.safeTransferFrom(
+            address,         // from (our wallet address)
+            vault.address,   // to (the vault)
+            positionId       // tokenId
+          );
+
+          const receipt = await tx.wait();
+
+          // Update Redux store to mark this position as in vault
+          dispatch(setPositionVaultStatus({
+            positionId,
+            inVault: true,
+            vaultAddress: vault.address
+          }));
+
+          // Also update the vault's positions list
+          dispatch(addPositionToVault({
+            vaultAddress: vault.address,
+            positionId
+          }));
+
+          results.push({
+            positionId,
+            platform: position.platform,
+            success: true,
+            txHash: receipt.hash
+          });
+        } catch (posError) {
+          console.error(`Error transferring position #${positionId}:`, posError);
+          results.push({
+            positionId,
+            success: false,
+            error: posError.message
+          });
+        }
+      }
+
+      // Check results and show appropriate message
+      const successful = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+
+      if (successful > 0) {
+        showSuccess(`Successfully added ${successful} position${successful !== 1 ? 's' : ''} to vault`);
+
+        // Trigger a general update to refresh all data
+        dispatch(triggerUpdate(Date.now()));
+
+        // Close the modal
+        onHide();
+      }
+
+      if (failed > 0) {
+        const errorMsg = `Failed to add ${failed} position${failed !== 1 ? 's' : ''}`;
+        showError(errorMsg);
+      }
     } catch (error) {
-      console.error(`Error ${mode === 'add' ? 'adding' : 'removing'} positions:`, error);
-      showError(`Failed to ${mode === 'add' ? 'add' : 'remove'} positions: ${error.message}`);
+      console.error("Error adding positions to vault:", error);
+      showError(`Failed to add positions: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }

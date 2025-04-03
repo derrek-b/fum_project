@@ -76,7 +76,6 @@ export default function VaultCard({ vault }) {
   const poolsParam = useSelector((state) => state.pools)
   const tokensParam = useSelector((state) => state.tokens)
   const { chainId } = useSelector((state) => state.wallet)
-  console.log('chain VC', chainId)
 
   return (
     <>

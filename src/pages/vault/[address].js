@@ -1,19 +1,38 @@
 // src/pages/vault/[address].js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
 import Head from "next/head";
+import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/PositionCard";
+import PositionSelectionModal from "../../components/PositionSelectionModal";
+import VaultPositionModal from "@/components/VaultPositionModal";
+import TokenDepositModal from "../../components/TokenDepositModal";
 import StrategyConfigPanel from "../../components/vault_wizard/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
+import { useVaultData } from "@/hooks/useVaultData";
 import { useVaultDetailData } from "../../hooks/useVaultDetailData";
 import { triggerUpdate } from "../../redux/updateSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
+import { getAllTokens } from "../../utils/tokenConfig";
+import { loadVaultData } from '../../utils/vaultsHelpers'
+import Image from "next/image";
+
+// Minimal ERC20 ABI for token balance checks
+const ERC20_ABI = [
+  {
+    constant: true,
+    inputs: [{ name: "_owner", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "balance", type: "uint256" }],
+    type: "function"
+  }
+];
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -36,9 +55,9 @@ function ErrorFallback({ error, resetErrorBoundary }) {
       <div className="d-flex justify-content-between">
         <Button
           variant="outline-secondary"
-          onClick={() => router.push('/')}
+          onClick={() => router.push('/vaults')}
         >
-          Go to Dashboard
+          Go to Vaults
         </Button>
         <Button
           variant="outline-danger"
@@ -56,15 +75,30 @@ export default function VaultDetailPage() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address: vaultAddress } = router.query;
+  const pools = useSelector((state) => state.pools);
+  const tokens = useSelector((state) => state.tokens);
+  const { chainId, provider, address: userAddress } = useSelector((state) => state.wallet);
+  const lastUpdate = useSelector((state) => state.updates.lastUpdate)
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
 
   // Use our custom hook for vault details
-  const { vault, vaultPositions, isLoading, isOwner, error, loadData } = useVaultDetailData(vaultAddress);
+  //const { vault, vaultPositions, isLoading, isOwner, error, loadData } = useVaultDetailData(vaultAddress);
 
   // Component state
+  const [vault, setVault] = useState(null)
+  const [vaultPositions, setVaultPositions] = useState(0)
   const [activeTab, setActiveTab] = useState('positions');
+  const [showAddPositionModal, setShowAddPositionModal] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
+  const [vaultTokens, setVaultTokens] = useState([]);
+  const [isLoadingTokens, setIsLoadingTokens] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState("");
+  const [isOwner, setIsOwner] = useState(false)
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
@@ -72,46 +106,133 @@ export default function VaultDetailPage() {
   const performance = strategyPerformance?.[vaultAddress];
   const history = executionHistory?.[vaultAddress] || [];
 
-  // Load data when component mounts or dependencies change
+  // Fetch token balances for the vault
+  const fetchVaultTokens = async () => {
+    if (!vaultAddress || !provider) return;
+
+    setIsLoadingTokens(true);
+    try {
+      const allTokens = getAllTokens();
+      const tokenAddresses = Object.values(allTokens)
+        .filter(token => token.addresses[chainId])
+        .map(token => ({
+          ...token,
+          address: token.addresses[chainId]
+        }));
+
+      const tokenBalances = await Promise.all(
+        tokenAddresses.map(async (token) => {
+          try {
+            const tokenContract = new ethers.Contract(token.address, ERC20_ABI, provider);
+            const balance = await tokenContract.balanceOf(vaultAddress);
+            const formattedBalance = ethers.formatUnits(balance, token.decimals);
+
+            // Skip tokens with 0 balance
+            if (parseFloat(formattedBalance) === 0) return null;
+
+            // Get token price - in a real app, you'd fetch this from an oracle or API
+            // For simplicity, let's assume $1 for stablecoins and $2000 for WETH
+            let valueUsd = 0;
+            if (token.isStablecoin) {
+              valueUsd = parseFloat(formattedBalance);
+            } else if (token.symbol === "WETH") {
+              valueUsd = parseFloat(formattedBalance) * 2000; // Placeholder price
+            }
+
+            return {
+              ...token,
+              balance: formattedBalance,
+              valueUsd
+            };
+          } catch (err) {
+            console.error(`Error fetching balance for ${token.symbol}:`, err);
+            return null;
+          }
+        })
+      );
+
+      const filteredTokens = tokenBalances.filter(token => token !== null);
+      setVaultTokens(filteredTokens);
+    } catch (err) {
+      console.error("Error fetching token balances:", err);
+      showError("Failed to fetch vault tokens");
+    } finally {
+      setIsLoadingTokens(false);
+    }
+  };
+
+  // Create loadData function to replace the useVaultDetailData hook
+  const loadData = useCallback(async () => {
+    if (!vaultAddress || !provider || !chainId) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Use our utility function to load vault data directly from chain
+      const result = await loadVaultData(vaultAddress, provider, chainId, dispatch, {
+        showError,
+        showSuccess
+      });
+
+      if (result.success) {
+        // Update vault info
+        setVault(result.vault);
+        setVaultPositions(result.positions)
+
+        // Check if user is the owner
+        setIsOwner(
+          userAddress &&
+          result.vault.owner &&
+          userAddress.toLowerCase() === result.vault.owner.toLowerCase()
+        );
+      } else {
+        setError(result.error || "Failed to load vault data");
+      }
+    } catch (err) {
+      console.error("Error loading vault data:", err);
+      setError("Failed to load vault details: " + err.message);
+      showError("Error loading vault details");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [vaultAddress, provider, chainId, userAddress, dispatch, showError, showSuccess]);
+
+  // Call loadData when dependencies change or refresh is triggered
   useEffect(() => {
     if (vaultAddress) {
       loadData();
+      fetchVaultTokens();
     }
-  }, [vaultAddress, loadData]);
+  }, [vaultAddress, refreshTrigger]);
+
+  // Add a forced refresh function
+  const forceRefresh = useCallback(() => {
+    // Increment the refresh trigger to force a reload
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   // Handle refresh
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
+    // Show a loading message
+    showSuccess("Refreshing vault data...");
+
     try {
+      // First force a Redux update
       dispatch(triggerUpdate());
-      loadData();
-      showSuccess("Refreshing vault data...");
+
+      // Then force component refresh
+      forceRefresh();
+
+      // Also refresh token balances
+      fetchVaultTokens();
     } catch (error) {
       console.error("Error triggering refresh:", error);
       showError("Failed to refresh data");
     }
-  };
-
-  // Handle withdraw position from vault
-  const handleWithdrawPosition = async (positionId) => {
-    if (!isOwner) {
-      showError("Only the vault owner can withdraw positions");
-      return;
-    }
-
-    try {
-      // Implementation would need to:
-      // 1. Create a contract instance for the vault
-      // 2. Call withdrawPosition with the NFT contract address and position ID
-      // 3. Update state after successful withdrawal
-
-      // This is a placeholder - actual implementation would interact with the contract
-      showSuccess("Position withdrawn from vault");
-      dispatch(triggerUpdate());
-    } catch (error) {
-      console.error("Error withdrawing position:", error);
-      showError(`Failed to withdraw position: ${error.message}`);
-    }
-  };
+  }, [dispatch, forceRefresh, fetchVaultTokens, showSuccess, showError]);
 
   // Handle strategy activation toggle
   const handleStrategyToggle = async (active) => {
@@ -135,15 +256,37 @@ export default function VaultDetailPage() {
     }
   };
 
+  // Handle token withdrawal (for owner)
+  const handleWithdrawToken = async (token) => {
+    if (!isOwner) {
+      showError("Only the vault owner can withdraw tokens");
+      return;
+    }
+
+    // Implementation would need to call a contract function on the vault
+    // to withdraw tokens to the owner's address
+    showError("Token withdrawal functionality not yet implemented");
+  };
+
+  // Handle refresh after position creation
+  const handlePositionCreated = useCallback(() => {
+    console.log("Position created, forcing refresh");
+
+    // Force a refresh after a short delay
+    setTimeout(() => {
+      handleRefresh();
+    }, 500);
+  }, [handleRefresh]);
+
   // If still loading
   if (isLoading && !vault) {
     return (
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
+          <Link href="/vaults" passHref>
             <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+              &larr; Back to Vaults
             </Button>
           </Link>
           <div className="text-center py-5">
@@ -161,9 +304,9 @@ export default function VaultDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
+          <Link href="/vaults" passHref>
             <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+              &larr; Back to Vaults
             </Button>
           </Link>
           <Alert variant="danger">
@@ -185,9 +328,9 @@ export default function VaultDetailPage() {
           <title>{vault?.name || 'Vault Detail'} | DeFi Dashboard</title>
         </Head>
 
-        <Link href="/" passHref>
+        <Link href="/vaults" passHref>
           <Button variant="outline-secondary" className="mb-4">
-            &larr; Back to Dashboard
+            &larr; Back to Vaults
           </Button>
         </Link>
 
@@ -200,9 +343,6 @@ export default function VaultDetailPage() {
           <div className="d-flex justify-content-between align-items-center mb-3">
             <h1 className="mb-0">
               {vault.name}
-              {isOwner && (
-                <Badge bg="secondary" className="ms-2">Owner</Badge>
-              )}
               {strategyActive && (
                 <Badge bg="success" className="ms-2">Active Strategy</Badge>
               )}
@@ -255,9 +395,28 @@ export default function VaultDetailPage() {
             className="mb-4"
           >
             <Tab eventKey="positions" title="Positions">
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h5 className="mb-0">Vault Positions</h5>
+                <div>
+                  <Button
+                    variant="outline-primary"
+                    onClick={() => setShowCreatePositionModal(true)}
+                    className="me-2"
+                  >
+                    + Create Position
+                  </Button>
+                  <Button
+                    variant="outline-primary"
+                    onClick={() => setShowAddPositionModal(true)}
+                  >
+                    + Add Position
+                  </Button>
+                </div>
+              </div>
+
               {vaultPositions.length === 0 ? (
                 <Alert variant="info" className="text-center">
-                  This vault doesn't have any positions yet. Deposit positions to use them with strategies.
+                  This vault doesn't have any positions yet. Add positions using the button above.
                 </Alert>
               ) : (
                 <Row>
@@ -271,6 +430,77 @@ export default function VaultDetailPage() {
                     </Col>
                   ))}
                 </Row>
+              )}
+            </Tab>
+
+            <Tab eventKey="tokens" title="Tokens">
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h5 className="mb-0">Vault Tokens</h5>
+                <Button
+                  variant="outline-primary"
+                  onClick={() => setShowDepositModal(true)}
+                >
+                  + Deposit Tokens
+                </Button>
+              </div>
+
+              {isLoadingTokens ? (
+                <div className="text-center py-5">
+                  <Spinner animation="border" variant="primary" />
+                  <p className="mt-3">Loading token balances...</p>
+                </div>
+              ) : vaultTokens.length === 0 ? (
+                <Alert variant="info" className="text-center">
+                  This vault doesn't have any tokens yet. Deposit tokens using the button above.
+                </Alert>
+              ) : (
+                <Table striped hover>
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>Balance</th>
+                      <th>Value (USD)</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vaultTokens.map((token) => (
+                      <tr key={token.symbol}>
+                        <td>
+                          <div className="d-flex align-items-center">
+                            {token.logoURI && (
+                              <div className="me-2">
+                                <Image
+                                  src={token.logoURI}
+                                  alt={token.symbol}
+                                  width={24}
+                                  height={24}
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <div className="fw-bold">{token.symbol}</div>
+                              <small className="text-muted">{token.name}</small>
+                            </div>
+                          </div>
+                        </td>
+                        <td>{parseFloat(token.balance).toFixed(6)}</td>
+                        <td>${parseFloat(token.valueUsd).toFixed(2)}</td>
+                        <td>
+                          {isOwner && (
+                            <Button
+                              variant="outline-secondary"
+                              size="sm"
+                              onClick={() => handleWithdrawToken(token)}
+                            >
+                              Withdraw
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
               )}
             </Tab>
 
@@ -328,10 +558,22 @@ export default function VaultDetailPage() {
                       <li>Adding and removing positions</li>
                       <li>Configuring and activating strategies</li>
                       <li>Setting authorization levels</li>
+                      <li>Depositing and withdrawing tokens</li>
                     </ul>
 
                     <div className="d-grid gap-2 col-md-6 mx-auto mt-4">
-                      <Button variant="outline-primary">Deposit Position</Button>
+                      <Button
+                        variant="outline-primary"
+                        onClick={() => setShowAddPositionModal(true)}
+                      >
+                        Add Position
+                      </Button>
+                      <Button
+                        variant="outline-primary"
+                        onClick={() => setShowDepositModal(true)}
+                      >
+                        Deposit Tokens
+                      </Button>
                       <Button variant="outline-primary">Withdraw All Positions</Button>
                       <Button
                         variant={strategyActive ? "outline-danger" : "outline-success"}
@@ -346,6 +588,33 @@ export default function VaultDetailPage() {
             )}
           </Tabs>
         </ErrorBoundary>
+
+        {/* Position Selection Modal */}
+        <PositionSelectionModal
+          show={showAddPositionModal}
+          onHide={() => setShowAddPositionModal(false)}
+          vault={vault}
+          pools={pools}
+          tokens={tokens}
+          chainId={chainId}
+          mode="add"
+        />
+
+        {/* Token Deposit Modal */}
+        <TokenDepositModal
+          show={showDepositModal}
+          onHide={() => setShowDepositModal(false)}
+          vaultAddress={vaultAddress}
+          onTokensUpdated={fetchVaultTokens}
+        />
+
+        {/* Vault Position Creation Modal */}
+        <VaultPositionModal
+          show={showCreatePositionModal}
+          onHide={() => setShowCreatePositionModal(false)}
+          vaultAddress={vaultAddress}
+          onPositionCreated={handlePositionCreated}
+        />
       </Container>
     </>
   );
