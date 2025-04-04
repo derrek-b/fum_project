@@ -15,12 +15,10 @@ import TokenDepositModal from "../../components/TokenDepositModal";
 import StrategyConfigPanel from "../../components/vault_wizard/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
-import { useVaultData } from "@/hooks/useVaultData";
-import { useVaultDetailData } from "../../hooks/useVaultDetailData";
 import { triggerUpdate } from "../../redux/updateSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
 import { getAllTokens } from "../../utils/tokenConfig";
-import { loadVaultData } from '../../utils/vaultsHelpers';
+import { loadVaultData, getVaultData } from '../../utils/vaultsHelpers';
 import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
 import Image from "next/image";
 
@@ -179,8 +177,8 @@ export default function VaultDetailPage() {
     setError(null);
 
     try {
-      // Use our utility function to load vault data directly from chain
-      const result = await loadVaultData(vaultAddress, provider, chainId, dispatch, {
+      // Use our getVaultData utility function to load vault data directly from chain
+      const result = await getVaultData(vaultAddress, provider, chainId, dispatch, {
         showError,
         showSuccess
       });
