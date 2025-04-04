@@ -18,8 +18,11 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     // Vault owner with full control
     address public owner;
 
-    // Authorized strategies that can send transaction batches
-    mapping(address => bool) public authorizedStrategies;
+    // Strategy contract storing vault parameters
+    address public strategy;
+
+    // Wallet authorized to execute transactions
+    address public executor;
 
     // Positions managed by this vault
     mapping(uint256 => bool) public managedPositions;
@@ -30,7 +33,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     event TransactionExecuted(address indexed target, bytes data, bool success);
     event TokensWithdrawn(address indexed token, address indexed to, uint256 amount);
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
-    event StrategyAuthorized(address indexed strategy, bool authorized);
+    event StrategyChanged(address indexed strategy);
+    event ExecutorChanged(address indexed executor);
 
     /**
      * @notice Constructor
@@ -39,10 +43,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     constructor(address _owner) {
         require(_owner != address(0), "PositionVault: zero owner address");
         owner = _owner;
-
-        // Set the deploying contract (factory) as temporarily authorized
-        // This allows the factory to set initial strategy authorizations
-        authorizedStrategies[msg.sender] = true;
+        strategy = address(0);
+        executor = address(0);
     }
 
     /**
@@ -58,7 +60,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
      */
     modifier onlyAuthorized() {
         require(
-            msg.sender == owner || authorizedStrategies[msg.sender],
+            msg.sender == owner || msg.sender == executor,
             "PositionVault: caller is not authorized"
         );
         _;
@@ -94,24 +96,39 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     }
 
     /**
-     * @notice Authorizes or deauthorizes a strategy to execute transactions
-     * @param strategy Address of the strategy
-     * @param authorized Whether the strategy is authorized
+     * @notice Authorizes a strategy
+     * @param _strategy Address of the strategy
      */
-    function setStrategyAuthorization(address strategy, bool authorized) external onlyAuthorized {
-        require(strategy != address(0), "PositionVault: zero strategy address");
-        authorizedStrategies[strategy] = authorized;
-        emit StrategyAuthorized(strategy, authorized);
+    function setStrategy(address _strategy) external onlyOwner {
+        require(_strategy != address(0), "PositionVault: zero strategy address");
+        strategy = _strategy;
+        emit StrategyChanged(strategy);
     }
 
     /**
-     * @notice Removes the temporary authorization from the factory
-     * @dev Should be called by the factory at the end of vault creation
+     * @notice De-authorises a strategy
      */
-    function removeFactoryAuthorization() external {
-        // Only the factory that deployed this contract can call this
-        require(msg.sender != owner, "PositionVault: owner cannot remove own authorization");
-        authorizedStrategies[msg.sender] = false;
+    function removeStrategy() external onlyOwner {
+        strategy = address(0);
+        emit StrategyChanged(strategy);
+    }
+
+    /**
+     * @notice Authorizes a executor
+     * @param _executor Address of the executor
+     */
+    function setExecutor(address _executor) external onlyOwner {
+        require(_executor != address(0), "PositionVault: zero executor address");
+        executor = _executor;
+        emit ExecutorChanged(executor);
+    }
+
+    /**
+     * @notice De-authorises a executor
+     */
+    function removeExecutor() external onlyOwner {
+        executor = address(0);
+        emit ExecutorChanged(executor);
     }
 
     /**
@@ -174,6 +191,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.2.0";
+        return "0.3.0";
     }
 }

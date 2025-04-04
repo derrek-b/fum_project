@@ -63,23 +63,23 @@
         "type": "event"
       },
       {
-        "anonymous": false,
         "inputs": [
           {
-            "indexed": true,
-            "internalType": "address",
-            "name": "strategy",
-            "type": "address"
-          },
-          {
-            "indexed": false,
-            "internalType": "bool",
-            "name": "whitelisted",
-            "type": "bool"
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
           }
         ],
-        "name": "StrategyWhitelisted",
-        "type": "event"
+        "name": "allVaults",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
       },
       {
         "inputs": [
@@ -102,15 +102,15 @@
       },
       {
         "inputs": [],
-        "name": "getVersion",
+        "name": "getTotalVaultCount",
         "outputs": [
           {
-            "internalType": "string",
+            "internalType": "uint256",
             "name": "",
-            "type": "string"
+            "type": "uint256"
           }
         ],
-        "stateMutability": "pure",
+        "stateMutability": "view",
         "type": "function"
       },
       {
@@ -121,12 +121,12 @@
             "type": "address"
           }
         ],
-        "name": "getVaults",
+        "name": "getVaultCount",
         "outputs": [
           {
-            "internalType": "address[]",
+            "internalType": "uint256",
             "name": "",
-            "type": "address[]"
+            "type": "uint256"
           }
         ],
         "stateMutability": "view",
@@ -169,12 +169,12 @@
             "type": "address"
           }
         ],
-        "name": "getVaultCount",
+        "name": "getVaults",
         "outputs": [
           {
-            "internalType": "uint256",
+            "internalType": "address[]",
             "name": "",
-            "type": "uint256"
+            "type": "address[]"
           }
         ],
         "stateMutability": "view",
@@ -182,15 +182,15 @@
       },
       {
         "inputs": [],
-        "name": "getTotalVaultCount",
+        "name": "getVersion",
         "outputs": [
           {
-            "internalType": "uint256",
+            "internalType": "string",
             "name": "",
-            "type": "uint256"
+            "type": "string"
           }
         ],
-        "stateMutability": "view",
+        "stateMutability": "pure",
         "type": "function"
       },
       {
@@ -221,37 +221,6 @@
         "inputs": [
           {
             "internalType": "address",
-            "name": "strategy",
-            "type": "address"
-          },
-          {
-            "internalType": "bool",
-            "name": "whitelisted",
-            "type": "bool"
-          }
-        ],
-        "name": "setStrategyWhitelisting",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-      },
-      {
-        "inputs": [],
-        "name": "getWhitelistedStrategies",
-        "outputs": [
-          {
-            "internalType": "address[]",
-            "name": "",
-            "type": "address[]"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
             "name": "vault",
             "type": "address"
           },
@@ -264,6 +233,35 @@
         "name": "updateVaultName",
         "outputs": [],
         "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "vaultInfo",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "creationTime",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       }
     ],
@@ -283,6 +281,19 @@
         ],
         "stateMutability": "nonpayable",
         "type": "constructor"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "executor",
+            "type": "address"
+          }
+        ],
+        "name": "ExecutorChanged",
+        "type": "event"
       },
       {
         "anonymous": false,
@@ -327,24 +338,37 @@
         "inputs": [
           {
             "indexed": true,
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
             "internalType": "address",
-            "name": "target",
+            "name": "nftContract",
             "type": "address"
           },
           {
-            "indexed": false,
-            "internalType": "bytes",
-            "name": "data",
-            "type": "bytes"
-          },
-          {
-            "indexed": false,
-            "internalType": "bool",
-            "name": "success",
-            "type": "bool"
+            "indexed": true,
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
           }
         ],
-        "name": "TransactionExecuted",
+        "name": "PositionWithdrawn",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "strategy",
+            "type": "address"
+          }
+        ],
+        "name": "StrategyChanged",
         "type": "event"
       },
       {
@@ -377,43 +401,24 @@
         "inputs": [
           {
             "indexed": true,
-            "internalType": "uint256",
-            "name": "tokenId",
-            "type": "uint256"
-          },
-          {
-            "indexed": true,
             "internalType": "address",
-            "name": "nftContract",
-            "type": "address"
-          },
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "to",
-            "type": "address"
-          }
-        ],
-        "name": "PositionWithdrawn",
-        "type": "event"
-      },
-      {
-        "anonymous": false,
-        "inputs": [
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "strategy",
+            "name": "target",
             "type": "address"
           },
           {
             "indexed": false,
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "indexed": false,
             "internalType": "bool",
-            "name": "authorized",
+            "name": "success",
             "type": "bool"
           }
         ],
-        "name": "StrategyAuthorized",
+        "name": "TransactionExecuted",
         "type": "event"
       },
       {
@@ -442,6 +447,19 @@
       },
       {
         "inputs": [],
+        "name": "executor",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
         "name": "getVersion",
         "outputs": [
           {
@@ -451,6 +469,25 @@
           }
         ],
         "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ],
+        "name": "managedPositions",
+        "outputs": [
+          {
+            "internalType": "bool",
+            "name": "",
+            "type": "bool"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       },
       {
@@ -502,7 +539,14 @@
       },
       {
         "inputs": [],
-        "name": "removeFactoryAuthorization",
+        "name": "removeExecutor",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "removeStrategy",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
@@ -511,18 +555,39 @@
         "inputs": [
           {
             "internalType": "address",
-            "name": "strategy",
+            "name": "_executor",
             "type": "address"
-          },
-          {
-            "internalType": "bool",
-            "name": "authorized",
-            "type": "bool"
           }
         ],
-        "name": "setStrategyAuthorization",
+        "name": "setExecutor",
         "outputs": [],
         "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_strategy",
+            "type": "address"
+          }
+        ],
+        "name": "setStrategy",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "strategy",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       },
       {
@@ -574,143 +639,11 @@
       {
         "stateMutability": "payable",
         "type": "receive"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "uint256",
-            "name": "",
-            "type": "uint256"
-          }
-        ],
-        "name": "managedPositions",
-        "outputs": [
-          {
-            "internalType": "bool",
-            "name": "",
-            "type": "bool"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
       }
     ]
   },
   "BatchExecutor": {
-    "abi": [
-      {
-        "inputs": [],
-        "stateMutability": "nonpayable",
-        "type": "constructor"
-      },
-      {
-        "anonymous": false,
-        "inputs": [
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "sender",
-            "type": "address"
-          },
-          {
-            "indexed": false,
-            "internalType": "uint256",
-            "name": "txCount",
-            "type": "uint256"
-          },
-          {
-            "indexed": false,
-            "internalType": "bool",
-            "name": "success",
-            "type": "bool"
-          }
-        ],
-        "name": "BatchExecuted",
-        "type": "event"
-      },
-      {
-        "anonymous": false,
-        "inputs": [
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "target",
-            "type": "address"
-          },
-          {
-            "indexed": false,
-            "internalType": "bytes",
-            "name": "data",
-            "type": "bytes"
-          },
-          {
-            "indexed": false,
-            "internalType": "bool",
-            "name": "success",
-            "type": "bool"
-          },
-          {
-            "indexed": false,
-            "internalType": "bytes",
-            "name": "returnData",
-            "type": "bytes"
-          }
-        ],
-        "name": "TransactionExecuted",
-        "type": "event"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address[]",
-            "name": "targets",
-            "type": "address[]"
-          },
-          {
-            "internalType": "bytes[]",
-            "name": "data",
-            "type": "bytes[]"
-          },
-          {
-            "internalType": "uint256[]",
-            "name": "values",
-            "type": "uint256[]"
-          }
-        ],
-        "name": "executeBatch",
-        "outputs": [
-          {
-            "internalType": "bool[]",
-            "name": "successes",
-            "type": "bool[]"
-          },
-          {
-            "internalType": "bytes[]",
-            "name": "results",
-            "type": "bytes[]"
-          }
-        ],
-        "stateMutability": "payable",
-        "type": "function"
-      },
-      {
-        "inputs": [],
-        "name": "getVersion",
-        "outputs": [
-          {
-            "internalType": "string",
-            "name": "",
-            "type": "string"
-          }
-        ],
-        "stateMutability": "pure",
-        "type": "function"
-      },
-      {
-        "stateMutability": "payable",
-        "type": "receive"
-      }
-    ],
+    "abi": [],
     "addresses": {
       "1337": "0x3bAACe002B7fA0De8ff77b4d8796812C0478bdb2"
     }

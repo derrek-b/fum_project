@@ -1,18 +1,17 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("VaultFactory - 0.2.1", function() {
+describe("VaultFactory - 0.3.0", function() {
   let VaultFactory;
   let PositionVault;
   let factory;
   let owner;
   let user1;
   let user2;
-  let strategyMock;
 
   beforeEach(async function() {
     // Get signers
-    [owner, user1, user2, strategyMock] = await ethers.getSigners();
+    [owner, user1, user2] = await ethers.getSigners();
 
     // Deploy the PositionVault contract first (we need its bytecode for the factory)
     PositionVault = await ethers.getContractFactory("PositionVault");
@@ -124,51 +123,6 @@ describe("VaultFactory - 0.2.1", function() {
       [isVault, vaultOwner] = await factory.isVault(ethers.ZeroAddress);
       expect(isVault).to.be.false;
       expect(vaultOwner).to.equal(ethers.ZeroAddress);
-    });
-  });
-
-  describe("Strategy Whitelisting", function() {
-    it("should allow owner to whitelist strategies", async function() {
-      await factory.connect(owner).setStrategyWhitelisting(strategyMock.address, true);
-
-      expect(await factory.whitelistedStrategies(strategyMock.address)).to.be.true;
-
-      const whitelistedStrategies = await factory.getWhitelistedStrategies();
-      expect(whitelistedStrategies.length).to.equal(1);
-      expect(whitelistedStrategies[0]).to.equal(strategyMock.address);
-    });
-
-    it("should allow owner to dewhitelist strategies", async function() {
-      // First whitelist, then dewhitelist
-      await factory.connect(owner).setStrategyWhitelisting(strategyMock.address, true);
-      await factory.connect(owner).setStrategyWhitelisting(strategyMock.address, false);
-
-      expect(await factory.whitelistedStrategies(strategyMock.address)).to.be.false;
-
-      const whitelistedStrategies = await factory.getWhitelistedStrategies();
-      expect(whitelistedStrategies.length).to.equal(0);
-    });
-
-    it("should reject whitelisting from non-owner", async function() {
-      await expect(
-        factory.connect(user1).setStrategyWhitelisting(strategyMock.address, true)
-      ).to.be.reverted;  // Just check that it reverts without specifics
-    });
-
-    it("should auto-authorize whitelisted strategies for new vaults", async function() {
-      // Whitelist a strategy
-      await factory.connect(owner).setStrategyWhitelisting(strategyMock.address, true);
-
-      // Create a vault
-      const tx = await factory.connect(user1).createVault("Auto Strategy Vault");
-      const receipt = await tx.wait();
-      const vaultAddress = receipt.logs.find(
-        log => log.fragment && log.fragment.name === 'VaultCreated'
-      ).args[1];
-
-      // Check that the strategy is authorized in the new vault
-      const vault = await ethers.getContractAt("PositionVault", vaultAddress);
-      expect(await vault.authorizedStrategies(strategyMock.address)).to.be.true;
     });
   });
 

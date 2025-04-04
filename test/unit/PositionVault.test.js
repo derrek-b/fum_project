@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("PositionVault - 0.2.1", function() {
+describe("PositionVault - 0.3.0", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
@@ -11,11 +11,12 @@ describe("PositionVault - 0.2.1", function() {
   let owner;
   let user1;
   let user2;
-  let strategy;
+  let strategyContract;
+  let executorWallet;
 
   beforeEach(async function() {
     // Get signers
-    [owner, user1, user2, strategy] = await ethers.getSigners();
+    [owner, user1, user2, strategyContract, executorWallet] = await ethers.getSigners();
 
     // Deploy the test contracts
     PositionVault = await ethers.getContractFactory("PositionVault");
@@ -43,31 +44,92 @@ describe("PositionVault - 0.2.1", function() {
     it("should initialize with the correct owner", async function() {
       expect(await vault.owner()).to.equal(owner.address);
     });
+
+    it("should initialize with empty strategy and executor", async function() {
+      expect(await vault.strategy()).to.equal(ethers.ZeroAddress);
+      expect(await vault.executor()).to.equal(ethers.ZeroAddress);
+    });
   });
 
-  describe("Strategy Authorization", function() {
-    it("should allow owner to authorize strategies", async function() {
-      await vault.setStrategyAuthorization(strategy.address, true);
-      expect(await vault.authorizedStrategies(strategy.address)).to.be.true;
+  describe("Strategy Management", function() {
+    it("should allow owner to set strategy", async function() {
+      await vault.setStrategy(strategyContract.address);
+      expect(await vault.strategy()).to.equal(strategyContract.address);
 
       // Check event emission
-      await expect(vault.setStrategyAuthorization(strategy.address, true))
-        .to.emit(vault, "StrategyAuthorized")
-        .withArgs(strategy.address, true);
+      await expect(vault.setStrategy(strategyContract.address))
+        .to.emit(vault, "StrategyChanged")
+        .withArgs(strategyContract.address);
     });
 
-    it("should allow owner to deauthorize strategies", async function() {
-      // First authorize, then deauthorize
-      await vault.setStrategyAuthorization(strategy.address, true);
-      await vault.setStrategyAuthorization(strategy.address, false);
+    it("should allow owner to remove strategy", async function() {
+      // First set, then remove
+      await vault.setStrategy(strategyContract.address);
+      await vault.removeStrategy();
 
-      expect(await vault.authorizedStrategies(strategy.address)).to.be.false;
+      expect(await vault.strategy()).to.equal(ethers.ZeroAddress);
+
+      // Check event emission
+      await expect(vault.removeStrategy())
+        .to.emit(vault, "StrategyChanged")
+        .withArgs(ethers.ZeroAddress);
     });
 
-    it("should reject authorization changes from non-owner", async function() {
+    it("should reject strategy changes from non-owner", async function() {
       await expect(
-        vault.connect(user1).setStrategyAuthorization(strategy.address, true)
-      ).to.be.revertedWith("PositionVault: caller is not authorized");
+        vault.connect(user1).setStrategy(strategyContract.address)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      await expect(
+        vault.connect(user1).removeStrategy()
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should reject setting zero address strategy", async function() {
+      await expect(
+        vault.setStrategy(ethers.ZeroAddress)
+      ).to.be.revertedWith("PositionVault: zero strategy address");
+    });
+  });
+
+  describe("Executor Management", function() {
+    it("should allow owner to set executor", async function() {
+      await vault.setExecutor(executorWallet.address);
+      expect(await vault.executor()).to.equal(executorWallet.address);
+
+      // Check event emission
+      await expect(vault.setExecutor(executorWallet.address))
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(executorWallet.address);
+    });
+
+    it("should allow owner to remove executor", async function() {
+      // First set, then remove
+      await vault.setExecutor(executorWallet.address);
+      await vault.removeExecutor();
+
+      expect(await vault.executor()).to.equal(ethers.ZeroAddress);
+
+      // Check event emission
+      await expect(vault.removeExecutor())
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(ethers.ZeroAddress);
+    });
+
+    it("should reject executor changes from non-owner", async function() {
+      await expect(
+        vault.connect(user1).setExecutor(executorWallet.address)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      await expect(
+        vault.connect(user1).removeExecutor()
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should reject setting zero address executor", async function() {
+      await expect(
+        vault.setExecutor(ethers.ZeroAddress)
+      ).to.be.revertedWith("PositionVault: zero executor address");
     });
   });
 
@@ -82,6 +144,9 @@ describe("PositionVault - 0.2.1", function() {
         user1.address,
         transferAmount
       ]);
+
+      // Set up executor for some tests
+      await vault.setExecutor(executorWallet.address);
     });
 
     it("should allow owner to execute transactions", async function() {
@@ -98,14 +163,11 @@ describe("PositionVault - 0.2.1", function() {
       expect(finalBalance - initialBalance).to.equal(transferAmount);
     });
 
-    it("should allow authorized strategies to execute transactions", async function() {
-      // Authorize strategy
-      await vault.setStrategyAuthorization(strategy.address, true);
-
+    it("should allow authorized executor to execute transactions", async function() {
       const initialBalance = await token.balanceOf(user1.address);
 
-      // Execute transfer transaction from strategy
-      await vault.connect(strategy).execute(
+      // Execute transfer transaction from executor
+      await vault.connect(executorWallet).execute(
         [await token.getAddress()],
         [callData]
       );
@@ -118,6 +180,14 @@ describe("PositionVault - 0.2.1", function() {
     it("should reject execution from unauthorized callers", async function() {
       await expect(
         vault.connect(user1).execute(
+          [await token.getAddress()],
+          [callData]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+
+      // Even the strategy contract cannot execute (only owner and executor can)
+      await expect(
+        vault.connect(strategyContract).execute(
           [await token.getAddress()],
           [callData]
         )
@@ -190,6 +260,16 @@ describe("PositionVault - 0.2.1", function() {
         vault.connect(user1).withdrawTokens(
           await token.getAddress(),
           user1.address,
+          ethers.parseEther("1")
+        )
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      // Even the executor cannot withdraw tokens
+      await vault.setExecutor(executorWallet.address);
+      await expect(
+        vault.connect(executorWallet).withdrawTokens(
+          await token.getAddress(),
+          executorWallet.address,
           ethers.parseEther("1")
         )
       ).to.be.revertedWith("PositionVault: caller is not the owner");
@@ -282,6 +362,16 @@ describe("PositionVault - 0.2.1", function() {
           await nft.getAddress(),
           tokenId,
           user1.address
+        )
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      // Even the executor cannot withdraw positions
+      await vault.setExecutor(executorWallet.address);
+      await expect(
+        vault.connect(executorWallet).withdrawPosition(
+          await nft.getAddress(),
+          tokenId,
+          executorWallet.address
         )
       ).to.be.revertedWith("PositionVault: caller is not the owner");
     });

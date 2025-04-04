@@ -24,14 +24,9 @@ contract VaultFactory is Ownable {
     // Global registry of all vaults
     address[] public allVaults;
 
-    // Whitelisted strategies that can be automatically authorized for new vaults
-    mapping(address => bool) public whitelistedStrategies;
-    address[] private whitelistedStrategyList;
-
     // Events
     event VaultCreated(address indexed user, address indexed vault, string name, uint256 userVaultCount);
     event VaultNameUpdated(address indexed vault, string name);
-    event StrategyWhitelisted(address indexed strategy, bool whitelisted);
 
     /**
      * @notice Constructor
@@ -62,18 +57,6 @@ contract VaultFactory is Ownable {
 
         // Add to global registry
         allVaults.push(vault);
-
-        // Auto-authorize whitelisted strategies
-        PositionVault positionVault = PositionVault(payable(vault));
-        for (uint i = 0; i < whitelistedStrategyList.length; i++) {
-            address strategy = whitelistedStrategyList[i];
-            if (whitelistedStrategies[strategy]) {
-                positionVault.setStrategyAuthorization(strategy, true);
-            }
-        }
-
-        // Remove factory's temporary authorization
-        positionVault.removeFactoryAuthorization();
 
         emit VaultCreated(msg.sender, vault, name, userVaults[msg.sender].length);
 
@@ -147,44 +130,7 @@ contract VaultFactory is Ownable {
         return (isVault, owner);
     }
 
-    /**
-     * @notice Whitelists or dewhitelists a strategy for auto-authorization in new vaults
-     * @param strategy Address of the strategy
-     * @param whitelisted Whether the strategy is whitelisted
-     */
-    function setStrategyWhitelisting(address strategy, bool whitelisted) external onlyOwner {
-        require(strategy != address(0), "VaultFactory: zero strategy address");
-
-        // Update whitelist status
-        bool currentStatus = whitelistedStrategies[strategy];
-        whitelistedStrategies[strategy] = whitelisted;
-
-        // Add to or remove from the list if status changed
-        if (whitelisted && !currentStatus) {
-            whitelistedStrategyList.push(strategy);
-        } else if (!whitelisted && currentStatus) {
-            // Remove from list - find index and replace with last element, then pop
-            for (uint i = 0; i < whitelistedStrategyList.length; i++) {
-                if (whitelistedStrategyList[i] == strategy) {
-                    whitelistedStrategyList[i] = whitelistedStrategyList[whitelistedStrategyList.length - 1];
-                    whitelistedStrategyList.pop();
-                    break;
-                }
-            }
-        }
-
-        emit StrategyWhitelisted(strategy, whitelisted);
-    }
-
-    /**
-     * @notice Gets all whitelisted strategies
-     * @return strategies Array of whitelisted strategy addresses
-     */
-    function getWhitelistedStrategies() external view returns (address[] memory) {
-        return whitelistedStrategyList;
-    }
-
     function getVersion() external pure returns (string memory) {
-        return "0.2.0";
+        return "0.3.0";
     }
 }
