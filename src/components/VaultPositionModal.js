@@ -3,17 +3,14 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
 import { AdapterFactory } from '../adapters';
-import { formatPrice, formatFeeDisplay } from '../utils/formatHelpers';
-import { calculateUsdValue } from '../utils/coingeckoUtils';
+import { formatPrice } from '../utils/formatHelpers';
+import { calculateUsdValueSync, prefetchTokenPrices } from '../utils/coingeckoUtils';
 import { ethers } from 'ethers';
 import { useToast } from '../context/ToastContext';
 import { triggerUpdate } from '../redux/updateSlice';
 import { getVaultContract } from '../utils/contracts';
 import { getAllTokens } from '../utils/tokenConfig';
-import { addPositionToVault, updateVaultPositions } from '../redux/vaultsSlice';
-import { setPositions } from '../redux/positionsSlice';
-import { Pool } from "@uniswap/v3-sdk";
-import { Token } from "@uniswap/sdk-core";
+import { updateVaultPositions } from '../redux/vaultsSlice';
 
 export default function VaultPositionModal({
   show,
@@ -50,7 +47,9 @@ export default function VaultPositionModal({
 
   // State for common form fields
   const [token0Amount, setToken0Amount] = useState('');
+  const [token0Symbol, setToken0Symbol] = useState('');
   const [token1Amount, setToken1Amount] = useState('');
+  const [token1Symbol, setToken1Symbol] = useState('');
   const [slippageTolerance, setSlippageTolerance] = useState(0.5); // 0.5% default
 
   // State for new position form fields
@@ -64,6 +63,7 @@ export default function VaultPositionModal({
     current: null
   });
   const [rangeType, setRangeType] = useState('medium'); // 'custom', 'narrow', 'medium', 'wide'
+  const [lastEditedField, setLastEditedField] = useState(null);
 
   // Token selection state
   const [commonTokens, setCommonTokens] = useState([]);
@@ -102,24 +102,24 @@ export default function VaultPositionModal({
 
   // Calculate USD values if token prices are available
   const token0UsdValue = useMemo(() => {
-    if (!token0Amount || !commonTokens.find(t => t.address === token0Address)?.symbol) return null;
+    if (!token0Amount || !token0Symbol) return null;
     try {
-      return calculateUsdValue(token0Amount, 1); // Placeholder price
+      return calculateUsdValueSync(token0Amount, token0Symbol);
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
     }
-  }, [token0Amount, token0Address, commonTokens]);
+  }, [token0Amount, token0Symbol]);
 
   const token1UsdValue = useMemo(() => {
-    if (!token1Amount || !commonTokens.find(t => t.address === token1Address)?.symbol) return null;
+    if (!token1Amount || !token1Symbol) return null;
     try {
-      return calculateUsdValue(token1Amount, 1); // Placeholder price
+      return calculateUsdValueSync(token1Amount, token1Symbol);
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
     }
-  }, [token1Amount, token1Address, commonTokens]);
+  }, [token1Amount, token1Symbol]);
 
   // Calculate total USD value
   const totalUsdValue = useMemo(() => {
@@ -227,6 +227,14 @@ export default function VaultPositionModal({
     }
   }, [show, chainId, showError]);
 
+  // Prefetch token prices
+  useEffect(() => {
+    if (token0Symbol && token1Symbol) {
+      // Prefetch prices for selected tokens
+      prefetchTokenPrices([token0Symbol, token1Symbol]);
+    }
+  }, [token0Symbol, token1Symbol]);
+
   // Fetch token balances when token addresses change
   useEffect(() => {
     if (token0Address && token1Address && provider && address) {
@@ -246,7 +254,9 @@ export default function VaultPositionModal({
 
   // Calculate paired token amount when token0 amount changes
   useEffect(() => {
-    if (!token0Amount || token0Amount === '0' || !currentPoolPrice) {
+    // Only run this effect when token0Amount changes, and it was
+    // specifically edited by the user (not updated programmatically by token1)
+    if (lastEditedField !== 'token0' || !token0Amount || token0Amount === '0' || !currentPoolPrice) {
       return;
     }
 
@@ -258,22 +268,57 @@ export default function VaultPositionModal({
         return;
       }
 
+      // Calculate based on current UI state
+      let effectivePrice = invertPriceDisplay ? 1 / price : price;
+
       // If tokens were swapped in sorting, we need to adjust the calculation
       const calculatedAmount1 = tokensSwapped
-        ? amount0 / price
-        : amount0 * price;
+        ? amount0 / effectivePrice
+        : amount0 * effectivePrice;
 
       setToken1Amount(calculatedAmount1.toFixed(6));
     } catch (error) {
       console.error("Error calculating paired amount:", error);
       setToken1Error("Failed to calculate paired amount");
     }
-  }, [token0Amount, currentPoolPrice, tokensSwapped]);
+  }, [token0Amount, currentPoolPrice, tokensSwapped, invertPriceDisplay, lastEditedField]);
+
+  // Calculate paired token amount when token1 amount changes
+  useEffect(() => {
+    // Only run this effect when token1Amount changes, and it was
+    // specifically edited by the user (not updated programmatically by token0)
+    if (lastEditedField !== 'token1' || !token1Amount || token1Amount === '0' || !currentPoolPrice) {
+      return;
+    }
+
+    try {
+      const amount1 = parseFloat(token1Amount);
+      const price = parseFloat(currentPoolPrice);
+
+      if (isNaN(amount1) || isNaN(price) || price === 0) {
+        return;
+      }
+
+      // Calculate based on current UI state
+      let effectivePrice = invertPriceDisplay ? 1 / price : price;
+
+      // If tokens were swapped in sorting, we need to adjust the calculation
+      const calculatedAmount0 = tokensSwapped
+        ? amount1 * effectivePrice
+        : amount1 / effectivePrice;
+
+      setToken0Amount(calculatedAmount0.toFixed(6));
+    } catch (error) {
+      console.error("Error calculating paired amount:", error);
+      setToken0Error("Failed to calculate paired amount");
+    }
+  }, [token1Amount, currentPoolPrice, tokensSwapped, invertPriceDisplay, lastEditedField]);
 
   // Handle token0 amount change with token1 calculation
   const handleToken0AmountChange = (value) => {
     setToken0Amount(value);
     setToken0Error(null);
+    setLastEditedField('token0');
 
     if (!value || value === '0' || !currentPoolPrice) {
       return;
@@ -308,6 +353,7 @@ export default function VaultPositionModal({
   const handleToken1AmountChange = (value) => {
     setToken1Amount(value);
     setToken1Error(null);
+    setLastEditedField('token1');
 
     if (!value || value === '0' || !currentPoolPrice) {
       return;
@@ -533,37 +579,42 @@ export default function VaultPositionModal({
     }
   };
 
-  // Handle token selection for new positions
   const handleToken0Selection = (tokenAddress) => {
     if (!tokenAddress) {
       setToken0Address('');
+      setToken0Symbol('');
+      setToken0Amount('');
+      setToken0Approved(false);
+      setCurrentPoolPrice(null);
+      setPriceLoadError(null);
       return;
     }
 
-    setToken0Address(tokenAddress);
+    // Find the token details
+    const token = commonTokens.find(t => t.address === tokenAddress);
 
-    // Reset token amounts when changing tokens
-    setToken0Amount('');
-    setToken1Amount('');
-    setCurrentPoolPrice(null);
-    setPriceLoadError(null);
-    setToken0Approved(false);
+    // Set both the address and symbol in one go
+    setToken0Address(tokenAddress);
+    setToken0Symbol(token?.symbol || 'Token0');
   };
 
   const handleToken1Selection = (tokenAddress) => {
     if (!tokenAddress) {
       setToken1Address('');
+      setToken1Symbol('');
+      setToken1Amount('');
+      setToken1Approved(false);
+      setCurrentPoolPrice(null);
+      setPriceLoadError(null);
       return;
     }
 
-    setToken1Address(tokenAddress);
+    // Find the token details
+    const token = commonTokens.find(t => t.address === tokenAddress);
 
-    // Reset token amounts when changing tokens
-    setToken0Amount('');
-    setToken1Amount('');
-    setCurrentPoolPrice(null);
-    setPriceLoadError(null);
-    setToken1Approved(false);
+    // Set both the address and symbol in one go
+    setToken1Address(tokenAddress);
+    setToken1Symbol(token?.symbol || 'Token1');
   };
 
   // Handle price range selection for new positions
@@ -990,20 +1041,6 @@ export default function VaultPositionModal({
     }
   }, [currentPoolPrice, invertPriceDisplay]);
 
-  // Get token symbols safely
-  const getToken0Symbol = () => {
-    const token = commonTokens.find(t => t.address === token0Address);
-    return token?.symbol || "Token0";
-  };
-
-  const getToken1Symbol = () => {
-    const token = commonTokens.find(t => t.address === token1Address);
-    return token?.symbol || "Token1";
-  };
-
-  const token0Symbol = getToken0Symbol();
-  const token1Symbol = getToken1Symbol();
-
   // Get correct display price direction
   const getPriceDisplay = () => {
     // For new positions, if tokens were swapped for Uniswap order, we need to adjust the display
@@ -1313,7 +1350,10 @@ export default function VaultPositionModal({
                         variant="link"
                         size="sm"
                         className="p-0"
-                        onClick={() => handleToken0AmountChange(token0Balance)}
+                        onClick={() => {
+                          handleToken0AmountChange(token0Balance);
+                          setLastEditedField('token0');
+                        }}
                         disabled={isProcessingOperation}
                       >
                         Max
@@ -1355,7 +1395,10 @@ export default function VaultPositionModal({
                         variant="link"
                         size="sm"
                         className="p-0"
-                        onClick={() => handleToken1AmountChange(token1Balance)}
+                        onClick={() => {
+                          handleToken1AmountChange(token1Balance);
+                          setLastEditedField('token1');
+                        }}
                         disabled={isProcessingOperation}
                       >
                         Max

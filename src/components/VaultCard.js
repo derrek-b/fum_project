@@ -126,17 +126,37 @@ export default function VaultCard({ vault }) {
               <div className="text-end">
                 {metrics.loading ? (
                   <Spinner animation="border" size="sm" />
-                ) : metrics.tvl !== undefined ? (
-                  `$${metrics.tvl.toFixed(2)}`
+                ) : metrics.tvl !== undefined && metrics.tvl !== null ? (
+                  <>
+                    ${metrics.tvl.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}
+                    {metrics.hasPartialData && (
+                      <OverlayTrigger
+                        placement="top"
+                        overlay={<Tooltip>Some position data is missing or incomplete. Total value may be underestimated.</Tooltip>}
+                      >
+                        <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
+                      </OverlayTrigger>
+                    )}
+                    {metrics.lastTVLUpdate && (
+                      <OverlayTrigger
+                        placement="top"
+                        overlay={<Tooltip>
+                          Last updated: {new Date(metrics.lastTVLUpdate).toLocaleString()}
+                        </Tooltip>}
+                      >
+                        <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
+                      </OverlayTrigger>
+                    )}
+                  </>
                 ) : (
-                  <span className="text-danger">N/A</span>
-                )}
-                {metrics.hasPartialData && (
                   <OverlayTrigger
                     placement="top"
-                    overlay={<Tooltip>Some position data is missing or incomplete</Tooltip>}
+                    overlay={<Tooltip>Could not calculate TVL. Token prices may be unavailable.</Tooltip>}
                   >
-                    <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
+                    <span className="text-danger">N/A</span>
                   </OverlayTrigger>
                 )}
               </div>

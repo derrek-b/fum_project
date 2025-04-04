@@ -20,7 +20,8 @@ import { useVaultDetailData } from "../../hooks/useVaultDetailData";
 import { triggerUpdate } from "../../redux/updateSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
 import { getAllTokens } from "../../utils/tokenConfig";
-import { loadVaultData } from '../../utils/vaultsHelpers'
+import { loadVaultData } from '../../utils/vaultsHelpers';
+import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
 import Image from "next/image";
 
 // Minimal ERC20 ABI for token balance checks
@@ -78,17 +79,14 @@ export default function VaultDetailPage() {
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const { chainId, provider, address: userAddress } = useSelector((state) => state.wallet);
-  const lastUpdate = useSelector((state) => state.updates.lastUpdate)
+  const lastUpdate = useSelector((state) => state.updates.lastUpdate);
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
 
-  // Use our custom hook for vault details
-  //const { vault, vaultPositions, isLoading, isOwner, error, loadData } = useVaultDetailData(vaultAddress);
-
   // Component state
-  const [vault, setVault] = useState(null)
-  const [vaultPositions, setVaultPositions] = useState(0)
+  const [vault, setVault] = useState(null);
+  const [vaultPositions, setVaultPositions] = useState([]);
   const [activeTab, setActiveTab] = useState('positions');
   const [showAddPositionModal, setShowAddPositionModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
@@ -96,9 +94,11 @@ export default function VaultDetailPage() {
   const [vaultTokens, setVaultTokens] = useState([]);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isOwner, setIsOwner] = useState(false)
+  const [isOwner, setIsOwner] = useState(false);
+  const [tokenPricesLoaded, setTokenPricesLoaded] = useState(false);
+  const [totalTokenValue, setTotalTokenValue] = useState(0);
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
@@ -120,29 +120,32 @@ export default function VaultDetailPage() {
           address: token.addresses[chainId]
         }));
 
+      // First, get all token symbols for prefetching prices
+      const allSymbols = tokenAddresses.map(token => token.symbol);
+
+      // Prefetch all token prices at once to populate the cache
+      await prefetchTokenPrices(allSymbols);
+      setTokenPricesLoaded(true);
+
       const tokenBalances = await Promise.all(
         tokenAddresses.map(async (token) => {
           try {
             const tokenContract = new ethers.Contract(token.address, ERC20_ABI, provider);
             const balance = await tokenContract.balanceOf(vaultAddress);
             const formattedBalance = ethers.formatUnits(balance, token.decimals);
+            const numericalBalance = parseFloat(formattedBalance);
 
             // Skip tokens with 0 balance
-            if (parseFloat(formattedBalance) === 0) return null;
+            if (numericalBalance === 0) return null;
 
-            // Get token price - in a real app, you'd fetch this from an oracle or API
-            // For simplicity, let's assume $1 for stablecoins and $2000 for WETH
-            let valueUsd = 0;
-            if (token.isStablecoin) {
-              valueUsd = parseFloat(formattedBalance);
-            } else if (token.symbol === "WETH") {
-              valueUsd = parseFloat(formattedBalance) * 2000; // Placeholder price
-            }
+            // Get token price from our utility
+            const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
 
             return {
               ...token,
               balance: formattedBalance,
-              valueUsd
+              numericalBalance,
+              valueUsd: valueUsd || 0
             };
           } catch (err) {
             console.error(`Error fetching balance for ${token.symbol}:`, err);
@@ -152,6 +155,11 @@ export default function VaultDetailPage() {
       );
 
       const filteredTokens = tokenBalances.filter(token => token !== null);
+
+      // Calculate total value of all tokens
+      const totalValue = filteredTokens.reduce((sum, token) => sum + (token.valueUsd || 0), 0);
+      setTotalTokenValue(totalValue);
+
       setVaultTokens(filteredTokens);
     } catch (err) {
       console.error("Error fetching token balances:", err);
@@ -180,7 +188,7 @@ export default function VaultDetailPage() {
       if (result.success) {
         // Update vault info
         setVault(result.vault);
-        setVaultPositions(result.positions)
+        setVaultPositions(result.positions || []);
 
         // Check if user is the owner
         setIsOwner(
@@ -206,7 +214,7 @@ export default function VaultDetailPage() {
       loadData();
       fetchVaultTokens();
     }
-  }, [vaultAddress, refreshTrigger]);
+  }, [vaultAddress, refreshTrigger, loadData]);
 
   // Add a forced refresh function
   const forceRefresh = useCallback(() => {
@@ -277,6 +285,17 @@ export default function VaultDetailPage() {
       handleRefresh();
     }, 500);
   }, [handleRefresh]);
+
+  // Format currency values consistently
+  const formatCurrency = (value) => {
+    if (value === null || value === undefined) return '$0.00';
+    return value.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
 
   // If still loading
   if (isLoading && !vault) {
@@ -370,7 +389,12 @@ export default function VaultDetailPage() {
                     <strong>Positions:</strong> {vaultPositions.length}
                   </div>
                   <div className="mb-3">
-                    <strong>Total Value Locked:</strong> ${vault.metrics?.tvl ? vault.metrics.tvl.toFixed(2) : '0.00'}
+                    <strong>Total Value Locked:</strong> {formatCurrency(vault.metrics?.tvl || totalTokenValue || 0)}
+                    {vault.metrics?.hasPartialData && (
+                      <Badge bg="warning" className="ms-2" title="Some position data is missing or incomplete">
+                        Partial Data
+                      </Badge>
+                    )}
                   </div>
                 </Col>
                 <Col md={4}>
@@ -454,53 +478,58 @@ export default function VaultDetailPage() {
                   This vault doesn't have any tokens yet. Deposit tokens using the button above.
                 </Alert>
               ) : (
-                <Table striped hover>
-                  <thead>
-                    <tr>
-                      <th>Token</th>
-                      <th>Balance</th>
-                      <th>Value (USD)</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vaultTokens.map((token) => (
-                      <tr key={token.symbol}>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            {token.logoURI && (
-                              <div className="me-2">
-                                <Image
-                                  src={token.logoURI}
-                                  alt={token.symbol}
-                                  width={24}
-                                  height={24}
-                                />
-                              </div>
-                            )}
-                            <div>
-                              <div className="fw-bold">{token.symbol}</div>
-                              <small className="text-muted">{token.name}</small>
-                            </div>
-                          </div>
-                        </td>
-                        <td>{parseFloat(token.balance).toFixed(6)}</td>
-                        <td>${parseFloat(token.valueUsd).toFixed(2)}</td>
-                        <td>
-                          {isOwner && (
-                            <Button
-                              variant="outline-secondary"
-                              size="sm"
-                              onClick={() => handleWithdrawToken(token)}
-                            >
-                              Withdraw
-                            </Button>
-                          )}
-                        </td>
+                <>
+                  <div className="text-end mb-3">
+                    <strong>Total Token Value: {formatCurrency(totalTokenValue)}</strong>
+                  </div>
+                  <Table striped hover>
+                    <thead>
+                      <tr>
+                        <th>Token</th>
+                        <th>Balance</th>
+                        <th>Value (USD)</th>
+                        <th>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </Table>
+                    </thead>
+                    <tbody>
+                      {vaultTokens.map((token) => (
+                        <tr key={token.symbol}>
+                          <td>
+                            <div className="d-flex align-items-center">
+                              {token.logoURI && (
+                                <div className="me-2">
+                                  <Image
+                                    src={token.logoURI}
+                                    alt={token.symbol}
+                                    width={24}
+                                    height={24}
+                                  />
+                                </div>
+                              )}
+                              <div>
+                                <div className="fw-bold">{token.symbol}</div>
+                                <small className="text-muted">{token.name}</small>
+                              </div>
+                            </div>
+                          </td>
+                          <td>{token.numericalBalance.toFixed(6)}</td>
+                          <td>{formatCurrency(token.valueUsd)}</td>
+                          <td>
+                            {isOwner && (
+                              <Button
+                                variant="outline-secondary"
+                                size="sm"
+                                onClick={() => handleWithdrawToken(token)}
+                              >
+                                Withdraw
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </>
               )}
             </Tab>
 

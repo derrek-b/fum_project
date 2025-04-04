@@ -12,7 +12,7 @@ import { addVaultPositions, setPositions } from '../redux/positionsSlice';
 import { setPools } from '../redux/poolSlice';
 import { setTokens } from '../redux/tokensSlice';
 import { setResourceUpdating } from '../redux/updateSlice';
-import { fetchTokenPrices, calculateUsdValue } from '../utils/coingeckoUtils';
+import { fetchTokenPrices, calculateUsdValueSync, prefetchTokenPrices } from '../utils/coingeckoUtils';
 
 export default function VaultsContainer() {
   const dispatch = useDispatch();
@@ -274,9 +274,11 @@ export default function VaultsContainer() {
           let pricesFetchFailed = false;
 
           try {
-            tokenPrices = await fetchTokenPrices(Array.from(tokenSymbols));
+            console.log("Fetching prices for tokens:", Array.from(tokenSymbols));
+            // Prefetch all token prices at once to populate the cache
+            await prefetchTokenPrices(Array.from(tokenSymbols));
           } catch (error) {
-            console.error(`Error fetching token prices: ${error.message}`);
+            console.error(`Error prefetching token prices: ${error.message}`);
             pricesFetchFailed = true;
           }
 
@@ -299,23 +301,33 @@ export default function VaultsContainer() {
 
               if (!tokenBalances) continue;
 
-              const token0UsdValue = calculateUsdValue(
+              // Use the sync version since we've already prefetched prices
+              const token0UsdValue = calculateUsdValueSync(
                 tokenBalances.token0.formatted,
-                tokenPrices[data.token0Data.symbol]
+                data.token0Data.symbol
               );
 
-              const token1UsdValue = calculateUsdValue(
+              const token1UsdValue = calculateUsdValueSync(
                 tokenBalances.token1.formatted,
-                tokenPrices[data.token1Data.symbol]
+                data.token1Data.symbol
               );
 
               if (token0UsdValue) totalTVL += token0UsdValue;
               if (token1UsdValue) totalTVL += token1UsdValue;
+
+              // Log successful value calculations
+              console.log(`Position ${data.position.id}: ${data.token0Data.symbol} = $${token0UsdValue?.toFixed(2) || 'N/A'}, ${data.token1Data.symbol} = $${token1UsdValue?.toFixed(2) || 'N/A'}`);
+
+              // If either token value couldn't be calculated, mark as partial data
+              if (token0UsdValue === null || token1UsdValue === null) {
+                hasPartialData = true;
+              }
             } catch (error) {
               console.error(`Error calculating position value: ${error.message}`);
               hasPartialData = true;
             }
           }
+          console.log(4)
 
           console.log(`Final TVL for vault ${vault.address}: ${totalTVL.toFixed(2)}`);
 
