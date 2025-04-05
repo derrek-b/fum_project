@@ -8,6 +8,7 @@ import { getUserVaults, getVaultInfo } from './contracts';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from './coingeckoUtils';
 import { triggerUpdate } from '../redux/updateSlice';
 import { getAvailableStrategies } from './strategyConfig';
+import { getAllTokens } from './tokenConfig';
 import { setAvailableStrategies } from '../redux/strategiesSlice';
 import { ethers } from 'ethers';
 
@@ -527,6 +528,88 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           lastTVLUpdate: Date.now()
         }
       }));
+    }
+
+    // 11. Calculate token TVL for each vault
+    console.log("Calculating token TVL for all vaults...");
+
+    for (const vault of vaultsData) {
+      try {
+        // Create an ERC20 ABI instance for token balance checks
+        const ERC20_ABI = [
+          {
+            constant: true,
+            inputs: [{ name: "_owner", type: "address" }],
+            name: "balanceOf",
+            outputs: [{ name: "balance", type: "uint256" }],
+            type: "function"
+          }
+        ];
+
+        console.log(`Calculating token TVL for vault ${vault.address}`);
+        const allTokens = getAllTokens();
+        const tokenAddresses = Object.values(allTokens)
+          .filter(token => token.addresses[chainId])
+          .map(token => ({
+            ...token,
+            address: token.addresses[chainId]
+          }));
+
+        // Get all token symbols for prefetching prices
+        const allSymbols = tokenAddresses.map(token => token.symbol);
+
+        // Prefetch all token prices at once to populate the cache
+        await prefetchTokenPrices(Array.from(new Set(allSymbols)));
+
+        let totalTokenValue = 0;
+        let hasTokenPriceErrors = false;
+
+        // Get token balances and calculate value
+        const tokenPromises = tokenAddresses.map(async (token) => {
+          try {
+            const tokenContract = new ethers.Contract(token.address, ERC20_ABI, provider);
+            const balance = await tokenContract.balanceOf(vault.address);
+            const formattedBalance = ethers.formatUnits(balance, token.decimals);
+            const numericalBalance = parseFloat(formattedBalance);
+
+            // Skip tokens with 0 balance
+            if (numericalBalance === 0) return 0;
+
+            // Get token price from our utility
+            const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
+
+            if (valueUsd === null) {
+              hasTokenPriceErrors = true;
+              return 0;
+            }
+
+            console.log(`Vault ${vault.address} token: ${token.symbol}, balance: ${numericalBalance}, value: $${valueUsd?.toFixed(2) || 'N/A'}`);
+            return valueUsd || 0;
+          } catch (err) {
+            console.error(`Error calculating value for ${token.symbol}:`, err);
+            hasTokenPriceErrors = true;
+            return 0;
+          }
+        });
+
+        const tokenValues = await Promise.all(tokenPromises);
+        totalTokenValue = tokenValues.reduce((sum, value) => sum + value, 0);
+
+        console.log(`Final token TVL for vault ${vault.address}: ${totalTokenValue.toFixed(2)}`);
+
+        // Get existing metrics and only add the tokenTVL field
+        // Do NOT modify the existing tvl field which represents position TVL
+        dispatch(updateVaultMetrics({
+          vaultAddress: vault.address,
+          metrics: {
+            tokenTVL: totalTokenValue,
+            hasPartialData: vault.metrics?.hasPartialData || hasTokenPriceErrors,
+            lastTVLUpdate: Date.now()
+          }
+        }));
+      } catch (error) {
+        console.error(`Error calculating token TVL for vault ${vault.address}:`, error);
+      }
     }
 
     return {

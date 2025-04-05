@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
-import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table } from "react-bootstrap";
+import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
 import Head from "next/head";
@@ -78,6 +78,10 @@ export default function VaultDetailPage() {
   const tokens = useSelector((state) => state.tokens);
   const { chainId, provider, address: userAddress } = useSelector((state) => state.wallet);
   const lastUpdate = useSelector((state) => state.updates.lastUpdate);
+  const vaultFromRedux = useSelector((state) =>
+    state.vaults.userVaults.find(v => v.address === vaultAddress)
+  );
+  const vaultMetrics = vaultFromRedux?.metrics || {};
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
@@ -387,11 +391,53 @@ export default function VaultDetailPage() {
                     <strong>Positions:</strong> {vaultPositions.length}
                   </div>
                   <div className="mb-3">
-                    <strong>Total Value Locked:</strong> {formatCurrency(vault.metrics?.tvl || totalTokenValue || 0)}
-                    {vault.metrics?.hasPartialData && (
-                      <Badge bg="warning" className="ms-2" title="Some position data is missing or incomplete">
-                        Partial Data
-                      </Badge>
+                    <strong>Total Value Locked:</strong>{' '}
+                    {vaultMetrics?.loading ? (
+                      <Spinner animation="border" size="sm" />
+                    ) : ((vaultMetrics?.tvl !== undefined && vaultMetrics?.tvl !== null) ||
+                        (vaultMetrics?.tokenTVL !== undefined && vaultMetrics?.tokenTVL !== null)) ? (
+                      <>
+                        {formatCurrency((vaultMetrics.tvl || 0) + (vaultMetrics.tokenTVL || 0))}
+                        {vaultMetrics.hasPartialData && (
+                          <OverlayTrigger
+                            placement="top"
+                            overlay={<Tooltip>Some data is missing or incomplete. Total value may be underestimated.</Tooltip>}
+                          >
+                            <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
+                          </OverlayTrigger>
+                        )}
+                        {vaultMetrics.lastTVLUpdate && (
+                          <OverlayTrigger
+                            placement="top"
+                            overlay={
+                              <Tooltip>
+                                <div>Last updated: {new Date(vaultMetrics.lastTVLUpdate).toLocaleString()}</div>
+                                <div>Position TVL: {formatCurrency(vaultMetrics.tvl || 0)}</div>
+                                <div>Token TVL: {formatCurrency(vaultMetrics.tokenTVL || 0)}</div>
+                              </Tooltip>
+                            }
+                          >
+                            <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
+                          </OverlayTrigger>
+                        )}
+                      </>
+                    ) : totalTokenValue > 0 ? (
+                      <>
+                        {formatCurrency(totalTokenValue)}
+                        <OverlayTrigger
+                          placement="top"
+                          overlay={<Tooltip>Value based on token balances only. Position values not included or unavailable.</Tooltip>}
+                        >
+                          <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
+                        </OverlayTrigger>
+                      </>
+                    ) : (
+                      <OverlayTrigger
+                        placement="top"
+                        overlay={<Tooltip>Could not calculate TVL. Token prices may be unavailable.</Tooltip>}
+                      >
+                        <span className="text-danger">N/A</span>
+                      </OverlayTrigger>
                     )}
                   </div>
                 </Col>

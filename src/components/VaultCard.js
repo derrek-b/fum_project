@@ -126,16 +126,17 @@ export default function VaultCard({ vault }) {
               <div className="text-end">
                 {metrics.loading ? (
                   <Spinner animation="border" size="sm" />
-                ) : metrics.tvl !== undefined && metrics.tvl !== null ? (
+                ) : ((metrics.tvl !== undefined && metrics.tvl !== null) ||
+                    (metrics.tokenTVL !== undefined && metrics.tokenTVL !== null)) ? (
                   <>
-                    ${metrics.tvl.toLocaleString(undefined, {
+                    ${((metrics.tvl || 0) + (metrics.tokenTVL || 0)).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2
                     })}
                     {metrics.hasPartialData && (
                       <OverlayTrigger
                         placement="top"
-                        overlay={<Tooltip>Some position data is missing or incomplete. Total value may be underestimated.</Tooltip>}
+                        overlay={<Tooltip>Some data is missing or incomplete. Total value may be underestimated.</Tooltip>}
                       >
                         <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
                       </OverlayTrigger>
@@ -143,9 +144,19 @@ export default function VaultCard({ vault }) {
                     {metrics.lastTVLUpdate && (
                       <OverlayTrigger
                         placement="top"
-                        overlay={<Tooltip>
-                          Last updated: {new Date(metrics.lastTVLUpdate).toLocaleString()}
-                        </Tooltip>}
+                        overlay={
+                          <Tooltip>
+                            <div>Last updated: {new Date(metrics.lastTVLUpdate).toLocaleString()}</div>
+                            <div>Position TVL: ${(metrics.tvl || 0).toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}</div>
+                            <div>Token TVL: ${(metrics.tokenTVL || 0).toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}</div>
+                          </Tooltip>
+                        }
                       >
                         <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
                       </OverlayTrigger>
