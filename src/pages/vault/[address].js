@@ -12,7 +12,7 @@ import PositionCard from "../../components/PositionCard";
 import PositionSelectionModal from "../../components/PositionSelectionModal";
 import VaultPositionModal from "@/components/VaultPositionModal";
 import TokenDepositModal from "../../components/TokenDepositModal";
-import StrategyConfigPanel from "../../components/vault_wizard/StrategyConfigPanel";
+import StrategyConfigPanel from "../../components/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { triggerUpdate } from "../../redux/updateSlice";
