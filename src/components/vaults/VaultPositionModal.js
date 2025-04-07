@@ -2,15 +2,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { AdapterFactory } from '../adapters';
-import { formatPrice } from '../utils/formatHelpers';
-import { calculateUsdValueSync, prefetchTokenPrices } from '../utils/coingeckoUtils';
+import { AdapterFactory } from '../../adapters';
+import { formatPrice } from '../../utils/formatHelpers';
+import { calculateUsdValueSync, prefetchTokenPrices } from '../../utils/coingeckoUtils';
 import { ethers } from 'ethers';
-import { useToast } from '../context/ToastContext';
-import { triggerUpdate } from '../redux/updateSlice';
-import { getVaultContract } from '../utils/contracts';
-import { getAllTokens } from '../utils/tokenConfig';
-import { updateVaultPositions } from '../redux/vaultsSlice';
+import { useToast } from '../../context/ToastContext';
+import { triggerUpdate } from '../../redux/updateSlice';
+import { getVaultContract } from '../../utils/contracts';
+import { getAllTokens } from '../../utils/tokenConfig';
+import { updateVaultPositions } from '../../redux/vaultsSlice';
 
 export default function VaultPositionModal({
   show,

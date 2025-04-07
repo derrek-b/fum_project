@@ -9,13 +9,14 @@ import Head from "next/head";
 import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/PositionCard";
-import PositionSelectionModal from "../../components/PositionSelectionModal";
-import VaultPositionModal from "@/components/VaultPositionModal";
-import TokenDepositModal from "../../components/TokenDepositModal";
-import StrategyConfigPanel from "../../components/StrategyConfigPanel";
+import PositionSelectionModal from "../../components/vaults/PositionSelectionModal";
+import VaultPositionModal from "@/components/vaults/VaultPositionModal";
+import TokenDepositModal from "../../components/vaults/TokenDepositModal";
+import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { triggerUpdate } from "../../redux/updateSlice";
+import { updateVaultTokenBalances } from "@/redux/vaultsSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
 import { getAllTokens } from "../../utils/tokenConfig";
 import { loadVaultData, getVaultData } from '../../utils/vaultsHelpers';
@@ -163,6 +164,28 @@ export default function VaultDetailPage() {
       setTotalTokenValue(totalValue);
 
       setVaultTokens(filteredTokens);
+
+      // Store token balances in Redux
+      const tokenBalancesMap = {};
+      filteredTokens.forEach(token => {
+        tokenBalancesMap[token.symbol] = {
+          symbol: token.symbol,
+          name: token.name,
+          balance: token.balance,
+          numericalBalance: token.numericalBalance,
+          valueUsd: token.valueUsd,
+          decimals: token.decimals,
+          logoURI: token.logoURI
+        };
+      });
+
+      // Update token balances in Redux
+      if (Object.keys(tokenBalancesMap).length > 0) {
+        dispatch(updateVaultTokenBalances({
+          vaultAddress,
+          tokenBalances: tokenBalancesMap
+        }));
+      }
     } catch (err) {
       console.error("Error fetching token balances:", err);
       showError("Failed to fetch vault tokens");

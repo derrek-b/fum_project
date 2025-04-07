@@ -3,7 +3,7 @@ import { AdapterFactory } from '../adapters';
 import { setPositions, addVaultPositions } from '../redux/positionsSlice';
 import { setPools } from '../redux/poolSlice';
 import { setTokens } from '../redux/tokensSlice';
-import { updateVaultPositions, updateVaultMetrics, updateVault, setVaults } from '../redux/vaultsSlice';
+import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, updateVault, setVaults } from '../redux/vaultsSlice';
 import { getUserVaults, getVaultInfo } from './contracts';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from './coingeckoUtils';
 import { triggerUpdate } from '../redux/updateSlice';
@@ -563,6 +563,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
         let totalTokenValue = 0;
         let hasTokenPriceErrors = false;
+        let tokenBalances = {}; // Store token balances for Redux
 
         // Get token balances and calculate value
         const tokenPromises = tokenAddresses.map(async (token) => {
@@ -575,6 +576,16 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
             // Skip tokens with 0 balance
             if (numericalBalance === 0) return 0;
 
+            // Save token balance to our tracking object
+            tokenBalances[token.symbol] = {
+              symbol: token.symbol,
+              name: token.name,
+              balance: formattedBalance,
+              numericalBalance,
+              decimals: token.decimals,
+              logoURI: token.logoURI
+            };
+
             // Get token price from our utility
             const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
 
@@ -582,6 +593,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
               hasTokenPriceErrors = true;
               return 0;
             }
+
+            // Add value to token balance object
+            tokenBalances[token.symbol].valueUsd = valueUsd;
 
             console.log(`Vault ${vault.address} token: ${token.symbol}, balance: ${numericalBalance}, value: $${valueUsd?.toFixed(2) || 'N/A'}`);
             return valueUsd || 0;
@@ -596,6 +610,14 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         totalTokenValue = tokenValues.reduce((sum, value) => sum + value, 0);
 
         console.log(`Final token TVL for vault ${vault.address}: ${totalTokenValue.toFixed(2)}`);
+
+        // Store token balances in the vault
+        if (Object.keys(tokenBalances).length > 0) {
+          dispatch(updateVaultTokenBalances({
+            vaultAddress: vault.address,
+            tokenBalances
+          }));
+        }
 
         // Get existing metrics and only add the tokenTVL field
         // Do NOT modify the existing tvl field which represents position TVL

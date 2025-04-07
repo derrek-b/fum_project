@@ -3,12 +3,12 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-bootstrap";
 import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
-import { useToast } from "../context/ToastContext";
-import config from "../utils/config";
-import { triggerUpdate } from "../redux/updateSlice";
-import { setPositionVaultStatus } from "../redux/positionsSlice";
-import { addPositionToVault } from "../redux/vaultsSlice";
-import { getPlatformById } from "../utils/config";
+import { useToast } from "../../context/ToastContext";
+import config from "../../utils/config";
+import { triggerUpdate } from "../../redux/updateSlice";
+import { setPositionVaultStatus } from "../../redux/positionsSlice";
+import { addPositionToVault } from "../../redux/vaultsSlice";
+import { getPlatformById } from "../../utils/config";
 import { ethers } from "ethers";
 
 export default function PositionSelectionModal({

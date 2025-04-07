@@ -5,7 +5,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import Head from 'next/head';
 import { useSelector } from 'react-redux';
 import Navbar from '../components/Navbar';
-import VaultsContainer from '../components/VaultsContainer';
+import VaultsContainer from '../components/vaults/VaultsContainer';
 import { useToast } from '../context/ToastContext';
 
 // Error Fallback Component

@@ -1,13 +1,14 @@
 {
   "version": "0.2.1",
-  "timestamp": "2025-04-04T18-33-12",
+  "timestamp": "2025-04-07T14-58-00",
   "network": {
     "name": "Hardhat Forked Arbitrum",
     "chainId": 1337
   },
   "contracts": {
-    "BatchExecutor": "0x3bAACe002B7fA0De8ff77b4d8796812C0478bdb2",
-    "VaultFactory": "0x62524304ADf1656A83d00e0284ccDBb45e8F8955"
+    "BatchExecutor": "0x31C12f59a6dF85d4144FEC3226234d5D93CC74B5",
+    "VaultFactory": "0xa1CEaa23ba5f43549b0B516bcf6E21929050Ef02",
+    "ParrisIslandStrategy": "0xa554d65f22573cBaB73279Ff57805834F012385d"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }

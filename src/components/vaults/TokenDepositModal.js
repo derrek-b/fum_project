@@ -3,8 +3,8 @@ import React, { useState, useEffect } from "react";
 import { Modal, Button, Form, InputGroup, Spinner, Alert, Card } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
-import { getAllTokens } from "../utils/tokenConfig";
-import { useToast } from "../context/ToastContext";
+import { getAllTokens } from "../../utils/tokenConfig";
+import { useToast } from "../../context/ToastContext";
 import Image from "next/image";
 
 // Minimal ERC20 ABI with just the functions we need

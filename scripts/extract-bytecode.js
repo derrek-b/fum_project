@@ -19,7 +19,8 @@ const CONTRACTS_TO_EXTRACT = [
   'PositionVault',
   'MockPositionNFT',
   'MockERC20',
-  'BatchExecutor'
+  'BatchExecutor',
+  'ParrisIslandStrategy'
 ];
 
 // Debug logging

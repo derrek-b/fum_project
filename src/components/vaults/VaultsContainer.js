@@ -4,11 +4,11 @@ import { useSelector, useDispatch } from "react-redux";
 import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-bootstrap";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
-import { createVault } from "../utils/contracts";
-import { triggerUpdate } from "../redux/updateSlice";
-import { setLoadingVaults, setVaultError } from '../redux/vaultsSlice';
-import { setResourceUpdating } from '../redux/updateSlice';
-import { loadVaultData } from '../utils/vaultsHelpers';
+import { createVault } from "../../utils/contracts";
+import { triggerUpdate } from "../../redux/updateSlice";
+import { setLoadingVaults, setVaultError } from '../../redux/vaultsSlice';
+import { setResourceUpdating } from '../../redux/updateSlice';
+import { loadVaultData } from '../../utils/vaultsHelpers';
 
 export default function VaultsContainer() {
   const dispatch = useDispatch();

@@ -32,20 +32,23 @@ const vaultsSlice = createSlice({
       };
       state.userVaults.push(newVault);
     },
+    // !!!!!UPDATED!!!!!
     updateVault: (state, action) => {
       // Update a specific vault's details, preserving positions if not provided
       const { vaultAddress, vaultData } = action.payload;
       const index = state.userVaults.findIndex(v => v.address === vaultAddress);
       if (index !== -1) {
-        // Keep existing positions and metrics if not included in update
+        // Keep existing positions, metrics, and tokenBalances if not included in update
         const existingPositions = state.userVaults[index].positions || [];
         const existingMetrics = state.userVaults[index].metrics || { tvl: 0, positionCount: 0 };
+        const existingTokenBalances = state.userVaults[index].tokenBalances || {};
 
         state.userVaults[index] = {
           ...state.userVaults[index],
           ...vaultData,
           positions: vaultData.positions || existingPositions,
-          metrics: vaultData.metrics || existingMetrics
+          metrics: vaultData.metrics || existingMetrics,
+          tokenBalances: vaultData.tokenBalances || existingTokenBalances
         };
       }
     },
@@ -124,6 +127,24 @@ const vaultsSlice = createSlice({
           });
       }
     },
+    // !!!!!UPDATED!!!!!
+    updateVaultTokenBalances: (state, action) => {
+      const { vaultAddress, tokenBalances } = action.payload;
+      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+
+      if (vaultIndex !== -1) {
+        // Initialize tokenBalances object if it doesn't exist
+        if (!state.userVaults[vaultIndex].tokenBalances) {
+          state.userVaults[vaultIndex].tokenBalances = {};
+        }
+
+        // Update token balances in the vault object
+        state.userVaults[vaultIndex].tokenBalances = {
+          ...state.userVaults[vaultIndex].tokenBalances,
+          ...tokenBalances
+        };
+      }
+    },
     updateVaultMetrics: (state, action) => {
       // Update metrics for a vault
       const { vaultAddress, metrics } = action.payload;
@@ -139,6 +160,23 @@ const vaultsSlice = createSlice({
         state.userVaults[vaultIndex].metrics = {
           ...state.userVaults[vaultIndex].metrics,
           ...metrics,
+          lastUpdated: Date.now()
+        };
+      }
+    },
+    updateVaultStrategy: (state, action) => {
+      const { vaultAddress, strategy } = action.payload;
+      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+
+      if (vaultIndex !== -1) {
+        // Initialize strategy object if it doesn't exist
+        if (!state.userVaults[vaultIndex].strategy) {
+          state.userVaults[vaultIndex].strategy = {};
+        }
+
+        // Update strategy in the vault object
+        state.userVaults[vaultIndex].strategy = {
+          ...strategy,
           lastUpdated: Date.now()
         };
       }
@@ -163,8 +201,10 @@ export const {
   setVaultPositions,
   addPositionToVault,
   removePositionFromVault,
-  updateVaultPositions, // New action for batch operations
+  updateVaultPositions,
+  updateVaultTokenBalances,
   updateVaultMetrics,
+  updateVaultStrategy,  // Add this
   clearVaults,
   setLoadingVaults,
   setVaultError

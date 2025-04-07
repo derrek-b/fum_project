@@ -2,9 +2,9 @@
 import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { ButtonGroup, Button, Badge } from 'react-bootstrap';
-import { setPlatformFilter } from '../redux/platformsSlice';
-import config from '../utils/config';
-import { useToast } from '../context/ToastContext';
+import { setPlatformFilter } from '../../redux/platformsSlice';
+import config from '../../utils/config';
+import { useToast } from '../../context/ToastContext';
 
 export default function PlatformFilter() {
   const dispatch = useDispatch();

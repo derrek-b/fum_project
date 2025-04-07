@@ -6,7 +6,7 @@ const solc = require('solc');
 const contractsDir = path.resolve(__dirname, '../contracts');
 
 // List of contracts to extract ABIs from
-const contractFiles = ['BatchExecutor.sol', 'PositionVault.sol', 'VaultFactory.sol'];
+const contractFiles = ['BatchExecutor.sol', 'PositionVault.sol', 'VaultFactory.sol', 'ParrisIslandStrategy.sol'];
 
 // Read the source code of the contracts
 const sources = {};
