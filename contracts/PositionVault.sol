@@ -27,6 +27,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     // Positions managed by this vault
     mapping(uint256 => bool) public managedPositions;
 
+    // NEW: Target tokens and platforms
+    string[] private targetTokens;
+    string[] private targetPlatforms;
+
     // Events for tracking position lifecycle
     event PositionRegistered(uint256 indexed tokenId, address indexed nftContract);
     event PositionRemoved(uint256 indexed tokenId, address indexed nftContract);
@@ -35,6 +39,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
     event StrategyChanged(address indexed strategy);
     event ExecutorChanged(address indexed executor);
+
+    // NEW: Events for token and platform updates
+    event TargetTokensUpdated(string[] tokens);
+    event TargetPlatformsUpdated(string[] platforms);
 
     /**
      * @notice Constructor
@@ -183,6 +191,50 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
         emit PositionRegistered(tokenId, msg.sender);
 
         return this.onERC721Received.selector;
+    }
+
+    /**
+     * @notice Sets the target tokens for this vault
+     * @param tokens Array of token symbols to target
+     */
+    function setTargetTokens(string[] calldata tokens) external onlyOwner {
+        delete targetTokens;
+
+        for (uint i = 0; i < tokens.length; i++) {
+            targetTokens.push(tokens[i]);
+        }
+
+        emit TargetTokensUpdated(tokens);
+    }
+
+    /**
+     * @notice Sets the target platforms for this vault
+     * @param platforms Array of platform IDs to target
+     */
+    function setTargetPlatforms(string[] calldata platforms) external onlyOwner {
+        delete targetPlatforms;
+
+        for (uint i = 0; i < platforms.length; i++) {
+            targetPlatforms.push(platforms[i]);
+        }
+
+        emit TargetPlatformsUpdated(platforms);
+    }
+
+    /**
+     * @notice Gets the target tokens for this vault
+     * @return Array of token symbols
+     */
+    function getTargetTokens() external view returns (string[] memory) {
+        return targetTokens;
+    }
+
+    /**
+     * @notice Gets the target platforms for this vault
+     * @return Array of platform IDs
+     */
+    function getTargetPlatforms() external view returns (string[] memory) {
+        return targetPlatforms;
     }
 
     /**

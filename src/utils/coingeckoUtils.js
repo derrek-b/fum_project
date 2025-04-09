@@ -76,7 +76,6 @@ export const fetchTokenPrices = async (tokenSymbols, currency = 'usd', bypassCac
       );
 
       if (allInCache) {
-        console.log("Using cached token prices");
         return priceCache.data;
       }
     }
@@ -92,7 +91,6 @@ export const fetchTokenPrices = async (tokenSymbols, currency = 'usd', bypassCac
     const apiUrl = urlBase + `&ids=${tokenIds}&vs_currencies=${currency}`;
 
     // Fetch data
-    console.log(`Fetching prices for: ${validSymbols.join(', ')}`);
     const response = await fetch(apiUrl);
 
     if (!response.ok) {
@@ -122,7 +120,7 @@ export const fetchTokenPrices = async (tokenSymbols, currency = 'usd', bypassCac
 
     // On error, return what we have in cache if it exists
     if (Object.keys(priceCache.data).length > 0) {
-      console.log("Using cached prices due to API error");
+      console.warn("Using cached prices due to API error");
       return priceCache.data;
     }
 
@@ -205,7 +203,6 @@ export const prefetchTokenPrices = async (symbols) => {
 
   try {
     await fetchTokenPrices(symbols);
-    console.log(`Prefetched prices for ${symbols.length} tokens`);
   } catch (error) {
     console.error("Error prefetching token prices:", error);
   }

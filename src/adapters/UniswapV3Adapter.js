@@ -546,7 +546,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     tickUpper,
     token0,
     token1,
-    verbose = true
+    verbose = false
   }) {
     // Convert all inputs to proper types
     const toBigInt = (val) => {
@@ -673,8 +673,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     try {
       if (!position || !poolData || !token0Data || !token1Data || !chainId) {
-        console.log('pos', position)
-        console.log('chain', chainId)
         throw new Error("Missing data for token amount calculation");
       }
 
@@ -1102,12 +1100,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         collectFees: true
       });
 
-      console.log("Generated remove liquidity transaction data:", {
-        to: txData.to,
-        value: txData.value,
-        dataLength: txData.data.length
-      });
-
       // Get signer
       const signer = await provider.getSigner();
 
@@ -1121,11 +1113,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Send transaction
-      console.log("Sending remove liquidity transaction...");
       const tx = await signer.sendTransaction(transaction);
-      console.log("Transaction sent:", tx.hash);
       const receipt = await tx.wait();
-      console.log("Transaction confirmed:", receipt);
 
       // IMPORTANT: Fetch updated position data after decreasing liquidity
       try {
@@ -1436,8 +1425,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance0 = await token0Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
-          console.log(`Approving ${token0Data.symbol} for position manager...`);
-
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
             positionManagerAddress,
@@ -1445,10 +1432,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             { gasLimit: 100000 }
           );
 
-          console.log(`${token0Data.symbol} approval transaction sent: ${approveTx.hash}`);
           tokenApprovals.push(approveTx.wait());
-        } else {
-          console.log(`${token0Data.symbol} already approved for position manager`);
         }
       }
 
@@ -1459,7 +1443,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance1 = await token1Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
-          console.log(`Approving ${token1Data.symbol} for position manager...`);
 
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
@@ -1468,18 +1451,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             { gasLimit: 100000 }
           );
 
-          console.log(`${token1Data.symbol} approval transaction sent: ${approveTx.hash}`);
           tokenApprovals.push(approveTx.wait());
         } else {
-          console.log(`${token1Data.symbol} already approved for position manager`);
         }
       }
 
       // Wait for all approvals to complete
       if (tokenApprovals.length > 0) {
-        console.log(`Waiting for ${tokenApprovals.length} approval transaction(s) to complete...`);
         await Promise.all(tokenApprovals);
-        console.log('All token approvals confirmed');
       }
 
       // STEP 2: Generate transaction data for adding liquidity
@@ -1496,12 +1475,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         slippageTolerance
       });
 
-      console.log("Generated add liquidity transaction data:", {
-        to: txData.to,
-        value: txData.value,
-        dataLength: txData.data.length
-      });
-
       // Construct transaction
       const transaction = {
         to: txData.to,
@@ -1512,11 +1485,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Send transaction
-      console.log("Sending add liquidity transaction...");
       const tx = await signer.sendTransaction(transaction);
-      console.log("Transaction sent:", tx.hash);
       const receipt = await tx.wait();
-      console.log("Transaction confirmed:", receipt);
 
       // IMPORTANT: Fetch updated position data after adding liquidity
       try {
@@ -1755,7 +1725,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance0 = await token0Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
-          console.log(`Approving ${token0Symbol} for position manager...`);
 
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
@@ -1764,10 +1733,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             { gasLimit: 100000 }
           );
 
-          console.log(`${token0Symbol} approval transaction sent: ${approveTx.hash}`);
           tokenApprovals.push(approveTx.wait());
-        } else {
-          console.log(`${token0Symbol} already approved for position manager`);
         }
       }
 
@@ -1776,7 +1742,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance1 = await token1Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
-          console.log(`Approving ${token1Symbol} for position manager...`);
 
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
@@ -1785,18 +1750,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             { gasLimit: 100000 }
           );
 
-          console.log(`${token1Symbol} approval transaction sent: ${approveTx.hash}`);
           tokenApprovals.push(approveTx.wait());
-        } else {
-          console.log(`${token1Symbol} already approved for position manager`);
         }
       }
 
       // Wait for all approvals to complete
       if (tokenApprovals.length > 0) {
-        console.log(`Waiting for ${tokenApprovals.length} approval transaction(s) to complete...`);
         await Promise.all(tokenApprovals);
-        console.log('All token approvals confirmed');
       }
 
       // STEP 2: Generate transaction data for creating the position
@@ -1815,12 +1775,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokensSwapped
       });
 
-      console.log("Generated create position transaction data:", {
-        to: txData.to,
-        value: txData.value,
-        position: txData.position
-      });
-
       // Construct transaction
       const transaction = {
         to: txData.to,
@@ -1831,11 +1785,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Send transaction
-      console.log("Sending create position transaction...");
       const tx = await signer.sendTransaction(transaction);
-      console.log("Transaction sent:", tx.hash);
       const receipt = await tx.wait();
-      console.log("Transaction confirmed:", receipt);
 
       // Extract the position ID from the transaction receipt
       let positionId = null;
@@ -1855,7 +1806,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
         if (transferEvent) {
           positionId = ethers.getBigInt(transferEvent.topics[3]).toString();
-          console.log(`New position ID: ${positionId}`);
         } else {
           console.warn("Could not find Transfer event in receipt");
         }
@@ -2003,11 +1953,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Use our calculated fees
       const token0Amount = fees.token0.raw.toString();
       const token1Amount = fees.token1.raw.toString();
-
-      console.log("Using calculated fees as minimums:", {
-        token0: token0Amount,
-        token1: token1Amount
-      });
 
       // Create collectOptions object with accurate minimums
       const collectOptions = {
@@ -2164,10 +2109,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
               token1,
               fees.token1.raw.toString()
             );
-            console.log("Using calculated fees as minimums:", {
-              token0: fees.token0.formatted,
-              token1: fees.token1.formatted
-            });
           }
         } catch (feeError) {
           console.warn("Error calculating fees, will use zero minimums:", feeError);
@@ -2324,14 +2265,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         useFullPrecision: true,
       });
 
-      console.log("Position to add liquidity:", {
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper,
-        amount0: amount0.toString(),
-        amount1: amount1.toString(),
-        liquidity: positionToIncreaseBy.liquidity.toString()
-      });
-
       // Create AddLiquidityOptions
       const addLiquidityOptions = {
         deadline: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
@@ -2391,8 +2324,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       tokensSwapped = false
     } = params;
 
-    console.log('Params in genCPD:', params)
-
     // Input validation
     if (!token0Address || !token1Address) {
       throw new Error("Token addresses are required");
@@ -2420,11 +2351,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         throw new Error(`Missing contract addresses for chainId: ${chainId}`);
       }
 
-      console.log("Contract addresses:", {
-        positionManagerAddress,
-        factoryAddress
-      });
-
       // Import required libraries
       const { Token, Percent } = require('@uniswap/sdk-core');
       const { Pool, Position, NonfungiblePositionManager } = require('@uniswap/v3-sdk');
@@ -2435,7 +2361,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const ERC20ABI = require('@openzeppelin/contracts/build/contracts/ERC20.json').abi;
 
       // Step 1: Get token details
-      console.log("Fetching token details...");
       const token0Contract = new ethers.Contract(token0Address, ERC20ABI, provider);
       const token1Contract = new ethers.Contract(token1Address, ERC20ABI, provider);
 
@@ -2447,11 +2372,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         token1Contract.symbol(),
         token1Contract.name()
       ]);
-
-      console.log("Token details:", {
-        token0: { address: token0Address, decimals: decimals0, symbol: symbol0, name: name0 },
-        token1: { address: token1Address, decimals: decimals1, symbol: symbol1, name: name1 },
-      });
 
       // Step 2: Create Token instances for the SDK
       // Token constructor requires (chainId, address, decimals, symbol, name)
@@ -2472,9 +2392,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       );
 
       // Step 3: Compute the Pool address to get Pool data
-      console.log("Computing pool address...");
       const currentPoolAddress = Pool.getAddress(tokenA, tokenB, Number(feeTier));
-      console.log(`Pool address: ${currentPoolAddress}`);
 
       // Step 4: Create Pool contract and get pool data
       const poolContract = new ethers.Contract(
@@ -2485,21 +2403,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       let liquidity, slot0, tickSpacing;
       try {
-        console.log("Fetching pool data...");
         [liquidity, slot0, tickSpacing] = await Promise.all([
           poolContract.liquidity(),
           poolContract.slot0(),
           poolContract.tickSpacing()
         ]);
-
-        console.log("Pool data:", {
-          liquidity: liquidity.toString(),
-          sqrtPriceX96: slot0.sqrtPriceX96.toString(),
-          tick: Number(slot0.tick),
-          tickSpacing: Number(tickSpacing)
-        });
       } catch (error) {
-        console.log("Pool doesn't exist yet, using default values");
+        console.warn("Pool doesn't exist yet, using default values");
         liquidity = "0";
         slot0 = {
           sqrtPriceX96: Math.sqrt(1) * (2 ** 96),
@@ -2530,12 +2440,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const normalizedTickLower = Math.floor(Number(tickLower) / Number(tickSpacing)) * Number(tickSpacing);
       const normalizedTickUpper = Math.floor(Number(tickUpper) / Number(tickSpacing)) * Number(tickSpacing);
 
-      console.log("Tick information:", {
-        original: { lower: tickLower, upper: tickUpper },
-        normalized: { lower: normalizedTickLower, upper: normalizedTickUpper },
-        tickSpacing: Number(tickSpacing)
-      });
-
       // Step 7: Convert token amounts to JSBI
       const amount0 = token0Amount && parseFloat(token0Amount) > 0
         ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
@@ -2544,11 +2448,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount1 = token1Amount && parseFloat(token1Amount) > 0
         ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
         : JSBI.BigInt(0);
-
-      console.log("Token amounts:", {
-        amount0: amount0.toString(),
-        amount1: amount1.toString()
-      });
 
       // Step 8: Create the Position instance
       const position = Position.fromAmounts({
@@ -2560,14 +2459,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         useFullPrecision: true
       });
 
-      console.log('POSITION', position)
-
-      console.log("Position created:", {
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper,
-        liquidity: position.liquidity.toString()
-      });
-
       // Step 9: Create mint options
       const mintOptions = {
         recipient: address,
@@ -2576,13 +2467,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Step 10: Get calldata for minting
-      console.log("Generating transaction data with addCallParameters...");
       const { calldata, value } = NonfungiblePositionManager.addCallParameters(
         position,
         mintOptions
       );
-
-      console.log("Transaction data generated successfully");
 
       // Return the transaction data
       return {

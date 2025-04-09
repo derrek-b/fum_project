@@ -58,7 +58,6 @@ export default function VaultsContainer() {
       return;
     }
 
-    console.log("Starting vault data loading");
     setIsLoading(true);
     setError(null);
 
@@ -75,7 +74,6 @@ export default function VaultsContainer() {
           setError(`Failed to load vaults: ${result.error}`);
           dispatch(setVaultError(`Failed to load vaults: ${result.error}`));
         } else {
-          console.log("All vault data loaded successfully");
         }
       })
       .catch(error => {
@@ -90,7 +88,7 @@ export default function VaultsContainer() {
         setIsLoading(false);
       });
 
-  }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
+  }, [isConnected, address, provider, chainId, lastUpdate]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
@@ -104,20 +102,6 @@ export default function VaultsContainer() {
 
       // Step 1: Create the vault - this remains the same for now
       const newVaultAddress = await createVault(vaultName, signer);
-
-      // Log strategy config for future implementation
-      if (strategyConfig) {
-        console.log("Strategy config for vault:", newVaultAddress, strategyConfig);
-        /*
-        // This will be implemented in a future update:
-        await configureVaultStrategy(
-          newVaultAddress,
-          strategyConfig.strategyId,
-          strategyConfig.parameters,
-          signer
-        );
-        */
-      }
 
       // Trigger a reload by dispatching an update
       dispatch(triggerUpdate(Date.now()));

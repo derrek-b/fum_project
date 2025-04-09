@@ -41,24 +41,15 @@ export default function PositionSelectionModal({
   // Debug logs
   useEffect(() => {
     if (show) {
-      console.log("Modal opened with data:");
-      console.log(`- Total positions: ${positions.length}`);
-      console.log(`- Pools loaded: ${poolsLoaded} (${Object.keys(pools).length} pools)`);
-      console.log(`- Tokens loaded: ${tokensLoaded} (${Object.keys(tokens).length} tokens)`);
-
       // Log some position details to help debug
       const directWalletPositions = positions.filter(p => !p.inVault);
       const vaultPositions = positions.filter(p => p.inVault && p.vaultAddress === vault.address);
-
-      console.log(`- Direct wallet positions: ${directWalletPositions.length}`);
-      console.log(`- Positions in this vault: ${vaultPositions.length}`);
 
       // Check for pool addresses
       const uniquePoolAddresses = new Set();
       positions.forEach(pos => {
         if (pos.poolAddress) uniquePoolAddresses.add(pos.poolAddress);
       });
-      console.log(`- Unique pool addresses in positions: ${uniquePoolAddresses.size}`);
 
       // Check which pools are missing
       const missingPools = Array.from(uniquePoolAddresses).filter(addr => !pools[addr]);
@@ -71,18 +62,15 @@ export default function PositionSelectionModal({
 
   // Filter positions based on mode using useMemo to avoid unnecessary recalculations
   const filteredPositions = useMemo(() => {
-    console.log("Filtering positions:", positions.length, "total positions");
 
     return positions.filter(position => {
       if (mode === 'add') {
         // When adding, show only positions NOT in any vault
         const isDirectWalletPosition = !position.inVault || !position.vaultAddress;
-        console.log(`Position ${position.id}: inVault=${position.inVault}, vaultAddress=${position.vaultAddress || 'none'}, isWallet=${isDirectWalletPosition}`);
         return isDirectWalletPosition;
       } else {
         // When removing, show only positions IN THIS vault
         const isInThisVault = position.inVault && position.vaultAddress === vault.address;
-        console.log(`Position ${position.id}: inVault=${position.inVault}, vaultAddress=${position.vaultAddress || 'none'}, isInThisVault=${isInThisVault}`);
         return isInThisVault;
       }
     });
@@ -93,23 +81,12 @@ export default function PositionSelectionModal({
     // Reset selections when modal opens or mode changes
     if (show) {
       setSelectedPositions([]);
-      console.log(`Modal opened in ${mode} mode with ${filteredPositions.length} available positions`);
     }
   }, [show, mode]);
 
   // Log the state of pools and tokens when they change
   useEffect(() => {
     if (show) {
-      console.log(`Pools object available: ${!!pools}`);
-      if (pools) {
-        console.log(`Pool keys: ${Object.keys(pools).length}`);
-      }
-
-      console.log(`Tokens object available: ${!!tokens}`);
-      if (tokens) {
-        console.log(`Token keys: ${Object.keys(tokens).length}`);
-      }
-
       // Check if any positions have pool addresses that don't exist in pools
       const missingPools = positions
         .filter(p => p.poolAddress && !pools[p.poolAddress])
@@ -155,8 +132,6 @@ export default function PositionSelectionModal({
           if (!position) {
             throw new Error(`Position #${positionId} data not found`);
           }
-
-          console.log(`Transferring position #${positionId} (${position.platform}) to vault ${vault.address}`);
 
           // Get the correct position manager address based on the position's platform
           const platformInfo = getPlatformById(position.platform, chainId);
@@ -250,38 +225,6 @@ export default function PositionSelectionModal({
     const platformColor = position.platform && config.platformMetadata[position.platform]?.color
                          ? config.platformMetadata[position.platform].color
                          : '#6c757d';
-
-
-    // // If pool data isn't in the store yet
-    // if (!pools[position.poolAddress]) {
-    //   console.log(`Pool not found for position ${position.id}, address: ${position.poolAddress}`);
-
-    //   token0 = { raw: 0n, formatted: "N/A" },
-    //   token1 = { raw: 0n, formatted: "N/A" }
-
-    //   return { pair: tokenPair, feeTier, platformColor, token0, token1 };
-    // } else {
-    //   const adapter = AdapterFactory.getAdapter(position.platform, provider)
-    //   const poolData = pools[position.poolAddress]
-
-    //   const token0Full = tokens[poolData.token0]
-    //   const token0Data = {
-    //     address: token0Full.address,
-    //     decimals: token0Full.decimals,
-    //     symbol: token0Full.symbol,
-    //     name: token0Full.name,
-    //   }
-
-    //   const token1Full = tokens[poolData.token1]
-    //   const token1Data = {
-    //     address: token1Full.address,
-    //     decimals: token1Full.decimals,
-    //     symbol: token1Full.symbol,
-    //     name: token1Full.name,
-    //   }
-
-    //   const { token0, token1 } = await adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
-    // }
 
     return { pair: tokenPair, feeTier, platformColor };
   };

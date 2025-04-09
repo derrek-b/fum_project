@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Modal, Button, Spinner, Alert, Badge } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { formatFeeDisplay } from '../utils/formatHelpers';
-import { useToast } from '../context/ToastContext';
-import { AdapterFactory } from '../adapters';
-import { triggerUpdate } from '../redux/updateSlice';
+import { formatFeeDisplay } from '../../utils/formatHelpers';
+import { useToast } from '../../context/ToastContext';
+import { AdapterFactory } from '../../adapters';
+import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function ClaimFeesModal({
   show,

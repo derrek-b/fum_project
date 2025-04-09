@@ -65,7 +65,6 @@ export const useVaultData = () => {
         );
 
         // 3. Update Redux with vault info
-        console.log(`Loaded ${vaultsWithInfo.length} vaults`);
         dispatch(setVaults(vaultsWithInfo));
 
         // 4. Collect vault positions, pools, tokens
@@ -129,7 +128,6 @@ export const useVaultData = () => {
         }
 
         // 5. Fetch non-vault positions for the add position modal
-        console.log("Fetching non-vault positions");
         const allPositions = [...vaultPositions]; // Start with vault positions
 
         // Try each adapter to get non-vault positions
@@ -138,7 +136,6 @@ export const useVaultData = () => {
             const result = await adapter.getNonVaultPositions(address, vaultAddresses, chainId);
 
             if (result?.positions?.length > 0) {
-              console.log(`Found ${result.positions.length} non-vault ${adapter.platformName} positions`);
 
               // Add positions to our collection
               allPositions.push(...result.positions);
@@ -174,13 +171,10 @@ export const useVaultData = () => {
         }
 
         // 7. Calculate and update TVL
-        console.log("Beginning TVL calculations");
-
         for (const vault of vaultsWithInfo) {
           const vaultPositions = positionsByVault[vault.address] || [];
 
           if (vaultPositions.length === 0) {
-            console.log(`No positions for vault ${vault.address}`);
             continue;
           }
 
@@ -212,11 +206,6 @@ export const useVaultData = () => {
             } catch (error) {
               console.error(`Error processing position data: ${error.message}`);
             }
-          }
-
-          if (positionData.length === 0) {
-            console.log(`No valid position data for vault ${vault.address}`);
-            continue;
           }
 
           // Fetch token prices
@@ -266,8 +255,6 @@ export const useVaultData = () => {
               hasPartialData = true;
             }
           }
-
-          console.log(`Calculated TVL for vault ${vault.address}: ${totalTVL.toFixed(2)}`);
 
           // Update vault metrics with TVL
           dispatch(updateVaultMetrics({

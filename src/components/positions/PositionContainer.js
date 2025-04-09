@@ -3,19 +3,19 @@ import React, { useEffect, useState, useRef } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import PositionCard from "./PositionCard";
-import RefreshControls from "./RefreshControls";
+import RefreshControls from "../RefreshControls";
 import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
-import { AdapterFactory } from "../adapters";
-import config from "../utils/config.js";
-import { getUserVaults, getVaultInfo } from "../utils/contracts";
-import { setPositions, addVaultPositions } from "../redux/positionsSlice";
-import { setPools, clearPools } from "../redux/poolSlice";
-import { setTokens, clearTokens } from "../redux/tokensSlice";
-import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../redux/updateSlice";
-import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../redux/platformsSlice";
-import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../redux/vaultsSlice";
-import { useToast } from "../context/ToastContext";
+import { AdapterFactory } from "../../adapters";
+import config from "../../utils/config.js";
+import { getUserVaults, getVaultInfo } from "../../utils/contracts";
+import { setPositions, addVaultPositions } from "../../redux/positionsSlice";
+import { setPools, clearPools } from "../../redux/poolSlice";
+import { setTokens, clearTokens } from "../../redux/tokensSlice";
+import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
+import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
+import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
+import { useToast } from "../../context/ToastContext";
 
 export default function PositionContainer() {
   const dispatch = useDispatch();
@@ -45,10 +45,8 @@ export default function PositionContainer() {
 
     // Only set up timer if auto-refresh is enabled and we're connected
     if (autoRefresh.enabled && isConnected && provider && address && chainId) {
-      console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
       try {
         timerRef.current = setInterval(() => {
-          console.log('Auto-refreshing data...');
           dispatch(markAutoRefresh());
           dispatch(triggerUpdate());
         }, autoRefresh.interval);
@@ -104,7 +102,6 @@ export default function PositionContainer() {
           })
         );
 
-        console.log(`Found ${vaultsWithInfo.length} vaults for user ${address}`);
         dispatch(setVaults(vaultsWithInfo));
       } catch (error) {
         console.error("Error fetching user vaults:", error);
@@ -122,7 +119,7 @@ export default function PositionContainer() {
   // Effect 1: Handle disconnection and clear state
   useEffect(() => {
     if (!isConnected || !address || !provider || !chainId) {
-      console.log("Wallet disconnected or incomplete connection, clearing state");
+      console.warn("Wallet disconnected or incomplete connection, clearing state");
       setLocalPositions([]);
       dispatch(setPositions([]));
       dispatch(clearPools());
@@ -152,8 +149,6 @@ export default function PositionContainer() {
           throw new Error(`No supported platforms found for chainId: ${chainId}`);
         }
 
-        console.log(`Found ${adapters.length} platform adapters for chain ${chainId}`);
-
         // Store supported platform IDs
         const supportedPlatforms = adapters.map(adapter => ({
           id: adapter.platformId,
@@ -167,7 +162,6 @@ export default function PositionContainer() {
         const platformResults = await Promise.all(
           adapters.map(async adapter => {
             try {
-              console.log(`Fetching positions from ${adapter.platformName}`);
               return await adapter.getPositions(address, chainId);
             } catch (adapterError) {
               console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
@@ -186,7 +180,6 @@ export default function PositionContainer() {
 
         platformResults.forEach((result, index) => {
           if (result && result.positions && result.positions.length > 0) {
-            console.log(`Got ${result.positions.length} positions from ${adapters[index].platformName}`);
             allPositions = [...allPositions, ...result.positions];
 
             // Track active platforms (those with positions)
@@ -244,7 +237,6 @@ export default function PositionContainer() {
     }
 
     const fetchVaultPositions = async () => {
-      console.log(`Fetching positions from ${userVaults.length} vaults`);
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: true }));
 
       // Get current pool and token data from the store
@@ -255,7 +247,6 @@ export default function PositionContainer() {
       const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
 
       if (adapters.length === 0) {
-        console.log("No adapters available for vault position fetching");
         dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: false }));
         return;
       }
@@ -264,18 +255,15 @@ export default function PositionContainer() {
 
       for (const vault of userVaults) {
         try {
-          console.log(`Fetching positions from vault: ${vault.name} (${vault.address})`);
           let vaultPositionsFound = 0;
 
           // For each vault, fetch positions from all platforms
           for (const adapter of adapters) {
             try {
-              console.log(`Checking ${adapter.platformName} positions in vault ${vault.name}`);
               const result = await adapter.getPositions(vault.address, chainId);
 
               if (result && result.positions && result.positions.length > 0) {
                 vaultPositionsFound += result.positions.length;
-                console.log(`Found ${result.positions.length} ${adapter.platformName} positions in vault ${vault.name}`);
 
                 // Add these positions to Redux with vault flag
                 dispatch(addVaultPositions({
@@ -307,10 +295,6 @@ export default function PositionContainer() {
               vaultErrors.push(`${vault.name}: ${adapterError.message}`);
               // Continue with other adapters even if one fails
             }
-          }
-
-          if (vaultPositionsFound > 0) {
-            console.log(`Successfully loaded ${vaultPositionsFound} positions from vault ${vault.name}`);
           }
         } catch (vaultError) {
           console.error(`Error processing vault ${vault.name}:`, vaultError);

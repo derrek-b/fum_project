@@ -16,6 +16,29 @@ contract ParrisIslandStrategy is Ownable {
     event ParameterUpdated(address indexed vault, string paramName);
     event TemplateSelected(address indexed vault, Template template);
     event CustomizationUpdated(address indexed vault, uint256 bitmap);
+    event VaultAuthorized(address indexed vault, bool authorized);
+
+    // ==================== Authorization ====================
+    // Mapping to track vaults that can modify their own parameters
+    mapping(address => bool) public authorizedVaults;
+
+    // Modifier to ensure caller is an authorized vault
+    modifier onlyAuthorizedVault() {
+        require(authorizedVaults[msg.sender], "ParrisIslandStrategy: caller is not an authorized vault");
+        _;
+    }
+
+    // Functions to manage vault authorization
+    function authorizeVault(address vault) external onlyOwner {
+        require(vault != address(0), "ParrisIslandStrategy: zero vault address");
+        authorizedVaults[vault] = true;
+        emit VaultAuthorized(vault, true);
+    }
+
+    function deauthorizeVault(address vault) external onlyOwner {
+        authorizedVaults[vault] = false;
+        emit VaultAuthorized(vault, false);
+    }
 
     // ==================== Enums ====================
     // Templates
@@ -92,13 +115,6 @@ contract ParrisIslandStrategy is Ownable {
 
     // ==================== Customization Bitmap ====================
     // Bitmap tracks which parameters have been customized (1 = customized, 0 = use template)
-    // Bit positions:
-    // 0: targetRangeUpper
-    // 1: targetRangeLower
-    // 2: rebalanceThresholdUpper
-    // 3: rebalanceThresholdLower
-    // 4: feeReinvestment
-    // ... and so on
     mapping(address => uint256) public customizationBitmap;
 
     // ==================== Template Selection ====================
@@ -156,7 +172,7 @@ contract ParrisIslandStrategy is Ownable {
      * @dev Select a template
      * @param template Template to select
      */
-    function selectTemplate(Template template) external {
+    function selectTemplate(Template template) external onlyAuthorizedVault {
         selectedTemplate[msg.sender] = template;
 
         // Clear customization bitmap if selecting a non-None template
@@ -771,7 +787,7 @@ contract ParrisIslandStrategy is Ownable {
         uint16 lowerRange,
         uint16 upperThreshold,
         uint16 lowerThreshold
-    ) external {
+    ) external onlyAuthorizedVault {
         targetRangeUpper[msg.sender] = upperRange;
         targetRangeLower[msg.sender] = lowerRange;
         rebalanceThresholdUpper[msg.sender] = upperThreshold;
@@ -796,7 +812,7 @@ contract ParrisIslandStrategy is Ownable {
         bool reinvest,
         uint256 trigger,
         uint16 ratio
-    ) external {
+    ) external onlyAuthorizedVault {
         feeReinvestment[msg.sender] = reinvest;
         reinvestmentTrigger[msg.sender] = trigger;
         reinvestmentRatio[msg.sender] = ratio;
@@ -820,7 +836,7 @@ contract ParrisIslandStrategy is Ownable {
         uint16 slippage,
         uint16 exitTrigger,
         uint16 utilization
-    ) external {
+    ) external onlyAuthorizedVault {
         maxSlippage[msg.sender] = slippage;
         emergencyExitTrigger[msg.sender] = exitTrigger;
         maxVaultUtilization[msg.sender] = utilization;
@@ -856,7 +872,7 @@ contract ParrisIslandStrategy is Ownable {
         uint16 thresholdHigh,
         uint16 rangeLow,
         uint16 thresholdLow
-    ) external {
+    ) external onlyAuthorizedVault {
         adaptiveRanges[msg.sender] = adaptive;
         rebalanceCountThresholdHigh[msg.sender] = countHigh;
         rebalanceCountThresholdLow[msg.sender] = countLow;
@@ -885,7 +901,7 @@ contract ParrisIslandStrategy is Ownable {
     function setOracleParameters(
         OracleSource source,
         uint16 tolerance
-    ) external {
+    ) external onlyAuthorizedVault {
         oracleSource[msg.sender] = source;
         priceDeviationTolerance[msg.sender] = tolerance;
 
@@ -908,7 +924,7 @@ contract ParrisIslandStrategy is Ownable {
         uint16 maxSize,
         uint256 minSize,
         uint16 utilization
-    ) external {
+    ) external onlyAuthorizedVault {
         maxPositionSizePercent[msg.sender] = maxSize;
         minPositionSize[msg.sender] = minSize;
         targetUtilization[msg.sender] = utilization;
@@ -930,7 +946,7 @@ contract ParrisIslandStrategy is Ownable {
     function setPlatformParameters(
         PlatformSelectionCriteria criteria,
         uint256 liquidity
-    ) external {
+    ) external onlyAuthorizedVault {
         platformSelectionCriteria[msg.sender] = criteria;
         minPoolLiquidity[msg.sender] = liquidity;
 

@@ -157,7 +157,11 @@ async function deploy() {
       contractsData[contractName].addresses = {};
     }
 
-    contractsData[contractName].addresses[chainId] = contractAddress;
+    if (contractName === 'ParrisIslandStrategy') {
+      contractsData['parris'].addresses[chainId] = contractAddress;
+    } else {
+      contractsData[contractName].addresses[chainId] = contractAddress;
+    }
 
     // Save results for deployment info
     deploymentResults[contractName] = contractAddress;

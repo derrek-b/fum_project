@@ -1,5 +1,6 @@
 // src/utils/vaultsHelpers.js
 import { AdapterFactory } from '../adapters';
+import { useSelector } from 'react-redux';
 import { setPositions, addVaultPositions } from '../redux/positionsSlice';
 import { setPools } from '../redux/poolSlice';
 import { setTokens } from '../redux/tokensSlice';
@@ -7,9 +8,10 @@ import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, upd
 import { getUserVaults, getVaultInfo } from './contracts';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from './coingeckoUtils';
 import { triggerUpdate } from '../redux/updateSlice';
-import { getAvailableStrategies } from './strategyConfig';
+import { getAvailableStrategies, getStrategyParameters } from './strategyConfig';
 import { getAllTokens } from './tokenConfig';
-import { setAvailableStrategies } from '../redux/strategiesSlice';
+import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
+import contractData from '../abis/contracts.json';
 import { ethers } from 'ethers';
 
 /**
@@ -35,49 +37,262 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
 
     // 1. Get strategy information
     const availableStrategies = getAvailableStrategies();
-    const simplifiedStrategies = availableStrategies.map(strategy => ({
-      id: strategy.id,
-      name: strategy.name,
-      subtitle: strategy.subtitle,
-      description: strategy.description
-    }));
 
+    // Create a mapping from contract addresses to strategy IDs
+    // This approach avoids modifying potentially frozen objects
+    const addressToStrategyMap = {};
+
+    // Build a direct mapping from addresses to strategy IDs
+    Object.keys(contractData).forEach(contractKey => {
+      // Skip non-strategy contracts
+      if (['VaultFactory', 'PositionVault', 'BatchExecutor'].includes(contractKey)) {
+        return;
+      }
+
+      const addresses = contractData[contractKey].addresses || {};
+
+      // Map each address directly to the contract key
+      Object.entries(addresses).forEach(([addrChainId, address]) => {
+        // Store normalized (lowercase) address for case-insensitive comparison
+        addressToStrategyMap[address.toLowerCase()] = {
+          strategyId: contractKey,
+          contractKey,
+          address,
+          chainId: addrChainId
+        };
+      });
+    });
+
+    // Create simplified strategies for the Redux store
+    const simplifiedStrategies = availableStrategies.map(strategy => {
+      // Find contract data for this strategy
+      const strategyContractKey = Object.keys(contractData).find(key =>
+        key.toLowerCase() === strategy.id.toLowerCase() ||
+        (key.toLowerCase().includes(strategy.id.toLowerCase()) &&
+         strategy.id.toLowerCase().includes(key.toLowerCase()))
+      );
+
+      // Get addresses from contract data if available
+      const addresses = strategyContractKey ?
+        (contractData[strategyContractKey].addresses || {}) : {};
+
+      // Return simplified strategy with addresses
+      return {
+        id: strategy.id,
+        name: strategy.name,
+        subtitle: strategy.subtitle,
+        description: strategy.description,
+        contractKey: strategyContractKey || strategy.id,
+        addresses: { ...addresses }, // Create a new object to avoid frozen objects
+        supportsTemplates: !!strategy.templateEnumMap,
+        templateEnumMap: strategy.templateEnumMap ? {...strategy.templateEnumMap} : null,
+        hasGetAllParameters: true,
+        parameterGroups: strategy.parameterGroups || []
+      };
+    });
+
+    // Update Redux store with strategies
     dispatch(setAvailableStrategies(simplifiedStrategies));
+
+    // Also update strategy addresses in Redux
+    Object.values(addressToStrategyMap).forEach(({ strategyId, chainId, address }) => {
+      dispatch(setStrategyAddress({
+        strategyId,
+        chainId,
+        address
+      }));
+    });
 
     // 2. Get basic vault info
     const vaultInfo = await getVaultInfo(vaultAddress, provider);
 
-    // 3. Get additional contract info (executor, strategy address)
+    // 3. Get additional contract info (executor, strategy address, target tokens, target platforms)
     let executor = null;
     let strategyAddress = null;
+    let targetTokens = [];
+    let targetPlatforms = [];
+    let strategyParams = {};
+    let activeTemplate = null;
+    let strategyId = null;
 
     try {
+      // Enhanced vault contract with additional methods
       const vaultContract = new ethers.Contract(
         vaultAddress,
         [
           "function executor() view returns (address)",
-          "function strategy() view returns (address)"
+          "function strategy() view returns (address)",
+          "function getTargetTokens() view returns (string[])",
+          "function getTargetPlatforms() view returns (string[])"
         ],
         provider
       );
 
+      // Get basic vault information
       [executor, strategyAddress] = await Promise.all([
         vaultContract.executor(),
         vaultContract.strategy()
       ]);
 
-      console.log(`Vault ${vaultAddress} strategy: ${strategyAddress}, executor: ${executor}`);
+      // Check if strategy is set and active
+      if (strategyAddress && strategyAddress !== ethers.ZeroAddress) {
+        try {
+          // Get target tokens and platforms from vault
+          [targetTokens, targetPlatforms] = await Promise.all([
+            vaultContract.getTargetTokens(),
+            vaultContract.getTargetPlatforms()
+          ]);
+
+          // Find the matching strategy from our direct mapping
+          // Use lowercase for case-insensitive comparison
+          const strategyInfo = addressToStrategyMap[strategyAddress.toLowerCase()];
+
+          if (strategyInfo) {
+            strategyId = strategyInfo.strategyId;
+            const contractKey = strategyInfo.contractKey;
+
+            // Find matching strategy in our simplified strategies
+            const matchingStrategy = simplifiedStrategies.find(s => s.id === strategyId);
+
+            // Get strategy configuration
+            const parameterDefinitions = getStrategyParameters(strategyId);
+
+            // Create strategy contract instance with actual ABI
+            const strategyContract = new ethers.Contract(
+              strategyAddress,
+              contractData[contractKey]?.abi || [],
+              provider
+            );
+
+            // Get template if strategy supports templates
+            if (matchingStrategy?.supportsTemplates) {
+              try {
+                // Try as a function with parameter
+                try {
+                  const templateValue = await strategyContract.selectedTemplate(vaultAddress);
+
+                  // Map template value to string based on strategy's enum mapping
+                  const templateMap = matchingStrategy.templateEnumMap || {
+                    1: 'conservative',
+                    2: 'moderate',
+                    3: 'aggressive',
+                    0: 'custom'
+                  };
+
+                  activeTemplate = templateMap[templateValue] || 'custom';
+                } catch (err) {
+                  // Try as a state variable
+                  const templateValue = await strategyContract.selectedTemplate();
+
+                  const templateMap = matchingStrategy.templateEnumMap || {
+                    1: 'conservative',
+                    2: 'moderate',
+                    3: 'aggressive',
+                    0: 'custom'
+                  };
+
+                  activeTemplate = templateMap[templateValue] || 'custom';
+                }
+              } catch (templateError) {
+                console.warn(`Error getting template: ${templateError.message}`);
+              }
+            }
+
+            // Get parameters based on strategy's parameter groups
+            try {
+              // For "ParrisIslandStrategy" or similar strategies with getAllParameters method
+              try {
+                const params = await strategyContract.getAllParameters(vaultAddress);
+
+                // Map the returned parameters to a structured object
+                strategyParams = {};
+                let paramIndex = 0;
+
+                // Process parameter groups
+                const parameterGroups = matchingStrategy?.parameterGroups || [];
+
+                for (const group of parameterGroups) {
+                  // Get parameters for this group
+                  const groupParams = Object.entries(parameterDefinitions)
+                    .filter(([paramId, config]) => config.group === group.id)
+                    .map(([paramId, config]) => ({ paramId, config }));
+
+                  // Process each parameter in the group
+                  for (const { paramId, config } of groupParams) {
+                    if (paramIndex < params.length) {
+                      const rawValue = params[paramIndex++];
+
+                      // Format based on parameter type
+                      switch (config.type) {
+                        case 'percent':
+                          // Convert basis points to percentage
+                          strategyParams[paramId] = parseFloat(rawValue) / 100;
+                          break;
+
+                        case 'currency':
+                          // Convert wei to ether
+                          strategyParams[paramId] = ethers.formatUnits(rawValue, 18);
+                          break;
+
+                        case 'boolean':
+                          strategyParams[paramId] = !!rawValue;
+                          break;
+
+                        case 'select':
+                          // Use raw value for enums
+                          strategyParams[paramId] = rawValue;
+                          break;
+
+                        default:
+                          // Use raw value for other types
+                          strategyParams[paramId] = rawValue;
+                      }
+                    }
+                  }
+                }
+
+                console.log("Strategy parameters loaded successfully");
+              } catch (err) {
+                console.warn("getAllParameters error:", err.message);
+
+                // Try individual parameter getters as fallback
+                // (Your existing parameter getter code can go here if needed)
+              }
+            } catch (paramError) {
+              console.warn(`Error loading strategy parameters: ${paramError.message}`);
+            }
+          } else {
+            console.warn(`Strategy at address ${strategyAddress} not found in available strategies`);
+            strategyId = 'unknown';
+          }
+        } catch (targetError) {
+          console.warn(`Error loading target tokens/platforms: ${targetError.message}`);
+        }
+      }
     } catch (contractError) {
       console.warn(`Could not fetch additional vault contract data: ${contractError.message}`);
     }
 
-    // Create vault data object with updated structure
+    // Create strategy object if strategy address is set
+    const strategy = strategyAddress && strategyAddress !== ethers.ZeroAddress ? {
+      strategyId: strategyId || 'unknown',
+      strategyAddress,
+      isActive: true,
+      selectedTokens: targetTokens,
+      selectedPlatforms: targetPlatforms,
+      parameters: strategyParams,
+      activeTemplate: activeTemplate,
+      lastUpdated: Date.now()
+    } : null;
+
+    // Create vault data object with updated structure including strategy
     const vaultData = {
       address: vaultAddress,
       ...vaultInfo,
       executor: executor || null,
       strategyAddress: strategyAddress || null,
       hasActiveStrategy: strategyAddress && strategyAddress !== ethers.ZeroAddress,
+      strategy: strategy,
       positions: [] // Initialize empty positions array
     };
 
@@ -97,11 +312,9 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
 
     for (const adapter of adapters) {
       try {
-        console.log(`Fetching ${adapter.platformName} positions for vault ${vaultAddress}`);
         const result = await adapter.getPositions(vaultAddress, chainId);
 
         if (result?.positions?.length > 0) {
-          console.log(`Found ${result.positions.length} ${adapter.platformName} positions in vault`);
 
           // Mark positions as being in vault and collect IDs
           result.positions.forEach(position => {
@@ -207,7 +420,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
   }
 
   try {
-    console.log(`Loading data for user: ${userAddress}`);
 
     // 1. Get all available strategies and add to store
     const availableStrategies = getAvailableStrategies();
@@ -222,7 +434,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
     // 2. Get all vault addresses for the user
     const vaultAddresses = await getUserVaults(userAddress, provider);
-    console.log(`Found ${vaultAddresses.length} vault addresses`);
 
     // 3. Get adapters for the current chain
     const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
@@ -243,7 +454,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     // 5. Process each vault to get its details
     for (const vaultAddress of vaultAddresses) {
       try {
-        console.log(`Processing vault: ${vaultAddress}`);
 
         // Get basic vault info
         const vaultInfo = await getVaultInfo(vaultAddress, provider);
@@ -266,8 +476,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
             vaultContract.executor(),
             vaultContract.strategy()
           ]);
-
-          console.log(`Vault ${vaultAddress} strategy: ${strategyAddress}, executor: ${executor}`);
         } catch (contractError) {
           console.warn(`Could not fetch additional vault contract data: ${contractError.message}`);
         }
@@ -289,11 +497,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
         for (const adapter of adapters) {
           try {
-            console.log(`Fetching ${adapter.platformName} positions for vault ${vaultAddress}`);
             const result = await adapter.getPositions(vaultAddress, chainId);
 
             if (result?.positions?.length > 0) {
-              console.log(`Found ${result.positions.length} ${adapter.platformName} positions in vault`);
 
               // Process each position
               result.positions.forEach(position => {
@@ -368,7 +574,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         const result = await adapter.getPositions(userAddress, chainId);
 
         if (result?.positions?.length > 0) {
-          console.log(`Found ${result.positions.length} total ${adapter.platformName} positions for user`);
 
           // Filter out positions already in vaults
           const nonVaultPositions = result.positions
@@ -378,8 +583,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
               inVault: false,
               vaultAddress: null
             }));
-
-          console.log(`${nonVaultPositions.length} positions are not in vaults`);
 
           // Add non-vault positions to allPositions
           allPositions.push(...nonVaultPositions);
@@ -411,17 +614,13 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 10. Calculate TVL for each vault
-    console.log("Calculating TVL for all vaults...");
 
     for (const vault of vaultsData) {
       const vaultPositions = positionsByVault[vault.address] || [];
 
       if (vaultPositions.length === 0) {
-        console.log(`No positions for vault ${vault.address}, skipping TVL calculation`);
         continue;
       }
-
-      console.log(`Calculating TVL for vault ${vault.address} with ${vaultPositions.length} positions`);
 
       // Get unique token symbols and collect data
       const tokenSymbols = new Set();
@@ -454,16 +653,10 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         }
       }
 
-      if (positionData.length === 0) {
-        console.log(`No valid position data for vault ${vault.address}`);
-        continue;
-      }
-
       // Fetch token prices
       let pricesFetchFailed = false;
 
       try {
-        console.log("Fetching prices for tokens:", Array.from(tokenSymbols));
         // Prefetch all token prices at once to populate the cache
         await prefetchTokenPrices(Array.from(tokenSymbols));
       } catch (error) {
@@ -517,8 +710,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         }
       }
 
-      console.log(`Final TVL for vault ${vault.address}: ${totalTVL.toFixed(2)}`);
-
       // Update vault metrics with TVL
       dispatch(updateVaultMetrics({
         vaultAddress: vault.address,
@@ -531,8 +722,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 11. Calculate token TVL for each vault
-    console.log("Calculating token TVL for all vaults...");
-
     for (const vault of vaultsData) {
       try {
         // Create an ERC20 ABI instance for token balance checks
@@ -546,7 +735,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           }
         ];
 
-        console.log(`Calculating token TVL for vault ${vault.address}`);
         const allTokens = getAllTokens();
         const tokenAddresses = Object.values(allTokens)
           .filter(token => token.addresses[chainId])
@@ -597,7 +785,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
             // Add value to token balance object
             tokenBalances[token.symbol].valueUsd = valueUsd;
 
-            console.log(`Vault ${vault.address} token: ${token.symbol}, balance: ${numericalBalance}, value: $${valueUsd?.toFixed(2) || 'N/A'}`);
             return valueUsd || 0;
           } catch (err) {
             console.error(`Error calculating value for ${token.symbol}:`, err);
@@ -608,8 +795,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
         const tokenValues = await Promise.all(tokenPromises);
         totalTokenValue = tokenValues.reduce((sum, value) => sum + value, 0);
-
-        console.log(`Final token TVL for vault ${vault.address}: ${totalTokenValue.toFixed(2)}`);
 
         // Store token balances in the vault
         if (Object.keys(tokenBalances).length > 0) {

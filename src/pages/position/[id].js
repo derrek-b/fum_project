@@ -12,10 +12,10 @@ import { fetchTokenPrices, calculateUsdValue } from "../../utils/coingeckoUtils"
 import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
 import RefreshControls from "../../components/RefreshControls";
-import AddLiquidityModal from "../../components/AddLiquidityModal";
-import RemoveLiquidityModal from "../../components/RemoveLiquidityModal";
-import ClosePositionModal from "../../components/ClosePositionModal";
-import ClaimFeesModal from "../../components/ClaimFeesModal";
+import AddLiquidityModal from "../../components/positions/AddLiquidityModal";
+import RemoveLiquidityModal from "../../components/positions/RemoveLiquidityModal";
+import ClosePositionModal from "../../components/positions/ClosePositionModal";
+import ClaimFeesModal from "../../components/positions/ClaimFeesModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
@@ -265,7 +265,6 @@ export default function PositionDetailPage() {
           // Force fee recalculation
           adapter.calculateFees(position, poolData, token0Data, token1Data)
             .then(fees => {
-              console.log("Refreshed fees:", fees);
               setUncollectedFees(fees);
               setIsLoadingFees(false);
               forceUpdate(); // Force component re-render
@@ -281,7 +280,6 @@ export default function PositionDetailPage() {
           if (chainId) {
             adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
               .then(balances => {
-                console.log("Refreshed balances:", balances);
                 setTokenBalances(balances);
                 setIsLoadingBalances(false);
                 forceUpdate(); // Force component re-render

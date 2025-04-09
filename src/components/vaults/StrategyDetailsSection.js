@@ -170,7 +170,8 @@ const StrategyDetailsSection = ({
       onParamsChange({
         parameters: params,
         selectedTokens,
-        selectedPlatforms
+        selectedPlatforms,
+        activePreset
       });
     }
   }, [params, selectedTokens, selectedPlatforms, onParamsChange]);

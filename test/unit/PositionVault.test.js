@@ -387,4 +387,110 @@ describe("PositionVault - 0.3.0", function() {
       ).to.be.revertedWith("PositionVault: position not managed by vault");
     });
   });
+
+  describe("Target Token and Platform Management", function() {
+    const testTokens = ["WETH", "USDC", "WBTC"];
+    const testPlatforms = ["uniswap_v3", "sushiswap", "pancakeswap"];
+
+    it("should allow owner to set target tokens", async function() {
+      // Set target tokens
+      await vault.setTargetTokens(testTokens);
+
+      // Verify tokens were set correctly
+      const storedTokens = await vault.getTargetTokens();
+      expect(storedTokens).to.deep.equal(testTokens);
+
+      // Check event emission
+      await expect(vault.setTargetTokens(testTokens))
+        .to.emit(vault, "TargetTokensUpdated")
+        .withArgs(testTokens);
+    });
+
+    it("should allow owner to set target platforms", async function() {
+      // Set target platforms
+      await vault.setTargetPlatforms(testPlatforms);
+
+      // Verify platforms were set correctly
+      const storedPlatforms = await vault.getTargetPlatforms();
+      expect(storedPlatforms).to.deep.equal(testPlatforms);
+
+      // Check event emission
+      await expect(vault.setTargetPlatforms(testPlatforms))
+        .to.emit(vault, "TargetPlatformsUpdated")
+        .withArgs(testPlatforms);
+    });
+
+    it("should allow updating tokens with a new list", async function() {
+      // Set initial tokens
+      await vault.setTargetTokens(testTokens);
+
+      // Update with a new list
+      const newTokens = ["DAI", "LINK"];
+      await vault.setTargetTokens(newTokens);
+
+      // Verify tokens were updated
+      const storedTokens = await vault.getTargetTokens();
+      expect(storedTokens).to.deep.equal(newTokens);
+      expect(storedTokens).to.not.deep.equal(testTokens);
+    });
+
+    it("should allow updating platforms with a new list", async function() {
+      // Set initial platforms
+      await vault.setTargetPlatforms(testPlatforms);
+
+      // Update with a new list
+      const newPlatforms = ["curve", "balancer"];
+      await vault.setTargetPlatforms(newPlatforms);
+
+      // Verify platforms were updated
+      const storedPlatforms = await vault.getTargetPlatforms();
+      expect(storedPlatforms).to.deep.equal(newPlatforms);
+      expect(storedPlatforms).to.not.deep.equal(testPlatforms);
+    });
+
+    it("should reject token updates from non-owner", async function() {
+      await expect(
+        vault.connect(user1).setTargetTokens(testTokens)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      // Even the executor cannot set tokens
+      await vault.setExecutor(executorWallet.address);
+      await expect(
+        vault.connect(executorWallet).setTargetTokens(testTokens)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should reject platform updates from non-owner", async function() {
+      await expect(
+        vault.connect(user1).setTargetPlatforms(testPlatforms)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+
+      // Even the executor cannot set platforms
+      await vault.setExecutor(executorWallet.address);
+      await expect(
+        vault.connect(executorWallet).setTargetPlatforms(testPlatforms)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should correctly handle empty arrays", async function() {
+      // Set empty token list
+      await vault.setTargetTokens([]);
+      const storedTokens = await vault.getTargetTokens();
+      expect(storedTokens).to.be.an('array').that.is.empty;
+
+      // Set empty platform list
+      await vault.setTargetPlatforms([]);
+      const storedPlatforms = await vault.getTargetPlatforms();
+      expect(storedPlatforms).to.be.an('array').that.is.empty;
+    });
+
+    it("should initialize with empty arrays", async function() {
+      // Check initial state
+      const initialTokens = await vault.getTargetTokens();
+      const initialPlatforms = await vault.getTargetPlatforms();
+
+      expect(initialTokens).to.be.an('array').that.is.empty;
+      expect(initialPlatforms).to.be.an('array').that.is.empty;
+    });
+  });
 });

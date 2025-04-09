@@ -8,7 +8,7 @@ import Link from "next/link";
 import Head from "next/head";
 import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
-import PositionCard from "../../components/PositionCard";
+import PositionCard from "../../components/positions/PositionCard";
 import PositionSelectionModal from "../../components/vaults/PositionSelectionModal";
 import VaultPositionModal from "@/components/vaults/VaultPositionModal";
 import TokenDepositModal from "../../components/vaults/TokenDepositModal";

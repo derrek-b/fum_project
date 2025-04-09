@@ -4,16 +4,16 @@ import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-boots
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
 import Image from "next/image";
-import { AdapterFactory } from "../adapters";
-import { formatPrice, formatFeeDisplay } from "../utils/formatHelpers";
-import { fetchTokenPrices } from "../utils/coingeckoUtils";
+import { AdapterFactory } from "../../adapters";
+import { formatPrice, formatFeeDisplay } from "../../utils/formatHelpers";
+import { fetchTokenPrices } from "../../utils/coingeckoUtils";
 import ClaimFeesModal from "./ClaimFeesModal";
 import RemoveLiquidityModal from "./RemoveLiquidityModal";
 import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
-import { triggerUpdate } from "../redux/updateSlice";
-import config from "../utils/config";
-import Logo from "../../public/Logo.svg"
+import { triggerUpdate } from "../../redux/updateSlice";
+import config from "../../utils/config";
+import Logo from "../../../public/Logo.svg"
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
@@ -254,31 +254,8 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
     const loadFees = async () => {
       try {
-        // Log detailed information before calculation
-        console.log(`FEES ATTEMPT: Calculating fees for position ${position.id} (${position.inVault ? 'vault' : 'wallet'})`);
-
-        // Check if poolData has ticks
-        console.log(`Pool data for position ${position.id} has ticks:`,
-          poolData && poolData.ticks ? `Yes (${Object.keys(poolData.ticks).length} ticks)` : 'No'
-        );
-
         // Check if position's specific ticks exist in poolData
-        const hasLowerTick = poolData?.ticks && poolData.ticks[position.tickLower];
-        const hasUpperTick = poolData?.ticks && poolData.ticks[position.tickUpper];
-        console.log(`Position ${position.id} ticks existence:`,
-          `Lower tick (${position.tickLower}): ${hasLowerTick ? 'Yes' : 'No'}, ` +
-          `Upper tick (${position.tickUpper}): ${hasUpperTick ? 'Yes' : 'No'}`
-        );
-
-        // Global fee growth data
-        console.log(`Pool ${position.poolAddress} fee growth data:`,
-          `Global0: ${poolData?.feeGrowthGlobal0X128 ? 'Yes' : 'No'}, ` +
-          `Global1: ${poolData?.feeGrowthGlobal1X128 ? 'Yes' : 'No'}`
-        );
-
         const fees = await adapter.calculateFees(position, poolData, token0Data, token1Data);
-
-        console.log(`FEES SUCCESS: Calculated for position ${position.id}:`, fees);
 
         // Only update state if component is still mounted
         if (isMounted) {

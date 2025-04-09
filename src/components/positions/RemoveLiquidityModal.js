@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { useToast } from '../context/ToastContext';
-import { AdapterFactory } from '../adapters';
-import { triggerUpdate } from '../redux/updateSlice';
+import { useToast } from '../../context/ToastContext';
+import { AdapterFactory } from '../../adapters';
+import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function RemoveLiquidityModal({
   show,

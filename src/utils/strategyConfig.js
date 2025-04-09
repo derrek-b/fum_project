@@ -397,6 +397,11 @@ const strategies = {
       }
     },
     // Templates for Parris Island (new)
+    templateEnumMap: {
+      'conservative': 1,
+      'moderate': 2,
+      'aggressive': 3
+    },
     templates: [
       {
         id: "conservative",
@@ -948,6 +953,7 @@ export function getAvailableStrategies() {
       name: strategy.name,
       subtitle: strategy.subtitle,
       description: strategy.description,
+      templateEnumMap: strategy.templateEnumMap,
       comingSoon: strategy.comingSoon || false
     }));
 }

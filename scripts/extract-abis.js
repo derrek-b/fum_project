@@ -58,7 +58,11 @@ contractFiles.forEach(file => {
   const contractName = path.basename(file, '.sol');
   const contractOutput = output.contracts[file][contractName];
   if (contractOutput) {
-    contractsAbi[contractName] = { abi: contractOutput.abi };
+    if (contractName === 'ParrisIslandStrategy') {
+      contractsAbi['parris'] = { abi: contractOutput.abi };
+    } else {
+      contractsAbi[contractName] = { abi: contractOutput.abi };
+    }
   } else {
     console.error(`Contract ${contractName} not found in compilation output`);
     process.exit(1);

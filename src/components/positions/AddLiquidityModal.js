@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { AdapterFactory } from '../adapters';
-import { formatPrice, formatFeeDisplay } from '../utils/formatHelpers';
-import { calculateUsdValue } from '../utils/coingeckoUtils';
+import { AdapterFactory } from '../../adapters';
+import { formatPrice, formatFeeDisplay } from '../../utils/formatHelpers';
+import { calculateUsdValue } from '../../utils/coingeckoUtils';
 import { ethers } from 'ethers';
-import { useToast } from '../context/ToastContext';
-import { triggerUpdate } from '../redux/updateSlice';
+import { useToast } from '../../context/ToastContext';
+import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function AddLiquidityModal({
   show,
@@ -47,11 +47,9 @@ export default function AddLiquidityModal({
   // When the modal is shown, pause auto-refresh
   useEffect(() => {
     if (show) {
-      console.log("Modal opened, checking auto-refresh state:", autoRefresh);
 
       // Store original state and pause auto-refresh if it's enabled if it's adding liquidity
       if (autoRefresh.enabled && isExistingPosition) {
-        console.log("Auto-refresh is enabled, pausing it while modal is open");
 
         try {
           // Store the current state before we change it
@@ -153,8 +151,6 @@ export default function AddLiquidityModal({
 
   // Reset form when closing the modal
   const handleClose = () => {
-    console.log("Modal closing, checking if auto-refresh needs to be restored");
-
     // Reset all state variables
     setToken0Amount('');
     setToken1Amount('');
@@ -187,7 +183,6 @@ export default function AddLiquidityModal({
     // Restore auto-refresh to its original state if it was changed
     if (originalAutoRefreshState !== null) {
       try {
-        console.log("Restoring auto-refresh to:", originalAutoRefreshState);
         dispatch({
           type: 'updates/setAutoRefresh',
           payload: originalAutoRefreshState
@@ -262,7 +257,6 @@ export default function AddLiquidityModal({
               token0Data.decimals,
               token1Data.decimals
             );
-            console.log("Setting current price for existing position:", calculatedPrice);
             setCurrentPoolPrice(calculatedPrice);
             setIsLoadingPrice(false);
           } catch (error) {
@@ -533,7 +527,6 @@ export default function AddLiquidityModal({
 
       // Update the tokensSwapped state for price calculations
       setTokensSwapped(swapped);
-      console.log("Tokens swapped for Uniswap ordering:", swapped);
 
       if (!poolAddress) {
         throw new Error("Failed to calculate pool address");
@@ -549,11 +542,9 @@ export default function AddLiquidityModal({
       try {
         // Try to get the pool data
         const slot0 = await poolContract.slot0();
-        console.log("Pool slot0 data:", slot0);
 
         // Extract tick value
         const tickValue = typeof slot0.tick === 'bigint' ? Number(slot0.tick) : Number(slot0.tick);
-        console.log("Pool current tick:", tickValue);
 
         // Use adapter to calculate price
         const price = adapter._calculatePriceFromSqrtPrice(
@@ -561,7 +552,6 @@ export default function AddLiquidityModal({
           sortedToken0.decimals,
           sortedToken1.decimals
         );
-        console.log("Calculated price from sqrtPriceX96:", price);
 
         // Update state with current price and tick
         setCurrentPoolPrice(price);
@@ -631,16 +621,10 @@ export default function AddLiquidityModal({
 
     // Use either the provided currentTick or the one from state
     const currentTick = currentTickOverride !== null ? currentTickOverride : priceRange.current;
-    console.log("Current tick for range calculation:", currentTick, "Type:", type);
 
     // If we don't have a current tick, we can't calculate ranges
     if (currentTick === null || isNaN(currentTick)) {
-      console.log("No valid current tick available, setting placeholder range");
-      setPriceRange({
-        min: type === 'narrow' ? -250 : (type === 'medium' ? -500 : -1000),
-        max: type === 'narrow' ? 250 : (type === 'medium' ? 500 : 1000),
-        current: null
-      });
+      console.warn("No valid current tick available, cannot calculate ranges");
       return;
     }
 
@@ -667,7 +651,6 @@ export default function AddLiquidityModal({
             tickSpacing = Math.ceil(Math.log(1.05) / Math.log(1.0001));
           } else {
             // Keep existing custom values
-            console.log("Keeping existing custom values");
             return;
           }
           break;
@@ -676,13 +659,9 @@ export default function AddLiquidityModal({
           return;
       }
 
-      console.log(`Tick spacing for ${type} range: ${tickSpacing} ticks`);
-
       // Calculate min and max ticks
       const minTick = Math.floor(currentTick - tickSpacing);
       const maxTick = Math.ceil(currentTick + tickSpacing);
-
-      console.log(`Calculated tick range: [${minTick}, ${maxTick}]`);
 
       // Verify calculations by converting ticks back to prices
       if (adapter && token0Address && token1Address) {
@@ -696,7 +675,6 @@ export default function AddLiquidityModal({
           try {
             const lowerPrice = adapter._tickToPrice(minTick, decimals0, decimals1);
             const upperPrice = adapter._tickToPrice(maxTick, decimals0, decimals1);
-            console.log(`Price range: [${lowerPrice}, ${upperPrice}]`);
           } catch (e) {
             console.error("Error verifying price range:", e);
           }
@@ -858,8 +836,6 @@ export default function AddLiquidityModal({
 
     try {
       // No need to pause auto-refresh here since we've already done it when the modal opened
-      console.log("Processing liquidity operation, auto-refresh status:", autoRefresh.enabled ? "enabled" : "paused");
-
       if (isExistingPosition) {
         // Validate inputs for adding liquidity
         if (!token0Amount && !token1Amount) {
@@ -938,7 +914,6 @@ export default function AddLiquidityModal({
   // Helper to format price from tick using the adapter
   const formatTickToPrice = (tick) => {
     if (tick === null || tick === undefined || !adapter) {
-      console.log("formatTickToPrice: Missing data - tick:", tick, "adapter:", !!adapter);
       return 'N/A';
     }
 
@@ -946,7 +921,6 @@ export default function AddLiquidityModal({
       const getTokenDecimals = () => {
         if (isExistingPosition) {
           if (!token0Data?.decimals || !token1Data?.decimals) {
-            console.log("Token decimal information missing for existing position");
             return { token0Decimals: null, token1Decimals: null };
           }
           return {
@@ -958,7 +932,6 @@ export default function AddLiquidityModal({
           const token1 = commonTokens.find(t => t.address === token1Address);
 
           if (!token0?.decimals || !token1?.decimals) {
-            console.log("Token decimal information missing for new position");
             return { token0Decimals: null, token1Decimals: null };
           }
 
@@ -969,7 +942,6 @@ export default function AddLiquidityModal({
       // Get token decimals
       const { token0Decimals, token1Decimals } = getTokenDecimals();
       if (token0Decimals === null || token1Decimals === null) {
-        console.log("Decimal information is missing");
         return 'N/A';
       }
 
@@ -992,14 +964,12 @@ export default function AddLiquidityModal({
         const numPrice = parseFloat(price);
         if (numPrice > 0) {
           price = (1 / numPrice).toString();
-          console.log(`Inverted price: ${price}`);
         }
       }
 
       // Format for display
       const numPrice = parseFloat(price);
       if (isNaN(numPrice)) {
-        console.log("Price is not a number:", price);
         return 'N/A';
       }
 

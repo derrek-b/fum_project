@@ -135,12 +135,9 @@ export default function VaultPositionModal({
   // When the modal is shown, pause auto-refresh
   useEffect(() => {
     if (show) {
-      console.log("Modal opened, checking auto-refresh state:", autoRefresh);
 
       // Store original state and pause auto-refresh if it's enabled
       if (autoRefresh.enabled) {
-        console.log("Auto-refresh is enabled, pausing it while modal is open");
-
         try {
           // Store the current state before we change it
           setOriginalAutoRefreshState(autoRefresh);
@@ -160,8 +157,6 @@ export default function VaultPositionModal({
 
   // Reset form when closing the modal
   const handleClose = () => {
-    console.log("Modal closing, checking if auto-refresh needs to be restored");
-
     // Reset all state variables
     setToken0Amount('');
     setToken1Amount('');
@@ -195,7 +190,6 @@ export default function VaultPositionModal({
     // Restore auto-refresh to its original state if it was changed
     if (originalAutoRefreshState !== null) {
       try {
-        console.log("Restoring auto-refresh to:", originalAutoRefreshState);
         dispatch({
           type: 'updates/setAutoRefresh',
           payload: originalAutoRefreshState
@@ -518,7 +512,6 @@ export default function VaultPositionModal({
 
       // Update the tokensSwapped state for price calculations
       setTokensSwapped(swapped);
-      console.log("Tokens swapped for Uniswap ordering:", swapped);
 
       if (!poolAddress) {
         throw new Error("Failed to calculate pool address");
@@ -534,11 +527,9 @@ export default function VaultPositionModal({
       try {
         // Try to get the pool data
         const slot0 = await poolContract.slot0();
-        console.log("Pool slot0 data:", slot0);
 
         // Extract tick value
         const tickValue = typeof slot0.tick === 'bigint' ? Number(slot0.tick) : Number(slot0.tick);
-        console.log("Pool current tick:", tickValue);
 
         // Use adapter to calculate price
         const price = adapter._calculatePriceFromSqrtPrice(
@@ -546,7 +537,6 @@ export default function VaultPositionModal({
           sortedToken0.decimals,
           sortedToken1.decimals
         );
-        console.log("Calculated price from sqrtPriceX96:", price);
 
         // Update state with current price and tick
         setCurrentPoolPrice(price);
@@ -623,16 +613,10 @@ export default function VaultPositionModal({
 
     // Use either the provided currentTick or the one from state
     const currentTick = currentTickOverride !== null ? currentTickOverride : priceRange.current;
-    console.log("Current tick for range calculation:", currentTick, "Type:", type);
 
     // If we don't have a current tick, we can't calculate ranges
     if (currentTick === null || isNaN(currentTick)) {
-      console.log("No valid current tick available, setting placeholder range");
-      setPriceRange({
-        min: type === 'narrow' ? -250 : (type === 'medium' ? -500 : -1000),
-        max: type === 'narrow' ? 250 : (type === 'medium' ? 500 : 1000),
-        current: null
-      });
+      console.warn("No valid current tick available, cannot calculate ranges");
       return;
     }
 
@@ -659,7 +643,6 @@ export default function VaultPositionModal({
             tickSpacing = Math.ceil(Math.log(1.05) / Math.log(1.0001));
           } else {
             // Keep existing custom values
-            console.log("Keeping existing custom values");
             return;
           }
           break;
@@ -668,13 +651,9 @@ export default function VaultPositionModal({
           return;
       }
 
-      console.log(`Tick spacing for ${type} range: ${tickSpacing} ticks`);
-
       // Calculate min and max ticks
       const minTick = Math.floor(currentTick - tickSpacing);
       const maxTick = Math.ceil(currentTick + tickSpacing);
-
-      console.log(`Calculated tick range: [${minTick}, ${maxTick}]`);
 
       // Verify calculations by converting ticks back to prices
       if (adapter && token0Address && token1Address) {
@@ -688,7 +667,6 @@ export default function VaultPositionModal({
           try {
             const lowerPrice = adapter._tickToPrice(minTick, decimals0, decimals1);
             const upperPrice = adapter._tickToPrice(maxTick, decimals0, decimals1);
-            console.log(`Price range: [${lowerPrice}, ${upperPrice}]`);
           } catch (e) {
             console.error("Error verifying price range:", e);
           }
@@ -831,9 +809,7 @@ export default function VaultPositionModal({
         { gasLimit: 3000000 }  // Higher gas limit for complex batch
       );
 
-      console.log("Batch transaction sent:", tx.hash);
       const receipt = await tx.wait();
-      console.log("Transaction confirmed:", receipt);
 
       // Extract the position ID from the transaction receipt
       let positionId = null;
@@ -854,7 +830,6 @@ export default function VaultPositionModal({
 
         if (transferEvent) {
           positionId = ethers.getBigInt(transferEvent.topics[3]).toString();
-          console.log(`New position ID: ${positionId}`);
 
           if (positionId) {
             // 1. Update vault positions in Redux
@@ -958,7 +933,7 @@ export default function VaultPositionModal({
         const token1 = commonTokens.find(t => t.address === token1Address);
 
         if (!token0?.decimals || !token1?.decimals) {
-          console.log("Token decimal information missing for new position");
+          console.warn("Token decimal information missing for new position");
           return { token0Decimals: null, token1Decimals: null };
         }
 
@@ -968,7 +943,7 @@ export default function VaultPositionModal({
       // Get token decimals
       const { token0Decimals, token1Decimals } = getTokenDecimals();
       if (token0Decimals === null || token1Decimals === null) {
-        console.log("Decimal information is missing");
+        console.warn("Decimal information is missing");
         return 'N/A';
       }
 
@@ -991,14 +966,12 @@ export default function VaultPositionModal({
         const numPrice = parseFloat(price);
         if (numPrice > 0) {
           price = (1 / numPrice).toString();
-          console.log(`Inverted price: ${price}`);
         }
       }
 
       // Format for display
       const numPrice = parseFloat(price);
       if (isNaN(numPrice)) {
-        console.log("Price is not a number:", price);
         return 'N/A';
       }
 

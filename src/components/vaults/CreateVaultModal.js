@@ -2,9 +2,9 @@
 import React, { useState } from "react";
 import { Modal, Button, Form, Spinner, Alert } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
-import { useToast } from "../context/ToastContext";
-import { createVault } from "../utils/contracts";
-import { triggerUpdate } from "../redux/updateSlice";
+import { useToast } from "../../context/ToastContext";
+import { createVault } from "../../utils/contracts";
+import { triggerUpdate } from "../../redux/updateSlice";
 import { useRouter } from "next/router";
 
 export default function CreateVaultModal({
@@ -34,7 +34,6 @@ export default function CreateVaultModal({
     try {
       const signer = await provider.getSigner();
       const vaultAddress = await createVault(vaultName, signer);
-      console.log(`Vault created at address: ${vaultAddress}`);
       return vaultAddress;
     } catch (error) {
       console.error("Error creating vault:", error);
@@ -76,8 +75,6 @@ export default function CreateVaultModal({
 
       // Close modal
       onHide();
-
-      console.log(vaultAddress)
 
       // Navigate to the vault details page
       router.push(`/vault/${vaultAddress}`);

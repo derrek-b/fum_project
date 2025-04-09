@@ -2,7 +2,7 @@ import React from "react";
 import { Container, Alert, Button } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Navbar from "../components/Navbar";
-import PositionContainer from "../components/PositionContainer";
+import PositionContainer from "../components/positions/PositionContainer";
 import styles from "../styles/Home.module.css";
 import { useToast } from "../context/ToastContext";
 

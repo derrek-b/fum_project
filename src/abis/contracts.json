@@ -266,7 +266,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xa1CEaa23ba5f43549b0B516bcf6E21929050Ef02"
+      "1337": "0x66D5888faB880a7408174dbB3dbB0Dc6bD2a3c02"
     }
   },
   "PositionVault": {
@@ -375,6 +375,32 @@
         "anonymous": false,
         "inputs": [
           {
+            "indexed": false,
+            "internalType": "string[]",
+            "name": "platforms",
+            "type": "string[]"
+          }
+        ],
+        "name": "TargetPlatformsUpdated",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": false,
+            "internalType": "string[]",
+            "name": "tokens",
+            "type": "string[]"
+          }
+        ],
+        "name": "TargetTokensUpdated",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
             "indexed": true,
             "internalType": "address",
             "name": "token",
@@ -453,6 +479,32 @@
             "internalType": "address",
             "name": "",
             "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getTargetPlatforms",
+        "outputs": [
+          {
+            "internalType": "string[]",
+            "name": "",
+            "type": "string[]"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getTargetTokens",
+        "outputs": [
+          {
+            "internalType": "string[]",
+            "name": "",
+            "type": "string[]"
           }
         ],
         "stateMutability": "view",
@@ -578,6 +630,32 @@
         "type": "function"
       },
       {
+        "inputs": [
+          {
+            "internalType": "string[]",
+            "name": "platforms",
+            "type": "string[]"
+          }
+        ],
+        "name": "setTargetPlatforms",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "string[]",
+            "name": "tokens",
+            "type": "string[]"
+          }
+        ],
+        "name": "setTargetTokens",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
         "inputs": [],
         "name": "strategy",
         "outputs": [
@@ -588,29 +666,6 @@
           }
         ],
         "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "token",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "to",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "amount",
-            "type": "uint256"
-          }
-        ],
-        "name": "withdrawTokens",
-        "outputs": [],
-        "stateMutability": "nonpayable",
         "type": "function"
       },
       {
@@ -637,18 +692,154 @@
         "type": "function"
       },
       {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "name": "withdrawTokens",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
         "stateMutability": "payable",
         "type": "receive"
       }
     ]
   },
   "BatchExecutor": {
-    "abi": [],
+    "abi": [
+      {
+        "inputs": [],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "sender",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "txCount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          }
+        ],
+        "name": "BatchExecuted",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "returnData",
+            "type": "bytes"
+          }
+        ],
+        "name": "TransactionExecuted",
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "values",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "executeBatch",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "successes",
+            "type": "bool[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "results",
+            "type": "bytes[]"
+          }
+        ],
+        "stateMutability": "payable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getVersion",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "stateMutability": "payable",
+        "type": "receive"
+      }
+    ],
     "addresses": {
-      "1337": "0x31C12f59a6dF85d4144FEC3226234d5D93CC74B5"
+      "1337": "0x6ecbc541f2fB1498b6b23772Ec1528dDdEdaDE64"
     }
   },
-  "ParrisIslandStrategy": {
+  "parris": {
     "abi": [
       {
         "inputs": [],
@@ -723,12 +914,31 @@
           },
           {
             "indexed": false,
-            "internalType": "uint8",
+            "internalType": "enum ParrisIslandStrategy.Template",
             "name": "template",
             "type": "uint8"
           }
         ],
         "name": "TemplateSelected",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "authorized",
+            "type": "bool"
+          }
+        ],
+        "name": "VaultAuthorized",
         "type": "event"
       },
       {
@@ -805,6 +1015,38 @@
         "inputs": [
           {
             "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "authorizeVault",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "authorizedVaults",
+        "outputs": [
+          {
+            "internalType": "bool",
+            "name": "",
+            "type": "bool"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
             "name": "",
             "type": "address"
           }
@@ -818,6 +1060,19 @@
           }
         ],
         "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "deauthorizeVault",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
       },
       {
@@ -1021,7 +1276,7 @@
             "type": "uint16"
           },
           {
-            "internalType": "uint8",
+            "internalType": "enum ParrisIslandStrategy.OracleSource",
             "name": "",
             "type": "uint8"
           },
@@ -1046,7 +1301,7 @@
             "type": "uint16"
           },
           {
-            "internalType": "uint8",
+            "internalType": "enum ParrisIslandStrategy.PlatformSelectionCriteria",
             "name": "",
             "type": "uint8"
           },
@@ -2175,7 +2430,11 @@
       }
     ],
     "addresses": {
-      "1337": "0xa554d65f22573cBaB73279Ff57805834F012385d"
+      "1337": "0x11A5396515c7b7FaD8152b42f099335F98cCA82c"
     }
+  },
+  "ParrisIslandStrategy": {
+    "abi": [],
+    "addresses": {}
   }
 }
