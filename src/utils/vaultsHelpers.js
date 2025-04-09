@@ -13,33 +13,24 @@ import { getAllTokens } from './tokenConfig';
 import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
 import contractData from '../abis/contracts.json';
 import { ethers } from 'ethers';
+import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json";
 
 /**
- * Load a specific vault's data and positions
- * @param {string} vaultAddress - The vault address
+ * Load strategies for a specific chain and configure Redux
  * @param {object} provider - Ethers provider
  * @param {number} chainId - Chain ID
  * @param {function} dispatch - Redux dispatch function
  * @param {object} options - Additional options
- * @returns {Promise<object>} Result object with success status and vault data
+ * @returns {Promise<object>} Result object containing strategies and mappings
  */
-export const getVaultData = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
-  const { showError, showSuccess } = options;
-
-  if (!vaultAddress || !provider || !chainId || !dispatch) {
-    const error = "Missing required parameters for loading vault data";
-    if (showError) showError(error);
-    return { success: false, error };
-  }
+export const loadVaultStrategies = async (provider, chainId, dispatch, options = {}) => {
+  const { showError } = options;
 
   try {
-    console.log(`Loading data for vault: ${vaultAddress}`);
-
-    // 1. Get strategy information
+    // Get strategy information
     const availableStrategies = getAvailableStrategies();
 
     // Create a mapping from contract addresses to strategy IDs
-    // This approach avoids modifying potentially frozen objects
     const addressToStrategyMap = {};
 
     // Build a direct mapping from addresses to strategy IDs
@@ -103,10 +94,35 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       }));
     });
 
-    // 2. Get basic vault info
+    return {
+      success: true,
+      strategies: simplifiedStrategies,
+      addressToStrategyMap
+    };
+  } catch (error) {
+    console.error("Error loading strategy configurations:", error);
+    if (showError) showError(`Failed to load strategy configurations: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Load basic vault information and contract details
+ * @param {string} vaultAddress - The vault address
+ * @param {object} provider - Ethers provider
+ * @param {object} addressToStrategyMap - Map of strategy addresses to strategy IDs
+ * @param {function} dispatch - Redux dispatch function
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} Result object with vault data
+ */
+export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrategyMap = {}, dispatch, options = {}) => {
+  const { showError } = options;
+
+  try {
+    // Get basic vault info
     const vaultInfo = await getVaultInfo(vaultAddress, provider);
 
-    // 3. Get additional contract info (executor, strategy address, target tokens, target platforms)
+    // Get additional contract info (executor, strategy address, target tokens, target platforms)
     let executor = null;
     let strategyAddress = null;
     let targetTokens = [];
@@ -151,115 +167,36 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
             strategyId = strategyInfo.strategyId;
             const contractKey = strategyInfo.contractKey;
 
-            // Find matching strategy in our simplified strategies
-            const matchingStrategy = simplifiedStrategies.find(s => s.id === strategyId);
+            // Get strategy parameters (simplified version)
+            const availableStrategies = getAvailableStrategies();
+            const matchingStrategy = availableStrategies.find(s => s.id === strategyId);
 
-            // Get strategy configuration
-            const parameterDefinitions = getStrategyParameters(strategyId);
-
-            // Create strategy contract instance with actual ABI
-            const strategyContract = new ethers.Contract(
-              strategyAddress,
-              contractData[contractKey]?.abi || [],
-              provider
-            );
-
-            // Get template if strategy supports templates
-            if (matchingStrategy?.supportsTemplates) {
+            if (matchingStrategy && contractKey) {
+              // More detailed strategy parameter handling would go here
+              // This is a simplified version
               try {
-                // Try as a function with parameter
-                try {
-                  const templateValue = await strategyContract.selectedTemplate(vaultAddress);
+                const strategyContract = new ethers.Contract(
+                  strategyAddress,
+                  contractData[contractKey]?.abi || [],
+                  provider
+                );
 
-                  // Map template value to string based on strategy's enum mapping
-                  const templateMap = matchingStrategy.templateEnumMap || {
-                    1: 'conservative',
-                    2: 'moderate',
-                    3: 'aggressive',
-                    0: 'custom'
-                  };
-
-                  activeTemplate = templateMap[templateValue] || 'custom';
-                } catch (err) {
-                  // Try as a state variable
-                  const templateValue = await strategyContract.selectedTemplate();
-
-                  const templateMap = matchingStrategy.templateEnumMap || {
-                    1: 'conservative',
-                    2: 'moderate',
-                    3: 'aggressive',
-                    0: 'custom'
-                  };
-
-                  activeTemplate = templateMap[templateValue] || 'custom';
-                }
-              } catch (templateError) {
-                console.warn(`Error getting template: ${templateError.message}`);
-              }
-            }
-
-            // Get parameters based on strategy's parameter groups
-            try {
-              // For "ParrisIslandStrategy" or similar strategies with getAllParameters method
-              try {
-                const params = await strategyContract.getAllParameters(vaultAddress);
-
-                // Map the returned parameters to a structured object
-                strategyParams = {};
-                let paramIndex = 0;
-
-                // Process parameter groups
-                const parameterGroups = matchingStrategy?.parameterGroups || [];
-
-                for (const group of parameterGroups) {
-                  // Get parameters for this group
-                  const groupParams = Object.entries(parameterDefinitions)
-                    .filter(([paramId, config]) => config.group === group.id)
-                    .map(([paramId, config]) => ({ paramId, config }));
-
-                  // Process each parameter in the group
-                  for (const { paramId, config } of groupParams) {
-                    if (paramIndex < params.length) {
-                      const rawValue = params[paramIndex++];
-
-                      // Format based on parameter type
-                      switch (config.type) {
-                        case 'percent':
-                          // Convert basis points to percentage
-                          strategyParams[paramId] = parseFloat(rawValue) / 100;
-                          break;
-
-                        case 'currency':
-                          // Convert wei to ether
-                          strategyParams[paramId] = ethers.formatUnits(rawValue, 18);
-                          break;
-
-                        case 'boolean':
-                          strategyParams[paramId] = !!rawValue;
-                          break;
-
-                        case 'select':
-                          // Use raw value for enums
-                          strategyParams[paramId] = rawValue;
-                          break;
-
-                        default:
-                          // Use raw value for other types
-                          strategyParams[paramId] = rawValue;
-                      }
-                    }
+                // Basic template extraction
+                if (matchingStrategy.templateEnumMap) {
+                  try {
+                    const templateValue = await strategyContract.selectedTemplate(vaultAddress);
+                    const templateMap = matchingStrategy.templateEnumMap;
+                    activeTemplate = templateMap[templateValue] || 'custom';
+                  } catch (err) {
+                    console.warn("Error getting template:", err.message);
                   }
                 }
 
-                console.log("Strategy parameters loaded successfully");
+                // Get strategy parameters
+                // This is a simplified version - a more complete version would parse all parameters
               } catch (err) {
-                console.warn("getAllParameters error:", err.message);
-
-                // Try individual parameter getters as fallback
-                // (Your existing parameter getter code can go here if needed)
+                console.warn("Error loading strategy details:", err.message);
               }
-            } catch (paramError) {
-              console.warn(`Error loading strategy parameters: ${paramError.message}`);
             }
           } else {
             console.warn(`Strategy at address ${strategyAddress} not found in available strategies`);
@@ -296,15 +233,150 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       positions: [] // Initialize empty positions array
     };
 
-    // 4. Get adapters for the current chain
+    // Update the vault in Redux
+    dispatch(updateVault({
+      vaultAddress,
+      vaultData
+    }));
+
+    return {
+      success: true,
+      vaultData
+    };
+  } catch (error) {
+    console.error("Error loading vault basic info:", error);
+    if (showError) showError(`Failed to load vault information: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Load token balances for a vault
+ * @param {string} vaultAddress - The vault address
+ * @param {object} provider - Ethers provider
+ * @param {number} chainId - Chain ID
+ * @param {function} dispatch - Redux dispatch function
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} Result object with token data
+ */
+export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
+  const { showError } = options;
+
+  try {
+    const allTokens = getAllTokens();
+    const tokenAddresses = Object.values(allTokens)
+      .filter(token => token.addresses[chainId])
+      .map(token => ({
+        ...token,
+        address: token.addresses[chainId]
+      }));
+
+    // First, get all token symbols for prefetching prices
+    const allSymbols = tokenAddresses.map(token => token.symbol);
+
+    // Prefetch all token prices at once to populate the cache
+    await prefetchTokenPrices(Array.from(new Set(allSymbols)));
+    const tokenPricesLoaded = true;
+
+    const tokenBalances = await Promise.all(
+      tokenAddresses.map(async (token) => {
+        try {
+          const abi = ERC20ABI.abi;
+          const tokenContract = new ethers.Contract(token.address, abi, provider);
+          const balance = await tokenContract.balanceOf(vaultAddress);
+          const formattedBalance = ethers.formatUnits(balance, token.decimals);
+          const numericalBalance = parseFloat(formattedBalance);
+
+          // Skip tokens with 0 balance
+          if (numericalBalance === 0) return null;
+
+          // Get token price from our utility
+          const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
+
+          return {
+            ...token,
+            balance: formattedBalance,
+            numericalBalance,
+            valueUsd: valueUsd || 0
+          };
+        } catch (err) {
+          console.error(`Error fetching balance for ${token.symbol}:`, err);
+          return null;
+        }
+      })
+    );
+
+    const filteredTokens = tokenBalances.filter(token => token !== null);
+
+    // Calculate total value of all tokens
+    const totalTokenValue = filteredTokens.reduce((sum, token) => sum + (token.valueUsd || 0), 0);
+
+    // Store token balances in Redux
+    const tokenBalancesMap = {};
+    filteredTokens.forEach(token => {
+      tokenBalancesMap[token.symbol] = {
+        symbol: token.symbol,
+        name: token.name,
+        balance: token.balance,
+        numericalBalance: token.numericalBalance,
+        valueUsd: token.valueUsd,
+        decimals: token.decimals,
+        logoURI: token.logoURI
+      };
+    });
+
+    // Update token balances in Redux
+    if (Object.keys(tokenBalancesMap).length > 0) {
+      dispatch(updateVaultTokenBalances({
+        vaultAddress,
+        tokenBalances: tokenBalancesMap
+      }));
+    }
+
+    // Update vault metrics with tokenTVL
+    dispatch(updateVaultMetrics({
+      vaultAddress,
+      metrics: {
+        tokenTVL: totalTokenValue,
+        lastTVLUpdate: Date.now()
+      }
+    }));
+
+    return {
+      success: true,
+      vaultTokens: filteredTokens,
+      totalTokenValue,
+      tokenPricesLoaded
+    };
+  } catch (err) {
+    console.error("Error fetching token balances:", err);
+    if (showError) showError("Failed to fetch vault tokens");
+    return { success: false, error: err.message };
+  }
+};
+
+/**
+ * Load positions for a vault from all adapters
+ * @param {string} vaultAddress - The vault address
+ * @param {object} provider - Ethers provider
+ * @param {number} chainId - Chain ID
+ * @param {function} dispatch - Redux dispatch function
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} Result object with position data
+ */
+export const loadVaultPositions = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
+  const { showError } = options;
+
+  try {
+    // Get adapters for the current chain
     const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
     if (adapters.length === 0) {
       const error = `No adapters available for chain ID ${chainId}`;
       if (showError) showError(error);
-      return { success: false, error, vault: vaultData };
+      return { success: false, error };
     }
 
-    // 5. Load positions from all adapters
+    // Load positions from all adapters
     const vaultPositions = [];
     const allPoolData = {};
     const allTokenData = {};
@@ -315,7 +387,6 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
         const result = await adapter.getPositions(vaultAddress, chainId);
 
         if (result?.positions?.length > 0) {
-
           // Mark positions as being in vault and collect IDs
           result.positions.forEach(position => {
             positionIds.push(position.id);
@@ -341,17 +412,8 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       }
     }
 
-    // 6. Update vault data with position IDs
-    vaultData.positions = positionIds;
-
-    // 7. Update Redux state
+    // Update Redux state
     if (positionIds.length > 0) {
-      // Update vault object with positions IDs
-      dispatch(updateVault({
-        vaultAddress,
-        vaultData
-      }));
-
       // Update vault positions in vaultsSlice
       dispatch(updateVaultPositions({
         vaultAddress,
@@ -363,12 +425,6 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       dispatch(updateVaultMetrics({
         vaultAddress,
         metrics: { positionCount: positionIds.length }
-      }));
-    } else {
-      // Even if no positions, update the vault with the new contract data
-      dispatch(updateVault({
-        vaultAddress,
-        vaultData
       }));
     }
 
@@ -391,13 +447,236 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
 
     return {
       success: true,
+      positions: vaultPositions,
+      positionIds,
+      poolData: allPoolData,
+      tokenData: allTokenData
+    };
+  } catch (error) {
+    console.error("Error loading vault positions:", error);
+    if (showError) showError(`Failed to load positions: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Main function to load a specific vault's data and positions
+ * @param {string} vaultAddress - The vault address
+ * @param {object} provider - Ethers provider
+ * @param {number} chainId - Chain ID
+ * @param {function} dispatch - Redux dispatch function
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} Result object with success status and vault data
+ */
+export const getVaultData = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
+  const { showError, showSuccess } = options;
+
+  if (!vaultAddress || !provider || !chainId || !dispatch) {
+    const error = "Missing required parameters for loading vault data";
+    if (showError) showError(error);
+    return { success: false, error };
+  }
+
+  try {
+    console.log(`Loading complete data for vault: ${vaultAddress}`);
+
+    // Step 1: Load strategies
+    const strategiesResult = await loadVaultStrategies(provider, chainId, dispatch, options);
+    if (!strategiesResult.success) {
+      console.warn("Strategy loading failed, continuing with partial data");
+    }
+
+    // Step 2: Load basic vault info
+    const vaultInfoResult = await loadVaultBasicInfo(
+      vaultAddress,
+      provider,
+      strategiesResult.addressToStrategyMap || {},
+      dispatch,
+      options
+    );
+
+    if (!vaultInfoResult.success) {
+      return { success: false, error: vaultInfoResult.error };
+    }
+
+    // Store vault data for final result
+    const vaultData = vaultInfoResult.vaultData;
+
+    // Step 3: Load token balances
+    const tokenResult = await loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch, options);
+
+    // Step 4: Load positions
+    const positionsResult = await loadVaultPositions(vaultAddress, provider, chainId, dispatch, options);
+
+    if (positionsResult.success) {
+      // Update vault with position IDs
+      vaultData.positions = positionsResult.positionIds;
+
+      // Update Redux
+      dispatch(updateVault({
+        vaultAddress,
+        vaultData
+      }));
+
+      // We do NOT calculate TVL here - it will be calculated in loadVaultData for all vaults at once
+      console.log(`Loaded ${positionsResult.positions.length} positions for vault ${vaultAddress}`);
+    }
+
+    return {
+      success: true,
       vault: vaultData,
-      positions: vaultPositions
+      positions: positionsResult.success ? positionsResult.positions : [],
+      vaultTokens: tokenResult.success ? tokenResult.vaultTokens : [],
+      totalTokenValue: tokenResult.success ? tokenResult.totalTokenValue : 0,
+      poolData: positionsResult.poolData || {},
+      tokenData: positionsResult.tokenData || {}
     };
   } catch (error) {
     console.error("Error loading vault data:", error);
     if (showError) showError(`Failed to load vault data: ${error.message}`);
     return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Force a complete data refresh after position creation
+ * @param {string} vaultAddress - Vault address
+ * @param {object} provider - Ethers provider
+ * @param {number} chainId - Chain ID
+ * @param {function} dispatch - Redux dispatch function
+ * @param {function} showSuccess - Success notification function
+ * @param {function} showError - Error notification function
+ */
+export const refreshAfterPositionCreation = async (vaultAddress, provider, chainId, dispatch, showSuccess, showError) => {
+  try {
+    console.log(`Starting focused refresh after position creation in vault ${vaultAddress}`);
+
+    // 1. First trigger Redux update
+    dispatch(triggerUpdate());
+
+    // 2. Simply reload the vault data, TVL calculation is done after
+    const result = await getVaultData(vaultAddress, provider, chainId, dispatch, { showError });
+
+    if (result.success) {
+      // Calculate TVL for this vault specifically - using the same approach as in the loadVaultData function
+      const positions = result.positions || [];
+      const poolData = result.poolData || {};
+      const tokenData = result.tokenData || {};
+
+      if (positions.length > 0) {
+        console.log("Calculating position TVL for refreshed vault");
+
+        // Get unique token symbols and collect data
+        const tokenSymbols = new Set();
+        const positionData = [];
+
+        // Process each position
+        for (const position of positions) {
+          try {
+            if (!position.poolAddress || !poolData[position.poolAddress]) continue;
+
+            const pool = poolData[position.poolAddress];
+            if (!pool.token0 || !pool.token1) continue;
+
+            const token0 = tokenData[pool.token0];
+            const token1 = tokenData[pool.token1];
+
+            if (!token0?.symbol || !token1?.symbol) continue;
+
+            tokenSymbols.add(token0.symbol);
+            tokenSymbols.add(token1.symbol);
+
+            positionData.push({
+              position,
+              poolData: pool,
+              token0Data: token0,
+              token1Data: token1
+            });
+          } catch (error) {
+            console.error(`Error processing position data: ${error.message}`);
+          }
+        }
+
+        // Fetch token prices
+        let pricesFetchFailed = false;
+
+        try {
+          // Prefetch all token prices at once to populate the cache
+          await prefetchTokenPrices(Array.from(tokenSymbols));
+        } catch (error) {
+          console.error(`Error prefetching token prices: ${error.message}`);
+          pricesFetchFailed = true;
+        }
+
+        // Calculate TVL
+        let totalTVL = 0;
+        let hasPartialData = pricesFetchFailed;
+
+        for (const data of positionData) {
+          try {
+            const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+            if (!adapter) continue;
+
+            const tokenBalances = await adapter.calculateTokenAmounts(
+              data.position,
+              data.poolData,
+              data.token0Data,
+              data.token1Data,
+              chainId
+            );
+
+            if (!tokenBalances) continue;
+
+            // Use the sync version since we've already prefetched prices
+            const token0UsdValue = calculateUsdValueSync(
+              tokenBalances.token0.formatted,
+              data.token0Data.symbol
+            );
+
+            const token1UsdValue = calculateUsdValueSync(
+              tokenBalances.token1.formatted,
+              data.token1Data.symbol
+            );
+
+            if (token0UsdValue) totalTVL += token0UsdValue;
+            if (token1UsdValue) totalTVL += token1UsdValue;
+
+            // If either token value couldn't be calculated, mark as partial data
+            if (token0UsdValue === null || token1UsdValue === null) {
+              hasPartialData = true;
+            }
+          } catch (error) {
+            console.error(`Error calculating position value: ${error.message}`);
+            hasPartialData = true;
+          }
+        }
+
+        console.log(`Calculated TVL: $${totalTVL.toFixed(2)}`);
+
+        // Update vault metrics with TVL
+        dispatch(updateVaultMetrics({
+          vaultAddress,
+          metrics: {
+            tvl: totalTVL,
+            hasPartialData,
+            lastTVLUpdate: Date.now()
+          }
+        }));
+      }
+
+      if (showSuccess) {
+        showSuccess("Position data refreshed successfully");
+      }
+    } else {
+      if (showError) {
+        showError("Partial data refresh - some information may be missing");
+      }
+    }
+  } catch (error) {
+    console.error("Error refreshing data after position creation:", error);
+    if (showError) {
+      showError("Failed to refresh data completely");
+    }
   }
 };
 
@@ -420,161 +699,59 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
   }
 
   try {
-
-    // 1. Get all available strategies and add to store
-    const availableStrategies = getAvailableStrategies();
-    const simplifiedStrategies = availableStrategies.map(strategy => ({
-      id: strategy.id,
-      name: strategy.name,
-      subtitle: strategy.subtitle,
-      description: strategy.description
-    }));
-
-    dispatch(setAvailableStrategies(simplifiedStrategies));
+    // 1. Load strategies
+    await loadVaultStrategies(provider, chainId, dispatch, options);
 
     // 2. Get all vault addresses for the user
     const vaultAddresses = await getUserVaults(userAddress, provider);
 
-    // 3. Get adapters for the current chain
-    const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
-    if (adapters.length === 0) {
-      const error = `No adapters available for chain ID ${chainId}`;
-      if (showError) showError(error);
-      return { success: false, error };
-    }
-
-    // 4. Initialize collections for data
+    // Initialize collections for data
     const vaultsData = [];
     const allPositions = [];
     const allPoolData = {};
     const allTokenData = {};
-    const vaultPositionIds = new Set();
     const positionsByVault = {};
 
-    // 5. Process each vault to get its details
+    // 3. Process each vault to get its details
     for (const vaultAddress of vaultAddresses) {
       try {
+        // Load full vault data for each vault
+        const vaultResult = await getVaultData(vaultAddress, provider, chainId, dispatch, options);
 
-        // Get basic vault info
-        const vaultInfo = await getVaultInfo(vaultAddress, provider);
+        if (vaultResult.success) {
+          vaultsData.push(vaultResult.vault);
 
-        // Get executor and strategy from contract
-        let executor = null;
-        let strategyAddress = null;
+          if (vaultResult.positions && vaultResult.positions.length > 0) {
+            allPositions.push(...vaultResult.positions);
+            positionsByVault[vaultAddress] = vaultResult.positions;
 
-        try {
-          const vaultContract = new ethers.Contract(
-            vaultAddress,
-            [
-              "function executor() view returns (address)",
-              "function strategy() view returns (address)"
-            ],
-            provider
-          );
-
-          [executor, strategyAddress] = await Promise.all([
-            vaultContract.executor(),
-            vaultContract.strategy()
-          ]);
-        } catch (contractError) {
-          console.warn(`Could not fetch additional vault contract data: ${contractError.message}`);
-        }
-
-        // Create vault data object with updated structure
-        const vaultData = {
-          address: vaultAddress,
-          ...vaultInfo,
-          executor: executor || null,
-          strategyAddress: strategyAddress || null,
-          hasActiveStrategy: strategyAddress && strategyAddress !== ethers.ZeroAddress,
-          positions: [], // Initialize empty positions array
-          metrics: { tvl: 0, positionCount: 0 }
-        };
-
-        // Get vault positions from all adapters
-        const currentVaultPositions = [];
-        const currentVaultPositionIds = [];
-
-        for (const adapter of adapters) {
-          try {
-            const result = await adapter.getPositions(vaultAddress, chainId);
-
-            if (result?.positions?.length > 0) {
-
-              // Process each position
-              result.positions.forEach(position => {
-                const positionWithVault = {
-                  ...position,
-                  inVault: true,
-                  vaultAddress
-                };
-
-                currentVaultPositionIds.push(position.id);
-                vaultPositionIds.add(position.id);
-                currentVaultPositions.push(position);
-                allPositions.push(positionWithVault);
-              });
-
-              // Collect pool and token data
-              if (result.poolData) {
-                Object.assign(allPoolData, result.poolData);
-              }
-
-              if (result.tokenData) {
-                Object.assign(allTokenData, result.tokenData);
-              }
+            // Collect pool and token data
+            if (vaultResult.poolData) {
+              Object.assign(allPoolData, vaultResult.poolData);
             }
-          } catch (error) {
-            console.error(`Error loading positions from ${adapter.platformName}:`, error);
+            if (vaultResult.tokenData) {
+              Object.assign(allTokenData, vaultResult.tokenData);
+            }
           }
-        }
-
-        // Store position IDs in vault data
-        vaultData.positions = currentVaultPositionIds;
-        vaultData.metrics.positionCount = currentVaultPositionIds.length;
-
-        if (currentVaultPositions.length > 0) {
-          positionsByVault[vaultAddress] = currentVaultPositions;
-        }
-
-        // Add vault to collection
-        vaultsData.push(vaultData);
-
-        // Update individual vault in Redux store
-        dispatch(updateVault({
-          vaultAddress,
-          vaultData
-        }));
-
-        // Update vault positions
-        if (currentVaultPositionIds.length > 0) {
-          dispatch(updateVaultPositions({
-            vaultAddress,
-            positionIds: currentVaultPositionIds,
-            operation: 'replace'
-          }));
-
-          dispatch(updateVaultMetrics({
-            vaultAddress,
-            metrics: { positionCount: currentVaultPositionIds.length }
-          }));
         }
       } catch (error) {
         console.error(`Error processing vault ${vaultAddress}:`, error);
       }
     }
 
-    // 6. Update all vaults in Redux
+    // 4. Update all vaults in Redux
     dispatch(setVaults(vaultsData));
 
-    // 7. Get ALL user positions including those not in vaults
+    // 5. Get all user positions that aren't in vaults
+    const vaultPositionIds = new Set(allPositions.map(p => p.id));
+    const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+
     for (const adapter of adapters) {
       try {
         // Get all user positions
         const result = await adapter.getPositions(userAddress, chainId);
 
         if (result?.positions?.length > 0) {
-
           // Filter out positions already in vaults
           const nonVaultPositions = result.positions
             .filter(position => !vaultPositionIds.has(position.id))
@@ -587,7 +764,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           // Add non-vault positions to allPositions
           allPositions.push(...nonVaultPositions);
 
-          // Collect additional pool and token data
+          // Collect additional pool and token data for Redux
           if (result.poolData) {
             Object.assign(allPoolData, result.poolData);
           }
@@ -601,10 +778,10 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       }
     }
 
-    // 8. Update Redux with ALL positions (vault and non-vault)
+    // 6. Update Redux with ALL positions (vault and non-vault)
     dispatch(setPositions(allPositions));
 
-    // 9. Update pools and tokens
+    // 7. Update pools and tokens
     if (Object.keys(allPoolData).length > 0) {
       dispatch(setPools(allPoolData));
     }
@@ -613,10 +790,13 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       dispatch(setTokens(allTokenData));
     }
 
-    // 10. Calculate TVL for each vault
-
+    // 8. Calculate TVL for each vault - THIS IS THE IMPORTANT PART
+    // THIS MUST BE DONE AFTER ALL TOKENS, POOLS AND POSITIONS ARE COLLECTED
+    console.log("Starting TVL calculation for all vaults");
     for (const vault of vaultsData) {
       const vaultPositions = positionsByVault[vault.address] || [];
+
+      console.log(`Calculating TVL for vault ${vault.address} with ${vaultPositions.length} positions`);
 
       if (vaultPositions.length === 0) {
         continue;
@@ -697,9 +877,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           if (token0UsdValue) totalTVL += token0UsdValue;
           if (token1UsdValue) totalTVL += token1UsdValue;
 
-          // Log successful value calculations
-          console.log(`Position ${data.position.id}: ${data.token0Data.symbol} = $${token0UsdValue?.toFixed(2) || 'N/A'}, ${data.token1Data.symbol} = $${token1UsdValue?.toFixed(2) || 'N/A'}`);
-
           // If either token value couldn't be calculated, mark as partial data
           if (token0UsdValue === null || token1UsdValue === null) {
             hasPartialData = true;
@@ -710,7 +887,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         }
       }
 
-      // Update vault metrics with TVL
+      console.log(`Calculated TVL for vault ${vault.address}: $${totalTVL.toFixed(2)}`);
+
+      // IMPORTANT: Update vault metrics with TVL
       dispatch(updateVaultMetrics({
         vaultAddress: vault.address,
         metrics: {
@@ -719,104 +898,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           lastTVLUpdate: Date.now()
         }
       }));
-    }
-
-    // 11. Calculate token TVL for each vault
-    for (const vault of vaultsData) {
-      try {
-        // Create an ERC20 ABI instance for token balance checks
-        const ERC20_ABI = [
-          {
-            constant: true,
-            inputs: [{ name: "_owner", type: "address" }],
-            name: "balanceOf",
-            outputs: [{ name: "balance", type: "uint256" }],
-            type: "function"
-          }
-        ];
-
-        const allTokens = getAllTokens();
-        const tokenAddresses = Object.values(allTokens)
-          .filter(token => token.addresses[chainId])
-          .map(token => ({
-            ...token,
-            address: token.addresses[chainId]
-          }));
-
-        // Get all token symbols for prefetching prices
-        const allSymbols = tokenAddresses.map(token => token.symbol);
-
-        // Prefetch all token prices at once to populate the cache
-        await prefetchTokenPrices(Array.from(new Set(allSymbols)));
-
-        let totalTokenValue = 0;
-        let hasTokenPriceErrors = false;
-        let tokenBalances = {}; // Store token balances for Redux
-
-        // Get token balances and calculate value
-        const tokenPromises = tokenAddresses.map(async (token) => {
-          try {
-            const tokenContract = new ethers.Contract(token.address, ERC20_ABI, provider);
-            const balance = await tokenContract.balanceOf(vault.address);
-            const formattedBalance = ethers.formatUnits(balance, token.decimals);
-            const numericalBalance = parseFloat(formattedBalance);
-
-            // Skip tokens with 0 balance
-            if (numericalBalance === 0) return 0;
-
-            // Save token balance to our tracking object
-            tokenBalances[token.symbol] = {
-              symbol: token.symbol,
-              name: token.name,
-              balance: formattedBalance,
-              numericalBalance,
-              decimals: token.decimals,
-              logoURI: token.logoURI
-            };
-
-            // Get token price from our utility
-            const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
-
-            if (valueUsd === null) {
-              hasTokenPriceErrors = true;
-              return 0;
-            }
-
-            // Add value to token balance object
-            tokenBalances[token.symbol].valueUsd = valueUsd;
-
-            return valueUsd || 0;
-          } catch (err) {
-            console.error(`Error calculating value for ${token.symbol}:`, err);
-            hasTokenPriceErrors = true;
-            return 0;
-          }
-        });
-
-        const tokenValues = await Promise.all(tokenPromises);
-        totalTokenValue = tokenValues.reduce((sum, value) => sum + value, 0);
-
-        // Store token balances in the vault
-        if (Object.keys(tokenBalances).length > 0) {
-          dispatch(updateVaultTokenBalances({
-            vaultAddress: vault.address,
-            tokenBalances
-          }));
-        }
-
-        // Get existing metrics and only add the tokenTVL field
-        // Do NOT modify the existing tvl field which represents position TVL
-        dispatch(updateVaultMetrics({
-          vaultAddress: vault.address,
-          metrics: {
-            tokenTVL: totalTokenValue,
-            hasPartialData: vault.metrics?.hasPartialData || hasTokenPriceErrors,
-            lastTVLUpdate: Date.now()
-          }
-        }));
-      } catch (error) {
-        console.error(`Error calculating token TVL for vault ${vault.address}:`, error);
-      }
     }
 
     return {
@@ -828,38 +909,5 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     console.error("Error loading user vault data:", error);
     if (showError) showError(`Failed to load user data: ${error.message}`);
     return { success: false, error: error.message };
-  }
-};
-
-/**
- * Force a complete data refresh after position creation
- * @param {string} vaultAddress - Vault address
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @param {function} dispatch - Redux dispatch function
- * @param {function} showSuccess - Success notification function
- * @param {function} showError - Error notification function
- */
-export const refreshAfterPositionCreation = async (vaultAddress, provider, chainId, dispatch, showSuccess, showError) => {
-  try {
-    console.log(`Starting full data refresh after position creation in vault ${vaultAddress}`);
-
-    // 1. First trigger Redux update
-    dispatch(triggerUpdate());
-
-    // 2. Force load vault data from chain
-    const result = await getVaultData(vaultAddress, provider, chainId, dispatch, { showError });
-
-    if (!result.success) {
-      console.error("Error in vault data refresh:", result.error);
-      if (showError) {
-        showError("Partial data refresh - some information may be missing");
-      }
-    }
-  } catch (error) {
-    console.error("Error refreshing data after position creation:", error);
-    if (showError) {
-      showError("Failed to refresh data completely");
-    }
   }
 };

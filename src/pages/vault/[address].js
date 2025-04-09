@@ -4,8 +4,9 @@ import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
-import Link from "next/link";
 import Head from "next/head";
+import Link from "next/link";
+import Image from "next/image";
 import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/positions/PositionCard";
@@ -21,18 +22,7 @@ import { formatTimestamp } from "../../utils/formatHelpers";
 import { getAllTokens } from "../../utils/tokenConfig";
 import { loadVaultData, getVaultData } from '../../utils/vaultsHelpers';
 import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
-import Image from "next/image";
-
-// Minimal ERC20 ABI for token balance checks
-const ERC20_ABI = [
-  {
-    constant: true,
-    inputs: [{ name: "_owner", type: "address" }],
-    name: "balanceOf",
-    outputs: [{ name: "balance", type: "uint256" }],
-    type: "function"
-  }
-];
+import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json" assert { type: "json" };
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -133,7 +123,7 @@ export default function VaultDetailPage() {
       const tokenBalances = await Promise.all(
         tokenAddresses.map(async (token) => {
           try {
-            const tokenContract = new ethers.Contract(token.address, ERC20_ABI, provider);
+            const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
             const balance = await tokenContract.balanceOf(vaultAddress);
             const formattedBalance = ethers.formatUnits(balance, token.decimals);
             const numericalBalance = parseFloat(formattedBalance);
@@ -195,7 +185,7 @@ export default function VaultDetailPage() {
   };
 
   // Create loadData function to replace the useVaultDetailData hook
-  const loadData = useCallback(async () => {
+  const loadData = async () => {
     if (!vaultAddress || !provider || !chainId) {
       return;
     }
@@ -231,7 +221,7 @@ export default function VaultDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [vaultAddress, provider, chainId, userAddress, dispatch, showError, showSuccess]);
+  };
 
   // Call loadData when dependencies change or refresh is triggered
   useEffect(() => {
@@ -239,7 +229,7 @@ export default function VaultDetailPage() {
       loadData();
       fetchVaultTokens();
     }
-  }, [vaultAddress, refreshTrigger, loadData]);
+  }, [vaultAddress, refreshTrigger]);
 
   // Add a forced refresh function
   const forceRefresh = useCallback(() => {

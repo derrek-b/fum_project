@@ -70,9 +70,6 @@ export default function CreateVaultModal({
       // Show success message
       showSuccess(`Vault "${vaultName}" created successfully!`);
 
-      // Refresh vaults data
-      dispatch(triggerUpdate(Date.now()));
-
       // Close modal
       onHide();
 

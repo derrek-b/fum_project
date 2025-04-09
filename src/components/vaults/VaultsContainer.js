@@ -50,8 +50,7 @@ export default function VaultsContainer() {
     addNotification(message, 'success');
   };
 
-  // Load data effect
-  useEffect(() => {
+  const loadData = () => {
     // Skip if not connected
     if (!isConnected || !address || !provider || !chainId) {
       setIsLoading(false);
@@ -87,8 +86,12 @@ export default function VaultsContainer() {
         dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: false }));
         setIsLoading(false);
       });
+  }
 
-  }, [isConnected, address, provider, chainId, lastUpdate]);
+  // Load data effect
+  useEffect(() => {
+    loadData();
+  }, []);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
@@ -103,14 +106,8 @@ export default function VaultsContainer() {
       // Step 1: Create the vault - this remains the same for now
       const newVaultAddress = await createVault(vaultName, signer);
 
-      // Trigger a reload by dispatching an update
-      dispatch(triggerUpdate(Date.now()));
-
       // Add a success notification
       showSuccess(`Successfully created vault: ${vaultName}`);
-      if (strategyConfig) {
-        showSuccess(`Strategy configuration saved. Will be activated in future update.`);
-      }
 
       setShowCreateVaultModal(false);
     } catch (error) {
