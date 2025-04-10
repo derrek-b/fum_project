@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strategy execution through vault contracts
 - Performance metrics for strategy execution
 - Strategy history tracking
+- Mobile responsive design improvements
+- Multi-chain support for additional networks
+- Bulk position management tools
 
 ## [0.3.0] - 2025-04-04
 ### Added
