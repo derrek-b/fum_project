@@ -139,8 +139,7 @@ const StrategyDetailsSection = ({
     if (currentStrategy?.parameters && currentStrategy.strategyId === strategyId) {
       setParams(currentStrategy.parameters);
 
-      // Try to determine which preset these parameters match
-      detectActivePreset(currentStrategy.parameters);
+      setActivePreset(currentStrategy.activeTemplate);
 
       // Set tokens and platforms if available
       if (currentStrategy.selectedTokens) {

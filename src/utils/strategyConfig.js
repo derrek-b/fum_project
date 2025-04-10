@@ -954,6 +954,7 @@ export function getAvailableStrategies() {
       subtitle: strategy.subtitle,
       description: strategy.description,
       templateEnumMap: strategy.templateEnumMap,
+      parameters: strategy.parameters,
       comingSoon: strategy.comingSoon || false
     }));
 }

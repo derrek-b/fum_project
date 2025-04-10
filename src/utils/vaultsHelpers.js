@@ -16,6 +16,172 @@ import { ethers } from 'ethers';
 import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json";
 
 /**
+ * Map OracleSource enum to string value
+ * @param {number} enumValue - Enum value from contract
+ * @returns {string} String representation
+ */
+const mapOracleSourceEnum = (enumValue) => {
+  const sources = ['dex', 'chainlink', 'twap'];
+  const index = parseInt(enumValue.toString());
+  if (index >= 0 && index < sources.length) {
+    return sources[index];
+  }
+  return 'unknown'; // Fallback for UI compatibility
+};
+
+/**
+ * Map PlatformSelectionCriteria enum to string value
+ * @param {number} enumValue - Enum value from contract
+ * @returns {string} String representation
+ */
+const mapPlatformCriteriaEnum = (enumValue) => {
+  const criteria = ['highest_tvl', 'highest_volume', 'lowest_fees', 'highest_rewards'];
+  const index = parseInt(enumValue.toString());
+  if (index >= 0 && index < criteria.length) {
+    return criteria[index];
+  }
+  return 'unknown'; // Fallback for UI compatibility
+};
+
+/**
+ * Map strategy parameters from contract return value to named objects
+ * @param {string} strategyId - Strategy ID
+ * @param {Array} params - Parameters array from contract
+ * @returns {object} Named parameters
+ */
+const mapStrategyParameters = (strategyId, params) => {
+  try {
+    // Strategy-specific parameter mappings
+    if (strategyId.toLowerCase() === 'parris') {
+      return {
+        // Range Parameters
+        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+        targetRangeLower: parseInt(params[1]) / 100,
+        rebalanceThresholdUpper: parseInt(params[2]) / 100,
+        rebalanceThresholdLower: parseInt(params[3]) / 100,
+
+        // Fee Settings
+        feeReinvestment: params[4],
+        reinvestmentTrigger: ethers.formatUnits(params[5], 18), // Convert wei to ether
+        reinvestmentRatio: parseInt(params[6]) / 100,
+
+        // Risk Management
+        maxSlippage: parseInt(params[7]) / 100,
+        emergencyExitTrigger: parseInt(params[8]) / 100,
+        maxVaultUtilization: parseInt(params[9]) / 100,
+
+        // Adaptive Settings
+        adaptiveRanges: params[10],
+        rebalanceCountThresholdHigh: parseInt(params[11]),
+        rebalanceCountThresholdLow: parseInt(params[12]),
+        adaptiveTimeframeHigh: parseInt(params[13]),
+        adaptiveTimeframeLow: parseInt(params[14]),
+        rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
+        thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
+        rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
+        thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
+
+        // Oracle Settings
+        oracleSource: mapOracleSourceEnum(params[19]),
+        priceDeviationTolerance: parseInt(params[20]) / 100,
+
+        // Position Sizing
+        maxPositionSizePercent: parseInt(params[21]) / 100,
+        minPositionSize: ethers.formatUnits(params[22], 18), // Convert wei to ether
+        targetUtilization: parseInt(params[23]) / 100,
+
+        // Platform Settings
+        platformSelectionCriteria: mapPlatformCriteriaEnum(params[24]),
+        minPoolLiquidity: ethers.formatUnits(params[25], 18) // Convert wei to ether
+      };
+    }
+    else if (strategyId.toLowerCase() === 'fed') {
+      return {
+        targetRange: parseInt(params[0]) / 100,
+        rebalanceThreshold: parseInt(params[1]) / 100,
+        feeReinvestment: params[2],
+        maxSlippage: parseInt(params[3]) / 100
+        // Add other Fed strategy parameters as needed
+      };
+    }
+
+    // If we reach here, we don't know how to map this strategy
+    console.warn(`No parameter mapping defined for strategy ${strategyId}`);
+    return {};
+  } catch (error) {
+    console.error(`Error mapping strategy parameters for ${strategyId}:`, error);
+    return {};
+  }
+};
+
+/**
+ * Fetch and map parameter values from a strategy contract
+ * @param {string} strategyAddress - The strategy contract address
+ * @param {string} strategyId - Strategy ID (e.g., "parris", "fed")
+ * @param {string} vaultAddress - The vault address
+ * @param {object} provider - Ethers provider
+ * @returns {Promise<object>} Strategy parameters and metadata
+ */
+const fetchStrategyParameters = async (strategyAddress, strategyId, vaultAddress, provider) => {
+  try {
+    // Find the contract key for this strategy
+    const contractKey = Object.keys(contractData).find(key =>
+      key.toLowerCase() === strategyId.toLowerCase() ||
+      (key.toLowerCase().includes(strategyId.toLowerCase()) &&
+       strategyId.toLowerCase().includes(key.toLowerCase()))
+    );
+
+    if (!contractKey || !contractData[contractKey]?.abi) {
+      console.warn(`No contract ABI found for strategy ${strategyId}`);
+      return null;
+    }
+
+    // Create contract instance
+    const strategyContract = new ethers.Contract(
+      strategyAddress,
+      contractData[contractKey].abi,
+      provider
+    );
+
+    // Get template information
+    const templateEnum = await strategyContract.selectedTemplate(vaultAddress);
+
+    // Get customization bitmap
+    const customizationBitmap = await strategyContract.customizationBitmap(vaultAddress);
+
+    // Get all parameters in a single call
+    const allParams = await strategyContract.getAllParameters(vaultAddress);
+
+    // Map the template to a human-readable value
+    let selectedTemplate = 'custom';
+
+    // Use the templateEnumMap from strategy config to map enum value to template ID
+    const availableStrategies = getAvailableStrategies();
+    const strategy = availableStrategies.find(s => s.id === strategyId);
+
+    if (strategy?.templateEnumMap) {
+      // Reverse lookup in templateEnumMap
+      for (const [templateId, enumValue] of Object.entries(strategy.templateEnumMap)) {
+        if (enumValue === parseInt(templateEnum.toString())) {
+          selectedTemplate = templateId;
+          break;
+        }
+      }
+    }
+
+    return {
+      selectedTemplate,
+      templateEnum: templateEnum.toString(),
+      customizationBitmap: customizationBitmap.toString(),
+      parameters: mapStrategyParameters(strategyId, allParams)
+    };
+  } catch (error) {
+    console.error(`Error fetching strategy parameters:`, error);
+    return null;
+  }
+};
+
+/**
  * Load strategies for a specific chain and configure Redux
  * @param {object} provider - Ethers provider
  * @param {number} chainId - Chain ID
@@ -78,7 +244,7 @@ export const loadVaultStrategies = async (provider, chainId, dispatch, options =
         supportsTemplates: !!strategy.templateEnumMap,
         templateEnumMap: strategy.templateEnumMap ? {...strategy.templateEnumMap} : null,
         hasGetAllParameters: true,
-        parameterGroups: strategy.parameterGroups || []
+        parameters: strategy.parameters || []
       };
     });
 
@@ -165,38 +331,29 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
 
           if (strategyInfo) {
             strategyId = strategyInfo.strategyId;
-            const contractKey = strategyInfo.contractKey;
 
-            // Get strategy parameters (simplified version)
-            const availableStrategies = getAvailableStrategies();
-            const matchingStrategy = availableStrategies.find(s => s.id === strategyId);
+            // Get strategy parameters from the contract
+            try {
+              // Fetch detailed strategy parameters using our new approach
+              const strategyResult = await fetchStrategyParameters(
+                strategyAddress,
+                strategyId,
+                vaultAddress,
+                provider
+              );
 
-            if (matchingStrategy && contractKey) {
-              // More detailed strategy parameter handling would go here
-              // This is a simplified version
-              try {
-                const strategyContract = new ethers.Contract(
-                  strategyAddress,
-                  contractData[contractKey]?.abi || [],
-                  provider
-                );
+              if (strategyResult) {
+                activeTemplate = strategyResult.selectedTemplate;
 
-                // Basic template extraction
-                if (matchingStrategy.templateEnumMap) {
-                  try {
-                    const templateValue = await strategyContract.selectedTemplate(vaultAddress);
-                    const templateMap = matchingStrategy.templateEnumMap;
-                    activeTemplate = templateMap[templateValue] || 'custom';
-                  } catch (err) {
-                    console.warn("Error getting template:", err.message);
-                  }
-                }
-
-                // Get strategy parameters
-                // This is a simplified version - a more complete version would parse all parameters
-              } catch (err) {
-                console.warn("Error loading strategy details:", err.message);
+                // Store all parameters and metadata
+                strategyParams = {
+                  ...strategyResult.parameters,
+                  customizationBitmap: strategyResult.customizationBitmap,
+                  templateEnum: strategyResult.templateEnum
+                };
               }
+            } catch (err) {
+              console.warn("Error loading strategy details:", err.message);
             }
           } else {
             console.warn(`Strategy at address ${strategyAddress} not found in available strategies`);
@@ -211,6 +368,7 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
     }
 
     // Create strategy object if strategy address is set
+    // Maintaining the EXACT same structure for frontend compatibility
     const strategy = strategyAddress && strategyAddress !== ethers.ZeroAddress ? {
       strategyId: strategyId || 'unknown',
       strategyAddress,
@@ -517,9 +675,6 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
         vaultAddress,
         vaultData
       }));
-
-      // We do NOT calculate TVL here - it will be calculated in loadVaultData for all vaults at once
-      console.log(`Loaded ${positionsResult.positions.length} positions for vault ${vaultAddress}`);
     }
 
     return {
@@ -564,7 +719,6 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
       const tokenData = result.tokenData || {};
 
       if (positions.length > 0) {
-        console.log("Calculating position TVL for refreshed vault");
 
         // Get unique token symbols and collect data
         const tokenSymbols = new Set();
@@ -650,8 +804,6 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
             hasPartialData = true;
           }
         }
-
-        console.log(`Calculated TVL: $${totalTVL.toFixed(2)}`);
 
         // Update vault metrics with TVL
         dispatch(updateVaultMetrics({
@@ -796,8 +948,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     for (const vault of vaultsData) {
       const vaultPositions = positionsByVault[vault.address] || [];
 
-      console.log(`Calculating TVL for vault ${vault.address} with ${vaultPositions.length} positions`);
-
       if (vaultPositions.length === 0) {
         continue;
       }
@@ -886,8 +1036,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
           hasPartialData = true;
         }
       }
-
-      console.log(`Calculated TVL for vault ${vault.address}: $${totalTVL.toFixed(2)}`);
 
       // IMPORTANT: Update vault metrics with TVL
       dispatch(updateVaultMetrics({

@@ -20,9 +20,9 @@ import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVaultTokenBalances } from "@/redux/vaultsSlice";
 import { formatTimestamp } from "../../utils/formatHelpers";
 import { getAllTokens } from "../../utils/tokenConfig";
-import { loadVaultData, getVaultData } from '../../utils/vaultsHelpers';
+import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
 import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
-import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json" assert { type: "json" };
+import ERC20ABIfull from "@openzeppelin/contracts/build/contracts/ERC20.json";
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -72,7 +72,8 @@ export default function VaultDetailPage() {
   const vaultFromRedux = useSelector((state) =>
     state.vaults.userVaults.find(v => v.address === vaultAddress)
   );
-  const vaultMetrics = vaultFromRedux?.metrics || {};
+  const vaultMetrics = vaultFromRedux?.metrics;
+  const vaultTokens = vaultFromRedux?.tokenBalances;
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
@@ -84,7 +85,7 @@ export default function VaultDetailPage() {
   const [showAddPositionModal, setShowAddPositionModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
-  const [vaultTokens, setVaultTokens] = useState([]);
+  //const [vaultTokens, setVaultTokens] = useState([]);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -194,6 +195,16 @@ export default function VaultDetailPage() {
     setError(null);
 
     try {
+      // Use our loadVaultData utility function to load all the user's vault data
+      const loadResult = await loadVaultData(userAddress, provider, chainId, dispatch, {
+        showError,
+        showSuccess
+      });
+
+      if (!loadResult.success) {
+        setError(loadResult.err || "Failed to load user's vault data");
+      }
+
       // Use our getVaultData utility function to load vault data directly from chain
       const result = await getVaultData(vaultAddress, provider, chainId, dispatch, {
         showError,
@@ -227,9 +238,8 @@ export default function VaultDetailPage() {
   useEffect(() => {
     if (vaultAddress) {
       loadData();
-      fetchVaultTokens();
     }
-  }, [vaultAddress, refreshTrigger]);
+  }, [vaultAddress, userAddress, refreshTrigger]);
 
   // Add a forced refresh function
   const forceRefresh = useCallback(() => {
@@ -250,12 +260,12 @@ export default function VaultDetailPage() {
       forceRefresh();
 
       // Also refresh token balances
-      fetchVaultTokens();
+      loadVaultTokenBalances();
     } catch (error) {
       console.error("Error triggering refresh:", error);
       showError("Failed to refresh data");
     }
-  }, [dispatch, forceRefresh, fetchVaultTokens, showSuccess, showError]);
+  }, [dispatch, forceRefresh, loadVaultTokenBalances, showSuccess, showError]);
 
   // Handle strategy activation toggle
   const handleStrategyToggle = async (active) => {
@@ -434,9 +444,9 @@ export default function VaultDetailPage() {
                           </OverlayTrigger>
                         )}
                       </>
-                    ) : totalTokenValue > 0 ? (
+                    ) : vaultMetrics?.tokenTVL > 0 ? (
                       <>
-                        {formatCurrency(totalTokenValue)}
+                        {formatCurrency(vaultMetrics?.tokenTVL)}
                         <OverlayTrigger
                           placement="top"
                           overlay={<Tooltip>Value based on token balances only. Position values not included or unavailable.</Tooltip>}
@@ -537,7 +547,7 @@ export default function VaultDetailPage() {
               ) : (
                 <>
                   <div className="text-end mb-3">
-                    <strong>Total Token Value: {formatCurrency(totalTokenValue)}</strong>
+                    <strong>Total Token Value: {formatCurrency(vaultMetrics?.tokenTVL)}</strong>
                   </div>
                   <Table striped hover>
                     <thead>
@@ -549,41 +559,44 @@ export default function VaultDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {vaultTokens.map((token) => (
-                        <tr key={token.symbol}>
-                          <td>
-                            <div className="d-flex align-items-center">
-                              {token.logoURI && (
-                                <div className="me-2">
-                                  <Image
-                                    src={token.logoURI}
-                                    alt={token.symbol}
-                                    width={24}
-                                    height={24}
-                                  />
+                      {Object.keys(vaultTokens).map((tokenKey) => {
+                        const token = vaultTokens[tokenKey]
+                        return (
+                          <tr key={token.symbol}>
+                            <td>
+                              <div className="d-flex align-items-center">
+                                {token.logoURI && (
+                                  <div className="me-2">
+                                    <Image
+                                      src={token.logoURI}
+                                      alt={token.symbol}
+                                      width={24}
+                                      height={24}
+                                    />
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="fw-bold">{token.symbol}</div>
+                                  <small className="text-muted">{token.name}</small>
                                 </div>
-                              )}
-                              <div>
-                                <div className="fw-bold">{token.symbol}</div>
-                                <small className="text-muted">{token.name}</small>
                               </div>
-                            </div>
-                          </td>
-                          <td>{token.numericalBalance.toFixed(6)}</td>
-                          <td>{formatCurrency(token.valueUsd)}</td>
-                          <td>
-                            {isOwner && (
-                              <Button
-                                variant="outline-secondary"
-                                size="sm"
-                                onClick={() => handleWithdrawToken(token)}
-                              >
-                                Withdraw
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>{token.numericalBalance.toFixed(5)}</td>
+                            <td>{formatCurrency(token.valueUsd)}</td>
+                            <td>
+                              {isOwner && (
+                                <Button
+                                  variant="outline-secondary"
+                                  size="sm"
+                                  onClick={() => handleWithdrawToken(token)}
+                                >
+                                  Withdraw
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </Table>
                 </>
@@ -691,7 +704,7 @@ export default function VaultDetailPage() {
           show={showDepositModal}
           onHide={() => setShowDepositModal(false)}
           vaultAddress={vaultAddress}
-          onTokensUpdated={fetchVaultTokens}
+          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
         />
 
         {/* Vault Position Creation Modal */}
