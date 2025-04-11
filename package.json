@@ -45,6 +45,7 @@
     "dotenv": "^16.4.7",
     "hardhat": "^2.22.19",
     "hardhat-gas-reporter": "^1.0.8",
+    "lucide-react": "^0.487.0",
     "react-bootstrap-icons": "^1.11.5",
     "solidity-coverage": "^0.8.2",
     "tsx": "^4.19.3",

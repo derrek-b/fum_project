@@ -301,9 +301,6 @@ const StrategyDetailsSection = ({
 
   // Handle parameter change
   const handleParamChange = (paramId, value) => {
-    // When a parameter is manually changed, we're in custom mode
-    setActivePreset('custom');
-
     setParams(prev => ({
       ...prev,
       [paramId]: value

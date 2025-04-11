@@ -1,8 +1,10 @@
-// src/components/VaultCard.js
+// src/components/vaults/VaultCard.js
 import React, { useState } from "react";
 import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip, Dropdown } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
+import * as LucideIcons from 'lucide-react';
+import { getStrategyDetails } from "../../utils/strategyConfig";
 import PositionSelectionModal from "./PositionSelectionModal";
 
 export default function VaultCard({ vault }) {
@@ -92,8 +94,60 @@ export default function VaultCard({ vault }) {
       >
         <Card.Body>
           <div className="d-flex justify-content-between align-items-center mb-2">
-            <Card.Title>
+            <Card.Title className="d-flex align-items-center">
               {vault.name}
+              {(() => {
+                // Check if there's a strategy configured in the vault data
+                const hasConfiguredStrategy = vault.strategy?.strategyId;
+
+                if (vault.strategy?.isActive && hasConfiguredStrategy) {
+                  // Active strategy case
+                  const strategyDetails = getStrategyDetails(vault.strategy?.strategyId);
+                  const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
+
+                  return (
+                    <Badge
+                      pill
+                      bg=""
+                      className="ms-2 d-inline-flex align-items-center"
+                      style={{
+                        backgroundColor: strategyDetails?.color || "#6c757d",
+                        borderColor: strategyDetails?.borderColor || strategyDetails?.color || "#6c757d",
+                        borderWidth: "1px",
+                        borderStyle: "solid",
+                        color: strategyDetails?.textColor || "#FFFFFF",
+                        padding: '0.25em 0.8em',
+                      }}
+                    >
+                      {IconComponent && <IconComponent size={14} className="me-1" />}
+                      {strategyDetails?.name || vaultStrategy.strategyId || "Unknown"}
+                    </Badge>
+                  );
+                } else {
+                  // "Not Configured" case - use the "none" strategy settings
+                  const noneStrategy = getStrategyDetails("none");
+                  const NoneIcon = noneStrategy?.icon ? LucideIcons[noneStrategy.icon] : null;
+
+                  return (
+                    <Badge
+                      pill
+                      bg=""
+                      className="ms-2 d-inline-flex align-items-center"
+                      style={{
+                        backgroundColor: noneStrategy?.color || "#6c757d",
+                        borderColor: noneStrategy?.borderColor || "#6c757d",
+                        borderWidth: "1px",
+                        borderStyle: "solid",
+                        color: noneStrategy?.textColor || "#FFFFFF",
+                        padding: '0.25em 0.8em',
+                      }}
+                    >
+                      {NoneIcon && <NoneIcon size={14} className="me-1" />}
+                      {"Not Configured"}
+                    </Badge>
+                  );
+                }
+              })()}
             </Card.Title>
             <Dropdown className="action-button-exclude">
               <Dropdown.Toggle as={CustomToggle} id={`vault-actions-${vault.address}`}>
@@ -175,14 +229,6 @@ export default function VaultCard({ vault }) {
           </div>
 
           <div className="d-flex justify-content-between align-items-center">
-            <div>
-              <small className="text-muted d-block">Strategy</small>
-              {vaultStrategy?.isActive ? (
-                <Badge bg="light" text="success">The Fed</Badge>
-              ) : (
-                <Badge bg="light" text="secondary">Not Configured</Badge>
-              )}
-            </div>
 
             <div>
               <small className="text-muted d-block text-end">APY</small>

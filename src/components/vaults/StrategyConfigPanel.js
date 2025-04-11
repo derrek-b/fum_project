@@ -16,7 +16,7 @@ const StrategyConfigPanel = ({
   isOwner,
   strategyActive,
   performance,
-  onStrategyToggle
+  //onStrategyToggle
 }) => {
   const dispatch = useDispatch();
   const provider = useSelector(state => state.wallet.provider);
@@ -93,10 +93,9 @@ const StrategyConfigPanel = ({
     const isEnabled = e.target.checked;
     setAutomationEnabled(isEnabled);
 
-    // If toggling off automation, clear the selected strategy
+    // If toggling off automation, start modal to get user confirmation
     if (!isEnabled) {
-      setSelectedStrategy('');
-      setEditMode(false);
+      console.log('disabling strategy...')
     }
   };
 
@@ -453,25 +452,6 @@ const StrategyConfigPanel = ({
                   onClick={handleSave}
                 >
                   Save Configuration
-                </Button>
-              </div>
-            )}
-
-            {isOwner && !editMode && !hasUnsavedChanges && vault?.hasActiveStrategy && (
-              <div className="d-flex justify-content-end mt-4">
-                <Button
-                  variant="danger"
-                  onClick={() => onStrategyToggle(false)}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Spinner animation="border" size="sm" className="me-2" />
-                      Deactivating strategy...
-                    </>
-                  ) : (
-                    "Deactivate Strategy"
-                  )}
                 </Button>
               </div>
             )}

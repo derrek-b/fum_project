@@ -10,6 +10,10 @@ const strategies = {
     name: "Manual Management",
     subtitle: "No Automated Strategy",
     description: "Manually manage your positions without automation",
+    icon: "Ban", // Lucide icon name
+    color: "#6c757d", // Dull grey
+    borderColor: "#6c757d", // Same grey for border
+    textColor: "#FFFFFF", // White text
     supportedTokens: getAllTokens(), // All tokens supported
     totalParameterSteps: 1, // One parameter step for demonstration
     parameterGroups: [
@@ -43,6 +47,10 @@ const strategies = {
     name: "Parris Island",
     subtitle: "Basic Liquidity Management",
     description: "A foundational strategy for automated liquidity position management with essential controls",
+    icon: "Dumbbell", // Lucide icon name
+    color: "#1565C0", // Marine blue
+    borderColor: "#B22234", // USA flag red
+    textColor: "#FFFFFF", // White text
     supportedTokens: getAllTokens(), // Common tokens for beginners
     minTokens: 2, // Need at least a pair
     requireTokenSelection: true,
@@ -850,6 +858,10 @@ const strategies = {
     name: "The Fed",
     subtitle: "Stablecoin Optimization",
     description: "Automated stablecoin strategy with peg deviation positioning and range optimization",
+    icon: "Banknote", // Lucide icon name
+    color: "#1B5E20", // Dark dollar green
+    borderColor: "#1B5E20", // Same green for border
+    textColor: "#F5F5F5", // Off-white
     supportedTokens: getStablecoins(), // Stablecoins only
     minTokens: 2,
     requireTokenSelection: true,
@@ -973,6 +985,10 @@ export function getStrategyDetails(strategyId) {
     name: strategy.name,
     subtitle: strategy.subtitle,
     description: strategy.description,
+    icon: strategy.icon,
+    color: strategy.color,
+    borderColor: strategy.borderColor,
+    textColor: strategy.textColor,
     supportedTokens: strategy.supportedTokens,
     minTokens: strategy.minTokens,
     maxTokens: strategy.maxTokens,

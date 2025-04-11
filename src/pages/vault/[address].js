@@ -23,6 +23,8 @@ import { getAllTokens } from "../../utils/tokenConfig";
 import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
 import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
 import ERC20ABIfull from "@openzeppelin/contracts/build/contracts/ERC20.json";
+import * as LucideIcons from 'lucide-react';
+import { getStrategyDetails } from "../../utils/strategyConfig";
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -267,28 +269,6 @@ export default function VaultDetailPage() {
     }
   }, [dispatch, forceRefresh, loadVaultTokenBalances, showSuccess, showError]);
 
-  // Handle strategy activation toggle
-  const handleStrategyToggle = async (active) => {
-    if (!isOwner) {
-      showError("Only the vault owner can control strategies");
-      return;
-    }
-
-    try {
-      // Implementation would need to:
-      // 1. Create a contract instance for the vault
-      // 2. Call setStrategyAuthorization for the strategy contract
-      // 3. Update state after successful transaction
-
-      // This is a placeholder - actual implementation would interact with the contract
-      showSuccess(`Strategy ${active ? 'activated' : 'deactivated'}`);
-      dispatch(triggerUpdate());
-    } catch (error) {
-      console.error("Error toggling strategy:", error);
-      showError(`Failed to ${active ? 'activate' : 'deactivate'} strategy: ${error.message}`);
-    }
-  };
-
   // Handle token withdrawal (for owner)
   const handleWithdrawToken = async (token) => {
     if (!isOwner) {
@@ -385,10 +365,60 @@ export default function VaultDetailPage() {
           }}
         >
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <h1 className="mb-0">
+            <h1 className="mb-0 d-flex align-items-center">
               {vault.name}
-              {strategyActive && (
-                <Badge bg="success" className="ms-2">Active Strategy</Badge>
+              {vault.strategy?.isActive ? (
+                (() => {
+                  const strategyDetails = getStrategyDetails(vault?.strategy?.strategyId);
+                  const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
+
+                  return (
+                    <Badge
+                      pill
+                      bg=""
+                      className="ms-2 d-inline-flex align-items-center"
+                      style={{
+                        backgroundColor: strategyDetails?.color || "#6c757d",
+                        borderColor: strategyDetails?.borderColor || strategyDetails?.color || "#6c757d",
+                        borderWidth: "1px",
+                        borderStyle: "solid",
+                        color: strategyDetails?.textColor || "#FFFFFF",
+                        padding: '0.15em 0.5em',
+                        fontSize: '0.5em',
+                        fontWeight: 'normal'
+                      }}
+                    >
+                      {IconComponent && <IconComponent size={10} className="me-1" />}
+                      {strategyDetails?.name || vault?.strategy?.strategyId || "Unknown"}
+                    </Badge>
+                  );
+                })()
+              ) : (
+                (() => {
+                  const noneStrategy = getStrategyDetails("none");
+                  const NoneIcon = noneStrategy?.icon ? LucideIcons[noneStrategy.icon] : null;
+
+                  return (
+                    <Badge
+                      pill
+                      bg=""
+                      className="ms-2 d-inline-flex align-items-center"
+                      style={{
+                        backgroundColor: noneStrategy?.color || "#6c757d",
+                        borderColor: noneStrategy?.borderColor || noneStrategy?.color || "#6c757d",
+                        borderWidth: "1px",
+                        borderStyle: "solid",
+                        color: noneStrategy?.textColor || "#FFFFFF",
+                        padding: '0.15em 0.5em',
+                        fontSize: '0.5em',
+                        fontWeight: 'normal'
+                      }}
+                    >
+                      {NoneIcon && <NoneIcon size={10} className="me-1" />}
+                      {noneStrategy?.name || "Manual Management"}
+                    </Badge>
+                  );
+                })()
               )}
             </h1>
 
@@ -466,9 +496,6 @@ export default function VaultDetailPage() {
                 </Col>
                 <Col md={4}>
                   <div className="mb-3">
-                    <strong>Strategy:</strong> {strategyActive ? 'The Fed (Active)' : 'None'}
-                  </div>
-                  <div className="mb-3">
                     <strong>APY:</strong> {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
                   </div>
                 </Col>
@@ -540,7 +567,7 @@ export default function VaultDetailPage() {
                   <Spinner animation="border" variant="primary" />
                   <p className="mt-3">Loading token balances...</p>
                 </div>
-              ) : vaultTokens.length === 0 ? (
+              ) : !vaultTokens || Object.keys(vaultTokens).length === 0 ? (
                 <Alert variant="info" className="text-center">
                   This vault doesn't have any tokens yet. Deposit tokens using the button above.
                 </Alert>
@@ -610,7 +637,6 @@ export default function VaultDetailPage() {
                 strategyConfig={strategyConfig}
                 strategyActive={strategyActive}
                 performance={performance}
-                onStrategyToggle={handleStrategyToggle}
               />
             </Tab>
 
