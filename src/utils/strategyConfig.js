@@ -57,20 +57,26 @@ const strategies = {
     totalParameterSteps: 2, // Corresponds to step 3 and 4 in the wizard
     parameterGroups: [
       {
+        id: 0,
         name: "Range Settings",
-        description: "Control how your position responds to price movements"
+        description: "Control how your position responds to price movements",
+        setterMethod: "setRangeParameters"
       },
       {
+        id: 1,
         name: "Fee Settings",
-        description: "Configure how fees are handled and reinvested"
+        description: "Configure how fees are handled and reinvested",
+        setterMethod: "setFeeParameters"
       },
       {
+        id: 2,
         name: "Risk Management",
-        description: "Set safeguards to protect your position"
+        description: "Set safeguards to protect your position",
       },
       {
+        id: 3,
         name: "Advanced Settings",
-        description: "Fine-tune your strategy behavior"
+        description: "Fine-tune your strategy behavior",
       }
     ],
     layouts: {
@@ -515,7 +521,7 @@ const strategies = {
       targetRangeUpper: {
         name: "Upper Range",
         description: "Range percentage above current price",
-        type: "number",
+        type: "percent",
         defaultValue: 5.0,
         min: 0.1,
         max: 10.0,
@@ -527,7 +533,7 @@ const strategies = {
       targetRangeLower: {
         name: "Lower Range",
         description: "Range percentage below current price",
-        type: "number",
+        type: "percent",
         defaultValue: 5.0,
         min: 0.1,
         max: 10.0,
@@ -539,7 +545,7 @@ const strategies = {
       rebalanceThresholdUpper: {
         name: "Upper Rebalance Trigger",
         description: "Price movement percentage above range that triggers a rebalance",
-        type: "number",
+        type: "percent",
         defaultValue: 3.0,
         min: 0.1,
         max: 20.0,
@@ -551,7 +557,7 @@ const strategies = {
       rebalanceThresholdLower: {
         name: "Lower Rebalance Trigger",
         description: "Price movement percentage below range that triggers a rebalance",
-        type: "number",
+        type: "percent",
         defaultValue: 3.0,
         min: 0.1,
         max: 20.0,
@@ -563,7 +569,7 @@ const strategies = {
       maxVaultUtilization: {
         name: "Max Vault Utilization",
         description: "Maximum percentage of vault assets that can be deployed across all positions",
-        type: "number",
+        type: "percent",
         defaultValue: 80,
         min: 10,
         max: 100,
@@ -639,7 +645,7 @@ const strategies = {
       rangeAdjustmentPercentHigh: {
         name: "Range Expansion Amount",
         description: "Percentage to increase position ranges when too many rebalances occur",
-        type: "number",
+        type: "percent",
         defaultValue: 20,
         min: 5,
         max: 100,
@@ -653,7 +659,7 @@ const strategies = {
       thresholdAdjustmentPercentHigh: {
         name: "Threshold Expansion Amount",
         description: "Percentage to increase rebalance thresholds when too many rebalances occur",
-        type: "number",
+        type: "percent",
         defaultValue: 15,
         min: 5,
         max: 100,
@@ -667,7 +673,7 @@ const strategies = {
       rangeAdjustmentPercentLow: {
         name: "Range Contraction Amount",
         description: "Percentage to decrease position ranges when too few rebalances occur",
-        type: "number",
+        type: "percent",
         defaultValue: 20,
         min: 5,
         max: 100,
@@ -681,7 +687,7 @@ const strategies = {
       thresholdAdjustmentPercentLow: {
         name: "Threshold Contraction Amount",
         description: "Percentage to decrease rebalance thresholds when too few rebalances occur",
-        type: "number",
+        type: "percent",
         defaultValue: 15,
         min: 5,
         max: 100,
@@ -697,7 +703,7 @@ const strategies = {
       maxSlippage: {
         name: "Max Slippage",
         description: "Maximum acceptable slippage when executing trades",
-        type: "number",
+        type: "percent",
         defaultValue: 0.5,
         min: 0.1,
         max: 5.0,
@@ -709,7 +715,7 @@ const strategies = {
       emergencyExitTrigger: {
         name: "Emergency Exit",
         description: "Price change percentage that triggers emergency exit from positions",
-        type: "number",
+        type: "percent",
         defaultValue: 15,
         min: 5,
         max: 50,
@@ -736,7 +742,7 @@ const strategies = {
       priceDeviationTolerance: {
         name: "Oracle Deviation Tolerance",
         description: "Maximum allowed deviation between different price sources",
-        type: "number",
+        type: "percent",
         defaultValue: 1.0,
         min: 0.1,
         max: 5.0,
@@ -750,7 +756,7 @@ const strategies = {
       maxPositionSizePercent: {
         name: "Max Position Size",
         description: "Maximum percentage of vault assets to allocate to any single position",
-        type: "number",
+        type: "percent",
         defaultValue: 30,
         min: 5,
         max: 100,
@@ -762,7 +768,7 @@ const strategies = {
       minPositionSize: {
         name: "Min Position Size",
         description: "Minimum position size in USD value to avoid dust positions",
-        type: "number",
+        type: "fiat-currency",
         defaultValue: 100,
         min: 10,
         max: 10000,
@@ -774,13 +780,13 @@ const strategies = {
       targetUtilization: {
         name: "Target Utilization",
         description: "Target percentage of vault assets to deploy (per position)",
-        type: "number",
+        type: "percent",
         defaultValue: 20,
         min: 5,
         max: 100,
         step: 5,
         suffix: "%",
-        group: 0,
+        group: 2,
         wizardStep: 4  // Changed from 5 to 4
       },
 
@@ -803,6 +809,7 @@ const strategies = {
         step: 10,
         prefix: "$",
         group: 1,
+        type: "fiat-currency",
         wizardStep: 4,  // Changed from 5 to 4
         conditionalOn: "feeReinvestment",
         conditionalValue: true
@@ -810,7 +817,7 @@ const strategies = {
       reinvestmentRatio: {
         name: "Reinvestment Ratio",
         description: "Percentage of collected fees to reinvest vs. hold as reserve",
-        type: "number",
+        type: "percent",
         defaultValue: 80,
         min: 0,
         max: 100,
@@ -840,7 +847,7 @@ const strategies = {
       minPoolLiquidity: {
         name: "Min Pool Liquidity",
         description: "Minimum pool liquidity threshold to enter a position",
-        type: "number",
+        type: "fiat-currency",
         defaultValue: 100000,
         min: 10000,
         max: 10000000,
@@ -967,6 +974,7 @@ export function getAvailableStrategies() {
       description: strategy.description,
       templateEnumMap: strategy.templateEnumMap,
       parameters: strategy.parameters,
+      parameterGroups: strategy.parameterGroups || [],
       comingSoon: strategy.comingSoon || false
     }));
 }

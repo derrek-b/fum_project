@@ -1,57 +1,69 @@
-// src/components/StrategyConfigPanel.js
+// src/components/vaults/StrategyConfigPanel.js
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useSelector, useDispatch } from 'react-redux';
 import { Card, Form, Button, Alert, Spinner, Badge } from 'react-bootstrap';
 import { getVaultContract, executeVaultTransactions } from '../../utils/contracts';
 import contractData from '../../abis/contracts.json';
-import { getAvailableStrategies, getStrategyParameters } from '../../utils/strategyConfig';
+import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from '../../utils/strategyConfig';
 import StrategyDetailsSection from './StrategyDetailsSection';
-import { updateVaultStrategy } from '../../redux/vaultsSlice';
+import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
 import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
+import StrategyDeactivationModal from './StrategyDeactivationModal';
+import StrategyTransactionModal from './StrategyTransactionModal';
+import { config } from 'dotenv';
 
 const StrategyConfigPanel = ({
   vaultAddress,
   isOwner,
   strategyActive,
   performance,
-  //onStrategyToggle
+  onStrategyToggle
 }) => {
   const dispatch = useDispatch();
   const provider = useSelector(state => state.wallet.provider);
   const chainId = useSelector(state => state.wallet.chainId);
-  const availableStrategies = useSelector(state => state.strategies.availableStrategies)
+  const availableStrategies = useSelector(state => state.strategies.availableStrategies);
 
   // Get the vault from Redux
   const vault = useSelector((state) =>
     state.vaults.userVaults.find(v => v.address === vaultAddress)
   );
 
-  // Get available strategies
-  //const [availableStrategies, setAvailableStrategies] = useState([]);
+  // State
   const [selectedStrategy, setSelectedStrategy] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [activePreset, setActivePreset] = useState('custom');
   const [strategyParams, setStrategyParams] = useState({});
+  // Store complete set of parameters including template defaults
+  const [initialParams, setInitialParams] = useState({});
   const [selectedTokens, setSelectedTokens] = useState([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
   const [editMode, setEditMode] = useState(false);
   const [validateFn, setValidateFn] = useState(null);
-  const { showSuccess, showError } = useToast();
+
+  // Track parameter changes separately from template changes
+  const [paramsChanged, setParamsChanged] = useState(false);
+
+  // Modals state
+  const [showDeactivationModal, setShowDeactivationModal] = useState(false);
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [transactionSteps, setTransactionSteps] = useState([]);
+  const [currentTransactionStep, setCurrentTransactionStep] = useState(0);
+  const [transactionError, setTransactionError] = useState('');
+  const [transactionLoading, setTransactionLoading] = useState(false);
 
   // Change tracking
   const [initialAutomationState, setInitialAutomationState] = useState(false);
   const [initialSelectedStrategy, setInitialSelectedStrategy] = useState('');
+  const [initialActivePreset, setInitialActivePreset] = useState('custom');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const { showSuccess, showError } = useToast();
 
   // Load available strategies and set initial state on component mount
   useEffect(() => {
-    // Get all strategies except 'none'
-    //const strategies = getAvailableStrategies();
-    //setAvailableStrategies(strategies);
-
     // Set automation toggle based on vault's active strategy status
     const hasStrategy = vault?.hasActiveStrategy || strategyActive || false;
     setAutomationEnabled(hasStrategy);
@@ -63,6 +75,27 @@ const StrategyConfigPanel = ({
       const activeStrategy = vault.strategy.strategyId;
       setSelectedStrategy(activeStrategy);
       setInitialSelectedStrategy(activeStrategy);
+
+      // Store parameters and preset
+      if (vault.strategy.parameters) {
+        setStrategyParams(vault.strategy.parameters);
+        setInitialParams(vault.strategy.parameters);
+      }
+
+      // Set preset
+      if (vault.strategy.activeTemplate) {
+        setActivePreset(vault.strategy.activeTemplate);
+        setInitialActivePreset(vault.strategy.activeTemplate);
+      }
+
+      // Set selected tokens and platforms
+      if (vault.strategy.selectedTokens) {
+        setSelectedTokens(vault.strategy.selectedTokens);
+      }
+
+      if (vault.strategy.selectedPlatforms) {
+        setSelectedPlatforms(vault.strategy.selectedPlatforms);
+      }
     } else if (vault?.hasActiveStrategy || strategyActive) {
       // Fallback to 'fed' if we know there's a strategy but don't have details
       setSelectedStrategy('fed');
@@ -77,10 +110,20 @@ const StrategyConfigPanel = ({
   useEffect(() => {
     const hasChanges =
       automationEnabled !== initialAutomationState ||
-      (automationEnabled && selectedStrategy !== initialSelectedStrategy);
+      (automationEnabled && selectedStrategy !== initialSelectedStrategy) ||
+      activePreset !== initialActivePreset ||
+      paramsChanged;
 
     setHasUnsavedChanges(hasChanges);
-  }, [automationEnabled, selectedStrategy, initialAutomationState, initialSelectedStrategy]);
+  }, [
+    automationEnabled,
+    selectedStrategy,
+    initialAutomationState,
+    initialSelectedStrategy,
+    activePreset,
+    initialActivePreset,
+    paramsChanged
+  ]);
 
   // Handle strategy selection change
   const handleStrategyChange = (e) => {
@@ -91,11 +134,79 @@ const StrategyConfigPanel = ({
   // Handle automation toggle
   const handleAutomationToggle = (e) => {
     const isEnabled = e.target.checked;
-    setAutomationEnabled(isEnabled);
 
-    // If toggling off automation, start modal to get user confirmation
-    if (!isEnabled) {
-      console.log('disabling strategy...')
+    if (initialAutomationState && !isEnabled) {
+      // Show deactivation confirmation modal when turning off an active strategy
+      setShowDeactivationModal(true);
+    } else {
+      // Direct set for enabling (turning on) a strategy
+      setAutomationEnabled(isEnabled);
+
+      // If toggling off automation, clear the selected strategy
+      if (!isEnabled) {
+        setSelectedStrategy('');
+        setEditMode(false);
+      }
+    }
+  };
+
+  // Handle confirmation of strategy deactivation
+  const handleConfirmDeactivation = async () => {
+    setShowDeactivationModal(false);
+
+    try {
+      // Set loading state
+      setIsLoading(true);
+
+      if (!provider) {
+        throw new Error("No provider available");
+      }
+
+      // Get signer
+      const signer = await provider.getSigner();
+
+      // Get vault contract instance
+      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+
+      // Send transaction to remove strategy
+      const tx = await vaultContract.removeStrategy();
+
+      // Wait for transaction to be mined
+      await tx.wait();
+
+      // Turn off automation
+      setAutomationEnabled(false);
+      setSelectedStrategy('');
+      setEditMode(false);
+
+      // Update vault data in Redux
+      dispatch(updateVault({
+        vaultAddress,
+        vaultData: {
+          hasActiveStrategy: false,
+          strategyAddress: null
+        }
+      }));
+
+      // Update strategy state in Redux
+      dispatch(updateVaultStrategy({
+        vaultAddress,
+        strategy: {
+          isActive: false,
+          lastUpdated: Date.now()
+        }
+      }));
+
+      // Trigger data refresh
+      dispatch(triggerUpdate());
+
+      // Show success message
+      showSuccess("Strategy deactivated successfully");
+    } catch (error) {
+      console.error("Error deactivating strategy:", error);
+      showError(`Failed to deactivate strategy: ${error.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -104,23 +215,70 @@ const StrategyConfigPanel = ({
     setEditMode(true);
   };
 
+  // Check if parameters have changed compared to initial values
+  const checkParametersChanged = (newParams, originalParams) => {
+    // If we don't have original params, consider it changed
+    if (!originalParams || Object.keys(originalParams).length === 0) {
+      return Object.keys(newParams).length > 0;
+    }
+
+    // Check for any differences
+    for (const [key, value] of Object.entries(newParams)) {
+      // If parameter doesn't exist in original or value is different
+      if (originalParams[key] === undefined || originalParams[key] !== value) {
+        return true;
+      }
+    }
+
+    // Check for keys in original that are no longer in newParams
+    for (const key of Object.keys(originalParams)) {
+      if (newParams[key] === undefined) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   // Handle parameter changes
   const handleParamsChange = (paramData) => {
-    if (paramData.parameters) {
-      setStrategyParams(paramData.parameters);
+    if (paramData.activePreset !== activePreset) {
+      const newPreset = paramData.activePreset;
+      setActivePreset(newPreset);
+
+      // If switching to a preset (not custom), load template parameters
+      if (newPreset !== 'custom') {
+        const templateDefaults = getTemplateDefaults(selectedStrategy, newPreset);
+        if (templateDefaults) {
+          setStrategyParams(templateDefaults);
+          // Also update initialParams when changing templates
+          setInitialParams(templateDefaults);
+          setParamsChanged(false);
+        }
+      }
+    }
+
+    if (paramData.parameters !== strategyParams) {
+      console.log('params changed')
+      const newParams = { ...strategyParams, ...paramData.parameters };
+
+      // Update strategy parameters
+      setStrategyParams(newParams);
+
+      // Check if parameters have changed from initial values
+      const changed = checkParametersChanged(newParams, initialParams);
+      setParamsChanged(changed);
     }
 
     // Store token and platform selections too
-    if (paramData.selectedTokens) {
+    if (paramData.selectedTokens !== selectedTokens) {
+      console.log('selected tokens changed')
       setSelectedTokens(paramData.selectedTokens);
     }
 
-    if (paramData.selectedPlatforms) {
+    if (paramData.selectedPlatforms !== selectedPlatforms) {
+      console.log('selected platforms changed')
       setSelectedPlatforms(paramData.selectedPlatforms);
-    }
-
-    if (paramData.activePreset) {
-      setActivePreset(paramData.activePreset);
     }
   };
 
@@ -132,6 +290,61 @@ const StrategyConfigPanel = ({
     }
   };
 
+  // Get the strategy name for display
+  const getStrategyName = () => {
+    const strategy = availableStrategies.find(s => s.id === selectedStrategy);
+    return strategy?.name || "Strategy";
+  };
+
+  // Generate transaction steps based on what needs to be done
+  const generateTransactionSteps = () => {
+    const steps = [];
+    const strategyConfig = availableStrategies.find(s => s.id === selectedStrategy);
+    const strategyName = strategyConfig?.name || "Strategy";
+
+    // Step 1: Always need to set strategy if activating or changing
+    if (!vault.strategyAddress || initialSelectedStrategy !== selectedStrategy) {
+      steps.push({
+        title: `Set Strategy Contract`,
+        description: `Authorize the ${strategyName} strategy for this vault`,
+      });
+    }
+
+    // Step 2: Set target tokens if provided
+    if (selectedTokens.length > 0) {
+      steps.push({
+        title: `Set Target Tokens`,
+        description: `Configure which tokens the strategy will manage`,
+      });
+    }
+
+    // Step 3: Set target platforms if provided
+    if (selectedPlatforms.length > 0) {
+      steps.push({
+        title: `Set Target Platforms`,
+        description: `Configure which platforms the strategy will use`,
+      });
+    }
+
+    // Step 4: Select template if applicable
+    if (activePreset && activePreset !== 'custom') {
+      steps.push({
+        title: `Select Strategy Template`,
+        description: `Apply the ${activePreset} template to set initial parameters`,
+      });
+    }
+
+    // Step 5: Set parameters if changed
+    if ((activePreset === 'custom' || paramsChanged) && Object.keys(strategyParams).length > 0) {
+      steps.push({
+        title: `Set Strategy Parameters`,
+        description: `Configure the detailed behavior of the strategy`,
+      });
+    }
+
+    return steps;
+  };
+
   // Handle save button click
   const handleSave = async () => {
     // Validation
@@ -140,9 +353,16 @@ const StrategyConfigPanel = ({
       if (!isValid) return;
     }
 
-    setIsLoading(true);
+    // Generate transaction steps
+    const steps = generateTransactionSteps();
+    setTransactionSteps(steps);
+    setCurrentTransactionStep(0);
+    setTransactionError('');
+    setShowTransactionModal(true);
 
     try {
+      setTransactionLoading(true);
+
       if (!provider) {
         throw new Error("No provider available");
       }
@@ -157,7 +377,6 @@ const StrategyConfigPanel = ({
       }
 
       // Get the contract address for the selected strategy
-      //const strategyAddress = strategyConfig.addresses?.[chainId.toString()];// Load strategy addresses from contracts.json
       let strategyAddress;
       Object.keys(contractData).forEach(contractKey => {
         // Skip non-strategy contracts
@@ -165,7 +384,10 @@ const StrategyConfigPanel = ({
           return;
         }
 
-        strategyAddress = contractData[contractKey].addresses?.[chainId];
+        const addresses = contractData[contractKey].addresses || {};
+        if (addresses[chainId]) {
+          strategyAddress = addresses[chainId];
+        }
       });
 
       if (!strategyAddress) {
@@ -183,13 +405,11 @@ const StrategyConfigPanel = ({
       );
 
       // Check if the vault is authorized in the strategy contract
-      // Note: This will only work if the strategy contract has this method
       let isAuthorized = false;
       try {
         isAuthorized = await strategyContract.authorizedVaults(vaultAddress);
       } catch (authCheckError) {
         console.warn("Strategy doesn't support vault authorization check:", authCheckError.message);
-        // Continue anyway, the authorization call below will fail if needed
       }
 
       if (!isAuthorized) {
@@ -199,7 +419,6 @@ const StrategyConfigPanel = ({
           await authTx.wait();
         } catch (authError) {
           console.warn("Strategy doesn't support vault authorization or failed:", authError.message);
-          // Continue anyway, the strategy might not require explicit authorization
         }
       }
 
@@ -207,20 +426,34 @@ const StrategyConfigPanel = ({
 
       // Step 1: Set strategy if needed
       if (!vault.strategyAddress || !vault.hasActiveStrategy) {
+        setCurrentTransactionStep(0);
         const setStrategyTx = await vaultContract.setStrategy(strategyAddress);
         await setStrategyTx.wait();
+        setCurrentTransactionStep(1);
       }
 
       // Step 2: Set target tokens if needed
       if (automationEnabled && selectedStrategy && selectedTokens.length > 0) {
-        const setTokensTx = await vaultContract.setTargetTokens(selectedTokens);
+        // Find the correct step index
+        const stepIndex = steps.findIndex(step => step.title.includes('Target Tokens'));
+        if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
+
+        // Create a NEW array for tokens to avoid immutability issues
+        const setTokensTx = await vaultContract.setTargetTokens([...selectedTokens]);
         await setTokensTx.wait();
+        setCurrentTransactionStep(stepIndex + 1);
       }
 
       // Step 3: Set target platforms if needed
       if (automationEnabled && selectedStrategy && selectedPlatforms.length > 0) {
-        const setPlatformsTx = await vaultContract.setTargetPlatforms(selectedPlatforms);
+        // Find the correct step index
+        const stepIndex = steps.findIndex(step => step.title.includes('Target Platforms'));
+        if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
+
+        // Create a NEW array for platforms to avoid immutability issues
+        const setPlatformsTx = await vaultContract.setTargetPlatforms([...selectedPlatforms]);
         await setPlatformsTx.wait();
+        setCurrentTransactionStep(stepIndex + 1);
       }
 
       // PART 2: Batch calls to Strategy contract through vault's execute function
@@ -230,13 +463,16 @@ const StrategyConfigPanel = ({
 
       // Get strategy-specific configuration for formatting parameters
       const parameterDefinitions = getStrategyParameters(selectedStrategy);
+
       // Step 4: Handle template selection if the strategy supports templates
       if (automationEnabled && selectedStrategy && activePreset && activePreset !== 'custom') {
+        // Find the correct step index
+        const stepIndex = steps.findIndex(step => step.title.includes('Template'));
+        if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
 
         // Get the template enum mapping from the config if available
-        const templateEnumMap = strategyConfig.templateEnumMap
-
-        const templateValue = templateEnumMap[activePreset] || 0;
+        const templateEnumMap = strategyConfig.templateEnumMap;
+        const templateValue = templateEnumMap ? templateEnumMap[activePreset] || 0 : 0;
 
         strategyTransactions.push({
           target: strategyAddress,
@@ -251,23 +487,25 @@ const StrategyConfigPanel = ({
       if (automationEnabled && selectedStrategy && (activePreset === 'custom' || hasUnsavedChanges)) {
         // Get parameter groups from config
         const parameterGroups = strategyConfig.parameterGroups || [];
-
         // Process each parameter group
         for (const group of parameterGroups) {
+          console.log(Object.entries(parameterDefinitions).filter(([paramId, config]) => config.group === group.id))
           // Get parameters for this group
           const groupParams = Object.entries(parameterDefinitions)
             .filter(([paramId, config]) => config.group === group.id)
             .map(([paramId, config]) => ({ paramId, config }));
 
+          console.log(groupParams.length, !group.setterMethod)
+
           // Skip if no parameters in this group or setter method isn't defined
           if (groupParams.length === 0 || !group.setterMethod) continue;
-
+          console.log(1)
           // Check if we have all required parameters
           const haveAllRequiredParams = groupParams.every(({ paramId }) =>
             strategyParams[paramId] !== undefined);
-
+          console.log(haveAllRequiredParams)
           if (!haveAllRequiredParams) continue;
-
+          console.log(2)
           // Format parameters according to their types and add transaction
           const formattedParams = groupParams.map(({ paramId, config }) => {
             const value = strategyParams[paramId];
@@ -278,9 +516,12 @@ const StrategyConfigPanel = ({
                 // Convert percentage to basis points (multiply by 100)
                 return Math.round(parseFloat(value) * 100);
 
-              case 'currency':
-                // Convert to wei
-                return ethers.parseUnits(value.toString(), 18);
+              case 'fiat-currency':
+                // Convert to pennies
+                return parseFloat(value).toFixed(2) * 100;
+
+              case 'token-currency':
+                // convert using token details?
 
               case 'boolean':
                 return !!value;
@@ -306,7 +547,6 @@ const StrategyConfigPanel = ({
 
       // Execute strategy transactions if any
       if (strategyTransactions.length > 0) {
-
         // Extract targets and data for executeVaultTransactions
         const targets = strategyTransactions.map(tx => tx.target);
         const dataArray = strategyTransactions.map(tx => tx.data);
@@ -315,14 +555,20 @@ const StrategyConfigPanel = ({
           // Execute the batch through vault's execute function
           const result = await vaultContract.execute(targets, dataArray);
           await result.wait();
+
+          // Set step to completed
+          setCurrentTransactionStep(steps.length);
         } catch (error) {
           console.error("Failed to execute strategy transactions:", error);
-          showError(`Failed to update strategy parameters: ${error.message}`);
-          // Don't rethrow, let's update the UI state anyway
+          setTransactionError(`Failed to update strategy parameters: ${error.message}`);
+          throw error;
         }
+      } else {
+        // If no strategy transactions, mark as complete
+        setCurrentTransactionStep(steps.length);
       }
 
-      // Update Redux with new strategy state
+      // Update Redux with new strategy state - including proper vault fields
       dispatch(updateVaultStrategy({
         vaultAddress,
         strategy: {
@@ -332,7 +578,17 @@ const StrategyConfigPanel = ({
           selectedTokens,
           selectedPlatforms,
           isActive: automationEnabled,
+          activeTemplate: activePreset,
           lastUpdated: Date.now()
+        }
+      }));
+
+      // Update the top-level vault fields too - THIS IS CRITICAL FOR DISPLAY UPDATES
+      dispatch(updateVault({
+        vaultAddress,
+        vaultData: {
+          hasActiveStrategy: automationEnabled,
+          strategyAddress: automationEnabled ? strategyAddress : null
         }
       }));
 
@@ -345,13 +601,19 @@ const StrategyConfigPanel = ({
       // Update component state
       setInitialAutomationState(automationEnabled);
       setInitialSelectedStrategy(selectedStrategy);
+      setInitialActivePreset(activePreset);
+      setInitialParams(strategyParams);
+      setParamsChanged(false);
       setHasUnsavedChanges(false);
       setEditMode(false);
+
+      // Keep transaction modal open to show completion
+      setTransactionLoading(false);
     } catch (error) {
       console.error("Error saving strategy configuration:", error);
+      setTransactionError(`Failed to save strategy: ${error.message}`);
       showError(`Failed to save strategy: ${error.message}`);
-    } finally {
-      setIsLoading(false);
+      setTransactionLoading(false);
     }
   };
 
@@ -366,8 +628,21 @@ const StrategyConfigPanel = ({
       setAutomationEnabled(initialAutomationState);
     }
 
+    if (activePreset !== initialActivePreset) {
+      setActivePreset(initialActivePreset);
+    }
+
+    // Reset parameters to initial state
+    setStrategyParams(initialParams);
+    setParamsChanged(false);
+
     setHasUnsavedChanges(false);
     setEditMode(false);
+  };
+
+  // Close transaction modal
+  const handleCloseTransactionModal = () => {
+    setShowTransactionModal(false);
   };
 
   // Render the strategy config panel
@@ -458,6 +733,31 @@ const StrategyConfigPanel = ({
           </>
         )}
       </Card.Body>
+
+      {/* Strategy Deactivation Modal */}
+      <StrategyDeactivationModal
+        show={showDeactivationModal}
+        onHide={() => setShowDeactivationModal(false)}
+        onConfirm={handleConfirmDeactivation}
+        strategyName={getStrategyName()}
+      />
+
+      {/* Strategy Transaction Modal */}
+      <StrategyTransactionModal
+        show={showTransactionModal}
+        onHide={handleCloseTransactionModal}
+        onCancel={() => {
+          if (!transactionLoading) {
+            setShowTransactionModal(false);
+          }
+        }}
+        currentStep={currentTransactionStep}
+        steps={transactionSteps}
+        isLoading={transactionLoading}
+        error={transactionError}
+        tokenSymbols={selectedTokens}
+        strategyName={getStrategyName()}
+      />
     </Card>
   );
 };

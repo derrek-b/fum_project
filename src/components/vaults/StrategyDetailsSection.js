@@ -173,7 +173,7 @@ const StrategyDetailsSection = ({
         activePreset
       });
     }
-  }, [params, selectedTokens, selectedPlatforms, onParamsChange]);
+  }, [params, selectedTokens, selectedPlatforms, activePreset]);
 
   // Expose validation functionality - only register once
   useEffect(() => {
