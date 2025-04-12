@@ -44,9 +44,6 @@ const StrategyConfigPanel = ({
   const [editMode, setEditMode] = useState(false);
   const [validateFn, setValidateFn] = useState(null);
 
-  // Track parameter changes separately from template changes
-  const [paramsChanged, setParamsChanged] = useState(false);
-
   // Modals state
   const [showDeactivationModal, setShowDeactivationModal] = useState(false);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
@@ -60,6 +57,10 @@ const StrategyConfigPanel = ({
   const [initialSelectedStrategy, setInitialSelectedStrategy] = useState('');
   const [initialActivePreset, setInitialActivePreset] = useState('custom');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [templateChanged, setTemplateChanged] = useState(false);
+  const [tokensChanged, setTokensChanged] = useState(false);
+  const [platformsChanged, setPlatformsChanged] = useState(false);
+  const [paramsChanged, setParamsChanged] = useState(false);
   const { showSuccess, showError } = useToast();
 
   // Load available strategies and set initial state on component mount
@@ -112,7 +113,7 @@ const StrategyConfigPanel = ({
       automationEnabled !== initialAutomationState ||
       (automationEnabled && selectedStrategy !== initialSelectedStrategy) ||
       activePreset !== initialActivePreset ||
-      paramsChanged;
+      templateChanged || tokensChanged || platformsChanged || paramsChanged;
 
     setHasUnsavedChanges(hasChanges);
   }, [
@@ -122,6 +123,9 @@ const StrategyConfigPanel = ({
     initialSelectedStrategy,
     activePreset,
     initialActivePreset,
+    templateChanged,
+    tokensChanged,
+    platformsChanged,
     paramsChanged
   ]);
 
@@ -243,6 +247,7 @@ const StrategyConfigPanel = ({
   // Handle parameter changes
   const handleParamsChange = (paramData) => {
     if (paramData.activePreset !== activePreset) {
+      setTemplateChanged(true)
       const newPreset = paramData.activePreset;
       setActivePreset(newPreset);
 
@@ -271,10 +276,12 @@ const StrategyConfigPanel = ({
 
     // Store token and platform selections too
     if (paramData.selectedTokens !== selectedTokens) {
+      setTokensChanged(true);
       setSelectedTokens(paramData.selectedTokens);
     }
 
     if (paramData.selectedPlatforms !== selectedPlatforms) {
+      setPlatformsChanged(true);
       setSelectedPlatforms(paramData.selectedPlatforms);
     }
   };
@@ -299,7 +306,7 @@ const StrategyConfigPanel = ({
     const strategyConfig = availableStrategies.find(s => s.id === selectedStrategy);
     const strategyName = strategyConfig?.name || "Strategy";
 
-    // Step 1: Always need to set strategy if activating or changing
+    // Step 1: Set strategy if activating or changing
     if (!vault.strategyAddress || initialSelectedStrategy !== selectedStrategy) {
       steps.push({
         title: `Set Strategy Contract`,
@@ -308,7 +315,7 @@ const StrategyConfigPanel = ({
     }
 
     // Step 2: Set target tokens if provided
-    if (selectedTokens.length > 0) {
+    if (selectedTokens.length > 0 && tokensChanged) {
       steps.push({
         title: `Set Target Tokens`,
         description: `Configure which tokens the strategy will manage`,
@@ -316,7 +323,7 @@ const StrategyConfigPanel = ({
     }
 
     // Step 3: Set target platforms if provided
-    if (selectedPlatforms.length > 0) {
+    if (selectedPlatforms.length > 0 && platformsChanged) {
       steps.push({
         title: `Set Target Platforms`,
         description: `Configure which platforms the strategy will use`,
@@ -324,7 +331,7 @@ const StrategyConfigPanel = ({
     }
 
     // Step 4: Select template if applicable
-    if (activePreset && activePreset !== 'custom') {
+    if (activePreset && templateChanged) {
       steps.push({
         title: `Select Strategy Template`,
         description: `Apply the ${activePreset} template to set initial parameters`,
@@ -430,7 +437,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 2: Set target tokens if needed
-      if (automationEnabled && selectedStrategy && selectedTokens.length > 0) {
+      if (automationEnabled && selectedStrategy && selectedTokens.length > 0 && tokensChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Target Tokens'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
@@ -442,7 +449,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 3: Set target platforms if needed
-      if (automationEnabled && selectedStrategy && selectedPlatforms.length > 0) {
+      if (automationEnabled && selectedStrategy && selectedPlatforms.length > 0 && platformsChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Target Platforms'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
@@ -462,14 +469,18 @@ const StrategyConfigPanel = ({
       const parameterDefinitions = getStrategyParameters(selectedStrategy);
 
       // Step 4: Handle template selection if the strategy supports templates
-      if (automationEnabled && selectedStrategy && activePreset && activePreset !== 'custom') {
+      if (automationEnabled && selectedStrategy && activePreset && templateChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Template'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
 
         // Get the template enum mapping from the config if available
         const templateEnumMap = strategyConfig.templateEnumMap;
-        const templateValue = templateEnumMap ? templateEnumMap[activePreset] || 0 : 0;
+        let templateValue = 0; // Default to 0 for 'custom'
+
+        if (activePreset !== 'custom') {
+          templateValue = templateEnumMap ? templateEnumMap[activePreset] || 0 : 0;
+        }
 
         strategyTransactions.push({
           target: strategyAddress,
@@ -481,7 +492,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 5: Set strategy parameters based on the strategy's parameter groups
-      if (automationEnabled && selectedStrategy && (activePreset === 'custom' || hasUnsavedChanges)) {
+      if (automationEnabled && selectedStrategy && (activePreset === 'custom' || paramsChanged)) {
         // Get contract parameter groups from config
         const contractParamGroups = strategyConfig.contractParametersGroups || [];
 
@@ -589,6 +600,9 @@ const StrategyConfigPanel = ({
       setInitialSelectedStrategy(selectedStrategy);
       setInitialActivePreset(activePreset);
       setInitialParams(strategyParams);
+      setTemplateChanged(false);
+      setTokensChanged(false);
+      setPlatformsChanged(false);
       setParamsChanged(false);
       setHasUnsavedChanges(false);
       setEditMode(false);
@@ -620,6 +634,9 @@ const StrategyConfigPanel = ({
 
     // Reset parameters to initial state
     setStrategyParams(initialParams);
+    setTemplateChanged(false);
+    setTokensChanged(false);
+    setPlatformsChanged(false);
     setParamsChanged(false);
 
     setHasUnsavedChanges(false);
