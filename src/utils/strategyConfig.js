@@ -79,6 +79,45 @@ const strategies = {
         description: "Fine-tune your strategy behavior",
       }
     ],
+    contractParametersGroups: [
+      {
+        id: "range",
+        setterMethod: "setRangeParameters",
+        parameters: ["targetRangeUpper", "targetRangeLower", "rebalanceThresholdUpper", "rebalanceThresholdLower"]
+      },
+      {
+        id: "fee",
+        setterMethod: "setFeeParameters",
+        parameters: ["feeReinvestment", "reinvestmentTrigger", "reinvestmentRatio"]
+      },
+      {
+        id: "risk",
+        setterMethod: "setRiskParameters",
+        parameters: ["maxSlippage", "emergencyExitTrigger", "maxVaultUtilization"]
+      },
+      {
+        id: "adaptive",
+        setterMethod: "setAdaptiveParameters",
+        parameters: ["adaptiveRanges", "rebalanceCountThresholdHigh", "rebalanceCountThresholdLow",
+                     "adaptiveTimeframeHigh", "adaptiveTimeframeLow", "rangeAdjustmentPercentHigh",
+                     "thresholdAdjustmentPercentHigh", "rangeAdjustmentPercentLow", "thresholdAdjustmentPercentLow"]
+      },
+      {
+        id: "oracle",
+        setterMethod: "setOracleParameters",
+        parameters: ["oracleSource", "priceDeviationTolerance"]
+      },
+      {
+        id: "positionSizing",
+        setterMethod: "setPositionSizingParameters",
+        parameters: ["maxPositionSizePercent", "minPositionSize", "targetUtilization"]
+      },
+      {
+        id: "platform",
+        setterMethod: "setPlatformParameters",
+        parameters: ["platformSelectionCriteria", "minPoolLiquidity"]
+      }
+    ],
     layouts: {
       // Step 3 layouts (was step 2)
       3: {
@@ -431,13 +470,13 @@ const strategies = {
           adaptiveRanges: false,
           maxSlippage: 0.3,
           emergencyExitTrigger: 20,
-          oracleSource: "chainlink",
+          oracleSource: "0",
           priceDeviationTolerance: 0.5,
           maxPositionSizePercent: 20,
           minPositionSize: 200,
           targetUtilization: 15,
           feeReinvestment: false,
-          platformSelectionCriteria: "highest_tvl",
+          platformSelectionCriteria: "0",
           minPoolLiquidity: 200000
         }
       },
@@ -463,7 +502,7 @@ const strategies = {
           thresholdAdjustmentPercentLow: 15,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
-          oracleSource: "dex",
+          oracleSource: "0",
           priceDeviationTolerance: 1.0,
           maxPositionSizePercent: 30,
           minPositionSize: 100,
@@ -471,7 +510,7 @@ const strategies = {
           feeReinvestment: true,
           reinvestmentTrigger: 50,
           reinvestmentRatio: 80,
-          platformSelectionCriteria: "highest_volume",
+          platformSelectionCriteria: "0",
           minPoolLiquidity: 100000
         }
       },
@@ -497,7 +536,7 @@ const strategies = {
           thresholdAdjustmentPercentLow: 20,
           maxSlippage: 1.0,
           emergencyExitTrigger: 10,
-          oracleSource: "twap",
+          oracleSource: "0",
           priceDeviationTolerance: 2.0,
           maxPositionSizePercent: 50,
           minPositionSize: 50,
@@ -505,7 +544,7 @@ const strategies = {
           feeReinvestment: true,
           reinvestmentTrigger: 25,
           reinvestmentRatio: 100,
-          platformSelectionCriteria: "highest_rewards",
+          platformSelectionCriteria: "3",
           minPoolLiquidity: 50000
         }
       },
@@ -517,7 +556,7 @@ const strategies = {
     ],
     // KEEPING ALL YOUR ORIGINAL PARAMETERS - just updating wizardStep values
     parameters: {
-      // Range and Rebalance Parameters - Step 3 (was 2)
+      // Range and Rebalance Parameters - contractGroup: "range"
       targetRangeUpper: {
         name: "Upper Range",
         description: "Range percentage above current price",
@@ -528,7 +567,8 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 3  // Changed from 2 to 3
+        contractGroup: "range",
+        wizardStep: 3
       },
       targetRangeLower: {
         name: "Lower Range",
@@ -540,7 +580,8 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 3  // Changed from 2 to 3
+        contractGroup: "range",
+        wizardStep: 3
       },
       rebalanceThresholdUpper: {
         name: "Upper Rebalance Trigger",
@@ -552,7 +593,8 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 3  // Changed from 2 to 3
+        contractGroup: "range",
+        wizardStep: 3
       },
       rebalanceThresholdLower: {
         name: "Lower Rebalance Trigger",
@@ -564,240 +606,19 @@ const strategies = {
         step: 0.1,
         suffix: "%",
         group: 0,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-      maxVaultUtilization: {
-        name: "Max Vault Utilization",
-        description: "Maximum percentage of vault assets that can be deployed across all positions",
-        type: "percent",
-        defaultValue: 80,
-        min: 10,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 2,
-        wizardStep: 3  // Changed from 2 to 3
+        contractGroup: "range",
+        wizardStep: 3
       },
 
-      // Adaptive Range Parameters - Step 3 (was 2)
-      adaptiveRanges: {
-        name: "Adaptive Ranges",
-        description: "Automatically adjust ranges based on rebalance frequency",
-        type: "boolean",
-        defaultValue: true,
-        group: 3,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-      rebalanceCountThresholdHigh: {
-        name: "High Rebalance Count",
-        description: "If more than this many rebalances occur in the timeframe, widen ranges",
-        type: "number",
-        defaultValue: 3,
-        min: 1,
-        max: 20,
-        step: 1,
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      rebalanceCountThresholdLow: {
-        name: "Low Rebalance Count",
-        description: "If fewer than this many rebalances occur in the timeframe, tighten ranges",
-        type: "number",
-        defaultValue: 1,
-        min: 0,
-        max: 10,
-        step: 1,
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      adaptiveTimeframeHigh: {
-        name: "High Count Timeframe",
-        description: "Days to look back when counting rebalances for widening ranges",
-        type: "number",
-        defaultValue: 7,
-        min: 1,
-        max: 30,
-        step: 1,
-        suffix: " days",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      adaptiveTimeframeLow: {
-        name: "Low Count Timeframe",
-        description: "Days to look back when counting rebalances for tightening ranges",
-        type: "number",
-        defaultValue: 7,
-        min: 1,
-        max: 30,
-        step: 1,
-        suffix: " days",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      rangeAdjustmentPercentHigh: {
-        name: "Range Expansion Amount",
-        description: "Percentage to increase position ranges when too many rebalances occur",
-        type: "percent",
-        defaultValue: 20,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      thresholdAdjustmentPercentHigh: {
-        name: "Threshold Expansion Amount",
-        description: "Percentage to increase rebalance thresholds when too many rebalances occur",
-        type: "percent",
-        defaultValue: 15,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      rangeAdjustmentPercentLow: {
-        name: "Range Contraction Amount",
-        description: "Percentage to decrease position ranges when too few rebalances occur",
-        type: "percent",
-        defaultValue: 20,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-      thresholdAdjustmentPercentLow: {
-        name: "Threshold Contraction Amount",
-        description: "Percentage to decrease rebalance thresholds when too few rebalances occur",
-        type: "percent",
-        defaultValue: 15,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 3,
-        wizardStep: 3,  // Changed from 2 to 3
-        conditionalOn: "adaptiveRanges",
-        conditionalValue: true
-      },
-
-      // Risk Parameters - Step 3 (was 2)
-      maxSlippage: {
-        name: "Max Slippage",
-        description: "Maximum acceptable slippage when executing trades",
-        type: "percent",
-        defaultValue: 0.5,
-        min: 0.1,
-        max: 5.0,
-        step: 0.1,
-        suffix: "%",
-        group: 2,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-      emergencyExitTrigger: {
-        name: "Emergency Exit",
-        description: "Price change percentage that triggers emergency exit from positions",
-        type: "percent",
-        defaultValue: 15,
-        min: 5,
-        max: 50,
-        step: 1,
-        suffix: "%",
-        group: 2,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-
-      // Oracle Parameters - Step 3 (was 2)
-      oracleSource: {
-        name: "Price Oracle",
-        description: "Source of price data for strategy decisions",
-        type: "select",
-        options: [
-          { value: "dex", label: "DEX Price" },
-          { value: "chainlink", label: "Chainlink" },
-          { value: "twap", label: "Time-Weighted Average Price" },
-        ],
-        defaultValue: "dex",
-        group: 3,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-      priceDeviationTolerance: {
-        name: "Oracle Deviation Tolerance",
-        description: "Maximum allowed deviation between different price sources",
-        type: "percent",
-        defaultValue: 1.0,
-        min: 0.1,
-        max: 5.0,
-        step: 0.1,
-        suffix: "%",
-        group: 3,
-        wizardStep: 3  // Changed from 2 to 3
-      },
-
-      // Position Sizing Parameters - Step 4 (was 5)
-      maxPositionSizePercent: {
-        name: "Max Position Size",
-        description: "Maximum percentage of vault assets to allocate to any single position",
-        type: "percent",
-        defaultValue: 30,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 2,
-        wizardStep: 4  // Changed from 5 to 4
-      },
-      minPositionSize: {
-        name: "Min Position Size",
-        description: "Minimum position size in USD value to avoid dust positions",
-        type: "fiat-currency",
-        defaultValue: 100,
-        min: 10,
-        max: 10000,
-        step: 10,
-        prefix: "$",
-        group: 2,
-        wizardStep: 4  // Changed from 5 to 4
-      },
-      targetUtilization: {
-        name: "Target Utilization",
-        description: "Target percentage of vault assets to deploy (per position)",
-        type: "percent",
-        defaultValue: 20,
-        min: 5,
-        max: 100,
-        step: 5,
-        suffix: "%",
-        group: 2,
-        wizardStep: 4  // Changed from 5 to 4
-      },
-
-      // Fee Parameters - Step 4 (was 5)
+      // Fee Settings - contractGroup: "fee"
       feeReinvestment: {
         name: "Reinvest Fees",
         description: "Automatically reinvest collected fees",
         type: "boolean",
         defaultValue: true,
         group: 1,
-        wizardStep: 4  // Changed from 5 to 4
+        contractGroup: "fee",
+        wizardStep: 4
       },
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
@@ -809,8 +630,9 @@ const strategies = {
         step: 10,
         prefix: "$",
         group: 1,
+        contractGroup: "fee",
         type: "fiat-currency",
-        wizardStep: 4,  // Changed from 5 to 4
+        wizardStep: 4,
         conditionalOn: "feeReinvestment",
         conditionalValue: true
       },
@@ -824,25 +646,267 @@ const strategies = {
         step: 5,
         suffix: "%",
         group: 1,
-        wizardStep: 4,  // Changed from 5 to 4
+        contractGroup: "fee",
+        wizardStep: 4,
         conditionalOn: "feeReinvestment",
         conditionalValue: true
       },
 
-      // Platform Parameters - Step 4 (was 5)
+      // Risk Management - contractGroup: "risk"
+      maxSlippage: {
+        name: "Max Slippage",
+        description: "Maximum acceptable slippage when executing trades",
+        type: "percent",
+        defaultValue: 0.5,
+        min: 0.1,
+        max: 5.0,
+        step: 0.1,
+        suffix: "%",
+        group: 2,
+        contractGroup: "risk",
+        wizardStep: 3
+      },
+      emergencyExitTrigger: {
+        name: "Emergency Exit",
+        description: "Price change percentage that triggers emergency exit from positions",
+        type: "percent",
+        defaultValue: 15,
+        min: 5,
+        max: 50,
+        step: 1,
+        suffix: "%",
+        group: 2,
+        contractGroup: "risk",
+        wizardStep: 3
+      },
+      maxVaultUtilization: {
+        name: "Max Vault Utilization",
+        description: "Maximum percentage of vault assets that can be deployed across all positions",
+        type: "percent",
+        defaultValue: 80,
+        min: 10,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 2,
+        contractGroup: "risk",
+        wizardStep: 3
+      },
+
+      // Adaptive Range Parameters - contractGroup: "adaptive"
+      adaptiveRanges: {
+        name: "Adaptive Ranges",
+        description: "Automatically adjust ranges based on rebalance frequency",
+        type: "boolean",
+        defaultValue: true,
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3
+      },
+      rebalanceCountThresholdHigh: {
+        name: "High Rebalance Count",
+        description: "If more than this many rebalances occur in the timeframe, widen ranges",
+        type: "number",
+        defaultValue: 3,
+        min: 1,
+        max: 20,
+        step: 1,
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      rebalanceCountThresholdLow: {
+        name: "Low Rebalance Count",
+        description: "If fewer than this many rebalances occur in the timeframe, tighten ranges",
+        type: "number",
+        defaultValue: 1,
+        min: 0,
+        max: 10,
+        step: 1,
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      adaptiveTimeframeHigh: {
+        name: "High Count Timeframe",
+        description: "Days to look back when counting rebalances for widening ranges",
+        type: "number",
+        defaultValue: 7,
+        min: 1,
+        max: 30,
+        step: 1,
+        suffix: " days",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      adaptiveTimeframeLow: {
+        name: "Low Count Timeframe",
+        description: "Days to look back when counting rebalances for tightening ranges",
+        type: "number",
+        defaultValue: 7,
+        min: 1,
+        max: 30,
+        step: 1,
+        suffix: " days",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      rangeAdjustmentPercentHigh: {
+        name: "Range Expansion Amount",
+        description: "Percentage to increase position ranges when too many rebalances occur",
+        type: "percent",
+        defaultValue: 20,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      thresholdAdjustmentPercentHigh: {
+        name: "Threshold Expansion Amount",
+        description: "Percentage to increase rebalance thresholds when too many rebalances occur",
+        type: "percent",
+        defaultValue: 15,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      rangeAdjustmentPercentLow: {
+        name: "Range Contraction Amount",
+        description: "Percentage to decrease position ranges when too few rebalances occur",
+        type: "percent",
+        defaultValue: 20,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+      thresholdAdjustmentPercentLow: {
+        name: "Threshold Contraction Amount",
+        description: "Percentage to decrease rebalance thresholds when too few rebalances occur",
+        type: "percent",
+        defaultValue: 15,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 3,
+        contractGroup: "adaptive",
+        wizardStep: 3,
+        conditionalOn: "adaptiveRanges",
+        conditionalValue: true
+      },
+
+      // Oracle Parameters - contractGroup: "oracle"
+      oracleSource: {
+        name: "Price Oracle",
+        description: "Source of price data for strategy decisions",
+        type: "select",
+        options: [
+          { value: "0", label: "DEX Price" },
+          { value: "1", label: "Chainlink" },
+          { value: "2", label: "Time-Weighted Average Price" },
+        ],
+        defaultValue: "0",
+        group: 3,
+        contractGroup: "oracle",
+        wizardStep: 3
+      },
+      priceDeviationTolerance: {
+        name: "Oracle Deviation Tolerance",
+        description: "Maximum allowed deviation between different price sources",
+        type: "percent",
+        defaultValue: 1.0,
+        min: 0.1,
+        max: 5.0,
+        step: 0.1,
+        suffix: "%",
+        group: 3,
+        contractGroup: "oracle",
+        wizardStep: 3
+      },
+
+      // Position Sizing Parameters - contractGroup: "positionSizing"
+      maxPositionSizePercent: {
+        name: "Max Position Size",
+        description: "Maximum percentage of vault assets to allocate to any single position",
+        type: "percent",
+        defaultValue: 30,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 2,
+        contractGroup: "positionSizing",
+        wizardStep: 4
+      },
+      minPositionSize: {
+        name: "Min Position Size",
+        description: "Minimum position size in USD value to avoid dust positions",
+        type: "fiat-currency",
+        defaultValue: 100,
+        min: 10,
+        max: 10000,
+        step: 10,
+        prefix: "$",
+        group: 2,
+        contractGroup: "positionSizing",
+        wizardStep: 4
+      },
+      targetUtilization: {
+        name: "Target Utilization",
+        description: "Target percentage of vault assets to deploy (per position)",
+        type: "percent",
+        defaultValue: 20,
+        min: 5,
+        max: 100,
+        step: 5,
+        suffix: "%",
+        group: 2,
+        contractGroup: "positionSizing",
+        wizardStep: 4
+      },
+
+      // Platform Parameters - contractGroup: "platform"
       platformSelectionCriteria: {
         name: "Platform Selection",
         description: "Criteria for selecting which platform to use for a position",
         type: "select",
         options: [
-          { value: "highest_tvl", label: "Highest TVL" },
-          { value: "highest_volume", label: "Highest Volume" },
-          { value: "lowest_fees", label: "Lowest Fees" },
-          { value: "highest_rewards", label: "Best Rewards" },
+          { value: "0", label: "Highest TVL" },
+          { value: "1", label: "Highest Volume" },
+          { value: "2", label: "Lowest Fees" },
+          { value: "3", label: "Best Rewards" },
         ],
-        defaultValue: "highest_volume",
+        defaultValue: "1",
         group: 3,
-        wizardStep: 4  // Changed from 5 to 4
+        contractGroup: "platform",
+        wizardStep: 4
       },
       minPoolLiquidity: {
         name: "Min Pool Liquidity",
@@ -854,11 +918,11 @@ const strategies = {
         step: 10000,
         prefix: "$",
         group: 2,
-        wizardStep: 4  // Changed from 5 to 4
-      },
+        contractGroup: "platform",
+        wizardStep: 4
+      }
     }
   },
-
   // The Fed strategy for stablecoin management
   "fed": {
     id: "fed",
@@ -974,7 +1038,8 @@ export function getAvailableStrategies() {
       description: strategy.description,
       templateEnumMap: strategy.templateEnumMap,
       parameters: strategy.parameters,
-      parameterGroups: strategy.parameterGroups || [],
+      parameterGroups: strategy.parameterGroups,
+      contractParametersGroups: strategy.contractParametersGroups,
       comingSoon: strategy.comingSoon || false
     }));
 }

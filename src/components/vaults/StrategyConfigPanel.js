@@ -259,7 +259,6 @@ const StrategyConfigPanel = ({
     }
 
     if (paramData.parameters !== strategyParams) {
-      console.log('params changed')
       const newParams = { ...strategyParams, ...paramData.parameters };
 
       // Update strategy parameters
@@ -272,12 +271,10 @@ const StrategyConfigPanel = ({
 
     // Store token and platform selections too
     if (paramData.selectedTokens !== selectedTokens) {
-      console.log('selected tokens changed')
       setSelectedTokens(paramData.selectedTokens);
     }
 
     if (paramData.selectedPlatforms !== selectedPlatforms) {
-      console.log('selected platforms changed')
       setSelectedPlatforms(paramData.selectedPlatforms);
     }
   };
@@ -485,30 +482,22 @@ const StrategyConfigPanel = ({
 
       // Step 5: Set strategy parameters based on the strategy's parameter groups
       if (automationEnabled && selectedStrategy && (activePreset === 'custom' || hasUnsavedChanges)) {
-        // Get parameter groups from config
-        const parameterGroups = strategyConfig.parameterGroups || [];
-        // Process each parameter group
-        for (const group of parameterGroups) {
-          console.log(Object.entries(parameterDefinitions).filter(([paramId, config]) => config.group === group.id))
-          // Get parameters for this group
-          const groupParams = Object.entries(parameterDefinitions)
-            .filter(([paramId, config]) => config.group === group.id)
-            .map(([paramId, config]) => ({ paramId, config }));
+        // Get contract parameter groups from config
+        const contractParamGroups = strategyConfig.contractParametersGroups || [];
 
-          console.log(groupParams.length, !group.setterMethod)
+        // Process each contract parameter group
+        for (const group of contractParamGroups) {
+          // Get parameters for this contract group
+          const groupParamIds = group.parameters || [];
+          const availableParams = groupParamIds.filter(paramId => strategyParams[paramId] !== undefined);
 
-          // Skip if no parameters in this group or setter method isn't defined
-          if (groupParams.length === 0 || !group.setterMethod) continue;
-          console.log(1)
-          // Check if we have all required parameters
-          const haveAllRequiredParams = groupParams.every(({ paramId }) =>
-            strategyParams[paramId] !== undefined);
-          console.log(haveAllRequiredParams)
-          if (!haveAllRequiredParams) continue;
-          console.log(2)
-          // Format parameters according to their types and add transaction
-          const formattedParams = groupParams.map(({ paramId, config }) => {
+          // Skip if no parameters in this group or not all required parameters are available
+          if (availableParams.length === 0 || availableParams.length !== groupParamIds.length) continue;
+
+          // Format parameters according to their types
+          const formattedParams = groupParamIds.map(paramId => {
             const value = strategyParams[paramId];
+            const config = parameterDefinitions[paramId];
 
             // Format based on parameter type
             switch (config.type) {
@@ -520,15 +509,12 @@ const StrategyConfigPanel = ({
                 // Convert to pennies
                 return parseFloat(value).toFixed(2) * 100;
 
-              case 'token-currency':
-                // convert using token details?
-
               case 'boolean':
                 return !!value;
 
               case 'select':
                 // Use the raw value for select types (should be enum value)
-                return value;
+                return parseInt(value);
 
               default:
                 // For other types, use the value as is
@@ -540,7 +526,7 @@ const StrategyConfigPanel = ({
           strategyTransactions.push({
             target: strategyAddress,
             data: strategyContract.interface.encodeFunctionData(group.setterMethod, formattedParams),
-            description: `Set ${group.name.toLowerCase()} parameters`
+            description: `Set ${group.id} parameters`
           });
         }
       }

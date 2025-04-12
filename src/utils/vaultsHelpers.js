@@ -20,28 +20,28 @@ import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json";
  * @param {number} enumValue - Enum value from contract
  * @returns {string} String representation
  */
-const mapOracleSourceEnum = (enumValue) => {
-  const sources = ['dex', 'chainlink', 'twap'];
-  const index = parseInt(enumValue.toString());
-  if (index >= 0 && index < sources.length) {
-    return sources[index];
-  }
-  return 'unknown'; // Fallback for UI compatibility
-};
+// const mapOracleSourceEnum = (enumValue) => {
+//   const sources = ['dex', 'chainlink', 'twap'];
+//   const index = parseInt(enumValue.toString());
+//   if (index >= 0 && index < sources.length) {
+//     return sources[index];
+//   }
+//   return 'unknown'; // Fallback for UI compatibility
+// };
 
 /**
  * Map PlatformSelectionCriteria enum to string value
  * @param {number} enumValue - Enum value from contract
  * @returns {string} String representation
  */
-const mapPlatformCriteriaEnum = (enumValue) => {
-  const criteria = ['highest_tvl', 'highest_volume', 'lowest_fees', 'highest_rewards'];
-  const index = parseInt(enumValue.toString());
-  if (index >= 0 && index < criteria.length) {
-    return criteria[index];
-  }
-  return 'unknown'; // Fallback for UI compatibility
-};
+// const mapPlatformCriteriaEnum = (enumValue) => {
+//   const criteria = ['highest_tvl', 'highest_volume', 'lowest_fees', 'highest_rewards'];
+//   const index = parseInt(enumValue.toString());
+//   if (index >= 0 && index < criteria.length) {
+//     return criteria[index];
+//   }
+//   return 'unknown'; // Fallback for UI compatibility
+// };
 
 /**
  * Map strategy parameters from contract return value to named objects
@@ -82,7 +82,7 @@ const mapStrategyParameters = (strategyId, params) => {
         thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
 
         // Oracle Settings
-        oracleSource: mapOracleSourceEnum(params[19]),
+        oracleSource: parseInt(params[19]),
         priceDeviationTolerance: parseInt(params[20]) / 100,
 
         // Position Sizing
@@ -91,7 +91,7 @@ const mapStrategyParameters = (strategyId, params) => {
         targetUtilization: parseInt(params[23]) / 100,
 
         // Platform Settings
-        platformSelectionCriteria: mapPlatformCriteriaEnum(params[24]),
+        platformSelectionCriteria: parseInt(params[24]),
         minPoolLiquidity: ethers.formatUnits(params[25], 18) // Convert wei to ether
       };
     }

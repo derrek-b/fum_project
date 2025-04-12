@@ -266,7 +266,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xC0277148e804B180F340e02d87E106ebDf5F53D2"
+      "1337": "0xa5d4F5876D165813e54531bF770d549f7F9a06B0"
     }
   },
   "PositionVault": {
@@ -836,7 +836,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xa14f7F24F88b40C27fDaa9A24aD79dAF1d7255b4"
+      "1337": "0x1289b5313aC14FC09736687Fcb9ED9405B345F23"
     }
   },
   "parris": {
@@ -2430,7 +2430,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xE08eB087BFe6Acb4f4e76c6A624b2e2e231514F4"
+      "1337": "0x15D0EFa53aD10011a7C53068eA78DF464d1aaaCE"
     }
   },
   "ParrisIslandStrategy": {
