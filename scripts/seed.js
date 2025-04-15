@@ -8,6 +8,8 @@ const JSBI = require('jsbi');
 const IUniswapV3PoolABI = require('@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
 const NonfungiblePositionManagerABI = require('@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json').abi;
 const ERC20ABI = require('@openzeppelin/contracts/build/contracts/ERC20.json').abi;
+const { abi: UniswapV3RouterABI } = require('@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json');
+
 // const fs = require('fs');
 // const path = require('path');
 
@@ -41,13 +43,13 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   // Contract setup
   const wethContract = new ethers.Contract(
     WETH_ADDRESS,
-    ['function approve(address spender, uint256 amount) external returns (bool)'],
+    ERC20ABI,
     wallet
   );
 
   const usdcContract = new ethers.Contract(
     USDC_ADDRESS,
-    ['function approve(address spender, uint256 amount) external returns (bool)'],
+    ERC20ABI,
     wallet
   );
 
@@ -57,13 +59,13 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
 
   const router = new ethers.Contract(
     UNISWAP_ROUTER_ADDRESS,
-    ROUTER_ABI,
+    UniswapV3RouterABI,
     wallet
   );
 
   // Get the current nonce and provider
   const provider = wallet.provider;
-  let currentNonce = await provider.getTransactionCount(wallet.address);
+  let currentNonce = await provider.getTransactionCount(wallet.address, "pending");
   console.log(`Starting with nonce: ${currentNonce}`);
 
   // Approve router to spend tokens (with explicit nonce)
@@ -71,7 +73,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   const approveTx1 = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
     ethers.parseEther('5000'),
-    { nonce: currentNonce++ }
+    { nonce: currentNonce++, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 100000 }
   );
   await approveTx1.wait();
   console.log('WETH approval confirmed');
@@ -80,27 +82,24 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   const approveTx2 = await usdcContract.approve(
     UNISWAP_ROUTER_ADDRESS,
     ethers.parseUnits('5000000', 6),
-    { nonce: currentNonce++ }
+    { nonce: currentNonce++, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 100000 }
   );
   await approveTx2.wait();
   console.log('USDC approval confirmed');
 
-  // Reset nonce after approvals in case anything changed
-  currentNonce = await provider.getTransactionCount(wallet.address);
-  console.log(`Nonce after approvals: ${currentNonce}`);
-
   // Perform alternating swaps
   for (let i = 0; i < numSwaps; i++) {
     try {
-      // Re-check nonce before each swap to ensure we're in sync
-      currentNonce = await provider.getTransactionCount(wallet.address);
+      // Refresh nonce with pending transactions
+      currentNonce = await provider.getTransactionCount(wallet.address, "pending");
+      console.log(`Swap ${i + 1}/${numSwaps} nonce: ${currentNonce}`);
 
       const isWethToUsdc = i % 2 === 0;
       const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
       const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
       const amountIn = isWethToUsdc ?
-        ethers.parseEther('2') : // 0.1 WETH
-        ethers.parseUnits('3800', 6); // 100 USDC
+        ethers.parseEther('0.1') : // 0.1 WETH
+        ethers.parseUnits('200', 6); // 200 USDC
 
       console.log(`Swap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
 
@@ -113,27 +112,31 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
         deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
         amountIn,
         amountOutMinimum: 0, // No minimum for testing
-        sqrtPriceLimitX96: 0 // No price limit
+        sqrtPriceLimitX96: 0
       };
 
-      // Execute swap with explicit nonce
+      // Execute swap
       const tx = await router.exactInputSingle(
         params,
-        { nonce: currentNonce }
+        { nonce: currentNonce, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 300000 }
       );
 
       console.log(`  Swap transaction sent: ${tx.hash}`);
 
-      // Wait for the transaction to be mined
+      // Wait for confirmation
       await tx.wait();
       console.log(`  Swap confirmed`);
 
-      // Small delay to give the node time to update its state (optional)
+      // Wait 2 seconds to align with Ganache's block time
       await new Promise(resolve => setTimeout(resolve, 500));
 
+      // Increment nonce only on success
+      currentNonce++;
+
     } catch (error) {
-      console.error(`Error in swap ${i+1}:`, error.message);
-      // Continue with the next swap even if one fails
+      console.error(`Error in swap ${i + 1}:`, error.message);
+      // Do not increment nonce on failure to retry with the same nonce
+      // Continue to next swap
     }
   }
 
@@ -521,7 +524,7 @@ async function main() {
   // 3. Execute the swap through the Uniswap router
 
   // Step 1: Wrap ETH to WETH using the WETH contract
-  console.log(`Wrapping 10 ETH to WETH...`);
+  console.log(`Wrapping 20 ETH to WETH...`);
 
   // WETH contract address is the same as the token address
   const wethContractWithABI = new ethers.Contract(
@@ -540,7 +543,7 @@ async function main() {
 
   // Deposit 5 ETH to get WETH
   const wrapTx = await wethContractWithABI.deposit({
-    value: ethers.parseEther('10'),
+    value: ethers.parseEther('20'),
     nonce: currentNonce++
   });
 
@@ -556,7 +559,7 @@ async function main() {
   console.log(`Approving Uniswap Router to spend WETH...`);
   const approveTx = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('5'),
+    ethers.parseEther('500'),
     {
       nonce: currentNonce++
     }
@@ -577,7 +580,7 @@ async function main() {
     wallet
   );
 
-  console.log(`Swapping 5 WETH for USDC...`);
+  console.log(`Swapping 10 WETH for USDC...`);
 
   // Current timestamp plus 20 minutes (in seconds)
   const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
@@ -588,7 +591,7 @@ async function main() {
     fee: 500, // 0.3% fee tier
     recipient: wallet.address,
     deadline: deadline,
-    amountIn: ethers.parseEther('5'),
+    amountIn: ethers.parseEther('10'),
     amountOutMinimum: 0, // For testing, we accept any amount out (in production, set a min)
     sqrtPriceLimitX96: 0,
     nonce: currentNonce++

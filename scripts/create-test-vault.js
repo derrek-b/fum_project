@@ -166,17 +166,6 @@ async function main() {
   const tx = await vaultFactory.createVault(vaultName);
   const receipt = await tx.wait();
 
-  console.log("All logs in receipt:");
-receipt.logs.forEach((log, index) => {
-  console.log(`Log ${index}:`, log);
-  try {
-    const parsed = vaultFactory.interface.parseLog(log);
-    console.log(`Parsed event: ${parsed.name}`);
-  } catch (e) {
-    console.log("Failed to parse with vaultFactory interface");
-  }
-});
-
   // Extract vault address from event logs
   const vaultCreatedEvents = receipt.logs
     .filter(log => {
