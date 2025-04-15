@@ -1,0 +1,2 @@
+# Files to be encrypted using git-crypt library
+src/automation/** filter=git-crypt diff=git-crypt
