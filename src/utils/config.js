@@ -6,6 +6,8 @@ const config = {
       rpcUrl: process.env.NEXT_PUBLIC_ARBITRUM_RPC || "https://arb1.arbitrum.io/rpc",
       name: "Arbitrum One",
       envPK: "NEXT_PUBLIC_ARBITRUM_DEPLOYER_PK", // Private key env variable name for deployment
+      executorEnvPK: "NEXT_PUBLIC_ARBITRUM_EXECUTOR_PK",
+      executorAddress: "0x0",
       platforms: {
         uniswapV3: {
           id: "uniswapV3",
@@ -22,6 +24,8 @@ const config = {
       rpcUrl: "http://localhost:8545",
       name: "Hardhat Forked Arbitrum",
       envPK: "NEXT_PUBLIC_LOCALHOST_DEPLOYER_PK", // Optional, script uses hardcoded value for localhost
+      executorEnvPK: "NEXT_PUBLIC_LOCALHOST_EXECUTOR_PK",
+      executorAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
       platforms: {
         uniswapV3: {
           id: "uniswapV3",
@@ -38,6 +42,8 @@ const config = {
       rpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC || "https://mainnet.infura.io/v3/YOUR_INFURA_KEY",
       name: "Ethereum",
       envPK: "NEXT_PUBLIC_ETHEREUM_DEPLOYER_PK", // Private key env variable name for deployment
+      executorEnvPK: "NEXT_PUBLIC_ETHEREUM_EXECUTOR_PK",
+      executorAddress: "0x0",
       platforms: {
         uniswapV3: {
           id: "uniswapV3",
@@ -141,6 +147,16 @@ export function platformSupportsTokens(platformId, tokenSymbols, chainId) {
 export function getPlatformColor(platformId) {
   const metadata = config.platformMetadata[platformId] || {};
   return metadata.color || "#6c757d"; // Default gray
+}
+
+/**
+ * Get the executor address for the current chain
+ * @param {number} chainId - The current chain ID
+ * @returns {string|null} The executor address or null if not configured
+ */
+export function getExecutorAddress(chainId) {
+  if (!chainId || !config.chains[chainId]) return null;
+  return config.chains[chainId].executorAddress || null;
 }
 
 export default config;

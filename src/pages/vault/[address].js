@@ -367,9 +367,9 @@ export default function VaultDetailPage() {
           <div className="d-flex justify-content-between align-items-center mb-3">
             <h1 className="mb-0 d-flex align-items-center">
               {vault.name}
-              {vault.strategy?.isActive ? (
+              {vaultFromRedux.strategy?.strategyId ? (
                 (() => {
-                  const strategyDetails = getStrategyDetails(vault?.strategy?.strategyId);
+                  const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
                   const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
 
                   return (

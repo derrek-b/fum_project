@@ -6,12 +6,14 @@ import { Card, Form, Button, Alert, Spinner, Badge } from 'react-bootstrap';
 import { getVaultContract, executeVaultTransactions } from '../../utils/contracts';
 import contractData from '../../abis/contracts.json';
 import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from '../../utils/strategyConfig';
+import { getExecutorAddress } from '@/utils/config';
 import StrategyDetailsSection from './StrategyDetailsSection';
 import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
 import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
+import AutomationModal from './AutomationModal';
 import { config } from 'dotenv';
 
 const StrategyConfigPanel = ({
@@ -43,6 +45,15 @@ const StrategyConfigPanel = ({
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
   const [editMode, setEditMode] = useState(false);
   const [validateFn, setValidateFn] = useState(null);
+  const [strategyJustSaved, setStrategyJustSaved] = useState(false);
+
+  // Separate executor state from strategy state
+  const [executorEnabled, setExecutorEnabled] = useState(false);
+  const [initialExecutorEnabled, setInitialExecutorEnabled] = useState(false);
+
+  // Automation modal state
+  const [showAutomationModal, setShowAutomationModal] = useState(false);
+  const [isEnablingAutomation, setIsEnablingAutomation] = useState(true);
 
   // Modals state
   const [showDeactivationModal, setShowDeactivationModal] = useState(false);
@@ -61,14 +72,31 @@ const StrategyConfigPanel = ({
   const [tokensChanged, setTokensChanged] = useState(false);
   const [platformsChanged, setPlatformsChanged] = useState(false);
   const [paramsChanged, setParamsChanged] = useState(false);
+
+  // NEW: Add data loading state
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
   const { showSuccess, showError } = useToast();
 
   // Load available strategies and set initial state on component mount
   useEffect(() => {
+    // Reset change tracking flags during loading
+    setTemplateChanged(false);
+    setTokensChanged(false);
+    setPlatformsChanged(false);
+    setParamsChanged(false);
+    setHasUnsavedChanges(false);
+
     // Set automation toggle based on vault's active strategy status
     const hasStrategy = vault?.hasActiveStrategy || strategyActive || false;
     setAutomationEnabled(hasStrategy);
     setInitialAutomationState(hasStrategy);
+
+    // Set executor state separately
+    const zeroAddress = "0x0000000000000000000000000000000000000000";
+    const hasExecutor = vault?.executor && vault.executor !== zeroAddress;
+    setExecutorEnabled(hasExecutor);
+    setInitialExecutorEnabled(hasExecutor);
 
     // If vault has an active strategy, set it as selected
     if (vault?.strategy?.strategyId) {
@@ -105,22 +133,36 @@ const StrategyConfigPanel = ({
       setSelectedStrategy('');
       setInitialSelectedStrategy('');
     }
+
+    // Determine if data is fully loaded
+    const isComplete = vault && (
+      !vault.hasActiveStrategy ||
+      (vault.strategy?.strategyId && vault.strategy?.parameters)
+    );
+
+    if (isComplete) {
+      setIsDataLoaded(true)
+    } else {
+      setIsDataLoaded(false);
+    }
   }, [vault, strategyActive]);
 
   // Check for unsaved changes whenever relevant state changes
   useEffect(() => {
+    // Only detect changes after data is fully loaded
+    if (!isDataLoaded) return;
+
     const hasChanges =
-      automationEnabled !== initialAutomationState ||
-      (automationEnabled && selectedStrategy !== initialSelectedStrategy) ||
-      activePreset !== initialActivePreset ||
+      // Strategy selection changes only - not automation state
+      (selectedStrategy !== initialSelectedStrategy) ||
+      (activePreset !== initialActivePreset) ||
       templateChanged || tokensChanged || platformsChanged || paramsChanged;
 
     setHasUnsavedChanges(hasChanges);
   }, [
-    automationEnabled,
+    isDataLoaded, // Add this to prevent premature detection
     selectedStrategy,
-    initialAutomationState,
-    initialSelectedStrategy,
+    initialSelectedStrategy, // Add initial values to dependencies
     activePreset,
     initialActivePreset,
     templateChanged,
@@ -129,14 +171,30 @@ const StrategyConfigPanel = ({
     paramsChanged
   ]);
 
+  // Show automation modal after successful strategy save
+  useEffect(() => {
+    if (strategyJustSaved && vault?.hasActiveStrategy) {
+      setShowTransactionModal(false)
+      // Show modal after a short delay to allow the transaction modal to close
+      setTimeout(() => {
+        setIsEnablingAutomation(true);
+        setShowAutomationModal(true);
+        setStrategyJustSaved(false); // Reset the flag
+      }, 500);
+    }
+  }, [strategyJustSaved, vault?.hasActiveStrategy]);
+
   // Handle strategy selection change
   const handleStrategyChange = (e) => {
+    if (!isDataLoaded) return; // Prevent changes during loading
     setSelectedStrategy(e.target.value);
     setEditMode(true);
   };
 
   // Handle automation toggle
   const handleAutomationToggle = (e) => {
+    if (!isDataLoaded) return; // Prevent changes during loading
+
     const isEnabled = e.target.checked;
 
     if (initialAutomationState && !isEnabled) {
@@ -151,6 +209,64 @@ const StrategyConfigPanel = ({
         setSelectedStrategy('');
         setEditMode(false);
       }
+    }
+  };
+
+  // Handle executor automation toggle
+  const handleExecutorToggle = (e) => {
+    if (!isDataLoaded) return; // Prevent changes during loading
+
+    const isEnabled = e.target.checked;
+    setIsEnablingAutomation(isEnabled);
+    setShowAutomationModal(true);
+  };
+
+  // Handle automation confirmation
+  const handleAutomationConfirm = async () => {
+    console.log(`Setting executor... ${isEnablingAutomation ? 'enabling' : 'disabling'} automation`);
+
+    try {
+      // Close the modal
+      setShowAutomationModal(false);
+
+      if (!provider) {
+        throw new Error("No provider available");
+      }
+
+      // Get signer with await
+      const signer = await provider.getSigner();
+
+      // Get vault contract instance
+      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+
+      // Get executor address from config
+      const executorAddress = getExecutorAddress(chainId)
+
+      // Set or remove executor
+      if (isEnablingAutomation) {
+        await vaultContract.setExecutor(executorAddress);
+        setExecutorEnabled(true);
+        setInitialExecutorEnabled(true);
+      } else {
+        await vaultContract.removeExecutor();
+        setExecutorEnabled(false);
+        setInitialExecutorEnabled(false);
+      }
+
+      // Show success message
+      showSuccess(`Automation ${isEnablingAutomation ? 'enabled' : 'disabled'} successfully`);
+
+      // Update redux state with executor info
+      dispatch(updateVault({
+        vaultAddress,
+        vaultData: {
+          executor: isEnablingAutomation ? executorAddress : null
+        }
+      }));
+
+    } catch (error) {
+      console.error(`Error ${isEnablingAutomation ? 'enabling' : 'disabling'} automation:`, error);
+      showError(`Failed to ${isEnablingAutomation ? 'enable' : 'disable'} automation: ${error.message}`);
     }
   };
 
@@ -216,27 +332,55 @@ const StrategyConfigPanel = ({
 
   // Handle edit request from child component
   const handleEditRequest = () => {
+    if (!isDataLoaded) return; // Prevent changes during loading
     setEditMode(true);
   };
 
-  // Check if parameters have changed compared to initial values
+  // Check if parameters have changed compared to initial values - uses deep comparison
+  // const checkParametersChanged = (newParams, originalParams) => {
+  //   // If we don't have original params, consider it changed
+  //   if (!originalParams || Object.keys(originalParams).length === 0) {
+  //     return Object.keys(newParams).length > 0;
+  //   }
+
+  //   // Check for any differences
+  //   for (const [key, value] of Object.entries(newParams)) {
+  //     // If parameter doesn't exist in original or value is different
+  //     if (originalParams[key] === undefined || originalParams[key] !== value) {
+  //       return true;
+  //     }
+  //   }
+
+  //   // Check for keys in original that are no longer in newParams
+  //   for (const key of Object.keys(originalParams)) {
+  //     if (newParams[key] === undefined) {
+  //       return true;
+  //     }
+  //   }
+
+  //   return false;
+  // };
+
   const checkParametersChanged = (newParams, originalParams) => {
-    // If we don't have original params, consider it changed
-    if (!originalParams || Object.keys(originalParams).length === 0) {
+    if (!originalParams) {
       return Object.keys(newParams).length > 0;
     }
 
-    // Check for any differences
-    for (const [key, value] of Object.entries(newParams)) {
-      // If parameter doesn't exist in original or value is different
-      if (originalParams[key] === undefined || originalParams[key] !== value) {
-        return true;
-      }
-    }
+    const keys = new Set([...Object.keys(newParams), ...Object.keys(originalParams)]);
 
-    // Check for keys in original that are no longer in newParams
-    for (const key of Object.keys(originalParams)) {
-      if (newParams[key] === undefined) {
+    for (const key of keys) {
+      const newValue = newParams[key];
+      const originalValue = originalParams[key];
+
+      if (newValue === undefined || originalValue === undefined) {
+        if (newValue !== originalValue) {
+          return true;
+        }
+      } else if (typeof newValue === 'object' && typeof originalValue === 'object') {
+        if (JSON.stringify(newValue) !== JSON.stringify(originalValue)) {
+          return true;
+        }
+      } else if (newValue !== originalValue) {
         return true;
       }
     }
@@ -244,10 +388,25 @@ const StrategyConfigPanel = ({
     return false;
   };
 
+  // Helper to compare arrays regardless of order
+  const areArraysEqual = (arr1, arr2) => {
+    if (!arr1 || !arr2) return false;
+    if (arr1.length !== arr2.length) return false;
+
+    // Create sorted copies for comparison
+    const sorted1 = [...arr1].sort();
+    const sorted2 = [...arr2].sort();
+
+    return sorted1.every((val, idx) => val === sorted2[idx]);
+  };
+
   // Handle parameter changes
   const handleParamsChange = (paramData) => {
+    if (!isDataLoaded) return; // Prevent changes during loading
+
+    // Handle preset change
     if (paramData.activePreset !== activePreset) {
-      setTemplateChanged(true)
+      setTemplateChanged(paramData.activePreset !== initialActivePreset);
       const newPreset = paramData.activePreset;
       setActivePreset(newPreset);
 
@@ -256,33 +415,34 @@ const StrategyConfigPanel = ({
         const templateDefaults = getTemplateDefaults(selectedStrategy, newPreset);
         if (templateDefaults) {
           setStrategyParams(templateDefaults);
-          // Also update initialParams when changing templates
-          setInitialParams(templateDefaults);
-          setParamsChanged(false);
+          // We don't update initialParams here - that would erase change detection
+          // Check if the new template params differ from initial params
+          setParamsChanged(checkParametersChanged(templateDefaults, initialParams));
         }
       }
     }
 
-    if (paramData.parameters !== strategyParams) {
+    // Handle parameter changes with deep comparison
+    if (paramData.parameters) {
       const newParams = { ...strategyParams, ...paramData.parameters };
-
-      // Update strategy parameters
       setStrategyParams(newParams);
 
-      // Check if parameters have changed from initial values
-      const changed = checkParametersChanged(newParams, initialParams);
-      setParamsChanged(changed);
+      // Check if parameters have changed using deep comparison
+      setParamsChanged(checkParametersChanged(newParams, initialParams));
     }
 
-    // Store token and platform selections too
-    if (paramData.selectedTokens !== selectedTokens) {
-      setTokensChanged(true);
+    // Handle token selection with proper array comparison
+    if (paramData.selectedTokens) {
       setSelectedTokens(paramData.selectedTokens);
+      // Check if tokens have changed using array comparison
+      setTokensChanged(!areArraysEqual(paramData.selectedTokens, currentStrategy?.selectedTokens || []));
     }
 
-    if (paramData.selectedPlatforms !== selectedPlatforms) {
-      setPlatformsChanged(true);
+    // Handle platform selection with proper array comparison
+    if (paramData.selectedPlatforms) {
       setSelectedPlatforms(paramData.selectedPlatforms);
+      // Check if platforms have changed using array comparison
+      setPlatformsChanged(!areArraysEqual(paramData.selectedPlatforms, currentStrategy?.selectedPlatforms || []));
     }
   };
 
@@ -595,6 +755,10 @@ const StrategyConfigPanel = ({
       // Show success message
       showSuccess("Strategy configuration saved successfully");
 
+      // Set flag to trigger automation modal after save
+      const isNewStrategy = !initialAutomationState && automationEnabled;
+      setStrategyJustSaved(isNewStrategy);
+
       // Update component state
       setInitialAutomationState(automationEnabled);
       setInitialSelectedStrategy(selectedStrategy);
@@ -606,8 +770,7 @@ const StrategyConfigPanel = ({
       setParamsChanged(false);
       setHasUnsavedChanges(false);
       setEditMode(false);
-
-      // Keep transaction modal open to show completion
+      setShowTransactionModal(false);
       setTransactionLoading(false);
     } catch (error) {
       console.error("Error saving strategy configuration:", error);
@@ -639,6 +802,7 @@ const StrategyConfigPanel = ({
     setPlatformsChanged(false);
     setParamsChanged(false);
 
+    console.log('setting hasUnsavedChanges & editMode to false...')
     setHasUnsavedChanges(false);
     setEditMode(false);
   };
@@ -648,20 +812,57 @@ const StrategyConfigPanel = ({
     setShowTransactionModal(false);
   };
 
+  // Render automation toggle for executor
+  const renderAutomationToggle = () => {
+    // Only show automation toggle when a strategy is active
+    if (!vault?.hasActiveStrategy) return null;
+
+    // Check specifically for address(0)
+    const zeroAddress = "0x0000000000000000000000000000000000000000";
+    const hasExecutor = vault?.executor && vault.executor !== zeroAddress;
+
+    return (
+      <div className="mt-4 mb-3 p-3 border rounded bg-light">
+        <div className="d-flex justify-content-between align-items-center">
+          <div>
+            <h5 className="mb-0">Automation Status</h5>
+            <p className="text-muted mb-0">
+              {executorEnabled ?
+                "Positions are being managed automatically by executor" :
+                "Strategy is active but automation is not enabled"}
+            </p>
+          </div>
+          <Form.Check
+            type="switch"
+            id="executor-switch"
+            label={executorEnabled ? "Active" : "Inactive"}
+            checked={executorEnabled}
+            onChange={handleExecutorToggle}
+            disabled={!isOwner}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  // Access current strategy directly from vault for array comparisons
+  const currentStrategy = vault?.strategy || null;
+
   // Render the strategy config panel
   return (
     <Card>
       <Card.Body>
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h4 className="mb-0">Strategy Configuration</h4>
-          {hasUnsavedChanges && (
-            <Badge bg="danger" className="py-1 px-2">
-              Unsaved changes
-            </Badge>
-          )}
         </div>
 
         <p>Configure automated management strategies for this vault's positions and tokens.</p>
+
+        {!isDataLoaded && (
+          <Alert variant="info">
+            Loading strategy configuration...
+          </Alert>
+        )}
 
         <Form.Check
           type="switch"
@@ -669,7 +870,7 @@ const StrategyConfigPanel = ({
           label="Use automated position management"
           checked={automationEnabled}
           onChange={handleAutomationToggle}
-          disabled={!isOwner}
+          disabled={!isOwner || !isDataLoaded}
           className="mb-4"
         />
 
@@ -681,7 +882,7 @@ const StrategyConfigPanel = ({
                 <Form.Select
                   value={selectedStrategy}
                   onChange={handleStrategyChange}
-                  disabled={!isOwner || (vault?.hasActiveStrategy && !hasUnsavedChanges)}
+                  disabled={!isOwner || !isDataLoaded || (vault?.hasActiveStrategy && !hasUnsavedChanges)}
                   className="mb-3"
                 >
                   <option value="">Select a strategy</option>
@@ -693,6 +894,9 @@ const StrategyConfigPanel = ({
                 </Form.Select>
               </Form.Group>
             </div>
+
+            {/* Render automation toggle when strategy is active */}
+            {renderAutomationToggle()}
 
             <h5 className="mt-4">Strategy Details</h5>
             <div className="strategy-details p-3 border rounded bg-light">
@@ -711,12 +915,13 @@ const StrategyConfigPanel = ({
                   onCancel={handleCancel}
                   onValidate={handleSetValidation}
                   onParamsChange={handleParamsChange}
+                  isDataLoaded={isDataLoaded} // Pass loading state to child
                 />
               )}
             </div>
 
             {/* Save/Cancel buttons at the bottom */}
-            {isOwner && (editMode || hasUnsavedChanges) && (
+            {isOwner && isDataLoaded && (editMode || hasUnsavedChanges) && (
               <div className="d-flex justify-content-end mt-4">
                 <Button
                   variant="outline-secondary"
@@ -760,6 +965,15 @@ const StrategyConfigPanel = ({
         error={transactionError}
         tokenSymbols={selectedTokens}
         strategyName={getStrategyName()}
+      />
+
+      {/* Automation Modal */}
+      <AutomationModal
+        show={showAutomationModal}
+        onHide={() => setShowAutomationModal(false)}
+        isEnabling={isEnablingAutomation}
+        executorAddress={getExecutorAddress(chainId)}
+        onConfirm={handleAutomationConfirm}
       />
     </Card>
   );
