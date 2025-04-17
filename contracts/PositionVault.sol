@@ -27,6 +27,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     // Positions managed by this vault
     mapping(uint256 => bool) public managedPositions;
 
+    // NEW: Enhanced position tracking
+    uint256[] private positionIds;
+    mapping(uint256 => uint256) private positionIdToIndex;
+
     // NEW: Target tokens and platforms
     string[] private targetTokens;
     string[] private targetPlatforms;
@@ -168,8 +172,21 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
         // Transfer the NFT
         IERC721(nftContract).safeTransferFrom(address(this), to, tokenId);
 
-        // Update tracking
-        managedPositions[tokenId] = false;
+        // Remove from tracking array with efficient swap and pop
+        uint256 index = positionIdToIndex[tokenId];
+        if (index < positionIds.length - 1) {
+            // Not the last element - swap with last
+            uint256 lastTokenId = positionIds[positionIds.length - 1];
+            positionIds[index] = lastTokenId;
+            positionIdToIndex[lastTokenId] = index;
+        }
+
+        // Pop last element
+        positionIds.pop();
+
+        // Clean up mappings
+        delete positionIdToIndex[tokenId];
+        delete managedPositions[tokenId];
 
         emit PositionWithdrawn(tokenId, nftContract, to);
         emit PositionRemoved(tokenId, nftContract);
@@ -187,6 +204,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     ) external override returns (bytes4) {
         // Register this position in our tracking
         managedPositions[tokenId] = true;
+
+        // Add to position tracking array
+        positionIdToIndex[tokenId] = positionIds.length;
+        positionIds.push(tokenId);
 
         emit PositionRegistered(tokenId, msg.sender);
 
@@ -238,11 +259,19 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     }
 
     /**
+     * @notice Gets all position IDs currently managed by this vault
+     * @return Array of position IDs
+     */
+    function getPositionIds() external view returns (uint256[] memory) {
+        return positionIds;
+    }
+
+    /**
      * @notice Allows the vault to receive ETH
      */
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.3.0";
+        return "0.3.1";
     }
 }
