@@ -7,14 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Strategy configuration UI with templates and customizable parameters
-- Strategy implementation for stablecoin optimization ("The Fed")
-- Strategy execution through vault contracts
+- Completing automation pipeline with transaction execution
 - Performance metrics for strategy execution
 - Strategy history tracking
-- Mobile responsive design improvements
-- Multi-chain support for additional networks
-- Bulk position management tools
+
+## [0.3.1] - 2025-04-16
+### Added
+- Event monitoring system for automated strategies
+  - Event-driven architecture for real-time position monitoring
+  - Strategy-based monitoring with modular design pattern
+  - Service Registry for vault discovery and monitoring
+  - Price event detection for strategy evaluation
+- Framework for strategy-specific implementation:
+  - Configurable monitoring for Parris Island strategy
+  - Support for future strategy implementations
+- Preparatory components for automated position management:
+  - Configurable pool monitoring
+  - Strategy parameter evaluation
 
 ## [0.3.0] - 2025-04-04
 ### Added

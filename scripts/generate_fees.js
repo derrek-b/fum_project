@@ -119,7 +119,7 @@ async function performSwaps(numSwaps = 5) {
       const swapParams = {
         tokenIn,
         tokenOut,
-        fee: 3000, // 0.3% fee tier
+        fee: 500, // 0.3% fee tier
         recipient: wallet.address,
         deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
         amountIn,
