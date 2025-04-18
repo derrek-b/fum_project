@@ -1,0 +1,19 @@
+{
+  "name": "fum_automation",
+  "version": "0.1.0",
+  "description": "DeFi liquidity position management automation",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev:link": "npm link fum_library",
+    "dev:unlink": "npm unlink fum_library && npm install file:../fum_library"
+  },
+  "keywords": [],
+  "author": "The D-Nice",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "dependencies": {
+    "ethers": "^6.13.5",
+    "fum_library": "file:../fum_library"
+  }
+}
