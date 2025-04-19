@@ -4,14 +4,32 @@
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
-  "keywords": [],
+  "keywords": [
+    "defi",
+    "liquidity",
+    "uniswap",
+    "ethereum"
+  ],
   "author": "The D-Nice",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "exports": {
     ".": "./dist/index.js",
     "./configs": "./dist/configs/index.js",
-    "./adapters": "./dist/adapters/index.js"
+    "./adapters": "./dist/adapters/index.js",
+    "./helpers": "./dist/helpers/index.js",
+    "./helpers/formatHelpers": "./dist/helpers/formatHelpers.js",
+    "./helpers/chainHelpers": "./dist/helpers/chainHelpers.js",
+    "./helpers/tokenHelpers": "./dist/helpers/tokenHelpers.js",
+    "./helpers/platformHelpers": "./dist/helpers/platformHelpers.js",
+    "./helpers/strategyHelpers": "./dist/helpers/strategyHelpers.js",
+    "./blockchain": "./dist/blockchain/index.js",
+    "./blockchain/wallet": "./dist/blockchain/wallet.js",
+    "./blockchain/contracts": "./dist/blockchain/contracts.js",
+    "./services": "./dist/services/index.js",
+    "./services/coingecko": "./dist/services/coingecko.js",
+    "./artifacts": "./dist/artifacts/index.js",
+    "./artifacts/contracts": "./dist/artifacts/contracts.js"
   },
   "files": [
     "dist"
@@ -21,6 +39,14 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "ethers": "^6.13.5"
+    "ethers": "^6.13.5",
+    "@uniswap/v3-sdk": "^3.10.0",
+    "@uniswap/sdk-core": "^4.0.6",
+    "jsbi": "^4.3.0"
+  },
+  "peerDependencies": {
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.3",
+    "@openzeppelin/contracts": "^5.0.0"
   }
 }
