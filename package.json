@@ -1,0 +1,23 @@
+{
+  "name": "fum_library",
+  "version": "0.1.0",
+  "description": "Shared utilities for FUM DeFi management",
+  "type": "module",
+  "main": "dist/index.js",
+  "keywords": [],
+  "author": "The D-Nice",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "exports": {
+    ".": "./dist/index.js",
+    "./configs": "./dist/configs/index.js",
+    "./adapters": "./dist/adapters/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/",
+    "prepublishOnly": "npm run build"
+  }
+}
