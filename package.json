@@ -19,5 +19,8 @@
   "scripts": {
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/",
     "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ethers": "^6.13.5"
   }
 }
