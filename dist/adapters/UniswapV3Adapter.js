@@ -3,6 +3,11 @@ import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
 
+// Import ABIs from Uniswap and OpenZeppelin libraries
+import { abi as NonfungiblePositionManagerABI } from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
+import { abi as IUniswapV3PoolABI } from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
+import { abi as ERC20ABI } from '@openzeppelin/contracts/build/contracts/ERC20.json';
+
 /**
  * Adapter for Uniswap V3 platform
  */
@@ -15,10 +20,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   constructor(config, provider) {
     super(config, provider, "uniswapV3", "Uniswap V3");
 
-    // Load required ABIs from artifacts
-    this.nonfungiblePositionManagerABI = this._loadABI('NonfungiblePositionManager');
-    this.uniswapV3PoolABI = this._loadABI('IUniswapV3Pool');
-    this.erc20ABI = this._loadABI('ERC20');
+    // Store the imported ABIs
+    this.nonfungiblePositionManagerABI = NonfungiblePositionManagerABI;
+    this.uniswapV3PoolABI = IUniswapV3PoolABI;
+    this.erc20ABI = ERC20ABI;
   }
 
   /**

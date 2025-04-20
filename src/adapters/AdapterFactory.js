@@ -1,5 +1,6 @@
 // fum_library/adapters/AdapterFactory.js
 import UniswapV3Adapter from "./UniswapV3Adapter.js";
+import chains from "../configs/chains.js";
 
 /**
  * Factory class for creating and managing platform adapters
@@ -17,26 +18,25 @@ export default class AdapterFactory {
 
   /**
    * Get all available adapters for a chain
-   * @param {Object} config - Configuration object
    * @param {number} chainId - Chain ID
    * @param {Object} provider - Ethers provider
    * @returns {Array} - Array of platform adapters
    */
-  static getAdaptersForChain(config, chainId, provider) {
+  static getAdaptersForChain(chainId, provider) {
     const adapters = [];
 
-    if (!chainId || !provider || !config?.chains?.[chainId]) {
+    if (!chainId || !provider || !chains?.[chainId]) {
       return adapters;
     }
 
-    const chainConfig = config.chains[chainId];
+    const chainConfig = chains[chainId];
 
     // Create an adapter for each supported platform on the chain
     Object.keys(chainConfig.platforms || {}).forEach(platformId => {
       const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
 
       if (AdapterClass) {
-        adapters.push(new AdapterClass(config, provider));
+        adapters.push(new AdapterClass(chains, provider));
       }
     });
 
@@ -45,12 +45,12 @@ export default class AdapterFactory {
 
   /**
    * Get an adapter for a specific platform
-   * @param {Object} config - Configuration object
    * @param {string} platformId - Platform ID
    * @param {Object} provider - Ethers provider
    * @returns {Object|null} - Platform adapter or null if not found
    */
-  static getAdapter(config, platformId, provider) {
+  static getAdapter(platformId, provider) {
+    console.log(platformId, provider)
     if (!platformId || !provider) {
       throw new Error("Platform ID and provider are required");
     }
@@ -62,7 +62,7 @@ export default class AdapterFactory {
       return null;
     }
 
-    return new AdapterClass(config, provider);
+    return new AdapterClass(chains, provider);
   }
 
   /**

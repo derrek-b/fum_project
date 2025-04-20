@@ -24,6 +24,7 @@ const chains = {
   // Local Hardhat Fork
   1337: {
     rpcUrl: "http://localhost:8545",
+    wsUrl: 'ws://localhost:8545',
     name: "Hardhat Forked Arbitrum",
     envPK: "NEXT_PUBLIC_LOCALHOST_DEPLOYER_PK", // Optional, script uses hardcoded value for localhost
     executorEnvPK: "NEXT_PUBLIC_LOCALHOST_EXECUTOR_PK",

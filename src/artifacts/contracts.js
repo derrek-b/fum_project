@@ -1,11 +1,11 @@
 // src/artifacts/contracts.js
-/**
- * Contract ABIs and addresses for the F.U.M. project
- * This file is auto-generated and should not be edited directly
- */
+      /**
+       * Contract ABIs and addresses for the F.U.M. project
+       * This file is auto-generated and should not be edited directly
+       */
 
-// Contract ABIs and addresses
-const contracts = {
+      // Contract ABIs and addresses
+      const contracts = {
   "VaultFactory": {
     "abi": [
       {
@@ -740,6 +740,125 @@ const contracts = {
         "type": "receive"
       }
     ]
+  },
+  "BatchExecutor": {
+    "abi": [
+      {
+        "inputs": [],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "sender",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "txCount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          }
+        ],
+        "name": "BatchExecuted",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "returnData",
+            "type": "bytes"
+          }
+        ],
+        "name": "TransactionExecuted",
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "values",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "executeBatch",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "successes",
+            "type": "bool[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "results",
+            "type": "bytes[]"
+          }
+        ],
+        "stateMutability": "payable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getVersion",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "stateMutability": "payable",
+        "type": "receive"
+      }
+    ],
+    "addresses": {
+      "1337": "0x1289b5313aC14FC09736687Fcb9ED9405B345F23"
+    }
   },
   "parris": {
     "abi": [
@@ -2335,7 +2454,11 @@ const contracts = {
       "1337": "0x5C5C936B0c494212425c7823B479eD72d317A4EF",
       "42161": "0x536D052143f65F054FaF0ADd74f151D57286ba49"
     }
+  },
+  "ParrisIslandStrategy": {
+    "abi": [],
+    "addresses": {}
   }
 };
 
-export default contracts;
+      export default contracts;
