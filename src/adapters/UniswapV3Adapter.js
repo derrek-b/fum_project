@@ -2,6 +2,9 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
+import { Position, Pool, NonfungiblePositionManager } from '@uniswap/v3-sdk';
+import { Percent, Token, CurrencyAmount } from '@uniswap/sdk-core';
+import JSBI from "jsbi";
 
 // Import ABIs from Uniswap and OpenZeppelin libraries
 import { abi as NonfungiblePositionManagerABI } from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
@@ -24,23 +27,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.nonfungiblePositionManagerABI = NonfungiblePositionManagerABI;
     this.uniswapV3PoolABI = IUniswapV3PoolABI;
     this.erc20ABI = ERC20ABI;
-  }
-
-  /**
-   * Load ABI from artifacts
-   * @param {string} contractName - Contract name
-   * @returns {Object} - Contract ABI
-   * @private
-   */
-  _loadABI(contractName) {
-    try {
-      // This should be adjusted to how your artifacts are loaded in the library
-      const artifacts = require('../artifacts/contracts.js');
-      return artifacts[contractName];
-    } catch (error) {
-      console.error(`Failed to load ABI for ${contractName}:`, error);
-      throw new Error(`Failed to load ${contractName} ABI`);
-    }
   }
 
   /**
@@ -85,10 +71,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Invalid chainId from provider");
     }
 
-    try {
-      // Use the Uniswap SDK to calculate pool address
-      const { Pool } = require('@uniswap/v3-sdk');
-      const { Token } = require('@uniswap/sdk-core');
+    try {      // Use the Uniswap SDK to calculate pool address
 
       const sdkToken0 = new Token(
         chainId,
@@ -267,8 +250,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         }
 
         // Create Token instances for pool address calculation
-        const { Pool } = require('@uniswap/v3-sdk');
-        const { Token } = require('@uniswap/sdk-core');
         const token0Instance = new Token(chainId, token0, decimals0, symbol0);
         const token1Instance = new Token(chainId, token1, decimals1, symbol1);
 
@@ -545,6 +526,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const tickLower = poolData.ticks[position.tickLower];
     const tickUpper = poolData.ticks[position.tickUpper];
 
+    console.log()
+
     // Create position object for fee calculation
     const positionForFeeCalc = {
       ...position,
@@ -552,9 +535,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       liquidity: BigInt(position.liquidity),
       feeGrowthInside0LastX128: BigInt(position.feeGrowthInside0LastX128),
       feeGrowthInside1LastX128: BigInt(position.feeGrowthInside1LastX128),
-      tokensOwed0: BigInt(position.tokensOwed0),
-      tokensOwed1: BigInt(position.tokensOwed1)
     };
+    console.log(2)
 
     try {
       return this._calculateUncollectedFees({
@@ -588,7 +570,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     tickUpper,
     token0,
     token1,
-    verbose = false
+    verbose = true
   }) {
     // Convert all inputs to proper types
     const toBigInt = (val) => {
@@ -725,10 +707,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         };
       }
 
-      // Import required libraries from Uniswap SDK
-      const { Position, Pool } = require("@uniswap/v3-sdk");
-      const { Token, CurrencyAmount } = require("@uniswap/sdk-core");
-
       // Create Token objects - use chainId from params
       const token0 = new Token(
         chainId,
@@ -836,10 +814,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
       const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-
-      // Import necessary modules
-      const { NonfungiblePositionManager } = require('@uniswap/v3-sdk');
-      const { CurrencyAmount, Token } = require('@uniswap/sdk-core');
 
       // Create contract instance to get position data
       const nftManager = new ethers.Contract(
@@ -1101,10 +1075,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
       const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-
-      // Import necessary modules
-      const { NonfungiblePositionManager, Position, Pool } = require('@uniswap/v3-sdk');
-      const { Percent, Token, CurrencyAmount } = require('@uniswap/sdk-core');
 
       // Create Token instances for the SDK
       const token0 = new Token(
@@ -1526,11 +1496,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
       const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
 
-      // Import necessary modules
-      const { NonfungiblePositionManager, Position, Pool } = require('@uniswap/v3-sdk');
-      const { Percent, Token, CurrencyAmount } = require('@uniswap/sdk-core');
-      const JSBI = require('jsbi');
-
       // Create Token instances for the SDK
       const token0 = new Token(
         chainId,
@@ -1899,11 +1864,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       if (!positionManagerAddress || !factoryAddress) {
         throw new Error(`Missing contract addresses for chainId: ${chainId}`);
       }
-
-      // Import required libraries
-      const { Token, Percent } = require('@uniswap/sdk-core');
-      const { Pool, Position, NonfungiblePositionManager } = require('@uniswap/v3-sdk');
-      const JSBI = require('jsbi');
 
       // Step 1: Get token details
       const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, provider);

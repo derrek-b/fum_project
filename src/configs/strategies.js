@@ -240,7 +240,7 @@ const strategies = {
       },
       rebalanceThresholdUpper: {
         name: "Upper Rebalance Trigger",
-        description: "Price movement percentage above range that triggers a rebalance",
+        description: "Percentage from top of range that triggers a rebalance",
         type: "percent",
         defaultValue: 3.0,
         min: 0.1,
@@ -252,7 +252,7 @@ const strategies = {
       },
       rebalanceThresholdLower: {
         name: "Lower Rebalance Trigger",
-        description: "Price movement percentage below range that triggers a rebalance",
+        description: "Percentage from bottom of range that triggers a rebalance",
         type: "percent",
         defaultValue: 3.0,
         min: 0.1,
