@@ -4,6 +4,50 @@ const { ethers } = require("ethers");
 const path = require("path");
 require("dotenv").config({ path: ".env.local" });
 
+// Path to the library (sibling directory)
+const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
+
+// Update the library's contracts.js file
+function updateLibraryContracts(contractsData) {
+  try {
+    const libraryDistPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
+    const libraryContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
+
+    // Create the artifacts directory if it doesn't exist
+    const distArtifactDir = path.dirname(libraryDistPath);
+    if (!fs.existsSync(distArtifactDir)) {
+      fs.mkdirSync(distArtifactDir, { recursive: true });
+    }
+
+    const libraryArtifactsDir = path.dirname(libraryContractsPath);
+    if (!fs.existsSync(libraryArtifactsDir)) {
+      fs.mkdirSync(libraryArtifactsDir, { recursive: true });
+    }
+
+    // Create the library contracts.js file with the updated data
+    const libraryContractsContent = `// src/artifacts/contracts.js
+      /**
+       * Contract ABIs and addresses for the F.U.M. project
+       * This file is auto-generated and should not be edited directly
+       */
+
+      // Contract ABIs and addresses
+      const contracts = ${JSON.stringify(contractsData, null, 2)};
+
+      export default contracts;`;
+
+    fs.writeFileSync(libraryDistPath, libraryContractsContent);
+    fs.writeFileSync(libraryContractsPath, libraryContractsContent);
+    console.log(`Updated distribution contracts.js at ${libraryDistPath}`)
+    console.log(`Updated library contracts.js at ${libraryContractsPath}`);
+    return true;
+  } catch (error) {
+    console.warn(`Could not update library contracts: ${error.message}`);
+    console.warn(`Ensure that the library exists at ${LIBRARY_PATH}`);
+    return false;
+  }
+}
+
 // Load contract artifacts
 const contracts = require("../src/abis/contracts.json");
 
@@ -120,6 +164,9 @@ async function main() {
     // Save updated contracts.json
     fs.writeFileSync(contractsPath, JSON.stringify(contractsData, null, 2));
     console.log(`Updated contracts.json with new addresses for network ${chainId}`);
+
+    // Update the library's contracts.js file
+    updateLibraryContracts(contractsData);
 
     // Save deployment info to deployments directory
     const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
