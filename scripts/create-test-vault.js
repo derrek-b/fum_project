@@ -33,7 +33,8 @@ const FALLBACK_ABIS = {
   WETH: [
     "function deposit() payable",
     "function balanceOf(address owner) view returns (uint256)",
-    "function approve(address spender, uint amount) returns (bool)"
+    "function approve(address spender, uint amount) returns (bool)",
+    "function transfer(address to, uint amount) returns (bool)"
   ],
   // Uniswap V3 Pool
   UniswapV3Pool: [
@@ -378,6 +379,86 @@ async function main() {
   // Verify position is tracked by vault
   const isManaged = await vault.managedPositions(positionId);
   console.log(`Position managed by vault: ${isManaged}`);
+
+  // Transfer additional tokens to the vault
+  console.log("\nTransferring additional tokens to the vault...");
+
+  // Check current WETH balance
+  const currentWethBalance = await wethContract.balanceOf(signer.address);
+  console.log(`Current WETH balance: ${ethers.formatEther(currentWethBalance)} WETH`);
+
+  // Amount to transfer: 3 WETH
+  const wethTransferAmount = ethers.parseEther("3");
+
+  // Wrap more ETH if needed
+  if (currentWethBalance < (wethTransferAmount * BigInt('3'))) {
+    const additionalWethNeeded = (wethTransferAmount * BigInt('2')) - currentWethBalance;
+    console.log(`\nWrapping ${ethers.formatEther(additionalWethNeeded)} additional ETH to WETH...`);
+    const wrapTx = await wethContract.deposit({ value: additionalWethNeeded });
+    await wrapTx.wait();
+    console.log("Additional ETH wrapped to WETH successfully");
+  }
+
+  // Check current USDC balance
+  const currentUsdcBalance = await usdcContract.balanceOf(signer.address);
+  console.log(`Current USDC balance: ${ethers.formatUnits(currentUsdcBalance, 6)} USDC`);
+
+  // Amount to transfer: 1000 USDC
+  const usdcTransferAmount = ethers.parseUnits("1000", 6);
+
+  // Ensure we have enough USDC (might need to swap more WETH for USDC)
+  if (currentUsdcBalance < usdcTransferAmount) {
+    const additionalUsdcNeeded = usdcTransferAmount - currentUsdcBalance;
+    console.log(`\nNeed ${ethers.formatUnits(additionalUsdcNeeded, 6)} more USDC. Swapping WETH for USDC...`);
+
+    // Estimate WETH needed for swap (rough estimate for test purposes)
+    const estimatedWethNeeded = ethers.parseEther("1"); // Approximate amount needed for remaining USDC
+
+    // Approve the router to spend WETH
+    const approveTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, estimatedWethNeeded);
+    await approveTx.wait();
+    console.log("Router approved to spend WETH for additional USDC");
+
+    // Set up swap parameters
+    const swapParams = {
+      tokenIn: WETH_ADDRESS,
+      tokenOut: USDC_ADDRESS,
+      fee: 500, // 0.05% fee pool
+      recipient: signer.address,
+      deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
+      amountIn: estimatedWethNeeded,
+      amountOutMinimum: 0, // No minimum for testing
+      sqrtPriceLimitX96: 0 // No price limit
+    };
+
+    // Execute the swap
+    const swapTx = await router.exactInputSingle(swapParams);
+    await swapTx.wait();
+    console.log("WETH swapped for additional USDC successfully");
+
+    // Get new USDC balance
+    const newUsdcBalance = await usdcContract.balanceOf(signer.address);
+    console.log(`New USDC balance: ${ethers.formatUnits(newUsdcBalance, 6)} USDC`);
+  }
+
+  // Transfer 3 WETH to the vault
+  console.log("\nTransferring 3 WETH to the vault...");
+  const transferWethTx = await wethContract.transfer(vaultAddress, wethTransferAmount);
+  await transferWethTx.wait();
+  console.log(`Successfully transferred ${ethers.formatEther(wethTransferAmount)} WETH to vault`);
+
+  // Transfer 6000 USDC to the vault
+  console.log("\nTransferring 1000 USDC to the vault...");
+  const transferUsdcTx = await usdcContract.transfer(vaultAddress, usdcTransferAmount);
+  await transferUsdcTx.wait();
+  console.log(`Successfully transferred ${ethers.formatUnits(usdcTransferAmount, 6)} USDC to vault`);
+
+  // Verify token balances in the vault
+  const vaultWethBalance = await wethContract.balanceOf(vaultAddress);
+  const vaultUsdcBalance = await usdcContract.balanceOf(vaultAddress);
+  console.log("\nVault token balances:");
+  console.log(`WETH: ${ethers.formatEther(vaultWethBalance)} WETH`);
+  console.log(`USDC: ${ethers.formatUnits(vaultUsdcBalance, 6)} USDC`);
 
   console.log("\nTest vault setup complete!");
   console.log("====================");
