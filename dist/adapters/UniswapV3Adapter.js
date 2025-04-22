@@ -103,6 +103,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
   }
 
+  getPoolABI() {
+    return IUniswapV3PoolABI;
+  }
+
+  getPositionManagerABI() {
+    return NonfungiblePositionManagerABI;
+  }
+
   /**
    * Check if a pool exists for the given tokens and fee tier
    * @param {Object} token0 - First token object with address and decimals
@@ -536,7 +544,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       feeGrowthInside0LastX128: BigInt(position.feeGrowthInside0LastX128),
       feeGrowthInside1LastX128: BigInt(position.feeGrowthInside1LastX128),
     };
-    console.log(2)
 
     try {
       return this._calculateUncollectedFees({
@@ -570,7 +577,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     tickUpper,
     token0,
     token1,
-    verbose = true
   }) {
     // Convert all inputs to proper types
     const toBigInt = (val) => {
@@ -590,11 +596,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const feeGrowthInside1LastX128 = toBigInt(position.feeGrowthInside1LastX128);
     const tokensOwed0 = toBigInt(position.tokensOwed0);
     const tokensOwed1 = toBigInt(position.tokensOwed1);
-
-    if (verbose) {
-      console.log(`\n=== CALCULATING UNCOLLECTED FEES ===`);
-      // Verbose logging code removed for brevity
-    }
 
     // Ensure we have tick data
     if (!tickLower || !tickUpper) {

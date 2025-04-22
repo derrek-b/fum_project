@@ -44,6 +44,22 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get pool ABI
+   * @returns {Object} - Pool ABI
+   */
+  async getPoolABI() {
+    throw new Error("getPoolABI must be implemented by subclasses");
+  }
+
+  /**
+   * Get position manager ABI
+   * @returns {Object} - Position Manager ABI
+   */
+  getPositionManagerABI() {
+    throw new Error("getPositionManagerABI must be implemented by subclasses");
+  }
+
+  /**
    * Check if a pool exists for the given tokens and fee tier
    * @param {Object} token0 - First token details
    * @param {Object} token1 - Second token details
