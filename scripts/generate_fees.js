@@ -36,7 +36,7 @@ const ROUTER_ABI = [
 ];
 
 // Main function to perform swaps
-async function performSwaps(numSwaps = 5) {
+async function performSwaps(numSwaps = 1) {
   console.log(`\n=== Starting generate-fees script - Performing ${numSwaps} swaps ===`);
 
   // Setup provider

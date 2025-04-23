@@ -1,13 +1,13 @@
 {
   "version": "0.2.1",
-  "timestamp": "2025-04-22T01-44-30",
+  "timestamp": "2025-04-23T13-25-33",
   "network": {
     "name": "arbitrum",
     "chainId": 1337
   },
   "contracts": {
-    "VaultFactory": "0x20eBEE002d53dbC02eaD1C55Bd7E31FF67615Ce0",
-    "ParrisIslandStrategy": "0x5C5C936B0c494212425c7823B479eD72d317A4EF"
+    "VaultFactory": "0x4C643CA6d29D8b028683269975b40d303c947412",
+    "ParrisIslandStrategy": "0x7ad1630b2E9F0e5401f220A33B473C7E5551dd3e"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }
