@@ -121,13 +121,13 @@ contract VaultFactory is Ownable {
     /**
      * @notice Checks if an address is a valid vault and returns its owner
      * @param vault Address to check
-     * @return isVault Whether the address is a recognized vault
+     * @return _isVault Whether the address is a recognized vault
      * @return owner Owner of the vault (zero address if not a vault)
      */
-    function isVault(address vault) external view returns (bool isVault, address owner) {
+    function isVault(address vault) external view returns (bool _isVault, address owner) {
         owner = vaultInfo[vault].owner;
-        isVault = owner != address(0);
-        return (isVault, owner);
+        _isVault = owner != address(0);
+        return (_isVault, owner);
     }
 
     function getVersion() external pure returns (string memory) {

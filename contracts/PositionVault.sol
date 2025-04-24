@@ -197,10 +197,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
      * @dev Called by NFT contracts when safeTransferFrom is called
      */
     function onERC721Received(
-        address operator,
-        address from,
+        address /*operator*/,
+        address /*from*/,
         uint256 tokenId,
-        bytes calldata data
+        bytes calldata /*data*/
     ) external override returns (bytes4) {
         // Register this position in our tracking
         managedPositions[tokenId] = true;

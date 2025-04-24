@@ -201,8 +201,11 @@ async function deploy() {
       contractsData[contractName].addresses = {};
     }
 
+    // Map contract name to strategy ID in contracts.json
     if (contractName === 'ParrisIslandStrategy') {
       contractsData['parris'].addresses[chainId] = contractAddress;
+    } else if (contractName === 'BabyStepsStrategy') {
+      contractsData['bob'].addresses[chainId] = contractAddress;
     } else {
       contractsData[contractName].addresses[chainId] = contractAddress;
     }
@@ -217,7 +220,7 @@ async function deploy() {
   let contractsToDeploy = [];
   if (contractName === 'all') {
     // Deploy all contracts
-    contractsToDeploy = ['VaultFactory', 'ParrisIslandStrategy'];  // Removed BatchExecutor
+    contractsToDeploy = ['VaultFactory', 'ParrisIslandStrategy', 'BabyStepsStrategy'];
   } else {
     // Deploy only the specified contract
     contractsToDeploy = [contractName];

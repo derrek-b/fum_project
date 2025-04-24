@@ -8,8 +8,16 @@ const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
 // Directory where the contracts are located
 const contractsDir = path.resolve(__dirname, '../contracts');
 
-// List of contracts to extract ABIs from (removed BatchExecutor)
-const contractFiles = ['PositionVault.sol', 'VaultFactory.sol', 'ParrisIslandStrategy.sol'];
+// Define contract mapping to handle special naming cases
+const contractMapping = {
+  'ParrisIslandStrategy.sol': 'parris',
+  'BabyStepsStrategy.sol': 'bob',
+  'PositionVault.sol': 'PositionVault',
+  'VaultFactory.sol': 'VaultFactory'
+};
+
+// List of contracts to extract ABIs from
+const contractFiles = Object.keys(contractMapping);
 
 // Read the source code of the contracts
 const sources = {};
@@ -46,16 +54,18 @@ function findImports(importPath) {
   }
 }
 
-// Function to update the library's contracts.js file
+// Function to update the library's contracts.js files in both src and dist
 function updateLibraryContracts(contractsAbi) {
   try {
-    const libraryContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
+    // Define paths for both src and dist versions
+    const srcContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
+    const distContractsPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
 
-    // First check if the file exists and read it to preserve addresses
+    // First check if the src file exists and read it to preserve addresses
     let existingContracts = {};
-    if (fs.existsSync(libraryContractsPath)) {
+    if (fs.existsSync(srcContractsPath)) {
       // Extract the existing contracts object with addresses
-      const fileContent = fs.readFileSync(libraryContractsPath, 'utf8');
+      const fileContent = fs.readFileSync(srcContractsPath, 'utf8');
       const contractsMatch = fileContent.match(/const contracts = ([\s\S]*?);[\s\S]*export default contracts/);
 
       if (contractsMatch && contractsMatch[1]) {
@@ -79,8 +89,8 @@ function updateLibraryContracts(contractsAbi) {
       };
     });
 
-    // Create the library contracts.js file
-    const libraryContractsContent = `// src/artifacts/contracts.js
+    // Create the contract content
+    const contractsContent = `// artifacts/contracts.js
       /**
        * Contract ABIs and addresses for the F.U.M. project
        * This file is auto-generated and should not be edited directly
@@ -91,15 +101,22 @@ function updateLibraryContracts(contractsAbi) {
 
       export default contracts;`;
 
-    // Create directories if they don't exist
-    const libraryArtifactsDir = path.dirname(libraryContractsPath);
-    if (!fs.existsSync(libraryArtifactsDir)) {
-      fs.mkdirSync(libraryArtifactsDir, { recursive: true });
+    // Update the src version
+    const srcArtifactsDir = path.dirname(srcContractsPath);
+    if (!fs.existsSync(srcArtifactsDir)) {
+      fs.mkdirSync(srcArtifactsDir, { recursive: true });
     }
+    fs.writeFileSync(srcContractsPath, contractsContent);
+    console.log(`Library's src/artifacts/contracts.js updated at ${srcContractsPath}`);
 
-    // Write the file
-    fs.writeFileSync(libraryContractsPath, libraryContractsContent);
-    console.log(`Library's contracts.js updated at ${libraryContractsPath}`);
+    // Update the dist version
+    const distArtifactsDir = path.dirname(distContractsPath);
+    if (!fs.existsSync(distArtifactsDir)) {
+      fs.mkdirSync(distArtifactsDir, { recursive: true });
+    }
+    fs.writeFileSync(distContractsPath, contractsContent);
+    console.log(`Library's dist/artifacts/contracts.js updated at ${distContractsPath}`);
+
     return true;
   } catch (error) {
     console.warn(`Could not update library contracts: ${error.message}`);
@@ -121,16 +138,14 @@ if (output.errors) {
 // Extract ABIs from the compilation output
 const contractsAbi = {};
 contractFiles.forEach(file => {
-  const contractName = path.basename(file, '.sol');
-  const contractOutput = output.contracts[file][contractName];
+  const originalContractName = path.basename(file, '.sol');
+  const mappedContractName = contractMapping[file];
+
+  const contractOutput = output.contracts[file][originalContractName];
   if (contractOutput) {
-    if (contractName === 'ParrisIslandStrategy') {
-      contractsAbi['parris'] = { abi: contractOutput.abi };
-    } else {
-      contractsAbi[contractName] = { abi: contractOutput.abi };
-    }
+    contractsAbi[mappedContractName] = { abi: contractOutput.abi };
   } else {
-    console.error(`Contract ${contractName} not found in compilation output`);
+    console.error(`Contract ${originalContractName} not found in compilation output`);
     process.exit(1);
   }
 });

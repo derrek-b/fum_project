@@ -13,14 +13,15 @@ const TEST_PROJECT_DIR = process.argv[2] ||
 
 const OUTPUT_DIR = path.join(__dirname, '../bytecode');
 
-// Contracts to extract
+// Contracts to extract - added BabyStepsStrategy
 const CONTRACTS_TO_EXTRACT = [
   'VaultFactory',
   'PositionVault',
   'MockPositionNFT',
   'MockERC20',
   'BatchExecutor',
-  'ParrisIslandStrategy'
+  'ParrisIslandStrategy',
+  'BabyStepsStrategy'
 ];
 
 // Debug logging

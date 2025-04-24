@@ -194,7 +194,8 @@ async function main() {
     signer
   );
 
-  // =============== Create Real Uniswap V3 Position =============== //
+  // =============== Position Creation Code Commented Out =============== //
+  /*
   console.log("\nSetting up for Uniswap position creation...");
 
   // Define token addresses for Arbitrum
@@ -379,75 +380,75 @@ async function main() {
   // Verify position is tracked by vault
   const isManaged = await vault.managedPositions(positionId);
   console.log(`Position managed by vault: ${isManaged}`);
+  */
+
+  // Define token addresses for Arbitrum that will be needed later
+  const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
+
+  // Create contract instances for tokens
+  const wethContract = new ethers.Contract(WETH_ADDRESS, FALLBACK_ABIS.WETH, signer);
+  const usdcContract = new ethers.Contract(USDC_ADDRESS, FALLBACK_ABIS.ERC20, signer);
+
+  // Check ETH balance
+  const ethBalance = await provider.getBalance(signer.address);
+  console.log(`ETH balance: ${ethers.formatEther(ethBalance)} ETH`);
+
+  // Wrap some ETH to get WETH
+  console.log("\nWrapping 5 ETH to WETH...");
+  const wrapTx = await wethContract.deposit({ value: ethers.parseEther("5") });
+  await wrapTx.wait();
+  console.log("ETH wrapped to WETH successfully");
+
+  // Setup for swapping some WETH to USDC
+  const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router
+  const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, FALLBACK_ABIS.UniswapV3Router, signer);
+
+  // Approve the router to spend WETH
+  const approveWethTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.parseEther("2"));
+  await approveWethTx.wait();
+  console.log("Router approved to spend WETH");
+
+  // Swap some WETH for USDC
+  console.log("\nSwapping WETH for USDC...");
+  const swapParams = {
+    tokenIn: WETH_ADDRESS,
+    tokenOut: USDC_ADDRESS,
+    fee: 500, // 0.05% fee pool
+    recipient: signer.address,
+    deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
+    amountIn: ethers.parseEther("2"), // Swap 2 WETH
+    amountOutMinimum: 0, // No minimum for testing
+    sqrtPriceLimitX96: 0 // No price limit
+  };
+
+  const swapTx = await router.exactInputSingle(swapParams);
+  await swapTx.wait();
+  console.log("WETH swapped for USDC successfully");
 
   // Transfer additional tokens to the vault
-  console.log("\nTransferring additional tokens to the vault...");
+  console.log("\nTransferring tokens to the vault...");
 
-  // Check current WETH balance
+  // Get current balances
   const currentWethBalance = await wethContract.balanceOf(signer.address);
+  const currentUsdcBalance = await usdcContract.balanceOf(signer.address);
+
   console.log(`Current WETH balance: ${ethers.formatEther(currentWethBalance)} WETH`);
+  console.log(`Current USDC balance: ${ethers.formatUnits(currentUsdcBalance, 6)} USDC`);
 
   // Amount to transfer: 3 WETH
   const wethTransferAmount = ethers.parseEther("3");
 
-  // Wrap more ETH if needed
-  if (currentWethBalance < (wethTransferAmount * BigInt('3'))) {
-    const additionalWethNeeded = (wethTransferAmount * BigInt('2')) - currentWethBalance;
-    console.log(`\nWrapping ${ethers.formatEther(additionalWethNeeded)} additional ETH to WETH...`);
-    const wrapTx = await wethContract.deposit({ value: additionalWethNeeded });
-    await wrapTx.wait();
-    console.log("Additional ETH wrapped to WETH successfully");
-  }
-
-  // Check current USDC balance
-  const currentUsdcBalance = await usdcContract.balanceOf(signer.address);
-  console.log(`Current USDC balance: ${ethers.formatUnits(currentUsdcBalance, 6)} USDC`);
-
   // Amount to transfer: 1000 USDC
   const usdcTransferAmount = ethers.parseUnits("1000", 6);
 
-  // Ensure we have enough USDC (might need to swap more WETH for USDC)
-  if (currentUsdcBalance < usdcTransferAmount) {
-    const additionalUsdcNeeded = usdcTransferAmount - currentUsdcBalance;
-    console.log(`\nNeed ${ethers.formatUnits(additionalUsdcNeeded, 6)} more USDC. Swapping WETH for USDC...`);
-
-    // Estimate WETH needed for swap (rough estimate for test purposes)
-    const estimatedWethNeeded = ethers.parseEther("1"); // Approximate amount needed for remaining USDC
-
-    // Approve the router to spend WETH
-    const approveTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, estimatedWethNeeded);
-    await approveTx.wait();
-    console.log("Router approved to spend WETH for additional USDC");
-
-    // Set up swap parameters
-    const swapParams = {
-      tokenIn: WETH_ADDRESS,
-      tokenOut: USDC_ADDRESS,
-      fee: 500, // 0.05% fee pool
-      recipient: signer.address,
-      deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
-      amountIn: estimatedWethNeeded,
-      amountOutMinimum: 0, // No minimum for testing
-      sqrtPriceLimitX96: 0 // No price limit
-    };
-
-    // Execute the swap
-    const swapTx = await router.exactInputSingle(swapParams);
-    await swapTx.wait();
-    console.log("WETH swapped for additional USDC successfully");
-
-    // Get new USDC balance
-    const newUsdcBalance = await usdcContract.balanceOf(signer.address);
-    console.log(`New USDC balance: ${ethers.formatUnits(newUsdcBalance, 6)} USDC`);
-  }
-
-  // Transfer 3 WETH to the vault
+  // Transfer WETH to the vault
   console.log("\nTransferring 3 WETH to the vault...");
   const transferWethTx = await wethContract.transfer(vaultAddress, wethTransferAmount);
   await transferWethTx.wait();
   console.log(`Successfully transferred ${ethers.formatEther(wethTransferAmount)} WETH to vault`);
 
-  // Transfer 6000 USDC to the vault
+  // Transfer USDC to the vault
   console.log("\nTransferring 1000 USDC to the vault...");
   const transferUsdcTx = await usdcContract.transfer(vaultAddress, usdcTransferAmount);
   await transferUsdcTx.wait();
@@ -463,8 +464,6 @@ async function main() {
   console.log("\nTest vault setup complete!");
   console.log("====================");
   console.log(`Vault Address: ${vaultAddress}`);
-  console.log(`Position ID: ${positionId}`);
-  console.log(`Position Platform: Uniswap V3`);
 }
 
 // Helper function to extract tokenId from mint transaction receipt
