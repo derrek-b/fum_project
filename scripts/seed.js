@@ -1,17 +1,27 @@
+import { fileURLToPath } from 'url';
+import path from 'path';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // seed.js - Script to create a test Uniswap V3 liquidity position
 
 // Import required libraries
-const { ethers } = require('ethers');
-const { Token, CurrencyAmount } = require('@uniswap/sdk-core');
-const { Pool, Position, NonfungiblePositionManager, TickMath } = require('@uniswap/v3-sdk');
-const JSBI = require('jsbi');
-const IUniswapV3PoolABI = require('@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json').abi;
-const NonfungiblePositionManagerABI = require('@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json').abi;
-const ERC20ABI = require('@openzeppelin/contracts/build/contracts/ERC20.json').abi;
-const { abi: UniswapV3RouterABI } = require('@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json');
+import { ethers } from 'ethers';
+import { Token, CurrencyAmount } from '@uniswap/sdk-core';
+import { Pool, Position, NonfungiblePositionManager, TickMath } from '@uniswap/v3-sdk';
+import JSBI from 'jsbi';
+import IUniswapV3PoolArtifact from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
+import NonfungiblePositionManagerArtifact from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
+import ERC20Artifact from '@openzeppelin/contracts/build/contracts/ERC20.json';
+import UniswapV3RouterArtifact from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json';
 
-// const fs = require('fs');
-// const path = require('path');
+const IUniswapV3PoolABI = IUniswapV3PoolArtifact.abi;
+const NonfungiblePositionManagerABI = NonfungiblePositionManagerArtifact.abi;
+const ERC20ABI = ERC20Artifact.abi;
+const UniswapV3RouterABI = UniswapV3RouterArtifact.abi
+
+// import fs from 'fs';
+// import path from 'path';
 
 // Define config directly for local fork of Arbitrum
 const config = {

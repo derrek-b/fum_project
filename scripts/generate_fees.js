@@ -1,8 +1,8 @@
 // scripts/generate-fees.js
 // Simple script to generate fees by performing multiple swaps on a Uniswap V3 pool
 
-const { ethers } = require('ethers');
-require("dotenv").config({ path: ".env.local" });
+import { ethers } from 'ethers';
+(await import("dotenv")).default.config({ path: ".env.local" });
 
 // Define token addresses and pool configuration
 const TOKENS = {

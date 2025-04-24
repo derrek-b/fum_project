@@ -2,15 +2,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { AdapterFactory } from '../../adapters';
-import { formatPrice } from '../../utils/formatHelpers';
-import { calculateUsdValueSync, prefetchTokenPrices } from '../../utils/coingeckoUtils';
+import '../../adapters/index.js';
+import '../../utils/formatHelpers.js';
+import '../../utils/coingeckoUtils.js';
 import { ethers } from 'ethers';
-import { useToast } from '../../context/ToastContext';
-import { triggerUpdate } from '../../redux/updateSlice';
-import { getVaultContract } from '../../utils/contracts';
-import { getAllTokens } from '../../utils/tokenConfig';
-import { updateVaultPositions } from '../../redux/vaultsSlice';
+import '../../context/ToastContext.js';
+import '../../redux/updateSlice.js';
+import '../../utils/contracts.js';
+import '../../utils/tokenConfig.js';
+import '../../redux/vaultsSlice.js';
+import { Pool } from '@uniswap/v3-sdk';
+import { Token } from '@uniswap/sdk-core';
 
 export default function VaultPositionModal({
   show,
@@ -452,10 +454,6 @@ export default function VaultPositionModal({
       // This would be in the adapter in a production app
       const getPoolAddressWithSorting = async () => {
         try {
-          // Use the Uniswap SDK to calculate pool address with properly sorted tokens
-          const { Pool } = require('@uniswap/v3-sdk');
-          const { Token } = require('@uniswap/sdk-core');
-
           // Sort tokens according to Uniswap V3 rules (lexicographically by address)
           let sortedToken0, sortedToken1;
           const shouldSwap = token0Address.toLowerCase() > token1Address.toLowerCase();

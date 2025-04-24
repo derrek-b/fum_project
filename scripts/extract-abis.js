@@ -1,6 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const solc = require('solc');
+import { fileURLToPath } from 'url';
+import path from 'path';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+import fs from 'fs';
+import path from 'path';
+import solc from 'solc';
 
 // Fixed path to the library (sibling directory)
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');

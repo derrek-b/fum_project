@@ -1,8 +1,13 @@
-const ganache = require("ganache");
-const fs = require("fs");
-const { ethers } = require("ethers");
-const path = require("path");
-require("dotenv").config({ path: ".env.local" });
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+import ganache from "ganache";
+import fs from "fs";
+import { ethers } from "ethers";
+import path from "path";
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
 
 // Path to the library (sibling directory)
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
@@ -15,7 +20,7 @@ function updateLibraryContracts(contractsData) {
 
     // Create the artifacts directory if it doesn't exist
     const distArtifactDir = path.dirname(libraryDistPath);
-    if (!fs.existsSync(distArtifactDir)) {
+    if (!existsSync(distArtifactDir)) {
       fs.mkdirSync(distArtifactDir, { recursive: true });
     }
 
@@ -111,7 +116,6 @@ async function main() {
       // Load contracts.json
       const contractsPath = path.join(__dirname, "../src/abis/contracts.json");
       let contractsData = JSON.parse(JSON.stringify(contracts)); // Create a deep copy to avoid modifying the module
-      console.log(contractsData)
 
       // Initialize all contract objects with addresses if they don't exist
       if (!contractsData.VaultFactory) {
