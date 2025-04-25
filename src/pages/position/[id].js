@@ -6,9 +6,6 @@ import { ErrorBoundary } from "react-error-boundary";
 import Image from "next/image";
 import Link from "next/link";
 import Head from "next/head";
-import { AdapterFactory } from "../../adapters";
-import { formatPrice, formatFeeDisplay } from "../../utils/formatHelpers";
-import { fetchTokenPrices, calculateUsdValue } from "../../utils/coingeckoUtils";
 import PriceRangeChart from "../../components/PriceRangeChart";
 import Navbar from "../../components/Navbar";
 import RefreshControls from "../../components/RefreshControls";
@@ -19,8 +16,10 @@ import ClaimFeesModal from "../../components/positions/ClaimFeesModal";
 import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
-import { useToast } from "../../context/ToastContext";
-import config from "../../utils/config";
+import { useToast } from "../../context/ToastContext";import { AdapterFactory } from "fum_library/adapters";
+import { formatPrice, formatFeeDisplay } from "fum_library/helpers";
+import { fetchTokenPrices, calculateUsdValue } from "fum_library/services";
+import { getPlatformColor, getPlatformLogo } from "../../dist/helpers/platformHelpers.js";
 
 // Fallback component to show when an error occurs
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -514,21 +513,21 @@ export default function PositionDetailPage() {
     }
   };
 
-  // Get the platform color directly from config
-  const getPlatformColor = () => {
-    if (position && position.platform && config.platformMetadata[position.platform]?.color) {
-      return config.platformMetadata[position.platform].color;
-    }
-    return '#6c757d'; // Default gray color
-  };
+  // // Get the platform color directly from config
+  // const getPlatformColor = () => {
+  //   if (position && position.platform && config.platformMetadata[position.platform]?.color) {
+  //     return config.platformMetadata[position.platform].color;
+  //   }
+  //   return '#6c757d'; // Default gray color
+  // };
 
-  // Get platform logo if available
-  const getPlatformLogo = () => {
-    if (position && position.platform && config.platformMetadata[position.platform]?.logo) {
-      return config.platformMetadata[position.platform].logo;
-    }
-    return null;
-  };
+  // // Get platform logo if available
+  // const getPlatformLogo = () => {
+  //   if (position && position.platform && config.platformMetadata[position.platform]?.logo) {
+  //     return config.platformMetadata[position.platform].logo;
+  //   }
+  //   return null;
+  // };
 
   // Check if platform has a logo
   const hasPlatformLogo = !!getPlatformLogo();
@@ -613,7 +612,7 @@ export default function PositionDetailPage() {
                     style={{ height: '24px', width: '24px' }}
                   >
                     <Image
-                      src={getPlatformLogo()}
+                      src={getPlatformLogo(position.platform)}
                       alt={position.platformName || position.platform}
                       width={24}
                       height={24}
@@ -627,7 +626,7 @@ export default function PositionDetailPage() {
                     bg=""
                     style={{
                       fontSize: '0.75rem',
-                      backgroundColor: getPlatformColor(),
+                      backgroundColor: getPlatformColor(position.platform),
                       padding: '0.25em 0.8em',
                       color: 'white',
                       border: 'none'

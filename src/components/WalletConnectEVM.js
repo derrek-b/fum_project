@@ -3,8 +3,9 @@
 import React, { useState } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
-import { createEthersProvider } from "../utils/wallet";
 import { setWallet, disconnectWallet, setProvider } from "../redux/walletSlice";
+import { createBrowserProvider } from "fum_library/blockchain/wallet";
+import { getChainName } from "fum_library/helpers/chainHelpers";
 import { useToast } from "../context/ToastContext"; // Import the toast hook
 
 export default function WalletConnectEVM() {
@@ -17,7 +18,7 @@ export default function WalletConnectEVM() {
     if (isConnecting) return; // Prevent multiple clicks while connecting
     setIsConnecting(true);
     try {
-      const newProvider = await createEthersProvider(); // Create provider only on connect
+      const newProvider = await createBrowserProvider(); // Create provider only on connect
 
       if (!newProvider) {
         throw new Error("No Ethereum wallet detected. Please install MetaMask or another wallet.");
@@ -39,7 +40,7 @@ export default function WalletConnectEVM() {
       }));
 
       // Show success notification
-      showSuccess(`Connected to ${getNetworkName(chainId)}`);
+      showSuccess(`Connected to ${getChainName(chainId)}`);
     } catch (error) {
       console.error("Failed to connect EVM wallet:", error);
 
@@ -68,26 +69,26 @@ export default function WalletConnectEVM() {
     return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
   };
 
-  // Helper function to get network name
-  const getNetworkName = (chainId) => {
-    switch (chainId) {
-      case 1:
-        return "Ethereum";
-      case 42161:
-        return "Arbitrum One";
-      case 1337:
-        return "Local Network";
-      default:
-        return `Chain #${chainId}`;
-    }
-  };
+  // // Helper function to get network name
+  // const getNetworkName = (chainId) => {
+  //   switch (chainId) {
+  //     case 1:
+  //       return "Ethereum";
+  //     case 42161:
+  //       return "Arbitrum One";
+  //     case 1337:
+  //       return "Local Network";
+  //     default:
+  //       return `Chain #${chainId}`;
+  //   }
+  // };
 
   return (
     <div className="d-flex align-items-center">
       {isConnected ? (
         <>
           <div className="me-2 text-light d-none d-md-block">
-            <small>{getNetworkName(chainId)}</small>
+            <small>{getChainName(chainId)}</small>
           </div>
           <Button
             variant="outline-light"

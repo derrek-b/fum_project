@@ -4,7 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import config from '../src/utils/config.js';
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+import contractData from 'fum_library/artifacts/contracts';
 
 // Load environment variables
 dotenv.config();
@@ -61,47 +62,23 @@ const FALLBACK_ABIS = {
   ]
 };
 
-// Load contract ABIs from contracts.json
-const loadContractData = (contractName) => {
-  const contractsPath = path.join(__dirname, '../src/abis/contracts.json');
-
-  if (!fs.existsSync(contractsPath)) {
-    throw new Error(`contracts.json not found at ${contractsPath}`);
-  }
-
-  const contractsData = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
-
-  if (!contractsData[contractName]) {
-    if (contractName in FALLBACK_ABIS) {
-      // Return a mock contract data object with the fallback ABI
-      console.log(`${contractName} not found in contracts.json, using fallback ABI`);
-      return { abi: FALLBACK_ABIS[contractName] };
-    }
-    throw new Error(`Contract ${contractName} not found in contracts.json`);
-  }
-
-  return contractsData[contractName];
-};
-
-// Load contract ABI
+// Load contract ABI from contractData or fallback
 const loadContractABI = (contractName) => {
-  // Try to load from contracts.json or fallback
-  try {
-    return loadContractData(contractName).abi;
-  } catch (error) {
-    // If not in contracts.json and no fallback, throw error
-    if (!(contractName in FALLBACK_ABIS)) {
-      throw error;
-    }
+  // Try to load from contractData or fallback
+  if (contractData[contractName]?.abi) {
+    return contractData[contractName].abi;
+  } else if (contractName in FALLBACK_ABIS) {
     console.log(`Using fallback ABI for ${contractName}`);
     return FALLBACK_ABIS[contractName];
+  } else {
+    throw new Error(`No ABI found for ${contractName}`);
   }
 };
 
 async function main() {
   // Get network configuration
   const chainId = networkName === 'localhost' ? 1337 : 42161; // Default to Arbitrum unless localhost
-  const networkConfig = config.chains[chainId];
+  const networkConfig = getChainConfig(chainId);
 
   if (!networkConfig) {
     throw new Error(`Network with chainId ${chainId} not configured`);
@@ -138,9 +115,8 @@ async function main() {
     const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
     vaultFactoryAddress = deployment.contracts.VaultFactory;
   } else {
-    // Fall back to contracts.json
-    const vaultFactoryData = loadContractData('VaultFactory');
-    vaultFactoryAddress = vaultFactoryData.addresses?.[chainId.toString()];
+    // Fall back to contractData
+    vaultFactoryAddress = contractData.VaultFactory?.addresses?.[chainId.toString()];
 
     if (!vaultFactoryAddress) {
       throw new Error(`No VaultFactory address found for chainId ${chainId}. Please deploy it first.`);
@@ -194,193 +170,7 @@ async function main() {
     signer
   );
 
-  // =============== Position Creation Code Commented Out =============== //
-  /*
-  console.log("\nSetting up for Uniswap position creation...");
-
-  // Define token addresses for Arbitrum
-  const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
-  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
-
-  // Define Uniswap V3 contract addresses
-  const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router
-  const UNISWAP_POSITION_MANAGER_ADDRESS = networkConfig.platforms.uniswapV3.positionManagerAddress;
-
-  console.log(`Using Uniswap Position Manager at: ${UNISWAP_POSITION_MANAGER_ADDRESS}`);
-
-  // Create contract instances
-  const wethContract = new ethers.Contract(WETH_ADDRESS, FALLBACK_ABIS.WETH, signer);
-  const usdcContract = new ethers.Contract(USDC_ADDRESS, FALLBACK_ABIS.ERC20, signer);
-  const positionManager = new ethers.Contract(UNISWAP_POSITION_MANAGER_ADDRESS, FALLBACK_ABIS.NonfungiblePositionManager, signer);
-  const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, FALLBACK_ABIS.UniswapV3Router, signer);
-
-  // Check ETH balance
-  const ethBalance = await provider.getBalance(signer.address);
-  console.log(`ETH balance: ${ethers.formatEther(ethBalance)} ETH`);
-
-  // Wrap some ETH to get WETH if needed
-  const wethBalance = await wethContract.balanceOf(signer.address);
-  if (wethBalance < ethers.parseEther("1")) {
-    console.log("\nWrapping 2 ETH to WETH...");
-    const wrapTx = await wethContract.deposit({ value: ethers.parseEther("2") });
-    await wrapTx.wait();
-    console.log("ETH wrapped to WETH successfully");
-  }
-
-  // Get token balances
-  const updatedWethBalance = await wethContract.balanceOf(signer.address);
-  const usdcBalance = await usdcContract.balanceOf(signer.address);
-
-  console.log(`WETH balance: ${ethers.formatEther(updatedWethBalance)} WETH`);
-  console.log(`USDC balance: ${ethers.formatUnits(usdcBalance, 6)} USDC`);
-
-  // If we don't have USDC, swap some WETH for USDC
-  if (usdcBalance < ethers.parseUnits("100", 6)) {
-    console.log("\nSwapping WETH for USDC...");
-
-    // First approve the router to spend WETH
-    const approveTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.parseEther("1"));
-    await approveTx.wait();
-    console.log("Router approved to spend WETH");
-
-    // Set up swap parameters
-    const swapParams = {
-      tokenIn: WETH_ADDRESS,
-      tokenOut: USDC_ADDRESS,
-      fee: 500, // 0.05% fee pool
-      recipient: signer.address,
-      deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
-      amountIn: ethers.parseEther("0.5"), // Swap 0.5 WETH
-      amountOutMinimum: 0, // No minimum for testing
-      sqrtPriceLimitX96: 0 // No price limit
-    };
-
-    // Execute the swap
-    const swapTx = await router.exactInputSingle(swapParams);
-    await swapTx.wait();
-    console.log("WETH swapped for USDC successfully");
-
-    // Get new USDC balance
-    const newUsdcBalance = await usdcContract.balanceOf(signer.address);
-    console.log(`New USDC balance: ${ethers.formatUnits(newUsdcBalance, 6)} USDC`);
-  }
-
-  // Get the current pool data to determine price and tick range
-  console.log("\nGetting pool data to determine price range...");
-
-  // For local network, directly use a known pool address
-  const poolAddress = "0x17c14D2c404D167802b16C450d3c99F88F2c4F4d"; // WETH/USDC 0.05% pool
-
-  console.log(`Using Uniswap V3 pool at: ${poolAddress}`);
-
-  const poolContract = new ethers.Contract(poolAddress, FALLBACK_ABIS.UniswapV3Pool, provider);
-
-  // Get current tick and pricing data
-  const slot0 = await poolContract.slot0();
-  const currentTick = Number(slot0.tick);
-  const tickSpacing = await poolContract.tickSpacing();
-
-  console.log(`Current tick: ${currentTick}`);
-  console.log(`Tick spacing: ${Number(tickSpacing)}`);
-
-  // Calculate a price range centered around the current price
-  const tickLower = Math.floor(currentTick - 1000); // ~10% below current price
-  const tickUpper = Math.ceil(currentTick + 1000); // ~10% above current price
-
-  // Adjust ticks to be multiples of tickSpacing
-  const adjustedTickLower = Math.floor(tickLower / Number(tickSpacing)) * Number(tickSpacing);
-  const adjustedTickUpper = Math.ceil(tickUpper / Number(tickSpacing)) * Number(tickSpacing);
-
-  console.log(`Adjusted tick range: ${adjustedTickLower} to ${adjustedTickUpper}`);
-
-  // Create the position
-  console.log("\nCreating Uniswap V3 position...");
-
-  // First approve the position manager to spend our tokens
-  const wethAmount = ethers.parseEther("0.1"); // 0.1 WETH
-  const usdcAmount = ethers.parseUnits("200", 6); // 200 USDC
-
-  // Approve WETH
-  const approveWethTx = await wethContract.approve(UNISWAP_POSITION_MANAGER_ADDRESS, wethAmount);
-  await approveWethTx.wait();
-  console.log("Position manager approved to spend WETH");
-
-  // Approve USDC
-  const approveUsdcTx = await usdcContract.approve(UNISWAP_POSITION_MANAGER_ADDRESS, usdcAmount);
-  await approveUsdcTx.wait();
-  console.log("Position manager approved to spend USDC");
-
-  // Determine the token order (Uniswap requires tokens to be in address order)
-  const isWETHToken0 = WETH_ADDRESS.toLowerCase() < USDC_ADDRESS.toLowerCase();
-
-  // Setup mint parameters
-  const mintParams = {
-    token0: isWETHToken0 ? WETH_ADDRESS : USDC_ADDRESS,
-    token1: isWETHToken0 ? USDC_ADDRESS : WETH_ADDRESS,
-    fee: 500, // 0.05% fee tier
-    tickLower: adjustedTickLower,
-    tickUpper: adjustedTickUpper,
-    amount0Desired: isWETHToken0 ? wethAmount : usdcAmount,
-    amount1Desired: isWETHToken0 ? usdcAmount : wethAmount,
-    amount0Min: 0, // No minimum for testing
-    amount1Min: 0, // No minimum for testing
-    recipient: signer.address, // Initially mint to our address
-    deadline: Math.floor(Date.now() / 1000) + 60 * 20 // 20 minutes
-  };
-
-  console.log("Mint parameters:", {
-    token0: isWETHToken0 ? "WETH" : "USDC",
-    token1: isWETHToken0 ? "USDC" : "WETH",
-    fee: mintParams.fee,
-    tickLower: mintParams.tickLower,
-    tickUpper: mintParams.tickUpper
-  });
-
-  // Create the position
-  const mintTx = await positionManager.mint(mintParams, { gasLimit: 5000000 });
-  console.log(`Mint transaction sent: ${mintTx.hash}`);
-  const mintReceipt = await mintTx.wait();
-  console.log("Position created successfully");
-
-  // Extract tokenId from the mint transaction
-  const positionId = await extractTokenIdFromReceipt(mintReceipt, positionManager);
-  console.log(`Position created with ID: ${positionId}`);
-
-  // Get position details
-  const positionDetails = await positionManager.positions(positionId);
-  console.log("\nPosition Details:");
-  console.log(`Token0: ${positionDetails.token0}`);
-  console.log(`Token1: ${positionDetails.token1}`);
-  console.log(`Fee Tier: ${positionDetails.fee}`);
-  console.log(`Tick Range: ${positionDetails.tickLower} to ${positionDetails.tickUpper}`);
-  console.log(`Liquidity: ${positionDetails.liquidity}`);
-
-  // Now transfer the position to the vault
-  console.log("\nTransferring position to vault...");
-
-  // First set approval for the vault to manage positions
-  console.log("Approving vault to manage positions...");
-  const approveTx = await positionManager.setApprovalForAll(vaultAddress, true);
-  await approveTx.wait();
-  console.log("Vault approved to manage positions");
-
-  // Transfer position to vault
-  const transferTx = await positionManager.safeTransferFrom(signer.address, vaultAddress, positionId);
-  await transferTx.wait();
-  console.log(`Position ${positionId} transferred to vault`);
-
-  // Verify the position is now owned by the vault
-  const newOwner = await positionManager.ownerOf(positionId);
-  if (newOwner.toLowerCase() === vaultAddress.toLowerCase()) {
-    console.log("Position transfer verified - vault is now the owner");
-  } else {
-    console.error(`Position transfer failed. Current owner: ${newOwner}`);
-  }
-
-  // Verify position is tracked by vault
-  const isManaged = await vault.managedPositions(positionId);
-  console.log(`Position managed by vault: ${isManaged}`);
-  */
+  // Rest of your code (commented out position creation etc.)...
 
   // Define token addresses for Arbitrum that will be needed later
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
@@ -464,34 +254,6 @@ async function main() {
   console.log("\nTest vault setup complete!");
   console.log("====================");
   console.log(`Vault Address: ${vaultAddress}`);
-}
-
-// Helper function to extract tokenId from mint transaction receipt
-async function extractTokenIdFromReceipt(receipt, positionManager) {
-  // Look for Transfer event from position manager
-  for (const log of receipt.logs) {
-    try {
-      // Find Transfer event (Transfer(address,address,uint256))
-      if (log.topics[0] === ethers.id("Transfer(address,address,uint256)")) {
-        // Check if it's a transfer from zero address (new mint)
-        const zeroAddress = ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32);
-        if (log.topics[1] === zeroAddress) {
-          return ethers.toBigInt(log.topics[3]);
-        }
-      }
-    } catch (e) {
-      continue;
-    }
-  }
-
-  // Fallback: get balance and check the last token
-  const balance = await positionManager.balanceOf(receipt.from);
-  if (Number(balance) > 0) {
-    const tokenId = await positionManager.tokenOfOwnerByIndex(receipt.from, Number(balance) - 1);
-    return tokenId;
-  }
-
-  throw new Error("Could not extract tokenId from receipt");
 }
 
 // Execute the script

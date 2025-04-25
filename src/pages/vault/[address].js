@@ -18,13 +18,14 @@ import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVaultTokenBalances } from "@/redux/vaultsSlice";
-import { formatTimestamp } from "../../utils/formatHelpers";
-import { getAllTokens } from "../../utils/tokenConfig";
 import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
-import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from '../../utils/coingeckoUtils';
-import ERC20ABIfull from "@openzeppelin/contracts/build/contracts/ERC20.json";
+import { formatTimestamp } from "fum_library/helpers";
+import { getAllTokens } from "fum_library/helpers";
+import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from 'fum_library/services';
+import { getStrategyDetails } from "fum_library/helpers";
 import * as LucideIcons from 'lucide-react';
-import { getStrategyDetails } from "../../utils/strategyConfig";
+import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
+const ERC20ABI = ERC20ARTIFACT.abi;
 
 // Error Fallback Component
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -262,7 +263,7 @@ export default function VaultDetailPage() {
       forceRefresh();
 
       // Also refresh token balances
-      loadVaultTokenBalances();
+      loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch, { showError });
     } catch (error) {
       console.error("Error triggering refresh:", error);
       showError("Failed to refresh data");

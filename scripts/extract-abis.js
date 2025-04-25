@@ -1,11 +1,10 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
+import solc from 'solc';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-import fs from 'fs';
-import path from 'path';
-import solc from 'solc';
 
 // Fixed path to the library (sibling directory)
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
@@ -155,17 +154,6 @@ contractFiles.forEach(file => {
   }
 });
 
-// Ensure the output directory exists
-const outputDir = path.resolve(__dirname, '../src/abis');
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
-
-// Write the ABIs to contracts.json
-const contractsJsonPath = path.join(outputDir, 'contracts.json');
-const contractsJson = JSON.stringify(contractsAbi, null, 2);
-fs.writeFileSync(contractsJsonPath, contractsJson);
-console.log(`contracts.json generated successfully at ${contractsJsonPath}`);
-
 // Update the library's contracts.js file
 updateLibraryContracts(contractsAbi);
+console.log("ABIs extracted and updated in library successfully");

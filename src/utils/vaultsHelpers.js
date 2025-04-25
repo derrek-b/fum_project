@@ -1,19 +1,20 @@
 // src/utils/vaultsHelpers.js
-import { AdapterFactory } from '../adapters';
 import { useSelector } from 'react-redux';
 import { setPositions, addVaultPositions } from '../redux/positionsSlice';
 import { setPools } from '../redux/poolSlice';
 import { setTokens } from '../redux/tokensSlice';
 import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, updateVault, setVaults } from '../redux/vaultsSlice';
-import { getUserVaults, getVaultInfo } from './contracts';
-import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from './coingeckoUtils';
 import { triggerUpdate } from '../redux/updateSlice';
-import { getAvailableStrategies, getStrategyParameters } from './strategyConfig';
-import { getAllTokens } from './tokenConfig';
 import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
-import contractData from '../abis/contracts.json';
 import { ethers } from 'ethers';
-import ERC20ABI from "@openzeppelin/contracts/build/contracts/ERC20.json";
+import { AdapterFactory } from 'fum_library/adapters';
+import { getUserVaults, getVaultInfo } from 'fum_library/blockchain';
+import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from 'fum_library/services';
+import { getAvailableStrategies, getStrategyParameters } from 'fum_library/helpers';
+import { getAllTokens } from 'fum_library/helpers';
+import contractData from 'fum_library/artifacts/contracts';
+import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
+const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Map OracleSource enum to string value

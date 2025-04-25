@@ -1,18 +1,20 @@
 import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+import path from 'path';
 import ganache from "ganache";
 import fs from "fs";
 import { ethers } from "ethers";
-import path from "path";
 import dotenv from 'dotenv';
+import contractData from 'fum_library/artifacts/contracts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 dotenv.config({ path: '.env.local' });
 
-// Path to the library (sibling directory)
+// Fixed path to the library (sibling directory)
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
 
-// Update the library's contracts.js file
+// Function to update library contracts.js files
 function updateLibraryContracts(contractsData) {
   try {
     const libraryDistPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
@@ -20,7 +22,7 @@ function updateLibraryContracts(contractsData) {
 
     // Create the artifacts directory if it doesn't exist
     const distArtifactDir = path.dirname(libraryDistPath);
-    if (!existsSync(distArtifactDir)) {
+    if (!fs.existsSync(distArtifactDir)) {
       fs.mkdirSync(distArtifactDir, { recursive: true });
     }
 
@@ -56,11 +58,6 @@ function updateLibraryContracts(contractsData) {
 // Main function to start Ganache and deploy contracts
 async function main() {
   try {
-    // Dynamically import contracts from the library instead of using require
-    console.log("Importing contract definitions...");
-    const contractsModule = await import('../../fum_library/dist/artifacts/contracts.js');
-    const contracts = contractsModule.default;
-
     console.log("Starting Ganache with Arbitrum mainnet fork...");
 
     const chainId = 1337; // Arbitrum One chain ID
@@ -113,28 +110,8 @@ async function main() {
       const wallet = new ethers.Wallet(privateKey, ethProvider);
       console.log(`Deploying with account: ${wallet.address}: ${ethers.formatEther(await ethProvider.getBalance(wallet.address))} ETH`);
 
-      // Load contracts.json
-      const contractsPath = path.join(__dirname, "../src/abis/contracts.json");
-      let contractsData = JSON.parse(JSON.stringify(contracts)); // Create a deep copy to avoid modifying the module
-
-      // Initialize all contract objects with addresses if they don't exist
-      if (!contractsData.VaultFactory) {
-        contractsData.VaultFactory = { abi: contracts.VaultFactory?.abi || [], addresses: {} };
-      } else if (!contractsData.VaultFactory.addresses) {
-        contractsData.VaultFactory.addresses = {};
-      }
-
-      if (!contractsData.parris) {
-        contractsData.parris = { abi: contracts.parris?.abi || [], addresses: {} };
-      } else if (!contractsData.parris.addresses) {
-        contractsData.parris.addresses = {};
-      }
-
-      if (!contractsData.bob) {
-        contractsData.bob = { abi: contracts.bob?.abi || [], addresses: {} };
-      } else if (!contractsData.bob.addresses) {
-        contractsData.bob.addresses = {};
-      }
+      // Create a deep copy of contractData to avoid modifying the imported object
+      const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
 
       // Deployment results
       const deploymentResults = {};
@@ -145,7 +122,7 @@ async function main() {
         const VaultFactoryBytecodePath = path.join(__dirname, `../bytecode/VaultFactory.bin`);
         const VaultFactoryBytecode = "0x" + fs.readFileSync(VaultFactoryBytecodePath, "utf8").trim();
         const VaultFactory = new ethers.ContractFactory(
-          contractsData.VaultFactory.abi,
+          contractsDataCopy.VaultFactory.abi,
           VaultFactoryBytecode,
           wallet
         );
@@ -160,8 +137,8 @@ async function main() {
         const vaultFactoryAddress = await vaultFactory.getAddress();
         console.log(`VaultFactory deployed to: ${vaultFactoryAddress}`);
 
-        // Update contracts.json
-        contractsData.VaultFactory.addresses[chainId] = vaultFactoryAddress;
+        // Update contracts data copy
+        contractsDataCopy.VaultFactory.addresses[chainId] = vaultFactoryAddress;
         deploymentResults.VaultFactory = vaultFactoryAddress;
 
         // Deploy ParrisIslandStrategy
@@ -169,7 +146,7 @@ async function main() {
         const ParrisIslandStrategyBytecodePath = path.join(__dirname, `../bytecode/ParrisIslandStrategy.bin`);
         const ParrisIslandStrategyBytecode = "0x" + fs.readFileSync(ParrisIslandStrategyBytecodePath, "utf8").trim();
         const ParrisIslandStrategy = new ethers.ContractFactory(
-          contractsData.parris.abi,
+          contractsDataCopy.parris.abi,
           ParrisIslandStrategyBytecode,
           wallet
         );
@@ -184,8 +161,8 @@ async function main() {
         const strategyAddress = await strategy.getAddress();
         console.log(`ParrisIslandStrategy deployed to: ${strategyAddress}`);
 
-        // Update contracts.json (map to 'parris')
-        contractsData.parris.addresses[chainId] = strategyAddress;
+        // Update contracts data copy (map to 'parris')
+        contractsDataCopy.parris.addresses[chainId] = strategyAddress;
         deploymentResults.ParrisIslandStrategy = strategyAddress;
 
         // Deploy BabyStepsStrategy
@@ -197,9 +174,9 @@ async function main() {
           const BabyStepsStrategyBytecode = "0x" + fs.readFileSync(BabyStepsStrategyBytecodePath, "utf8").trim();
 
           // Check if we have the ABI
-          if (contractsData.bob?.abi && contractsData.bob.abi.length > 0) {
+          if (contractsDataCopy.bob?.abi && contractsDataCopy.bob.abi.length > 0) {
             const BabyStepsStrategy = new ethers.ContractFactory(
-              contractsData.bob.abi,
+              contractsDataCopy.bob.abi,
               BabyStepsStrategyBytecode,
               wallet
             );
@@ -214,8 +191,8 @@ async function main() {
             const babyStepsStrategyAddress = await babyStepsStrategy.getAddress();
             console.log(`BabyStepsStrategy deployed to: ${babyStepsStrategyAddress}`);
 
-            // Update contracts.json (map to 'bob')
-            contractsData.bob.addresses[chainId] = babyStepsStrategyAddress;
+            // Update contracts data copy (map to 'bob')
+            contractsDataCopy.bob.addresses[chainId] = babyStepsStrategyAddress;
             deploymentResults.BabyStepsStrategy = babyStepsStrategyAddress;
           } else {
             console.warn("Warning: BabyStepsStrategy ABI not found. Skipping deployment.");
@@ -224,12 +201,8 @@ async function main() {
           console.warn(`Warning: BabyStepsStrategy bytecode not found at ${BabyStepsStrategyBytecodePath}. Skipping deployment.`);
         }
 
-        // Save updated contracts.json
-        fs.writeFileSync(contractsPath, JSON.stringify(contractsData, null, 2));
-        console.log(`Updated contracts.json with new addresses for network ${chainId}`);
-
         // Update the library's contracts.js file
-        updateLibraryContracts(contractsData);
+        updateLibraryContracts(contractsDataCopy);
 
         // Save deployment info to deployments directory
         const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");

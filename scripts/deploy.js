@@ -5,7 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import config from '../src/utils/config.js';
+import { getChainConfig } from 'fum_library/configs/chains';
+import contractData from 'fum_library/artifacts/contracts';
 
 // Load environment variables
 dotenv.config();
@@ -13,9 +14,6 @@ dotenv.config();
 // Setup path helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Path to the library (sibling directory)
-const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -48,9 +46,9 @@ function getPrivateKey(chainId) {
   }
 
   // For other networks, look up the env var name in config
-  const networkConfig = config.chains[chainId];
+  const networkConfig = getChainConfig(chainId);
   if (!networkConfig) {
-    throw new Error(`Network with chainId ${chainId} not configured in config.js`);
+    throw new Error(`Network with chainId ${chainId} not configured`);
   }
 
   // Get environment variable name from config
@@ -64,54 +62,13 @@ function getPrivateKey(chainId) {
   return privateKey;
 }
 
-// Update the library's contracts.js file
-function updateLibraryContracts(contractsData) {
-  try {
-    const libraryDistPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
-    const libraryContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
-
-    // Create the artifacts directory if it doesn't exist
-    const distArtifactDir = path.dirname(libraryDistPath);
-    if (!fs.existsSync(distArtifactDir)) {
-      fs.mkdirSync(distArtifactDir, { recursive: true });
-    }
-
-    const libraryArtifactsDir = path.dirname(libraryContractsPath);
-    if (!fs.existsSync(libraryArtifactsDir)) {
-      fs.mkdirSync(libraryArtifactsDir, { recursive: true });
-    }
-
-    // Create the library contracts.js file with the updated data
-    const libraryContractsContent = `// src/artifacts/contracts.js
-      /**
-       * Contract ABIs and addresses for the F.U.M. project
-       * This file is auto-generated and should not be edited directly
-       */
-
-      // Contract ABIs and addresses
-      const contracts = ${JSON.stringify(contractsData, null, 2)};
-
-      export default contracts;`;
-
-    fs.writeFileSync(libraryDistPath, libraryContractsContent);
-    fs.writeFileSync(libraryContractsPath, libraryContractsContent);
-    console.log(`Updated distribution contracts.js at ${libraryDistPath}`)
-    console.log(`Updated library contracts.js at ${libraryContractsPath}`);
-    return true;
-  } catch (error) {
-    console.warn(`Could not update library contracts: ${error.message}`);
-    console.warn(`Ensure that the library exists at ${LIBRARY_PATH}`);
-    return false;
-  }
-}
-
 async function deploy() {
   // Get network details
   const chainId = getChainId(networkName);
-  const networkConfig = config.chains[chainId];
+  const networkConfig = getChainConfig(chainId);
 
   if (!networkConfig) {
-    throw new Error(`Network with chainId ${chainId} not configured in config.js`);
+    throw new Error(`Network with chainId ${chainId} not configured`);
   }
 
   console.log(`Deploying to ${networkConfig.name} (${chainId})...`);
@@ -128,16 +85,8 @@ async function deploy() {
   const balance = await provider.getBalance(wallet.address);
   console.log(`Account balance: ${ethers.formatEther(balance)} ETH`);
 
-  // Load contract ABIs from contracts.json
-  const contractsPath = path.join(__dirname, '../src/abis/contracts.json');
-  let contractsData;
-
-  try {
-    contractsData = JSON.parse(fs.readFileSync(contractsPath, 'utf8'));
-  } catch (error) {
-    console.log("contracts.json not found or invalid, creating new file");
-    contractsData = {};
-  }
+  // Make a local copy of the contract data to avoid modifying the imported version
+  const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
 
   // Deployment results to track what was deployed
   const deploymentResults = {};
@@ -155,16 +104,18 @@ async function deploy() {
 
     const bytecode = '0x' + fs.readFileSync(bytecodePath, 'utf8').trim();
 
-    // Look for existing ABI or create a minimal entry
+    // Look for existing ABI
     let abi = [];
-    if (contractsData[contractName] && contractsData[contractName].abi) {
-      abi = contractsData[contractName].abi;
+    if (contractName === 'ParrisIslandStrategy') {
+      abi = contractsDataCopy['parris']?.abi || [];
+    } else if (contractName === 'BabyStepsStrategy') {
+      abi = contractsDataCopy['bob']?.abi || [];
     } else {
+      abi = contractsDataCopy[contractName]?.abi || [];
+    }
+
+    if (abi.length === 0) {
       console.warn(`No ABI found for ${contractName}, using empty array`);
-      contractsData[contractName] = {
-        abi: [],
-        addresses: {}
-      };
     }
 
     // Deploy the contract
@@ -189,27 +140,6 @@ async function deploy() {
     const contractAddress = await contract.getAddress();
     console.log(`${contractName} deployed to: ${contractAddress}`);
 
-    // Update contracts.json with the new address for this network
-    if (!contractsData[contractName]) {
-      contractsData[contractName] = {
-        abi: abi,
-        addresses: {}
-      };
-    }
-
-    if (!contractsData[contractName].addresses) {
-      contractsData[contractName].addresses = {};
-    }
-
-    // Map contract name to strategy ID in contracts.json
-    if (contractName === 'ParrisIslandStrategy') {
-      contractsData['parris'].addresses[chainId] = contractAddress;
-    } else if (contractName === 'BabyStepsStrategy') {
-      contractsData['bob'].addresses[chainId] = contractAddress;
-    } else {
-      contractsData[contractName].addresses[chainId] = contractAddress;
-    }
-
     // Save results for deployment info
     deploymentResults[contractName] = contractAddress;
 
@@ -230,13 +160,6 @@ async function deploy() {
   for (const contract of contractsToDeploy) {
     await deployContract(contract);
   }
-
-  // Update contracts.json with all deployed addresses
-  fs.writeFileSync(contractsPath, JSON.stringify(contractsData, null, 2));
-  console.log(`Updated contracts.json with new addresses for network ${chainId}`);
-
-  // Update the library's contracts.js file
-  updateLibraryContracts(contractsData);
 
   // Save deployment info to deployments directory
   const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
@@ -259,20 +182,17 @@ async function deploy() {
     fs.mkdirSync(deploymentsDir, { recursive: true });
   }
 
-  if(chainId !== 1337) {// Save deployment info
-    const deploymentPath = path.join(deploymentsDir, `${chainId}-${timestamp}.json`);
-    fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
-    return
-  }
   // Save deployment info
   const deploymentPath = path.join(deploymentsDir, `${chainId}-${timestamp}.json`);
   fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
 
-  // Also save as latest deployment for this network
-  const latestPath = path.join(deploymentsDir, `${chainId}-latest.json`);
-  fs.writeFileSync(latestPath, JSON.stringify(deploymentInfo, null, 2));
+  // Also save as latest deployment for this network (except for mainnet)
+  if(chainId !== 1) {
+    const latestPath = path.join(deploymentsDir, `${chainId}-latest.json`);
+    fs.writeFileSync(latestPath, JSON.stringify(deploymentInfo, null, 2));
+    console.log(`Deployment info saved to deployments/${chainId}-latest.json`);
+  }
 
-  console.log(`Deployment info saved to deployments/${chainId}-latest.json`);
   console.log('Deployment completed successfully!');
 }
 
