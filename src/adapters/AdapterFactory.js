@@ -32,7 +32,7 @@ export default class AdapterFactory {
     const chainConfig = chains[chainId];
 
     // Create an adapter for each supported platform on the chain
-    Object.keys(chainConfig.platforms || {}).forEach(platformId => {
+    Object.keys(chainConfig.platformAddresses || {}).forEach(platformId => {
       const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
 
       if (AdapterClass) {

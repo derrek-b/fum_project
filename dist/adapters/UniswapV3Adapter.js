@@ -7,9 +7,13 @@ import { Percent, Token, CurrencyAmount } from '@uniswap/sdk-core';
 import JSBI from "jsbi";
 
 // Import ABIs from Uniswap and OpenZeppelin libraries
-import { abi as NonfungiblePositionManagerABI } from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
-import { abi as IUniswapV3PoolABI } from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
-import { abi as ERC20ABI } from '@openzeppelin/contracts/build/contracts/ERC20.json';
+import NonfungiblePositionManagerARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
+import IUniswapV3PoolARTIFACT from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
+import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
+
+const NonfungiblePositionManagerABI = NonfungiblePositionManagerARTIFACT.abi;
+const IUniswapV3PoolABI = IUniswapV3PoolARTIFACT.abi;
+const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Adapter for Uniswap V3 platform
@@ -156,12 +160,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get chain configuration
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
 
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Create contract instance
       const positionManager = new ethers.Contract(
@@ -810,11 +814,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get position manager address from chain config
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Create contract instance to get position data
       const nftManager = new ethers.Contract(
@@ -931,8 +935,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // IMPORTANT: Fetch updated position data after claiming fees
       try {
         // Get position manager address from chain config
-        const chainConfig = this.config.chains[chainId];
-        const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+        const chainConfig = this.config[chainId];
+        const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
         // Create contract instances for fetching updated data
         const nftManager = new ethers.Contract(
@@ -1071,11 +1075,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get position manager address from chain config
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Create Token instances for the SDK
       const token0 = new Token(
@@ -1261,8 +1265,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // IMPORTANT: Fetch updated position data after decreasing liquidity
       try {
         // Get position manager address from chain config
-        const chainConfig = this.config.chains[chainId];
-        const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+        const chainConfig = this.config[chainId];
+        const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
         // Create contract instances for fetching updated data
         const nftManager = new ethers.Contract(
@@ -1491,11 +1495,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get position manager address from chain config
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Create Token instances for the SDK
       const token0 = new Token(
@@ -1622,11 +1626,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get position manager address from chain config
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Get signer
       const signer = await provider.getSigner();
@@ -1854,13 +1858,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get configuration for current chain
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
 
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
-      const factoryAddress = chainConfig.platforms.uniswapV3.factoryAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+      const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
 
       if (!positionManagerAddress || !factoryAddress) {
         throw new Error(`Missing contract addresses for chainId: ${chainId}`);
@@ -2071,11 +2075,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get position manager address from chain config
-      const chainConfig = this.config.chains[chainId];
-      if (!chainConfig || !chainConfig.platforms?.uniswapV3?.positionManagerAddress) {
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
         throw new Error(`No configuration found for chainId: ${chainId}`);
       }
-      const positionManagerAddress = chainConfig.platforms.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
 
       // Get signer
       const signer = await provider.getSigner();

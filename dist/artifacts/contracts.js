@@ -1,4 +1,4 @@
-// artifacts/contracts.js
+// src/artifacts/contracts.js
       /**
        * Contract ABIs and addresses for the F.U.M. project
        * This file is auto-generated and should not be edited directly
