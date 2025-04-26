@@ -2,8 +2,12 @@
 import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { ButtonGroup, Button, Badge } from 'react-bootstrap';
+
+// FUM Library imports
+import { getPlatformMetadata, getPlatformName, getPlatformColor } from 'fum_library/helpers/platformHelpers';
+
+// Local project imports
 import { setPlatformFilter } from '../../redux/platformsSlice';
-import config from '../../utils/config';
 import { useToast } from '../../context/ToastContext';
 
 export default function PlatformFilter() {
@@ -57,7 +61,9 @@ export default function PlatformFilter() {
 
         {activePlatforms.map(platformId => {
           try {
-            const platformMeta = config.platformMetadata[platformId] || {};
+            const platformMeta = getPlatformMetadata(platformId) || {};
+            const platformName = getPlatformName(platformId);
+            const platformColor = getPlatformColor(platformId);
             const count = platformCounts[platformId] || 0;
 
             if (count === 0) return null; // Don't show platforms with no positions
@@ -68,11 +74,11 @@ export default function PlatformFilter() {
                 variant={platformFilter === platformId ? 'primary' : 'outline-primary'}
                 onClick={() => setFilter(platformId)}
                 style={platformFilter === platformId ? {} : {
-                  borderColor: platformMeta.color || '#6c757d',
-                  color: platformMeta.color || '#6c757d'
+                  borderColor: platformColor || '#6c757d',
+                  color: platformColor || '#6c757d'
                 }}
               >
-                {platformMeta.name || platformId}
+                {platformName || platformId}
                 <Badge bg="light" text="dark" className="ms-1">
                   {count}
                 </Badge>

@@ -4,15 +4,19 @@ import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-boots
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
 import Image from "next/image";
-import { AdapterFactory } from "../../adapters";
-import { formatPrice, formatFeeDisplay } from "../../utils/formatHelpers";
-import { fetchTokenPrices } from "../../utils/coingeckoUtils";
+
+// FUM Library imports
+import { AdapterFactory } from "fum_library/adapters";
+import { formatPrice, formatFeeDisplay } from "fum_library/helpers/formatHelpers";
+import { fetchTokenPrices } from "fum_library/services/coingecko";
+import { getPlatformColor, getPlatformLogo, getPlatformName } from "fum_library/helpers/platformHelpers";
+
+// Local project imports
 import ClaimFeesModal from "./ClaimFeesModal";
 import RemoveLiquidityModal from "./RemoveLiquidityModal";
 import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../../redux/updateSlice";
-import config from "../../utils/config";
 import Logo from "../../../public/Logo.svg"
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
@@ -373,10 +377,18 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     return <Card><Card.Body>Loading position data or data unavailable...</Card.Body></Card>;
   }
 
-  // Get the platform color directly from config
-  const platformColor = position.platform && config.platformMetadata[position.platform]?.color
-                       ? config.platformMetadata[position.platform].color
+  // Get the platform color using FUM library helper
+  const platformColor = position.platform
+                       ? getPlatformColor(position.platform)
                        : '#6c757d';
+
+  // Get the platform logo using FUM library helper
+  const platformLogo = position.platform
+                      ? getPlatformLogo(position.platform)
+                      : null;
+
+  // Get the platform name using FUM library helper
+  const platformName = position.platformName || getPlatformName(position.platform);
 
   return (
     <>
@@ -407,7 +419,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
               {/* Conditional display of either logo or badge */}
               {position.platform && (
-                config.platformMetadata[position.platform]?.logo ? (
+                platformLogo ? (
                   // Show logo if available
                   <div
                     className="ms-2 d-inline-flex align-items-center justify-content-center"
@@ -417,11 +429,11 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                     }}
                   >
                     <Image
-                      src={config.platformMetadata[position.platform].logo}
-                      alt={position.platformName || position.platform}
+                      src={platformLogo}
+                      alt={platformName}
                       width={20}
                       height={20}
-                      title={position.platformName || position.platform}
+                      title={platformName}
                     />
                   </div>
                 ) : (
@@ -438,7 +450,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                       border: 'none'
                     }}
                   >
-                    {position.platformName}
+                    {platformName}
                   </Badge>
                 )
               )}
@@ -449,9 +461,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                   className="ms-2 d-inline-flex align-items-center pb-1"
                   title="Position is in a vault"
                 >
-                  <span
-
-                  >
+                  <span>
                     <Image width={18} height={18} alt="Vault indicator" src={Logo} />
                   </span>
                 </div>

@@ -2,13 +2,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
+
+// FUM Library imports
+import { AdapterFactory } from "fum_library/adapters";
+import { getUserVaults, getVaultInfo } from "fum_library/blockchain/contracts";
+import { getChainName } from "fum_library/helpers/chainHelpers";
+
+// Local project imports
 import PositionCard from "./PositionCard";
 import RefreshControls from "../RefreshControls";
 import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
-import { AdapterFactory } from "../../adapters";
-import config from "../../utils/config.js";
-import { getUserVaults, getVaultInfo } from "../../utils/contracts";
 import { setPositions, addVaultPositions } from "../../redux/positionsSlice";
 import { setPools, clearPools } from "../../redux/poolSlice";
 import { setTokens, clearTokens } from "../../redux/tokensSlice";
@@ -350,7 +354,7 @@ export default function PositionContainer() {
           <p className="mb-0">No active liquidity positions found for this wallet.</p>
           {chainId && (
             <small className="d-block mt-2">
-              Connected to {config.chains[chainId]?.name || `Chain ID ${chainId}`}
+              Connected to {getChainName(chainId) || `Chain ID ${chainId}`}
             </small>
           )}
         </Alert>

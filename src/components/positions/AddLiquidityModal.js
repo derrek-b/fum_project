@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import '../../adapters/index.js';
-import '../../utils/formatHelpers.js';
-import '../../utils/coingeckoUtils.js';
 import { ethers } from 'ethers';
-import '../../context/ToastContext.js';
-import '../../redux/updateSlice.js';
+import { Pool } from '@uniswap/v3-sdk';
+import { Token } from '@uniswap/sdk-core';
+
+// FUM Library imports
+import { AdapterFactory } from 'fum_library/adapters';
+import { formatPrice } from 'fum_library/helpers/formatHelpers';
+import { calculateUsdValue, calculateUsdValueSync } from 'fum_library/services/coingecko';
+
+// Local project imports
+import { useToast } from '../../context/ToastContext.js';
+import { triggerUpdate } from '../../redux/updateSlice.js';
 
 export default function AddLiquidityModal({
   show,
@@ -468,8 +474,6 @@ export default function AddLiquidityModal({
       const getPoolAddressWithSorting = async () => {
         try {
           // Use the Uniswap SDK to calculate pool address with properly sorted tokens
-          import { Pool } from '@uniswap/v3-sdk';
-          import { Token } from '@uniswap/sdk-core';
 
           // Sort tokens according to Uniswap V3 rules (lexicographically by address)
           let sortedToken0, sortedToken1;
