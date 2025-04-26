@@ -2,15 +2,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import '../../adapters/index.js';
-import '../../utils/formatHelpers.js';
-import '../../utils/coingeckoUtils.js';
 import { ethers } from 'ethers';
-import '../../context/ToastContext.js';
+import { useToast } from '../../context/ToastContext.js';
 import '../../redux/updateSlice.js';
-import '../../utils/contracts.js';
-import '../../utils/tokenConfig.js';
 import '../../redux/vaultsSlice.js';
+import { AdapterFactory, getAdapter } from 'fum_library/adapters';
+import { formatPrice, formatUnits } from 'fum_library/helpers/formatHelpers';
+import { calculateUsdValueSync, prefetchTokenPrices } from 'fum_library/services/coingecko';
+import { getVaultContract } from 'fum_library/blockchain/contracts';
+import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { Pool } from '@uniswap/v3-sdk';
 import { Token } from '@uniswap/sdk-core';
 

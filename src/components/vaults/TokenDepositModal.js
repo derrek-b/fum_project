@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Modal, Button, Form, InputGroup, Spinner, Alert, Card } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
-import { getAllTokens } from "../../utils/tokenConfig";
+import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
 import Image from "next/image";
 
@@ -160,7 +160,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
                   <Card.Body className="text-center py-2">
                     {token.logoURI && (
                       <div className="mb-2">
-                        <Image
+                        <img
                           src={token.logoURI}
                           alt={token.symbol}
                           width={32}

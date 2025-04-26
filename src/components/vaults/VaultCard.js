@@ -4,7 +4,7 @@ import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip, Dropdown } from 
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
 import * as LucideIcons from 'lucide-react';
-import { getStrategyDetails } from "../../utils/strategyConfig";
+import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
 import PositionSelectionModal from "./PositionSelectionModal";
 
 export default function VaultCard({ vault }) {

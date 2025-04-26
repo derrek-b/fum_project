@@ -24,9 +24,9 @@ import {
   getDefaultParams,
   getStrategyTemplates,
   getTemplateDefaults
-} from '../../utils/strategyConfig';
-import { getAvailablePlatforms } from '../../utils/config';
-import { getAllTokens } from '../../utils/tokenConfig';
+} from 'fum_library/helpers/strategyHelpers';
+import { getAvailablePlatforms } from 'fum_library/helpers/platformHelpers';
+import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 
 /**
  * Displays and allows editing of detailed strategy configuration for a vault

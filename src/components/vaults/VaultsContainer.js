@@ -4,7 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-bootstrap";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
-import { createVault } from "../../utils/contracts";
+import { createVault } from 'fum_library/blockchain/contracts';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { setLoadingVaults, setVaultError } from '../../redux/vaultsSlice';
 import { setResourceUpdating } from '../../redux/updateSlice';

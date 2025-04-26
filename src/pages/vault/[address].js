@@ -595,7 +595,7 @@ export default function VaultDetailPage() {
                               <div className="d-flex align-items-center">
                                 {token.logoURI && (
                                   <div className="me-2">
-                                    <Image
+                                    <img
                                       src={token.logoURI}
                                       alt={token.symbol}
                                       width={24}

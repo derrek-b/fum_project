@@ -440,8 +440,7 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
     const tokenBalances = await Promise.all(
       tokenAddresses.map(async (token) => {
         try {
-          const abi = ERC20ABI.abi;
-          const tokenContract = new ethers.Contract(token.address, abi, provider);
+          const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
           const balance = await tokenContract.balanceOf(vaultAddress);
           const formattedBalance = ethers.formatUnits(balance, token.decimals);
           const numericalBalance = parseFloat(formattedBalance);

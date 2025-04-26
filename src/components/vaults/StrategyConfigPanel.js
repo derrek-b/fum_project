@@ -3,10 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { useSelector, useDispatch } from 'react-redux';
 import { Card, Form, Button, Alert, Spinner, Badge } from 'react-bootstrap';
-import { getVaultContract, executeVaultTransactions } from '../../utils/contracts';
-import contractData from '../../abis/contracts.json';
-import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from '../../utils/strategyConfig';
-import { getExecutorAddress } from '@/utils/config';
 import StrategyDetailsSection from './StrategyDetailsSection';
 import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
 import { triggerUpdate } from '../../redux/updateSlice';
@@ -14,6 +10,10 @@ import { useToast } from '@/context/ToastContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
 import AutomationModal from './AutomationModal';
+import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
+import contractData from 'fum_library/artifacts/contracts';
+import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from 'fum_library/helpers/strategyHelpers';
+import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import { config } from 'dotenv';
 
 const StrategyConfigPanel = ({

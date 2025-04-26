@@ -4,11 +4,11 @@ import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-boo
 import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
-import config from "../../utils/config";
+import { platforms } from 'fum_library/configs';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
 import { addPositionToVault } from "../../redux/vaultsSlice";
-import { getPlatformById } from "../../utils/config";
+import { getPlatformById } from 'fum_library/helpers/platformHelpers';
 import { ethers } from "ethers";
 
 export default function PositionSelectionModal({
@@ -222,8 +222,8 @@ export default function PositionSelectionModal({
     const feeTier = `${position.fee / 10000}%`;
 
     // Get the platform color directly from config
-    const platformColor = position.platform && config.platformMetadata[position.platform]?.color
-                         ? config.platformMetadata[position.platform].color
+    const platformColor = position.protocol && platforms[position.protocol]?.color
+                         ? platforms[position.protocol].color
                          : '#6c757d';
 
     return { pair: tokenPair, feeTier, platformColor };
@@ -291,8 +291,8 @@ export default function PositionSelectionModal({
                     disabled={isProcessing}
                   />
                   {/* Conditional display of either logo or badge */}
-                  {position.platform && (
-                    config.platformMetadata[position.platform]?.logo ? (
+                  {position.protocol && (
+                    platforms[position.protocol]?.logo ? (
                       // Show logo if available
                       <div
                         className="ms-2 d-inline-flex align-items-center justify-content-center"
@@ -302,7 +302,7 @@ export default function PositionSelectionModal({
                         }}
                       >
                         <Image
-                          src={config.platformMetadata[position.platform].logo}
+                          src={platforms[position.platform].logo}
                           alt={position.platformName || position.platform}
                           width={40}
                           height={40}
