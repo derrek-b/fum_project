@@ -316,7 +316,7 @@ const StrategyDetailsSection = ({
     }
   };
 
-  // Validate parameters
+  // Update the validateParams function to include min/max validations
   const validateParams = () => {
     if (!strategyId || strategyId === 'none') return true;
 
@@ -332,13 +332,25 @@ const StrategyDetailsSection = ({
     const strategyDetails = getStrategyDetails(strategyId);
     if (strategyDetails?.minTokens && selectedTokens.length < strategyDetails.minTokens) {
       isValid = false;
-      allErrors.tokens = `At least ${strategyDetails.minTokens} tokens must be selected`;
+      allErrors.tokens = `At least ${strategyDetails.minTokens} token(s) must be selected`;
     }
 
-    // Validate platforms
-    if (selectedPlatforms.length === 0) {
+    // Add validation for max tokens if specified
+    if (strategyDetails?.maxTokens && selectedTokens.length > strategyDetails.maxTokens) {
       isValid = false;
-      allErrors.platforms = 'At least one platform must be selected';
+      allErrors.tokens = `No more than ${strategyDetails.maxTokens} token(s) can be selected`;
+    }
+
+    // Validate platforms - min platforms
+    if (strategyDetails?.minPlatforms && selectedPlatforms.length < strategyDetails.minPlatforms) {
+      isValid = false;
+      allErrors.platforms = `At least ${strategyDetails.minPlatforms} platform(s) must be selected`;
+    }
+
+    // Add validation for max platforms if specified
+    if (strategyDetails?.maxPlatforms && selectedPlatforms.length > strategyDetails.maxPlatforms) {
+      isValid = false;
+      allErrors.platforms = `No more than ${strategyDetails.maxPlatforms} platform(s) can be selected`;
     }
 
     // Set errors if any
@@ -422,7 +434,7 @@ const StrategyDetailsSection = ({
     );
   };
 
-  // Render token selection section
+  // Updated renderTokenSelection function to remove deposit restriction and add min/max info
   const renderTokenSelection = () => {
     if (!strategyId || strategyId === 'none') return null;
 
@@ -440,8 +452,8 @@ const StrategyDetailsSection = ({
         <Accordion.Body>
           <p className="text-muted mb-3">
             Select which tokens this strategy will manage.
-            {strategyDetails?.minTokens && (
-              <span className="ms-1">At least {strategyDetails.minTokens} tokens required.</span>
+            {strategyDetails?.minTokens && strategyDetails?.maxTokens && (
+              <span className="ms-1">Select a minimum of {strategyDetails.minTokens} and a maximum of {strategyDetails.maxTokens} tokens.</span>
             )}
           </p>
 
@@ -451,13 +463,13 @@ const StrategyDetailsSection = ({
 
           <ListGroup>
             {tokenList.map(([symbol, token]) => {
-              // Check if token has balance in vault
+              // Check if token has balance in vault (for display purposes only)
               const hasBalance = vaultTokenBalances[symbol] && parseFloat(vaultTokenBalances[symbol].balance) > 0;
               return (
                 <ListGroup.Item
                   key={symbol}
                   className="d-flex justify-content-between align-items-center"
-                  disabled={!editMode || !hasBalance}
+                  disabled={!editMode} // Only disable if not in edit mode
                 >
                   <div className="d-flex align-items-center">
                     {token.logoURI && (
@@ -491,7 +503,7 @@ const StrategyDetailsSection = ({
                     type="checkbox"
                     checked={selectedTokens.includes(symbol)}
                     onChange={() => handleTokenToggle(symbol)}
-                    disabled={!editMode || !hasBalance}
+                    disabled={!editMode} // Only disable if not in edit mode
                   />
                 </ListGroup.Item>
               );
@@ -510,7 +522,7 @@ const StrategyDetailsSection = ({
     );
   };
 
-  // Render platform selection section
+  // Updated renderPlatformSelection function to add min/max info
   const renderPlatformSelection = () => {
     if (!strategyId || strategyId === 'none') return null;
 
@@ -527,6 +539,9 @@ const StrategyDetailsSection = ({
         <Accordion.Body>
           <p className="text-muted mb-3">
             Select which platforms this strategy will use for liquidity positions.
+            {strategyDetails?.minTokens && strategyDetails?.maxTokens && (
+              <span className="ms-1">Select a minimum of {strategyDetails.minPlatforms} and a maximum of {strategyDetails.maxPlatforms} platforms.</span>
+            )}
           </p>
 
           {errors.platforms && (

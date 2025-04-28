@@ -9,7 +9,6 @@ import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
-import AutomationModal from './AutomationModal';
 import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
 import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from 'fum_library/helpers/strategyHelpers';
@@ -19,7 +18,6 @@ import { config } from 'dotenv';
 const StrategyConfigPanel = ({
   vaultAddress,
   isOwner,
-  strategyActive,
   performance,
   onStrategyToggle
 }) => {
@@ -36,7 +34,6 @@ const StrategyConfigPanel = ({
   // State
   const [selectedStrategy, setSelectedStrategy] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [automationEnabled, setAutomationEnabled] = useState(false);
   const [activePreset, setActivePreset] = useState('custom');
   const [strategyParams, setStrategyParams] = useState({});
   // Store complete set of parameters including template defaults
@@ -45,15 +42,6 @@ const StrategyConfigPanel = ({
   const [selectedPlatforms, setSelectedPlatforms] = useState([]);
   const [editMode, setEditMode] = useState(false);
   const [validateFn, setValidateFn] = useState(null);
-  const [strategyJustSaved, setStrategyJustSaved] = useState(false);
-
-  // Separate executor state from strategy state
-  const [executorEnabled, setExecutorEnabled] = useState(false);
-  const [initialExecutorEnabled, setInitialExecutorEnabled] = useState(false);
-
-  // Automation modal state
-  const [showAutomationModal, setShowAutomationModal] = useState(false);
-  const [isEnablingAutomation, setIsEnablingAutomation] = useState(true);
 
   // Modals state
   const [showDeactivationModal, setShowDeactivationModal] = useState(false);
@@ -64,7 +52,6 @@ const StrategyConfigPanel = ({
   const [transactionLoading, setTransactionLoading] = useState(false);
 
   // Change tracking
-  const [initialAutomationState, setInitialAutomationState] = useState(false);
   const [initialSelectedStrategy, setInitialSelectedStrategy] = useState('');
   const [initialActivePreset, setInitialActivePreset] = useState('custom');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -86,17 +73,6 @@ const StrategyConfigPanel = ({
     setPlatformsChanged(false);
     setParamsChanged(false);
     setHasUnsavedChanges(false);
-
-    // Set automation toggle based on vault's active strategy status
-    const hasStrategy = vault?.hasActiveStrategy || strategyActive || false;
-    setAutomationEnabled(hasStrategy);
-    setInitialAutomationState(hasStrategy);
-
-    // Set executor state separately
-    const zeroAddress = "0x0000000000000000000000000000000000000000";
-    const hasExecutor = vault?.executor && vault.executor !== zeroAddress;
-    setExecutorEnabled(hasExecutor);
-    setInitialExecutorEnabled(hasExecutor);
 
     // If vault has an active strategy, set it as selected
     if (vault?.strategy?.strategyId) {
@@ -125,7 +101,7 @@ const StrategyConfigPanel = ({
       if (vault.strategy.selectedPlatforms) {
         setSelectedPlatforms(vault.strategy.selectedPlatforms);
       }
-    } else if (vault?.hasActiveStrategy || strategyActive) {
+    } else if (vault?.hasActiveStrategy) {
       // Fallback to 'fed' if we know there's a strategy but don't have details
       setSelectedStrategy('fed');
       setInitialSelectedStrategy('fed');
@@ -145,7 +121,7 @@ const StrategyConfigPanel = ({
     } else {
       setIsDataLoaded(false);
     }
-  }, [vault, strategyActive]);
+  }, [vault]);
 
   // Check for unsaved changes whenever relevant state changes
   useEffect(() => {
@@ -153,7 +129,7 @@ const StrategyConfigPanel = ({
     if (!isDataLoaded) return;
 
     const hasChanges =
-      // Strategy selection changes only - not automation state
+      // Strategy selection changes
       (selectedStrategy !== initialSelectedStrategy) ||
       (activePreset !== initialActivePreset) ||
       templateChanged || tokensChanged || platformsChanged || paramsChanged;
@@ -171,103 +147,11 @@ const StrategyConfigPanel = ({
     paramsChanged
   ]);
 
-  // Show automation modal after successful strategy save
-  useEffect(() => {
-    if (strategyJustSaved && vault?.hasActiveStrategy) {
-      setShowTransactionModal(false)
-      // Show modal after a short delay to allow the transaction modal to close
-      setTimeout(() => {
-        setIsEnablingAutomation(true);
-        setShowAutomationModal(true);
-        setStrategyJustSaved(false); // Reset the flag
-      }, 500);
-    }
-  }, [strategyJustSaved, vault?.hasActiveStrategy]);
-
   // Handle strategy selection change
   const handleStrategyChange = (e) => {
     if (!isDataLoaded) return; // Prevent changes during loading
     setSelectedStrategy(e.target.value);
     setEditMode(true);
-  };
-
-  // Handle automation toggle
-  const handleAutomationToggle = (e) => {
-    if (!isDataLoaded) return; // Prevent changes during loading
-
-    const isEnabled = e.target.checked;
-
-    if (initialAutomationState && !isEnabled) {
-      // Show deactivation confirmation modal when turning off an active strategy
-      setShowDeactivationModal(true);
-    } else {
-      // Direct set for enabling (turning on) a strategy
-      setAutomationEnabled(isEnabled);
-
-      // If toggling off automation, clear the selected strategy
-      if (!isEnabled) {
-        setSelectedStrategy('');
-        setEditMode(false);
-      }
-    }
-  };
-
-  // Handle executor automation toggle
-  const handleExecutorToggle = (e) => {
-    if (!isDataLoaded) return; // Prevent changes during loading
-
-    const isEnabled = e.target.checked;
-    setIsEnablingAutomation(isEnabled);
-    setShowAutomationModal(true);
-  };
-
-  // Handle automation confirmation
-  const handleAutomationConfirm = async () => {
-    console.log(`Setting executor... ${isEnablingAutomation ? 'enabling' : 'disabling'} automation`);
-
-    try {
-      // Close the modal
-      setShowAutomationModal(false);
-
-      if (!provider) {
-        throw new Error("No provider available");
-      }
-
-      // Get signer with await
-      const signer = await provider.getSigner();
-
-      // Get vault contract instance
-      const vaultContract = getVaultContract(vaultAddress, provider, signer);
-
-      // Get executor address from config
-      const executorAddress = getExecutorAddress(chainId)
-
-      // Set or remove executor
-      if (isEnablingAutomation) {
-        await vaultContract.setExecutor(executorAddress);
-        setExecutorEnabled(true);
-        setInitialExecutorEnabled(true);
-      } else {
-        await vaultContract.removeExecutor();
-        setExecutorEnabled(false);
-        setInitialExecutorEnabled(false);
-      }
-
-      // Show success message
-      showSuccess(`Automation ${isEnablingAutomation ? 'enabled' : 'disabled'} successfully`);
-
-      // Update redux state with executor info
-      dispatch(updateVault({
-        vaultAddress,
-        vaultData: {
-          executor: isEnablingAutomation ? executorAddress : null
-        }
-      }));
-
-    } catch (error) {
-      console.error(`Error ${isEnablingAutomation ? 'enabling' : 'disabling'} automation:`, error);
-      showError(`Failed to ${isEnablingAutomation ? 'enable' : 'disable'} automation: ${error.message}`);
-    }
   };
 
   // Handle confirmation of strategy deactivation
@@ -294,8 +178,7 @@ const StrategyConfigPanel = ({
       // Wait for transaction to be mined
       await tx.wait();
 
-      // Turn off automation
-      setAutomationEnabled(false);
+      // Clear strategy state
       setSelectedStrategy('');
       setEditMode(false);
 
@@ -337,30 +220,6 @@ const StrategyConfigPanel = ({
   };
 
   // Check if parameters have changed compared to initial values - uses deep comparison
-  // const checkParametersChanged = (newParams, originalParams) => {
-  //   // If we don't have original params, consider it changed
-  //   if (!originalParams || Object.keys(originalParams).length === 0) {
-  //     return Object.keys(newParams).length > 0;
-  //   }
-
-  //   // Check for any differences
-  //   for (const [key, value] of Object.entries(newParams)) {
-  //     // If parameter doesn't exist in original or value is different
-  //     if (originalParams[key] === undefined || originalParams[key] !== value) {
-  //       return true;
-  //     }
-  //   }
-
-  //   // Check for keys in original that are no longer in newParams
-  //   for (const key of Object.keys(originalParams)) {
-  //     if (newParams[key] === undefined) {
-  //       return true;
-  //     }
-  //   }
-
-  //   return false;
-  // };
-
   const checkParametersChanged = (newParams, originalParams) => {
     if (!originalParams) {
       return Object.keys(newParams).length > 0;
@@ -597,7 +456,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 2: Set target tokens if needed
-      if (automationEnabled && selectedStrategy && selectedTokens.length > 0 && tokensChanged) {
+      if (selectedStrategy && selectedTokens.length > 0 && tokensChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Target Tokens'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
@@ -609,7 +468,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 3: Set target platforms if needed
-      if (automationEnabled && selectedStrategy && selectedPlatforms.length > 0 && platformsChanged) {
+      if (selectedStrategy && selectedPlatforms.length > 0 && platformsChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Target Platforms'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
@@ -629,7 +488,7 @@ const StrategyConfigPanel = ({
       const parameterDefinitions = getStrategyParameters(selectedStrategy);
 
       // Step 4: Handle template selection if the strategy supports templates
-      if (automationEnabled && selectedStrategy && activePreset && templateChanged) {
+      if (selectedStrategy && activePreset && templateChanged) {
         // Find the correct step index
         const stepIndex = steps.findIndex(step => step.title.includes('Template'));
         if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
@@ -652,7 +511,7 @@ const StrategyConfigPanel = ({
       }
 
       // Step 5: Set strategy parameters based on the strategy's parameter groups
-      if (automationEnabled && selectedStrategy && (activePreset === 'custom' || paramsChanged)) {
+      if (selectedStrategy && (activePreset === 'custom' || paramsChanged)) {
         // Get contract parameter groups from config
         const contractParamGroups = strategyConfig.contractParametersGroups || [];
 
@@ -734,7 +593,7 @@ const StrategyConfigPanel = ({
           parameters: strategyParams,
           selectedTokens,
           selectedPlatforms,
-          isActive: automationEnabled,
+          isActive: true,
           activeTemplate: activePreset,
           lastUpdated: Date.now()
         }
@@ -744,8 +603,8 @@ const StrategyConfigPanel = ({
       dispatch(updateVault({
         vaultAddress,
         vaultData: {
-          hasActiveStrategy: automationEnabled,
-          strategyAddress: automationEnabled ? strategyAddress : null
+          hasActiveStrategy: true,
+          strategyAddress: strategyAddress
         }
       }));
 
@@ -755,12 +614,7 @@ const StrategyConfigPanel = ({
       // Show success message
       showSuccess("Strategy configuration saved successfully");
 
-      // Set flag to trigger automation modal after save
-      const isNewStrategy = !initialAutomationState && automationEnabled;
-      setStrategyJustSaved(isNewStrategy);
-
       // Update component state
-      setInitialAutomationState(automationEnabled);
       setInitialSelectedStrategy(selectedStrategy);
       setInitialActivePreset(activePreset);
       setInitialParams(strategyParams);
@@ -787,10 +641,6 @@ const StrategyConfigPanel = ({
       setSelectedStrategy(initialSelectedStrategy);
     }
 
-    if (automationEnabled !== initialAutomationState) {
-      setAutomationEnabled(initialAutomationState);
-    }
-
     if (activePreset !== initialActivePreset) {
       setActivePreset(initialActivePreset);
     }
@@ -812,39 +662,6 @@ const StrategyConfigPanel = ({
     setShowTransactionModal(false);
   };
 
-  // Render automation toggle for executor
-  const renderAutomationToggle = () => {
-    // Only show automation toggle when a strategy is active
-    if (!vault?.hasActiveStrategy) return null;
-
-    // Check specifically for address(0)
-    const zeroAddress = "0x0000000000000000000000000000000000000000";
-    const hasExecutor = vault?.executor && vault.executor !== zeroAddress;
-
-    return (
-      <div className="mt-4 mb-3 p-3 border rounded bg-light">
-        <div className="d-flex justify-content-between align-items-center">
-          <div>
-            <h5 className="mb-0">Automation Status</h5>
-            <p className="text-muted mb-0">
-              {executorEnabled ?
-                "Positions are being managed automatically by executor" :
-                "Strategy is active but automation is not enabled"}
-            </p>
-          </div>
-          <Form.Check
-            type="switch"
-            id="executor-switch"
-            label={executorEnabled ? "Active" : "Inactive"}
-            checked={executorEnabled}
-            onChange={handleExecutorToggle}
-            disabled={!isOwner}
-          />
-        </div>
-      </div>
-    );
-  };
-
   // Access current strategy directly from vault for array comparisons
   const currentStrategy = vault?.strategy || null;
 
@@ -864,81 +681,77 @@ const StrategyConfigPanel = ({
           </Alert>
         )}
 
-        <Form.Check
-          type="switch"
-          id="automation-switch"
-          label="Use automated position management"
-          checked={automationEnabled}
-          onChange={handleAutomationToggle}
-          disabled={!isOwner || !isDataLoaded}
-          className="mb-4"
-        />
-
-        {automationEnabled && (
-          <>
-            <div className="mb-4">
-              <Form.Group>
-                <Form.Label><strong>Select Strategy</strong></Form.Label>
-                <Form.Select
-                  value={selectedStrategy}
-                  onChange={handleStrategyChange}
-                  disabled={!isOwner || !isDataLoaded || (vault?.hasActiveStrategy && !hasUnsavedChanges)}
-                  className="mb-3"
-                >
-                  <option value="">Select a strategy</option>
-                  {availableStrategies.map(strategy => (
-                    <option key={strategy.id} value={strategy.id}>
-                      {strategy.name} - {strategy.subtitle}
-                    </option>
-                  ))}
-                </Form.Select>
-              </Form.Group>
-            </div>
-
-            {/* Render automation toggle when strategy is active */}
-            {renderAutomationToggle()}
-
-            <h5 className="mt-4">Strategy Details</h5>
-            <div className="strategy-details p-3 border rounded bg-light">
-              {(!automationEnabled || (!vault?.hasActiveStrategy && !selectedStrategy)) ? (
-                <Alert variant="info">
-                  No strategy established for the vault. Select a strategy and activate it to enable automated management.
-                </Alert>
-              ) : (
-                <StrategyDetailsSection
-                  vaultAddress={vaultAddress}
-                  isOwner={isOwner}
-                  strategyId={selectedStrategy}
-                  strategyActive={strategyActive && !hasUnsavedChanges}
-                  editMode={editMode}
-                  onEditRequest={handleEditRequest}
-                  onCancel={handleCancel}
-                  onValidate={handleSetValidation}
-                  onParamsChange={handleParamsChange}
-                  isDataLoaded={isDataLoaded} // Pass loading state to child
-                />
-              )}
-            </div>
-
-            {/* Save/Cancel buttons at the bottom */}
-            {isOwner && isDataLoaded && (editMode || hasUnsavedChanges) && (
-              <div className="d-flex justify-content-end mt-4">
+        <div className="mb-4">
+          <Form.Group>
+            {vault?.hasActiveStrategy && isOwner && !editMode ? (
+              <Form.Label style={{ width: '100%' }} >
                 <Button
-                  variant="outline-secondary"
-                  onClick={handleCancel}
-                  className="me-2"
+                  variant="outline-danger"
+                  size="sm"
+                  onClick={() => setShowDeactivationModal(true)}
+                  style={{ width: '100%' }}
                 >
-                  Cancel
+                  Disable Strategy
                 </Button>
-                <Button
-                  variant="primary"
-                  onClick={handleSave}
-                >
-                  Save Configuration
-                </Button>
-              </div>
+              </Form.Label>
+            ) : (
+              <Form.Label><strong>Select Strategy</strong></Form.Label>
             )}
-          </>
+            <Form.Select
+              value={selectedStrategy}
+              onChange={handleStrategyChange}
+              disabled={!isOwner || !isDataLoaded || (vault?.hasActiveStrategy && !hasUnsavedChanges)}
+              className="mb-3"
+            >
+              <option value="">Select a strategy</option>
+              {availableStrategies.map(strategy => (
+                <option key={strategy.id} value={strategy.id} disabled={strategy.comingSoon}>
+                  {strategy.name} - {strategy.subtitle} {strategy.comingSoon ? "(Coming Soon)" : ""}
+                </option>
+              ))}
+            </Form.Select>
+          </Form.Group>
+        </div>
+
+        <h5 className="mt-4">Strategy Details</h5>
+        <div className="strategy-details p-3 border rounded bg-light">
+          {!selectedStrategy ? (
+            <Alert variant="info">
+              No strategy selected for the vault. Select a strategy to configure automated management.
+            </Alert>
+          ) : (
+            <StrategyDetailsSection
+              vaultAddress={vaultAddress}
+              isOwner={isOwner}
+              strategyId={selectedStrategy}
+              strategyActive={vault?.hasActiveStrategy && !hasUnsavedChanges}
+              editMode={editMode}
+              onEditRequest={handleEditRequest}
+              onCancel={handleCancel}
+              onValidate={handleSetValidation}
+              onParamsChange={handleParamsChange}
+              isDataLoaded={isDataLoaded} // Pass loading state to child
+            />
+          )}
+        </div>
+
+        {/* Save/Cancel buttons at the bottom */}
+        {isOwner && isDataLoaded && (editMode || hasUnsavedChanges) && (
+          <div className="d-flex justify-content-end mt-4">
+            <Button
+              variant="outline-secondary"
+              onClick={handleCancel}
+              className="me-2"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSave}
+            >
+              Save Configuration
+            </Button>
+          </div>
         )}
       </Card.Body>
 
@@ -965,15 +778,6 @@ const StrategyConfigPanel = ({
         error={transactionError}
         tokenSymbols={selectedTokens}
         strategyName={getStrategyName()}
-      />
-
-      {/* Automation Modal */}
-      <AutomationModal
-        show={showAutomationModal}
-        onHide={() => setShowAutomationModal(false)}
-        isEnabling={isEnablingAutomation}
-        executorAddress={getExecutorAddress(chainId)}
-        onConfirm={handleAutomationConfirm}
       />
     </Card>
   );

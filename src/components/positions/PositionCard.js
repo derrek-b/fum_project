@@ -428,7 +428,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                       width: '20px'
                     }}
                   >
-                    <Image
+                    <img
                       src={platformLogo}
                       alt={platformName}
                       width={20}

@@ -419,7 +419,7 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
  * @returns {Promise<object>} Result object with token data
  */
 export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
-  const { showError } = options;
+  const { showError, silent = false } = options;
 
   try {
     const allTokens = getAllTokens();
@@ -483,33 +483,43 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
       };
     });
 
-    // Update token balances in Redux
-    if (Object.keys(tokenBalancesMap).length > 0) {
-      dispatch(updateVaultTokenBalances({
+    // Only update Redux if not in silent mode
+    if (!silent) {
+      // Update token balances in Redux
+      if (Object.keys(tokenBalancesMap).length > 0) {
+        dispatch(updateVaultTokenBalances({
+          vaultAddress,
+          tokenBalances: tokenBalancesMap
+        }));
+      }
+
+      // Update vault metrics with tokenTVL
+      dispatch(updateVaultMetrics({
         vaultAddress,
-        tokenBalances: tokenBalancesMap
+        metrics: {
+          tokenTVL: totalTokenValue,
+          lastTVLUpdate: Date.now()
+        }
       }));
     }
-
-    // Update vault metrics with tokenTVL
-    dispatch(updateVaultMetrics({
-      vaultAddress,
-      metrics: {
-        tokenTVL: totalTokenValue,
-        lastTVLUpdate: Date.now()
-      }
-    }));
 
     return {
       success: true,
       vaultTokens: filteredTokens,
       totalTokenValue,
-      tokenPricesLoaded
+      tokenPricesLoaded,
+      tokenBalancesMap
     };
   } catch (err) {
     console.error("Error fetching token balances:", err);
-    if (showError) showError("Failed to fetch vault tokens");
-    return { success: false, error: err.message };
+    if (showError && !silent) showError("Failed to fetch vault tokens");
+    return {
+      success: false,
+      error: err.message,
+      totalTokenValue: 0,
+      vaultTokens: [],
+      tokenBalancesMap: {}
+    };
   }
 };
 
@@ -627,7 +637,7 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
  * @returns {Promise<object>} Result object with success status and vault data
  */
 export const getVaultData = async (vaultAddress, provider, chainId, dispatch, options = {}) => {
-  const { showError, showSuccess } = options;
+  const { showError, showSuccess, skipMetricsUpdate = false } = options;
 
   if (!vaultAddress || !provider || !chainId || !dispatch) {
     const error = "Missing required parameters for loading vault data";
@@ -660,8 +670,14 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
     // Store vault data for final result
     const vaultData = vaultInfoResult.vaultData;
 
-    // Step 3: Load token balances
-    const tokenResult = await loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch, options);
+    // Step 3: Load token balances with silent mode if skipMetricsUpdate is true
+    const tokenResult = await loadVaultTokenBalances(
+      vaultAddress,
+      provider,
+      chainId,
+      dispatch,
+      { ...options, silent: skipMetricsUpdate }
+    );
 
     // Step 4: Load positions
     const positionsResult = await loadVaultPositions(vaultAddress, provider, chainId, dispatch, options);
@@ -670,10 +686,114 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       // Update vault with position IDs
       vaultData.positions = positionsResult.positionIds;
 
-      // Update Redux
+      // Update Redux with the basic vault data
       dispatch(updateVault({
         vaultAddress,
         vaultData
+      }));
+    }
+
+    // Only calculate position values and update metrics if not skipping metrics update
+    if (!skipMetricsUpdate && positionsResult.success && positionsResult.positions.length > 0) {
+      const positions = positionsResult.positions;
+      const poolData = positionsResult.poolData || {};
+      const tokenData = positionsResult.tokenData || {};
+
+      // Get unique token symbols and collect data
+      const tokenSymbols = new Set();
+      const positionData = [];
+
+      // Process each position
+      for (const position of positions) {
+        try {
+          if (!position.poolAddress || !poolData[position.poolAddress]) continue;
+
+          const pool = poolData[position.poolAddress];
+          if (!pool.token0 || !pool.token1) continue;
+
+          const token0 = tokenData[pool.token0];
+          const token1 = tokenData[pool.token1];
+
+          if (!token0?.symbol || !token1?.symbol) continue;
+
+          tokenSymbols.add(token0.symbol);
+          tokenSymbols.add(token1.symbol);
+
+          positionData.push({
+            position,
+            poolData: pool,
+            token0Data: token0,
+            token1Data: token1
+          });
+        } catch (error) {
+          console.error(`Error processing position data: ${error.message}`);
+        }
+      }
+
+      // Fetch token prices
+      let pricesFetchFailed = false;
+
+      try {
+        // Prefetch all token prices at once to populate the cache
+        await prefetchTokenPrices(Array.from(tokenSymbols));
+      } catch (error) {
+        console.error(`Error prefetching token prices: ${error.message}`);
+        pricesFetchFailed = true;
+      }
+
+      // Calculate TVL
+      let totalTVL = 0;
+      let hasPartialData = pricesFetchFailed;
+
+      for (const data of positionData) {
+        try {
+          const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+          if (!adapter) continue;
+
+          const tokenBalances = await adapter.calculateTokenAmounts(
+            data.position,
+            data.poolData,
+            data.token0Data,
+            data.token1Data,
+            chainId
+          );
+
+          if (!tokenBalances) continue;
+
+          // Use the sync version since we've already prefetched prices
+          const token0UsdValue = calculateUsdValueSync(
+            tokenBalances.token0.formatted,
+            data.token0Data.symbol
+          );
+
+          const token1UsdValue = calculateUsdValueSync(
+            tokenBalances.token1.formatted,
+            data.token1Data.symbol
+          );
+
+          if (token0UsdValue) totalTVL += token0UsdValue;
+          if (token1UsdValue) totalTVL += token1UsdValue;
+
+          // If either token value couldn't be calculated, mark as partial data
+          if (token0UsdValue === null || token1UsdValue === null) {
+            hasPartialData = true;
+          }
+        } catch (error) {
+          console.error(`Error calculating position value: ${error.message}`);
+          hasPartialData = true;
+        }
+      }
+
+      // Update vault metrics with combined TVL information
+      dispatch(updateVaultMetrics({
+        vaultAddress,
+        metrics: {
+          tvl: totalTVL,
+          tokenTVL: tokenResult.success ? tokenResult.totalTokenValue : 0,
+          hasPartialData,
+          positionCount: positions.length,
+          lastTVLUpdate: Date.now()
+        }
       }));
     }
 
@@ -858,43 +978,61 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     const vaultAddresses = await getUserVaults(userAddress, provider);
 
     // Initialize collections for data
-    const vaultsData = [];
     const allPositions = [];
     const allPoolData = {};
     const allTokenData = {};
     const positionsByVault = {};
+    const completeVaultsData = []; // Will hold fully calculated vault data
 
-    // 3. Process each vault to get its details
+    // 3. First pass: Get basic vault info and collect position data
+    console.log("First pass: gathering basic vault info and positions");
     for (const vaultAddress of vaultAddresses) {
       try {
-        // Load full vault data for each vault
-        const vaultResult = await getVaultData(vaultAddress, provider, chainId, dispatch, options);
+        // Get basic vault info including positions, but don't update metrics yet
+        const vaultResult = await getVaultData(vaultAddress, provider, chainId, dispatch, {
+          ...options,
+          skipMetricsUpdate: true // Add this flag to getVaultData
+        });
 
         if (vaultResult.success) {
-          vaultsData.push(vaultResult.vault);
+          // Store basic vault data (without finalized metrics)
+          const vaultData = vaultResult.vault;
 
+          // Store positions for TVL calculation
           if (vaultResult.positions && vaultResult.positions.length > 0) {
             allPositions.push(...vaultResult.positions);
             positionsByVault[vaultAddress] = vaultResult.positions;
-
-            // Collect pool and token data
-            if (vaultResult.poolData) {
-              Object.assign(allPoolData, vaultResult.poolData);
-            }
-            if (vaultResult.tokenData) {
-              Object.assign(allTokenData, vaultResult.tokenData);
-            }
+          } else {
+            positionsByVault[vaultAddress] = [];
           }
+
+          // Collect pool and token data
+          if (vaultResult.poolData) {
+            Object.assign(allPoolData, vaultResult.poolData);
+          }
+          if (vaultResult.tokenData) {
+            Object.assign(allTokenData, vaultResult.tokenData);
+          }
+
+          // Store vault data temporarily
+          completeVaultsData.push({
+            ...vaultData,
+            // Initialize metrics object that will be completed later
+            metrics: {
+              tvl: 0,
+              tokenTVL: vaultResult.totalTokenValue || 0,
+              positionCount: vaultResult.positions ? vaultResult.positions.length : 0,
+              hasPartialData: false,
+              lastTVLUpdate: Date.now()
+            }
+          });
         }
       } catch (error) {
         console.error(`Error processing vault ${vaultAddress}:`, error);
       }
     }
 
-    // 4. Update all vaults in Redux
-    dispatch(setVaults(vaultsData));
-
-    // 5. Get all user positions that aren't in vaults
+    // 4. Get all user positions that aren't in vaults
     const vaultPositionIds = new Set(allPositions.map(p => p.id));
     const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
 
@@ -930,10 +1068,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       }
     }
 
-    // 6. Update Redux with ALL positions (vault and non-vault)
-    dispatch(setPositions(allPositions));
-
-    // 7. Update pools and tokens
+    // 5. Update pools and tokens in Redux
     if (Object.keys(allPoolData).length > 0) {
       dispatch(setPools(allPoolData));
     }
@@ -942,115 +1077,133 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       dispatch(setTokens(allTokenData));
     }
 
-    // 8. Calculate TVL for each vault - THIS IS THE IMPORTANT PART
-    // THIS MUST BE DONE AFTER ALL TOKENS, POOLS AND POSITIONS ARE COLLECTED
-    console.log("Starting TVL calculation for all vaults");
-    for (const vault of vaultsData) {
+    // 6. Update Redux with ALL positions (vault and non-vault)
+    dispatch(setPositions(allPositions));
+
+    // 7. Prefetch all token prices at once to make TVL calculations faster
+    console.log("Prefetching token prices for all tokens");
+    const allTokenSymbols = new Set();
+
+    // Collect all token symbols from pool data
+    Object.values(allPoolData).forEach(pool => {
+      if (pool.token0 && allTokenData[pool.token0]?.symbol) {
+        allTokenSymbols.add(allTokenData[pool.token0].symbol);
+      }
+      if (pool.token1 && allTokenData[pool.token1]?.symbol) {
+        allTokenSymbols.add(allTokenData[pool.token1].symbol);
+      }
+    });
+
+    try {
+      await prefetchTokenPrices(Array.from(allTokenSymbols));
+    } catch (error) {
+      console.warn("Error prefetching token prices:", error);
+    }
+
+    // 8. Second pass: Calculate TVL for each vault
+    console.log("Second pass: Calculating TVL for all vaults");
+    for (let i = 0; i < completeVaultsData.length; i++) {
+      const vault = completeVaultsData[i];
       const vaultPositions = positionsByVault[vault.address] || [];
 
-      if (vaultPositions.length === 0) {
-        continue;
-      }
+      // Initialize TVL calculation
+      let positionTVL = 0;
+      let hasPartialData = false;
 
-      // Get unique token symbols and collect data
-      const tokenSymbols = new Set();
-      const positionData = [];
+      if (vaultPositions.length > 0) {
+        const positionData = [];
 
-      // Process each position
-      for (const position of vaultPositions) {
-        try {
-          if (!position.poolAddress || !allPoolData[position.poolAddress]) continue;
+        // Process each position
+        for (const position of vaultPositions) {
+          try {
+            if (!position.poolAddress || !allPoolData[position.poolAddress]) continue;
 
-          const poolData = allPoolData[position.poolAddress];
-          if (!poolData.token0 || !poolData.token1) continue;
+            const poolData = allPoolData[position.poolAddress];
+            if (!poolData.token0 || !poolData.token1) continue;
 
-          const token0Data = allTokenData[poolData.token0];
-          const token1Data = allTokenData[poolData.token1];
+            const token0Data = allTokenData[poolData.token0];
+            const token1Data = allTokenData[poolData.token1];
 
-          if (!token0Data?.symbol || !token1Data?.symbol) continue;
+            if (!token0Data?.symbol || !token1Data?.symbol) continue;
 
-          tokenSymbols.add(token0Data.symbol);
-          tokenSymbols.add(token1Data.symbol);
-
-          positionData.push({
-            position,
-            poolData,
-            token0Data,
-            token1Data
-          });
-        } catch (error) {
-          console.error(`Error processing position data: ${error.message}`);
-        }
-      }
-
-      // Fetch token prices
-      let pricesFetchFailed = false;
-
-      try {
-        // Prefetch all token prices at once to populate the cache
-        await prefetchTokenPrices(Array.from(tokenSymbols));
-      } catch (error) {
-        console.error(`Error prefetching token prices: ${error.message}`);
-        pricesFetchFailed = true;
-      }
-
-      // Calculate TVL
-      let totalTVL = 0;
-      let hasPartialData = pricesFetchFailed;
-
-      for (const data of positionData) {
-        try {
-          const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
-          if (!adapter) continue;
-
-          const tokenBalances = await adapter.calculateTokenAmounts(
-            data.position,
-            data.poolData,
-            data.token0Data,
-            data.token1Data,
-            chainId
-          );
-
-          if (!tokenBalances) continue;
-
-          // Use the sync version since we've already prefetched prices
-          const token0UsdValue = calculateUsdValueSync(
-            tokenBalances.token0.formatted,
-            data.token0Data.symbol
-          );
-
-          const token1UsdValue = calculateUsdValueSync(
-            tokenBalances.token1.formatted,
-            data.token1Data.symbol
-          );
-
-          if (token0UsdValue) totalTVL += token0UsdValue;
-          if (token1UsdValue) totalTVL += token1UsdValue;
-
-          // If either token value couldn't be calculated, mark as partial data
-          if (token0UsdValue === null || token1UsdValue === null) {
+            positionData.push({
+              position,
+              poolData,
+              token0Data,
+              token1Data
+            });
+          } catch (error) {
+            console.error(`Error processing position data: ${error.message}`);
             hasPartialData = true;
           }
-        } catch (error) {
-          console.error(`Error calculating position value: ${error.message}`);
-          hasPartialData = true;
+        }
+
+        // Calculate position TVL
+        for (const data of positionData) {
+          try {
+            const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+            if (!adapter) {
+              hasPartialData = true;
+              continue;
+            }
+
+            const tokenBalances = await adapter.calculateTokenAmounts(
+              data.position,
+              data.poolData,
+              data.token0Data,
+              data.token1Data,
+              chainId
+            );
+
+            if (!tokenBalances) {
+              hasPartialData = true;
+              continue;
+            }
+
+            // Use the sync version since we've already prefetched prices
+            const token0UsdValue = calculateUsdValueSync(
+              tokenBalances.token0.formatted,
+              data.token0Data.symbol
+            );
+
+            const token1UsdValue = calculateUsdValueSync(
+              tokenBalances.token1.formatted,
+              data.token1Data.symbol
+            );
+
+            if (token0UsdValue !== null) positionTVL += token0UsdValue;
+            if (token1UsdValue !== null) positionTVL += token1UsdValue;
+
+            // If either token value couldn't be calculated, mark as partial data
+            if (token0UsdValue === null || token1UsdValue === null) {
+              hasPartialData = true;
+            }
+          } catch (error) {
+            console.error(`Error calculating position value: ${error.message}`);
+            hasPartialData = true;
+          }
         }
       }
 
-      // IMPORTANT: Update vault metrics with TVL
-      dispatch(updateVaultMetrics({
-        vaultAddress: vault.address,
+      // Update the metrics with calculated TVL
+      completeVaultsData[i] = {
+        ...vault,
         metrics: {
-          tvl: totalTVL,
-          hasPartialData,
+          ...vault.metrics,
+          tvl: positionTVL,
+          hasPartialData: hasPartialData || vault.metrics.hasPartialData,
           lastTVLUpdate: Date.now()
         }
-      }));
+      };
     }
+
+    // 9. NOW update all vaults in Redux with COMPLETE data
+    console.log("Updating Redux with complete vault data");
+    dispatch(setVaults(completeVaultsData));
 
     return {
       success: true,
-      vaults: vaultsData,
+      vaults: completeVaultsData,
       positions: allPositions
     };
   } catch (error) {

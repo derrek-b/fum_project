@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
-import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, OverlayTrigger, Tooltip } from "react-bootstrap";
+import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, Form, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Head from "next/head";
 import Link from "next/link";
@@ -10,8 +10,6 @@ import Image from "next/image";
 import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/positions/PositionCard";
-import PositionSelectionModal from "../../components/vaults/PositionSelectionModal";
-import VaultPositionModal from "@/components/vaults/VaultPositionModal";
 import TokenDepositModal from "../../components/vaults/TokenDepositModal";
 import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
 import RefreshControls from "../../components/RefreshControls";
@@ -85,10 +83,7 @@ export default function VaultDetailPage() {
   const [vault, setVault] = useState(null);
   const [vaultPositions, setVaultPositions] = useState([]);
   const [activeTab, setActiveTab] = useState('positions');
-  const [showAddPositionModal, setShowAddPositionModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
-  const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
-  //const [vaultTokens, setVaultTokens] = useState([]);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -96,10 +91,10 @@ export default function VaultDetailPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [tokenPricesLoaded, setTokenPricesLoaded] = useState(false);
   const [totalTokenValue, setTotalTokenValue] = useState(0);
+  const [automationEnabled, setAutomationEnabled] = useState(false);
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
-  const strategyActive = activeStrategies?.[vaultAddress]?.isActive || false;
   const performance = strategyPerformance?.[vaultAddress];
   const history = executionHistory?.[vaultAddress] || [];
 
@@ -282,15 +277,32 @@ export default function VaultDetailPage() {
     showError("Token withdrawal functionality not yet implemented");
   };
 
-  // Handle refresh after position creation
-  const handlePositionCreated = useCallback(() => {
-    console.log("Position created, forcing refresh");
+  // Handle the automation toggle
+  const handleAutomationToggle = useCallback((enabled) => {
+    if (enabled) {
+      console.log('setting executor...');
+      // Here we would call a function to set the executor
+      // Example: setExecutor(chainId, vaultAddress, provider, userAddress);
+      setAutomationEnabled(true);
+    } else {
+      console.log('removing executor...');
+      // Here we would call a function to remove the executor
+      // Example: removeExecutor(vaultAddress, provider, userAddress);
+      setAutomationEnabled(false);
+    }
+  }, [chainId, vaultAddress, provider, userAddress]);
 
-    // Force a refresh after a short delay
-    setTimeout(() => {
-      handleRefresh();
-    }, 500);
-  }, [handleRefresh]);
+  // Iinitialize toggle based on executor address
+  useEffect(() => {
+    if (vaultFromRedux && vaultFromRedux.executor) {
+      // Check if executor is not address(0)
+      const isExecutorEnabled = vaultFromRedux.executor &&
+                              vaultFromRedux.executor !== "0x0000000000000000000000000000000000000000";
+      setAutomationEnabled(isExecutorEnabled);
+    } else {
+      setAutomationEnabled(false);
+    }
+  }, [vaultFromRedux]);
 
   // Format currency values consistently
   const formatCurrency = (value) => {
@@ -373,17 +385,26 @@ export default function VaultDetailPage() {
                   const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
                   const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
 
+                  // Use grey colors when automation is off, strategy colors when on
+                  const bgColor = automationEnabled ? (strategyDetails?.color) : "#6c757d";
+                  const borderColor = automationEnabled
+                    ? (strategyDetails?.borderColor)
+                    : "#6c757d";
+                  const textColor = automationEnabled
+                    ? (strategyDetails?.textColor)
+                    : "#FFFFFF";
+
                   return (
                     <Badge
                       pill
                       bg=""
                       className="ms-2 d-inline-flex align-items-center"
                       style={{
-                        backgroundColor: strategyDetails?.color || "#6c757d",
-                        borderColor: strategyDetails?.borderColor || strategyDetails?.color || "#6c757d",
+                        backgroundColor: bgColor,
+                        borderColor: borderColor,
                         borderWidth: "1px",
                         borderStyle: "solid",
-                        color: strategyDetails?.textColor || "#FFFFFF",
+                        color: textColor,
                         padding: '0.15em 0.5em',
                         fontSize: '0.5em',
                         fontWeight: 'normal'
@@ -421,6 +442,42 @@ export default function VaultDetailPage() {
                   );
                 })()
               )}
+
+              {/* Always show the Automation Toggle */}
+              <div className="ms-3 d-flex align-items-center">
+                <OverlayTrigger
+                  placement="top"
+                  overlay={
+                    <Tooltip>
+                      {!vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
+                        ? "Automation requires an active strategy"
+                        : ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
+                          ? "Automation requires assets in the vault"
+                          : automationEnabled
+                            ? "Click to disable automated strategy execution"
+                            : "Click to enable automated strategy execution"}
+                    </Tooltip>
+                  }
+                >
+                  <span>
+                    <Form.Check
+                      type="switch"
+                      id="automation-toggle"
+                      checked={automationEnabled}
+                      onChange={(e) => handleAutomationToggle(e.target.checked)}
+                      disabled={
+                        // Disable if:
+                        // 1. No strategy selected
+                        !vaultFromRedux.strategy?.strategyId ||
+                        vaultFromRedux.strategy?.strategyId === 'none' ||
+                        // 2. TVL is 0 (no assets in vault)
+                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
+                      }
+                      style={{ marginBottom: 0 }} // Remove any bottom margin
+                    />
+                  </span>
+                </OverlayTrigger>
+              </div>
             </h1>
 
             <div className="d-flex align-items-center">
@@ -516,26 +573,11 @@ export default function VaultDetailPage() {
             <Tab eventKey="positions" title="Positions">
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h5 className="mb-0">Vault Positions</h5>
-                <div>
-                  <Button
-                    variant="outline-primary"
-                    onClick={() => setShowCreatePositionModal(true)}
-                    className="me-2"
-                  >
-                    + Create Position
-                  </Button>
-                  <Button
-                    variant="outline-primary"
-                    onClick={() => setShowAddPositionModal(true)}
-                  >
-                    + Add Position
-                  </Button>
-                </div>
               </div>
 
               {vaultPositions.length === 0 ? (
                 <Alert variant="info" className="text-center">
-                  This vault doesn't have any positions yet. Add positions using the button above.
+                  This vault doesn't have any positions yet.
                 </Alert>
               ) : (
                 <Row>
@@ -636,7 +678,6 @@ export default function VaultDetailPage() {
                 vaultAddress={vaultAddress}
                 isOwner={isOwner}
                 strategyConfig={strategyConfig}
-                strategyActive={strategyActive}
                 performance={performance}
               />
             </Tab>
@@ -673,58 +714,8 @@ export default function VaultDetailPage() {
                 </Table>
               )}
             </Tab>
-
-            {isOwner && (
-              <Tab eventKey="management" title="Management">
-                <Card>
-                  <Card.Body>
-                    <h4>Vault Management</h4>
-                    <p>As the vault owner, you have control over:</p>
-                    <ul>
-                      <li>Adding and removing positions</li>
-                      <li>Configuring and activating strategies</li>
-                      <li>Setting authorization levels</li>
-                      <li>Depositing and withdrawing tokens</li>
-                    </ul>
-
-                    <div className="d-grid gap-2 col-md-6 mx-auto mt-4">
-                      <Button
-                        variant="outline-primary"
-                        onClick={() => setShowAddPositionModal(true)}
-                      >
-                        Add Position
-                      </Button>
-                      <Button
-                        variant="outline-primary"
-                        onClick={() => setShowDepositModal(true)}
-                      >
-                        Deposit Tokens
-                      </Button>
-                      <Button variant="outline-primary">Withdraw All Positions</Button>
-                      <Button
-                        variant={strategyActive ? "outline-danger" : "outline-success"}
-                        onClick={() => handleStrategyToggle(!strategyActive)}
-                      >
-                        {strategyActive ? "Deactivate Strategy" : "Activate Strategy"}
-                      </Button>
-                    </div>
-                  </Card.Body>
-                </Card>
-              </Tab>
-            )}
           </Tabs>
         </ErrorBoundary>
-
-        {/* Position Selection Modal */}
-        <PositionSelectionModal
-          show={showAddPositionModal}
-          onHide={() => setShowAddPositionModal(false)}
-          vault={vault}
-          pools={pools}
-          tokens={tokens}
-          chainId={chainId}
-          mode="add"
-        />
 
         {/* Token Deposit Modal */}
         <TokenDepositModal
@@ -732,14 +723,6 @@ export default function VaultDetailPage() {
           onHide={() => setShowDepositModal(false)}
           vaultAddress={vaultAddress}
           onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
-        />
-
-        {/* Vault Position Creation Modal */}
-        <VaultPositionModal
-          show={showCreatePositionModal}
-          onHide={() => setShowCreatePositionModal(false)}
-          vaultAddress={vaultAddress}
-          onPositionCreated={handlePositionCreated}
         />
       </Container>
     </>

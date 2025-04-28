@@ -15,23 +15,25 @@ export default function Navbar() {
   return (
     <BSNavbar bg="dark" variant="dark" expand="lg" className="mb-4">
       <Container>
-        <BSNavbar.Brand style={{ marginRight: "75px"}} href="/">
-          <img
-            src="/Logo.svg"
-            alt="D-fied Logo"
-            width="50"
-            height="50"
-            className="d-inline-block align-top"
-          />
-          <span style={{ fontSize: "30px"}}>-fied</span>
-        </BSNavbar.Brand>
+        <Link href="/" passHref legacyBehavior>
+          <BSNavbar.Brand style={{ marginRight: "75px", cursor: "pointer" }}>
+            <img
+              src="/Logo.svg"
+              alt="D-fied Logo"
+              width="50"
+              height="50"
+              className="d-inline-block align-top"
+            />
+            <span style={{ fontSize: "30px"}}>-fied</span>
+          </BSNavbar.Brand>
+        </Link>
 
         <BSNavbar.Toggle aria-controls="main-navbar-nav" />
 
         <BSNavbar.Collapse id="main-navbar-nav">
           <Nav className="me-auto">
-            <Link href="/" passHref legacyBehavior>
-              <Nav.Link active={isActive('/')}>Positions</Nav.Link>
+            <Link href="/positions" passHref legacyBehavior>
+              <Nav.Link active={isActive('/positions')}>Positions</Nav.Link>
             </Link>
             <Link href="/vaults" passHref legacyBehavior>
               <Nav.Link active={isActive('/vaults') || isActive('/vault')}>Vaults</Nav.Link>
