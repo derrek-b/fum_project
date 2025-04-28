@@ -158,7 +158,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       return { positions: [], poolData: {}, tokenData: {} };
     }
 
-    console.log(this.config[chainId])
     try {
       // Get chain configuration
       const chainConfig = this.config[chainId];

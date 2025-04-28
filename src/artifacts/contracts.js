@@ -1619,7 +1619,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x98bEF4004bF668F083BC68aaaEF3C18eCA843ad6",
+      "1337": "0x172A9DA328BC71f4354f4f17Db5630552cC9420d",
       "42161": "0x536D052143f65F054FaF0ADd74f151D57286ba49"
     }
   },
@@ -2436,7 +2436,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x172A9DA328BC71f4354f4f17Db5630552cC9420d"
+      "1337": "0xCd40ae7648E53B92e338CCaAF78734397D2Fe2A4"
     }
   },
   "PositionVault": {
@@ -3285,7 +3285,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x00c0402BDE9E2c2962cA7586a5DABb38fAd515a8",
+      "1337": "0x98bEF4004bF668F083BC68aaaEF3C18eCA843ad6",
       "42161": "0x87501845182b94f1B7B23E92045819e000CA9B46"
     }
   }

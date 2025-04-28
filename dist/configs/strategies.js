@@ -17,12 +17,12 @@ const strategies = {
     borderColor: "#6c757d",
     textColor: "#FFFFFF",
     supportedTokens: getAllTokens(),
-    minTokens: 2,
-    maxTokens: 2,
-    minPlatforms: 1,
-    maxPlatforms: 1,
-    minPositions: 1,
-    maxPositions: 1,
+    minTokens: 0,
+    maxTokens: 0,
+    minPlatforms: 0,
+    maxPlatforms: 0,
+    minPositions: 0,
+    maxPositions: 0,
     parameters: {
       tokenDeposits: {
         name: "Token Deposits",
@@ -57,7 +57,6 @@ const strategies = {
     maxPlatforms: 1,
     minPositions: 1,
     maxPositions: 1,
-    requireTokenSelection: true,
     parameterGroups: [
       {
         id: 0,
@@ -92,7 +91,7 @@ const strategies = {
       {
         id: "risk",
         setterMethod: "setRiskParameters",
-        parameters: ["maxSlippage", "emergencyExitTrigger", "maxVaultUtilization"]
+        parameters: ["maxSlippage", "emergencyExitTrigger", "maxUtilization"]
       }
     ],
     // Templates for Basic Strategy
@@ -322,7 +321,6 @@ const strategies = {
     maxPlatforms: 2,
     minPositions: 1,
     maxPositions: 1,
-    requireTokenSelection: true,
     parameterGroups: [
       {
         id: 0,
@@ -882,7 +880,6 @@ const strategies = {
     maxPlatforms: 1,
     minPositions: 1,
     maxPositions: 1,
-    requireTokenSelection: true,
     // Templates for The Fed
     templates: [
       {

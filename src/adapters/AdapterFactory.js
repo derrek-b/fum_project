@@ -50,7 +50,6 @@ export default class AdapterFactory {
    * @returns {Object|null} - Platform adapter or null if not found
    */
   static getAdapter(platformId, provider) {
-    console.log(platformId, provider)
     if (!platformId || !provider) {
       throw new Error("Platform ID and provider are required");
     }

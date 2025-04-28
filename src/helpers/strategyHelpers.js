@@ -42,7 +42,8 @@ export function getStrategyDetails(strategyId) {
     supportedTokens: strategy.supportedTokens,
     minTokens: strategy.minTokens,
     maxTokens: strategy.maxTokens,
-    requireTokenSelection: strategy.requireTokenSelection,
+    minPlatforms: strategy.minPlatforms,
+    maxPlatforms: strategy.maxPlatforms,
     parameterGroups: strategy.parameterGroups || [],
   };
 }
@@ -215,17 +216,6 @@ export function validateStrategyParams(strategyId, params) {
       }
     }
   });
-
-  // Strategy-specific validations
-  if (strategyId === "parris") {
-    // Validate upper and lower ranges
-    if (params.targetRangeUpper <= 0) {
-      errors.targetRangeUpper = "Upper range must be greater than 0";
-    }
-    if (params.targetRangeLower <= 0) {
-      errors.targetRangeLower = "Lower range must be greater than 0";
-    }
-  }
 
   return {
     isValid: Object.keys(errors).length === 0,
