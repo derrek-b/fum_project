@@ -12,15 +12,19 @@ import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/positions/PositionCard";
 import TokenDepositModal from "../../components/vaults/TokenDepositModal";
 import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
+import AutomationModal from '../../components/vaults/AutomationModal';
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { triggerUpdate } from "../../redux/updateSlice";
-import { updateVaultTokenBalances } from "@/redux/vaultsSlice";
+import { updateVault } from "../../redux/vaultsSlice";
 import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
 import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
+import { validateTokensForStrategy } from "fum_library/helpers";
+import { getVaultContract } from 'fum_library/blockchain/contracts';
+import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import * as LucideIcons from 'lucide-react';
 import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
 const ERC20ABI = ERC20ARTIFACT.abi;
@@ -92,96 +96,15 @@ export default function VaultDetailPage() {
   const [tokenPricesLoaded, setTokenPricesLoaded] = useState(false);
   const [totalTokenValue, setTotalTokenValue] = useState(0);
   const [automationEnabled, setAutomationEnabled] = useState(false);
+  const [showAutomationModal, setShowAutomationModal] = useState(false);
+  const [isEnablingAutomation, setIsEnablingAutomation] = useState(false);
+  const [pendingExecutorAddress, setPendingExecutorAddress] = useState('');
+  const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
   const performance = strategyPerformance?.[vaultAddress];
   const history = executionHistory?.[vaultAddress] || [];
-
-  // Fetch token balances for the vault
-  const fetchVaultTokens = async () => {
-    if (!vaultAddress || !provider) return;
-
-    setIsLoadingTokens(true);
-    try {
-      const allTokens = getAllTokens();
-      const tokenAddresses = Object.values(allTokens)
-        .filter(token => token.addresses[chainId])
-        .map(token => ({
-          ...token,
-          address: token.addresses[chainId]
-        }));
-
-      // First, get all token symbols for prefetching prices
-      const allSymbols = tokenAddresses.map(token => token.symbol);
-
-      // Prefetch all token prices at once to populate the cache
-      await prefetchTokenPrices(allSymbols);
-      setTokenPricesLoaded(true);
-
-      const tokenBalances = await Promise.all(
-        tokenAddresses.map(async (token) => {
-          try {
-            const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
-            const balance = await tokenContract.balanceOf(vaultAddress);
-            const formattedBalance = ethers.formatUnits(balance, token.decimals);
-            const numericalBalance = parseFloat(formattedBalance);
-
-            // Skip tokens with 0 balance
-            if (numericalBalance === 0) return null;
-
-            // Get token price from our utility
-            const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
-
-            return {
-              ...token,
-              balance: formattedBalance,
-              numericalBalance,
-              valueUsd: valueUsd || 0
-            };
-          } catch (err) {
-            console.error(`Error fetching balance for ${token.symbol}:`, err);
-            return null;
-          }
-        })
-      );
-
-      const filteredTokens = tokenBalances.filter(token => token !== null);
-
-      // Calculate total value of all tokens
-      const totalValue = filteredTokens.reduce((sum, token) => sum + (token.valueUsd || 0), 0);
-      setTotalTokenValue(totalValue);
-
-      setVaultTokens(filteredTokens);
-
-      // Store token balances in Redux
-      const tokenBalancesMap = {};
-      filteredTokens.forEach(token => {
-        tokenBalancesMap[token.symbol] = {
-          symbol: token.symbol,
-          name: token.name,
-          balance: token.balance,
-          numericalBalance: token.numericalBalance,
-          valueUsd: token.valueUsd,
-          decimals: token.decimals,
-          logoURI: token.logoURI
-        };
-      });
-
-      // Update token balances in Redux
-      if (Object.keys(tokenBalancesMap).length > 0) {
-        dispatch(updateVaultTokenBalances({
-          vaultAddress,
-          tokenBalances: tokenBalancesMap
-        }));
-      }
-    } catch (err) {
-      console.error("Error fetching token balances:", err);
-      showError("Failed to fetch vault tokens");
-    } finally {
-      setIsLoadingTokens(false);
-    }
-  };
 
   // Create loadData function to replace the useVaultDetailData hook
   const loadData = async () => {
@@ -278,19 +201,108 @@ export default function VaultDetailPage() {
   };
 
   // Handle the automation toggle
-  const handleAutomationToggle = useCallback((enabled) => {
+  const handleAutomationToggle = (enabled) => {
     if (enabled) {
       console.log('setting executor...');
-      // Here we would call a function to set the executor
-      // Example: setExecutor(chainId, vaultAddress, provider, userAddress);
-      setAutomationEnabled(true);
+      // Get the executor address for this chain
+      const executorAddr = getExecutorAddress(chainId);
+
+      if (!executorAddr) {
+        showError(`No automation executor available for network ${chainId}`);
+        return;
+      }
+
+      // Set up modal for enabling
+      setPendingExecutorAddress(executorAddr);
+      setIsEnablingAutomation(true);
     } else {
       console.log('removing executor...');
-      // Here we would call a function to remove the executor
-      // Example: removeExecutor(vaultAddress, provider, userAddress);
-      setAutomationEnabled(false);
+      // Set up modal for disabling
+      setIsEnablingAutomation(false);
     }
-  }, [chainId, vaultAddress, provider, userAddress]);
+
+    // Show the confirmation modal
+    setShowAutomationModal(true);
+  };
+
+  // Add this new function to handle the actual transaction after confirmation
+  const handleConfirmAutomation = async () => {
+    if (!vaultAddress || !provider) {
+      showError("Unable to connect to your wallet");
+      setShowAutomationModal(false);
+      return;
+    }
+
+    setIsProcessingAutomation(true);
+
+    try {
+      // Get signer
+      const signer = await provider.getSigner();
+
+      // Get vault contract
+      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+
+      // Check if the vault has a strategy set before enabling automation
+      if (vault.strategyAddress === "0x0000000000000000000000000000000000000000") {
+        showError("Cannot enable automation without an active strategy");
+        return;
+      }
+
+      // Ensure vault has assets deposited
+      if (vault.metrics.tvl === 0 || vault.metrics.tokenTVL === 0) {
+        showError("Cannot enable automation without assets to manage.");
+        return;
+      }
+
+      if (isEnablingAutomation) {
+        console.log('Setting executor...', pendingExecutorAddress);
+
+        // Call contract to set executor
+        const tx = await vaultContract.setExecutor(pendingExecutorAddress);
+        await tx.wait();
+
+        // Update Redux store
+        dispatch(updateVault({
+          vaultAddress,
+          vaultData: {
+            executor: pendingExecutorAddress
+          }
+        }));
+
+        setAutomationEnabled(true);
+        showSuccess("Automation enabled successfully");
+      } else {
+        console.log('Removing executor...');
+        // Call contract to remove executor
+        const tx = await vaultContract.removeExecutor();
+        await tx.wait();
+
+        // Update Redux store with address(0)
+        dispatch(updateVault({
+          vaultAddress,
+          vaultData: {
+            executor: "0x0000000000000000000000000000000000000000"
+          }
+        }));
+
+        setAutomationEnabled(false);
+        showSuccess("Automation disabled successfully");
+      }
+    } catch (error) {
+      console.error("Error toggling automation:", error);
+      showError(`Failed to ${isEnablingAutomation ? 'enable' : 'disable'} automation: ${error.message}`);
+
+      // Revert the UI toggle state if there was an error
+      if (isEnablingAutomation) {
+        setAutomationEnabled(false);
+      } else {
+        setAutomationEnabled(true);
+      }
+    } finally {
+      setIsProcessingAutomation(false);
+      setShowAutomationModal(false);
+    }
+  };
 
   // Iinitialize toggle based on executor address
   useEffect(() => {
@@ -451,7 +463,7 @@ export default function VaultDetailPage() {
                     <Tooltip>
                       {!vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
                         ? "Automation requires an active strategy"
-                        : ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
+                        : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
                           ? "Automation requires assets in the vault"
                           : automationEnabled
                             ? "Click to disable automated strategy execution"
@@ -473,7 +485,7 @@ export default function VaultDetailPage() {
                         // 2. TVL is 0 (no assets in vault)
                         ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
                       }
-                      style={{ marginBottom: 0 }} // Remove any bottom margin
+                      style={{ fontSize: '0.65em', paddingBottom: '4px' }}
                     />
                   </span>
                 </OverlayTrigger>
@@ -600,6 +612,7 @@ export default function VaultDetailPage() {
                 <Button
                   variant="outline-primary"
                   onClick={() => setShowDepositModal(true)}
+                  disabled={automationEnabled}
                 >
                   + Deposit Tokens
                 </Button>
@@ -723,6 +736,15 @@ export default function VaultDetailPage() {
           onHide={() => setShowDepositModal(false)}
           vaultAddress={vaultAddress}
           onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
+        />
+
+        {/* Automation Modal */}
+        <AutomationModal
+          show={showAutomationModal}
+          onHide={() => setShowAutomationModal(false)}
+          isEnabling={isEnablingAutomation}
+          executorAddress={pendingExecutorAddress}
+          onConfirm={handleConfirmAutomation}
         />
       </Container>
     </>

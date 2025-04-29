@@ -53,7 +53,26 @@ const ERC20ABI = ERC20ARTIFACT.abi;
 const mapStrategyParameters = (strategyId, params) => {
   try {
     // Strategy-specific parameter mappings
-    if (strategyId.toLowerCase() === 'parris') {
+    if (strategyId.toLowerCase() === 'bob') {
+      return {
+        // Range Parameters
+        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+        targetRangeLower: parseInt(params[1]) / 100,
+        rebalanceThresholdUpper: parseInt(params[2]) / 100,
+        rebalanceThresholdLower: parseInt(params[3]) / 100,
+
+        // Fee Settings
+        feeReinvestment: params[4],
+        reinvestmentTrigger: ethers.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
+        reinvestmentRatio: parseInt(params[6]) / 100,
+
+        // Risk Management
+        maxSlippage: parseInt(params[7]) / 100,
+        emergencyExitTrigger: parseInt(params[8]) / 100,
+        maxUtilization: parseInt(params[9]) / 100
+      };
+    }
+    else if (strategyId.toLowerCase() === 'parris') {
       return {
         // Range Parameters
         targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent

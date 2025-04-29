@@ -26,6 +26,11 @@ const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName }) =>
           <p className="mb-0">
             You can reactivate the strategy at any time with the same or different parameters.
           </p>
+          <Alert variant='danger' className='mt-3'>
+            <p>
+              Note: If you disable the strategy, automation will also be disabled automatically.
+            </p>
+          </Alert>
         </Alert>
       </Modal.Body>
       <Modal.Footer>

@@ -174,9 +174,11 @@ const StrategyConfigPanel = ({
 
       // Send transaction to remove strategy
       const tx = await vaultContract.removeStrategy();
-
-      // Wait for transaction to be mined
       await tx.wait();
+
+      // Send transaction to remove executor
+      const removeExecutorTx = await vaultContract.removeExecutor();
+      await removeExecutorTx.wait();
 
       // Clear strategy state
       setSelectedStrategy('');
