@@ -150,7 +150,7 @@ async function deploy() {
   let contractsToDeploy = [];
   if (contractName === 'all') {
     // Deploy all contracts
-    contractsToDeploy = ['VaultFactory', 'ParrisIslandStrategy', 'BabyStepsStrategy'];
+    contractsToDeploy = ['BatchExecutor', 'VaultFactory', 'ParrisIslandStrategy', 'BabyStepsStrategy'];
   } else {
     // Deploy only the specified contract
     contractsToDeploy = [contractName];

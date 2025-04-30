@@ -1,5 +1,5 @@
-import { expect } from "chai";
-import { ethers } from "hardhat";
+const { expect } = require("chai");
+const { ethers } = require('hardhat');
 
 describe("PositionVault - 0.3.1", function() {
   let PositionVault;

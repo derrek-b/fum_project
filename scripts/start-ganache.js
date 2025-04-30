@@ -117,6 +117,30 @@ async function main() {
       const deploymentResults = {};
 
       try {
+        // Deploy BatchExecutor
+        console.log("\nDeploying BatchExecutor...");
+        const BatchExecutorBytecodePath = path.join(__dirname, `../bytecode/BatchExecutor.bin`);
+        const BatchExecutorBytecode = "0x" + fs.readFileSync(BatchExecutorBytecodePath, "utf8").trim();
+        const BatchExecutor = new ethers.ContractFactory(
+          contractsDataCopy.BatchExecutor.abi,
+          BatchExecutorBytecode,
+          wallet
+        );
+
+        const batchExecutor = await BatchExecutor.deploy({
+          gasLimit: 5000000,
+          gasPrice: ethers.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
+        });
+        console.log(`Transaction hash: ${batchExecutor.deploymentTransaction().hash}`);
+        console.log("Waiting for deployment to be confirmed...");
+        await batchExecutor.waitForDeployment();
+        const batchExecutorAddress = await batchExecutor.getAddress();
+        console.log(`BatchExecutor deployed to: ${batchExecutorAddress}`);
+
+        // Update contracts data copy
+        contractsDataCopy.BatchExecutor.addresses[chainId] = batchExecutorAddress;
+        deploymentResults.BatchExecutor = batchExecutorAddress;
+
         // Deploy VaultFactory
         console.log("\nDeploying VaultFactory...");
         const VaultFactoryBytecodePath = path.join(__dirname, `../bytecode/VaultFactory.bin`);

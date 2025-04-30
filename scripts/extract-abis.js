@@ -17,7 +17,8 @@ const contractMapping = {
   'ParrisIslandStrategy.sol': 'parris',
   'BabyStepsStrategy.sol': 'bob',
   'PositionVault.sol': 'PositionVault',
-  'VaultFactory.sol': 'VaultFactory'
+  'VaultFactory.sol': 'VaultFactory',
+  'BatchExecutor.sol': 'BatchExecutor'
 };
 
 // List of contracts to extract ABIs from
