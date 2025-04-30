@@ -5,6 +5,30 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-04-30
+
+### Added
+- New helper functionality in strategyHelpers.js
+  - Added `validateTokensForStrategy` function to compare vault tokens against strategy token selections
+  - Provides validation messages for mismatched tokens that will need to be swapped
+- Fine-tuned strategy configuration parameters
+- Improved documentation for strategy parameter validations
+
+### Fixed
+- Minor bug fixes and code refinements
+
+## [0.1.2] - 2025-04-25
+
+### Added
+- Baby Steps strategy implementation
+  - Simplified parameter set for beginner users
+  - Streamlined UI interactions for position management
+- Enhanced ABI handling for contract interactions
+
+### Fixed
+- Various refactoring bug fixes
+- Stability improvements in adapter functionality
+
 ## [0.1.1] - 2025-04-21
 
 ### Added
@@ -35,5 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restructured project to support NPM package format
 - Improved error handling across all modules
 
-[0.1.1]: https://github.com/yourusername/fum_library/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/yourusername/fum_library/releases/tag/v0.1.0
+[0.1.3]: https://github.com/D-fied/fum_library/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/D-fied/fum_library/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/D-fied/fum_library/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/D-fied/fum_library/releases/tag/v0.1.0
