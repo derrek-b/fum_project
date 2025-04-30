@@ -172,13 +172,35 @@ const StrategyConfigPanel = ({
       // Get vault contract instance
       const vaultContract = getVaultContract(vaultAddress, provider, signer);
 
-      // Send transaction to remove strategy
-      const tx = await vaultContract.removeStrategy();
-      await tx.wait();
+      // First remove executor if one exists
+      if (vault.executor !== '0x0000000000000000000000000000000000000000') {
+        const removeExecutorTx = await vaultContract.removeExecutor();
 
-      // Send transaction to remove executor
-      const removeExecutorTx = await vaultContract.removeExecutor();
-      await removeExecutorTx.wait();
+        // Wait for transaction to be mined
+        const executorReceipt = await removeExecutorTx.wait();
+
+        if (!executorReceipt.status) {
+          throw new Error("Failed to remove executor");
+        }
+
+        // Update vault data in Redux
+        dispatch(updateVault({
+          vaultAddress,
+          vaultData: {
+            executor: '0x0000000000000000000000000000000000000000'
+          }
+        }));
+      }
+
+      // Now remove strategy
+      const removeStrategyTx = await vaultContract.removeStrategy();
+
+      // Wait for transaction to be mined
+      const strategyReceipt = await removeStrategyTx.wait();
+
+      if (!strategyReceipt.status) {
+        throw new Error("Failed to remove strategy");
+      }
 
       // Clear strategy state
       setSelectedStrategy('');

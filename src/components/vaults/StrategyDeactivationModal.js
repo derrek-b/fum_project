@@ -28,7 +28,7 @@ const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName }) =>
           </p>
           <Alert variant='danger' className='mt-3'>
             <p>
-              Note: If you disable the strategy, automation will also be disabled automatically.
+              Note: To disable the strategy, you will first be asked to disable automation if it is active.
             </p>
           </Alert>
         </Alert>

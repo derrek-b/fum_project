@@ -243,13 +243,13 @@ export default function VaultDetailPage() {
       const vaultContract = getVaultContract(vaultAddress, provider, signer);
 
       // Check if the vault has a strategy set before enabling automation
-      if (vault.strategyAddress === "0x0000000000000000000000000000000000000000") {
+      if (vaultFromRedux.strategyAddress === "0x0000000000000000000000000000000000000000") {
         showError("Cannot enable automation without an active strategy");
         return;
       }
 
       // Ensure vault has assets deposited
-      if (vault.metrics.tvl === 0 || vault.metrics.tokenTVL === 0) {
+      if (vaultFromRedux.metrics.tvl === 0 && vaultFromRedux.metrics.tokenTVL === 0) {
         showError("Cannot enable automation without assets to manage.");
         return;
       }
