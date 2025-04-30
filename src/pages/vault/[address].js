@@ -100,6 +100,7 @@ export default function VaultDetailPage() {
   const [isEnablingAutomation, setIsEnablingAutomation] = useState(false);
   const [pendingExecutorAddress, setPendingExecutorAddress] = useState('');
   const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
+  const [validationMessages, setValidationMessages] = useState([]);
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
@@ -203,7 +204,6 @@ export default function VaultDetailPage() {
   // Handle the automation toggle
   const handleAutomationToggle = (enabled) => {
     if (enabled) {
-      console.log('setting executor...');
       // Get the executor address for this chain
       const executorAddr = getExecutorAddress(chainId);
 
@@ -212,13 +212,40 @@ export default function VaultDetailPage() {
         return;
       }
 
-      // Set up modal for enabling
+      // Check 1: Validate strategy is selected for the vault
+      if (!vaultFromRedux.hasActiveStrategy || !vaultFromRedux.strategyAddress) {
+        showError("Cannot enable automation without a strategy selected and saved");
+        return;
+      }
+
+      // Check 2: Validate vault has assets to manage (TVL > 0)
+      const totalTVL = (vaultFromRedux.metrics.tvl) + (vaultFromRedux.metrics.tokenTVL);
+      if (totalTVL <= 0) {
+        showError("Cannot enable automation without assets to manage");
+        return;
+      }
+
+      const messages = []
+      // Check 3: If vault has tokens, validate using the existing library function
+      if (vaultFromRedux.tokenBalances && Object.keys(vaultFromRedux.tokenBalances).length > 0) {
+        // Use the existing validator function from our library
+        const tokenValidationMessages = validateTokensForStrategy(vaultFromRedux.tokenBalances, vaultFromRedux.strategy.selectedTokens);
+
+        if (tokenValidationMessages.length > 0) {
+          messages.push(...tokenValidationMessages);
+        }
+      }
+
+      // Check 4: Check positions fit strategy when transferring/creating is reinstated
+
+      console.log('setting executor...');
       setPendingExecutorAddress(executorAddr);
       setIsEnablingAutomation(true);
+      setValidationMessages(messages);
     } else {
       console.log('removing executor...');
-      // Set up modal for disabling
       setIsEnablingAutomation(false);
+      setValidationMessages([]);
     }
 
     // Show the confirmation modal
@@ -745,6 +772,7 @@ export default function VaultDetailPage() {
           isEnabling={isEnablingAutomation}
           executorAddress={pendingExecutorAddress}
           onConfirm={handleConfirmAutomation}
+          validationMessages={validationMessages}
         />
       </Container>
     </>

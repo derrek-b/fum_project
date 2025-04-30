@@ -7,7 +7,8 @@ const AutomationModal = ({
   onHide,
   isEnabling,
   executorAddress,
-  onConfirm
+  onConfirm,
+  validationMessages
 }) => {
   return (
     <Modal show={show} onHide={onHide} centered>
@@ -17,12 +18,20 @@ const AutomationModal = ({
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        {/* Display validation messages if there are any */}
+        {validationMessages.length > 0 && (
+          <Alert variant="danger" className="mb-3">
+            <Alert.Heading style={{ width: '100%', textAlign: 'center'}}>Warning</Alert.Heading>
+            <ul className="mb-0">
+              {validationMessages.map((message, index) => (
+                <li key={index}>{message}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
         {isEnabling ? (
           <>
-            <Alert variant="info">
-              <p>You are about to enable automated position management for this vault.</p>
-              <p>This will authorize the following address to execute transactions on behalf of your vault:</p>
-            </Alert>
+            <p>You are about to enable the following address to automate position management for this vault:</p>
 
             <div className="bg-light p-3 mb-3 rounded">
               <code className="user-select-all">{executorAddress}</code>
