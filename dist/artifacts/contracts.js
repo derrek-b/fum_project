@@ -1619,7 +1619,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x172A9DA328BC71f4354f4f17Db5630552cC9420d",
+      "1337": "0xa3d4AD3d63ff0916b1ca6165dE6E20Bf0a0F7F8F",
       "42161": "0x536D052143f65F054FaF0ADd74f151D57286ba49"
     }
   },
@@ -2436,7 +2436,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xCd40ae7648E53B92e338CCaAF78734397D2Fe2A4"
+      "1337": "0x602D595557beE16D4EbB88eA655350dBCC14e614"
     }
   },
   "PositionVault": {
@@ -3285,8 +3285,200 @@
       }
     ],
     "addresses": {
-      "1337": "0x98bEF4004bF668F083BC68aaaEF3C18eCA843ad6",
+      "1337": "0xa650Dd7E5D39b8DaDd1f4f21dD8203995Efa6E5D",
       "42161": "0x87501845182b94f1B7B23E92045819e000CA9B46"
+    }
+  },
+  "BatchExecutor": {
+    "abi": [
+      {
+        "inputs": [],
+        "name": "ReentrancyGuardReentrantCall",
+        "type": "error"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "sender",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "txCount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool[]",
+            "name": "successes",
+            "type": "bool[]"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes[]",
+            "name": "results",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "AtomicBatchExecuted",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "sender",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "txCount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "completedCount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool[]",
+            "name": "successes",
+            "type": "bool[]"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes[]",
+            "name": "results",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "SequenceBatchExecuted",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "indexed": false,
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "indexed": false,
+            "internalType": "bytes",
+            "name": "returnData",
+            "type": "bytes"
+          }
+        ],
+        "name": "TransactionExecuted",
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "values",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "executeAtomicBatch",
+        "outputs": [
+          {
+            "internalType": "bool",
+            "name": "",
+            "type": "bool"
+          }
+        ],
+        "stateMutability": "payable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "values",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "executeSequenceBatch",
+        "outputs": [
+          {
+            "internalType": "bool",
+            "name": "",
+            "type": "bool"
+          }
+        ],
+        "stateMutability": "payable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getVersion",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "stateMutability": "payable",
+        "type": "receive"
+      }
+    ],
+    "addresses": {
+      "1337": "0x40C4C57f279a2A5Ab25573fD8D24795994D3bcba"
     }
   }
 };

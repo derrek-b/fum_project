@@ -300,3 +300,38 @@ export function formatParameterValue(value, paramConfig) {
 
   return `${value}${paramConfig.suffix || ''}`;
 }
+
+/**
+ * Validate if tokens in a vault match those configured in a strategy
+ * @param {Object} vaultTokens - Object containing token balances in the vault
+ * @param {Object} strategyConfig - Strategy configuration containing token selections
+ * @returns {Array<string>} Array of validation messages (empty if validation passes)
+ */
+export function validateTokensForStrategy (vaultTokens, strategyTokens) {
+  const messages = [];
+  console.log('vaultTokens', vaultTokens)
+  console.log('strategyTokens', strategyTokens)
+
+  // Early exit if no tokens in vault or no strategy config
+  if (!vaultTokens || Object.keys(vaultTokens).length === 0 || !strategyTokens) {
+    return messages;
+  }
+
+  // If no tokens are specified in the strategy, we can't validate
+  if (!strategyTokens.length) {
+    return messages;
+  }
+
+  // Check if each vault token is included in strategy tokens
+  const vaultTokenSymbols = Object.keys(vaultTokens);
+
+  const unmatchedTokens = vaultTokenSymbols.filter(symbol =>
+    !strategyTokens.includes(symbol)
+  );
+
+  if (unmatchedTokens.length > 0) {
+    messages.push(`The following tokens in your vault are not part of your strategy: ${unmatchedTokens.join(', ')}. These tokens will be swapped into the selected strategy tokens.`);
+  }
+
+  return messages;
+};
