@@ -1,6 +1,13 @@
 # F.U.M. Project Changelog
 
-## v0.2.0 (Current Development)
+## v0.2.1 (Current Development)
+
+### Added
+- Baby Steps strategy implementation with simplified parameter set
+- Platform-specific implementation for BabyStepsStrategy (Uniswap V3)
+- Dynamic contract ABI selection based on strategy type
+
+## v0.2.0
 
 ### Added
 - Dynamic range calculation based on current price and strategy parameters
