@@ -309,8 +309,6 @@ export function formatParameterValue(value, paramConfig) {
  */
 export function validateTokensForStrategy (vaultTokens, strategyTokens) {
   const messages = [];
-  console.log('vaultTokens', vaultTokens)
-  console.log('strategyTokens', strategyTokens)
 
   // Early exit if no tokens in vault or no strategy config
   if (!vaultTokens || Object.keys(vaultTokens).length === 0 || !strategyTokens) {
@@ -328,8 +326,6 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
   const unmatchedTokens = vaultTokenSymbols.filter(symbol =>
     !strategyTokens.includes(symbol)
   );
-
-  console.log('unmatchedTokens', unmatchedTokens)
 
   if (unmatchedTokens.length > 0) {
     messages.push(`The following tokens in your vault are not part of your strategy: ${unmatchedTokens.join(', ')}. These tokens will be swapped into the selected strategy tokens.`);

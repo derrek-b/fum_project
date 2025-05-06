@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -23,6 +23,7 @@
     "./helpers/tokenHelpers": "./dist/helpers/tokenHelpers.js",
     "./helpers/platformHelpers": "./dist/helpers/platformHelpers.js",
     "./helpers/strategyHelpers": "./dist/helpers/strategyHelpers.js",
+    "./helpers/vaultHelpers": "./dist/helpers/vaultHelpers.js",
     "./blockchain": "./dist/blockchain/index.js",
     "./blockchain/wallet": "./dist/blockchain/wallet.js",
     "./blockchain/contracts": "./dist/blockchain/contracts.js",
