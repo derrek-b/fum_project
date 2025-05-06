@@ -1,6 +1,21 @@
 # F.U.M. Project Changelog
 
-## v0.2.1 (Current Development)
+## v0.2.2 (Current Development)
+
+### Added
+- Integration with refactored VaultDataService for improved data management
+- Enhanced multi-platform support with platform-specific strategy implementations
+- Centralized event management system for improved monitoring
+- Support for authorization event callbacks with cleaner architecture
+- Improved error handling and notification system
+
+### Improved
+- Refactored strategy base classes for better code organization
+- Enhanced caching system for optimized RPC usage
+- Comprehensive documentation for setup and configuration
+- Optimized fee collection and position management logic
+
+## v0.2.1
 
 ### Added
 - Baby Steps strategy implementation with simplified parameter set
