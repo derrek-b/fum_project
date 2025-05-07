@@ -33,8 +33,11 @@ The automation service consists of several core components:
 # Install dependencies
 npm install
 
-# Run automation service (requires environment variables)
-node scripts/run-automation.js
+# Run automation service in demo mode (default)
+node scripts/test-automation.js
+
+# Run automation service in live transaction mode (be careful!)
+node scripts/test-automation.js --demoMode=false
 ```
 
 ## Configuration
@@ -56,6 +59,13 @@ AUTOMATION_ADDRESS=0x...
 # Notification Settings
 TELEGRAM_BOT_API_KEY=your-bot-key
 TELEGRAM_CHAT_ID=your-chat-id
+
+# Demo Mode
+# By default, the service runs in demo mode (demoMode=true), which means it will:
+# 1. Not execute any actual transactions
+# 2. Send simulated transaction information via Telegram
+# 3. Show DEMO indicators in logs and messages
+# To run in live mode, use the --demoMode=false command line flag
 ```
 
 ## Strategies

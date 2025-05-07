@@ -3,6 +3,9 @@
 ## v0.2.2 (Current Development)
 
 ### Added
+- Demo mode feature for simulating transactions without execution (demoMode=true by default)
+- Command line flag support (--demoMode=false) to toggle between demo and live modes
+- Enhanced Telegram notifications for demo transactions and events
 - Integration with refactored VaultDataService for improved data management
 - Enhanced multi-platform support with platform-specific strategy implementations
 - Centralized event management system for improved monitoring
