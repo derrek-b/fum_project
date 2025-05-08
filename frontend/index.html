@@ -38,6 +38,27 @@
           </select>
         </div>
         
+        <div class="filter-group">
+          <label for="filterAction">Action:</label>
+          <select id="filterAction">
+            <option value="all">All Actions</option>
+            <option value="rebalance">Rebalance</option>
+            <option value="fee_collection">Fee Collection</option>
+            <option value="price_monitoring">Price Monitoring</option>
+            <option value="position_update">Position Update</option>
+          </select>
+        </div>
+        
+        <div class="filter-group">
+          <label for="filterResult">Result:</label>
+          <select id="filterResult">
+            <option value="all">All Results</option>
+            <option value="success">Success</option>
+            <option value="no_action_needed">No Action Needed</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        
         <div class="filter-group search-group">
           <input type="text" id="searchInput" placeholder="Search logs...">
           <button id="clearSearch" class="icon-button" title="Clear search">✕</button>
