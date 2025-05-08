@@ -34,11 +34,36 @@ The automation service consists of several core components:
 npm install
 
 # Run automation service in demo mode (default)
+npm run start
+# or
 node scripts/test-automation.js
+
+# Run automation service with web-based log viewer
+npm run start:logs
+# or
+node scripts/test-automation.js --logs
+
+# Customize log server port
+node scripts/test-automation.js --logs --log-port 8080
 
 # Run automation service in live transaction mode (be careful!)
 node scripts/test-automation.js --demoMode=false
 ```
+
+### Log Viewer
+
+The automation service includes a web-based log viewer for easier monitoring. When enabled with the `--logs` flag, the viewer is available at:
+
+```
+http://localhost:3000
+```
+
+Features:
+- Real-time log updates
+- Filtering by level (info, warn, error) and source
+- Text search functionality
+- Auto-scrolling toggle
+- Export logs to JSON
 
 ## Configuration
 

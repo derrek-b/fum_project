@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>F.U.M. Automation Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>F.U.M. Automation Dashboard</h1>
+      <div class="status-bar">
+        <div id="connection-status" class="status-indicator offline">
+          <span class="status-dot"></span>
+          <span class="status-text">Offline</span>
+        </div>
+        <div id="log-counter">
+          <span id="log-count">0</span> logs
+        </div>
+      </div>
+      <div class="controls">
+        <div class="filter-group">
+          <label for="filterLevel">Level:</label>
+          <select id="filterLevel">
+            <option value="all">All Levels</option>
+            <option value="info">Info</option>
+            <option value="warn">Warning</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+        
+        <div class="filter-group">
+          <label for="filterSource">Source:</label>
+          <select id="filterSource">
+            <option value="all">All Sources</option>
+          </select>
+        </div>
+        
+        <div class="filter-group search-group">
+          <input type="text" id="searchInput" placeholder="Search logs...">
+          <button id="clearSearch" class="icon-button" title="Clear search">✕</button>
+        </div>
+        
+        <div class="button-group">
+          <button id="clearBtn">Clear View</button>
+          <button id="exportBtn" title="Export logs to JSON">Export</button>
+          <button id="toggleAutoScroll" class="active" title="Toggle auto-scrolling">Auto-scroll</button>
+        </div>
+      </div>
+    </header>
+    
+    <main>
+      <div class="logs-container">
+        <div id="logs"></div>
+      </div>
+    </main>
+    
+    <footer>
+      <div class="timestamp">
+        Last update: <span id="last-update">Never</span>
+      </div>
+    </footer>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
