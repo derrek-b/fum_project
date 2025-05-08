@@ -1,18 +1,25 @@
 # F.U.M. Project Changelog
 
-## v0.2.2 (Current Development)
+## v0.3.0 (Current Development)
 
 ### Added
-- Demo mode feature for simulating transactions without execution (demoMode=true by default)
-- Command line flag support (--demoMode=false) to toggle between demo and live modes
-- Enhanced Telegram notifications for demo transactions and events
+- New frontend logging system with human-readable log formatting
+- Real-time log filtering by action type, source, and result
+- "Newest-first" log display for better usability
+- Enhanced position monitoring with percentage-in-range calculation
+- Demo mode feature for simulating transactions without execution (configurable via --demoMode flag)
+- Command line flag support for all configuration options
+- Enhanced Telegram notifications with detailed transaction information
 - Integration with refactored VaultDataService for improved data management
 - Enhanced multi-platform support with platform-specific strategy implementations
 - Centralized event management system for improved monitoring
-- Support for authorization event callbacks with cleaner architecture
-- Improved error handling and notification system
 
 ### Improved
+- Significantly reduced log verbosity with intelligent filtering
+- More robust error handling and reporting
+- Enhanced visualization of position states and actions
+- Optimized price event handling to reduce unnecessary processing
+- Better token pair detection and display in logs
 - Refactored strategy base classes for better code organization
 - Enhanced caching system for optimized RPC usage
 - Comprehensive documentation for setup and configuration
