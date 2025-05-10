@@ -33,7 +33,7 @@ The automation service consists of several core components:
 # Install dependencies
 npm install
 
-# Run automation service in demo mode (default)
+# Run automation service
 npm run start
 # or
 node scripts/test-automation.js
@@ -45,9 +45,6 @@ node scripts/test-automation.js --logs
 
 # Customize log server port
 node scripts/test-automation.js --logs --log-port 8080
-
-# Run automation service in live transaction mode (be careful!)
-node scripts/test-automation.js --demoMode=false
 ```
 
 ### Log Viewer
@@ -85,12 +82,8 @@ AUTOMATION_ADDRESS=0x...
 TELEGRAM_BOT_API_KEY=your-bot-key
 TELEGRAM_CHAT_ID=your-chat-id
 
-# Demo Mode
-# By default, the service runs in demo mode (demoMode=true), which means it will:
-# 1. Not execute any actual transactions
-# 2. Send simulated transaction information via Telegram
-# 3. Show DEMO indicators in logs and messages
-# To run in live mode, use the --demoMode=false command line flag
+# Environment Variables
+# Configure these environment variables to control the service behavior
 ```
 
 ## Strategies
@@ -128,6 +121,27 @@ The project follows a modular architecture that makes it easy to extend:
 1. **Adding new strategies**: Extend the `StrategyBase` class and implement required methods
 2. **Adding platform support**: Create platform-specific implementations in strategy subfolders
 3. **Custom event handlers**: Register with the centralized EventManager
+
+## Testing
+
+The automation service includes a comprehensive testing framework for unit, integration, and scenario-based testing. See the [TESTING.md](TESTING.md) guide for detailed information on:
+
+- Available test fixtures
+- Pre-configured test scenarios
+- Testing with Ganache forked networks
+- Mocking blockchain events
+- Testing best practices
+
+```bash
+# Run unit tests
+npm test
+
+# Run integration tests
+npm run test:integration
+
+# Run test scenarios
+node scripts/test-runner.js --scenario=price-movement
+```
 
 ## License
 
