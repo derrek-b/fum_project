@@ -5,6 +5,25 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2025-05-11
+
+### Added
+- Comprehensive unit testing suite:
+  - Implemented testing infrastructure using Vitest
+  - Created tests for formatHelpers.js functions for data formatting utilities
+  - Added tests for tokenHelpers.js functions for token management
+  - Added tests for chainHelpers.js functions for chain management
+  - Added tests for platformHelpers.js functions for platform interaction
+  - Added tests for strategyHelpers.js functions for strategy configuration
+  - Created tests for UniswapV3Adapter core price calculation methods
+  - Added tests for vaultHelpers.js functions for vault management
+- Added testing documentation and guidelines in TESTING.md
+- Fixed decimal adjustment in UniswapV3Adapter price calculations
+
+### Changed
+- Updated module imports to use explicit file extensions for better compatibility
+- Removed redundant code in adapters/index.js exports
+
 ## [0.1.4] - 2025-05-06
 
 ### Added
@@ -75,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restructured project to support NPM package format
 - Improved error handling across all modules
 
+[0.1.5]: https://github.com/D-fied/fum_library/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/D-fied/fum_library/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/D-fied/fum_library/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/D-fied/fum_library/compare/v0.1.1...v0.1.2
