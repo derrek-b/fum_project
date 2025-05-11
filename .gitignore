@@ -1,1 +1,5 @@
 ToDo
+node_modules/
+coverage/
+
+**/.claude/settings.local.json
