@@ -476,7 +476,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Apply decimal adjustment - must handle both positive and negative cases
     const decimalsDiff = decimals1 - decimals0;
-    let price = priceInt * Math.pow(10, decimalsDiff < 0 ? -decimalsDiff : 0);
+    let price = priceInt;
+
+    // Apply correct decimal adjustment for both positive and negative differences
+    if (decimalsDiff > 0) {
+      // If token1 has more decimals than token0, multiply by 10^(decimals1-decimals0)
+      price = price * Math.pow(10, decimalsDiff);
+    } else if (decimalsDiff < 0) {
+      // If token0 has more decimals than token1, divide by 10^(decimals0-decimals1)
+      price = price / Math.pow(10, -decimalsDiff);
+    }
 
     // Invert the price if requested
     if (invert) {
@@ -505,7 +514,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Apply the decimal adjustment
     const decimalsDiff = decimals1 - decimals0;
-    let price = rawPrice * Math.pow(10, decimalsDiff < 0 ? -decimalsDiff : 0);
+    let price = rawPrice;
+
+    // Apply correct decimal adjustment for both positive and negative differences
+    if (decimalsDiff > 0) {
+      // If token1 has more decimals than token0, multiply by 10^(decimals1-decimals0)
+      price = price * Math.pow(10, decimalsDiff);
+    } else if (decimalsDiff < 0) {
+      // If token0 has more decimals than token1, divide by 10^(decimals0-decimals1)
+      price = price / Math.pow(10, -decimalsDiff);
+    }
 
     // Invert if requested (token0 per token1 instead of token1 per token0)
     if (invert) {

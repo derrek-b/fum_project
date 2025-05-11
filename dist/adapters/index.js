@@ -13,24 +13,20 @@ export { default as AdapterFactory } from './AdapterFactory.js';
 
 // Export a convenience function to get all adapters for a chain
 export const getAdaptersForChain = (config, chainId, provider) => {
-  const { AdapterFactory } = require('./AdapterFactory.js');
   return AdapterFactory.getAdaptersForChain(config, chainId, provider);
 };
 
 // Export a convenience function to get a specific adapter
 export const getAdapter = (config, platformId, provider) => {
-  const { AdapterFactory } = require('./AdapterFactory.js');
   return AdapterFactory.getAdapter(config, platformId, provider);
 };
 
 // Export a function to get all supported platforms
 export const getSupportedPlatforms = () => {
-  const { AdapterFactory } = require('./AdapterFactory.js');
   return AdapterFactory.getSupportedPlatforms();
 };
 
 // Export a function to register a new adapter
 export const registerAdapter = (platformId, AdapterClass) => {
-  const { AdapterFactory } = require('./AdapterFactory.js');
   return AdapterFactory.registerAdapter(platformId, AdapterClass);
 };

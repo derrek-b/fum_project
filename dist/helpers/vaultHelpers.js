@@ -1,11 +1,11 @@
 // src/helpers/vaultHelpers.js
-import { ethers } from 'ethers';
-import { AdapterFactory } from '../adapters';
-import { getUserVaults, getVaultInfo } from '../blockchain';
-import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from '../services';
-import { getAvailableStrategies, getStrategyParameters } from './strategyHelpers';
-import { getAllTokens } from './tokenHelpers';
-import contractData from '../artifacts/contracts';
+import { assert, ethers } from 'ethers';
+import { AdapterFactory } from '../adapters/index.js';
+import { getUserVaults, getVaultInfo } from '../blockchain/index.js';
+import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from '../services/index.js';
+import { getAvailableStrategies, getStrategyParameters } from './strategyHelpers.js';
+import { getAllTokens } from './tokenHelpers.js';
+import contractData from '../artifacts/contracts.js';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
 const ERC20ABI = ERC20ARTIFACT.abi;
 
@@ -168,7 +168,7 @@ export const fetchStrategyParameters = async (strategyAddress, strategyId, vault
 
 /**
  * Get available strategy configurations for a chain
- * @param {object} provider - Ethers provider 
+ * @param {object} provider - Ethers provider
  * @param {number} chainId - Chain ID
  * @returns {Promise<object>} Result object containing strategies and mappings
  */
@@ -732,7 +732,7 @@ export const getAllUserVaultData = async (userAddress, provider, chainId) => {
   try {
     // 1. Load strategies
     const strategiesResult = await getVaultStrategies(provider, chainId);
-    
+
     // 2. Get all vault addresses for the user
     const vaultAddresses = await getUserVaults(userAddress, provider);
 
