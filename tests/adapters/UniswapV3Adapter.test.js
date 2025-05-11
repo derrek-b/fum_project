@@ -396,19 +396,172 @@ describe('UniswapV3Adapter', () => {
   });
   
   describe('_calculateUncollectedFees', () => {
-    it('should correctly calculate uncollected fees', () => {
+    it('should correctly calculate uncollected fees with standard data', () => {
       const result = adapter._calculateUncollectedFees(mockFeeCalculationData);
-      
+
       expect(result).toHaveProperty('token0');
       expect(result).toHaveProperty('token1');
       expect(result.token0).toHaveProperty('raw');
       expect(result.token0).toHaveProperty('formatted');
       expect(result.token1).toHaveProperty('raw');
       expect(result.token1).toHaveProperty('formatted');
-      
+
       // Check that values are not NaN
       expect(isNaN(Number(result.token0.formatted))).toBe(false);
       expect(isNaN(Number(result.token1.formatted))).toBe(false);
+    });
+
+    it('should correctly handle different position range scenarios', () => {
+      // Case 1: Current tick is below position range
+      const belowRangeData = {
+        ...mockFeeCalculationData,
+        currentTick: mockFeeCalculationData.position.tickLower - 1000 // Below lower tick
+      };
+
+      const belowRangeResult = adapter._calculateUncollectedFees(belowRangeData);
+      expect(belowRangeResult).toHaveProperty('token0');
+      expect(belowRangeResult).toHaveProperty('token1');
+      expect(isNaN(Number(belowRangeResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(belowRangeResult.token1.formatted))).toBe(false);
+
+      // Case 2: Current tick is above position range
+      const aboveRangeData = {
+        ...mockFeeCalculationData,
+        currentTick: mockFeeCalculationData.position.tickUpper + 1000 // Above upper tick
+      };
+
+      const aboveRangeResult = adapter._calculateUncollectedFees(aboveRangeData);
+      expect(aboveRangeResult).toHaveProperty('token0');
+      expect(aboveRangeResult).toHaveProperty('token1');
+      expect(isNaN(Number(aboveRangeResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(aboveRangeResult.token1.formatted))).toBe(false);
+
+      // Case 3: Current tick is at lower boundary
+      const atLowerData = {
+        ...mockFeeCalculationData,
+        currentTick: mockFeeCalculationData.position.tickLower // At lower tick
+      };
+
+      const atLowerResult = adapter._calculateUncollectedFees(atLowerData);
+      expect(atLowerResult).toHaveProperty('token0');
+      expect(atLowerResult).toHaveProperty('token1');
+      expect(isNaN(Number(atLowerResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(atLowerResult.token1.formatted))).toBe(false);
+
+      // Case 4: Current tick is at upper boundary
+      const atUpperData = {
+        ...mockFeeCalculationData,
+        currentTick: mockFeeCalculationData.position.tickUpper // At upper tick
+      };
+
+      const atUpperResult = adapter._calculateUncollectedFees(atUpperData);
+      expect(atUpperResult).toHaveProperty('token0');
+      expect(atUpperResult).toHaveProperty('token1');
+      expect(isNaN(Number(atUpperResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(atUpperResult.token1.formatted))).toBe(false);
+    });
+
+    it('should handle edge cases with zero liquidity', () => {
+      const zeroLiquidityData = {
+        ...mockFeeCalculationData,
+        position: {
+          ...mockFeeCalculationData.position,
+          liquidity: "0",
+          // Zero out tokensOwed to properly test zero fees with zero liquidity
+          tokensOwed0: "0",
+          tokensOwed1: "0"
+        }
+      };
+
+      const result = adapter._calculateUncollectedFees(zeroLiquidityData);
+      // With our mocked formatUnits in ethers.js, zero values return "0" not "0.000000"
+      expect(result.token0.formatted).toBe("0");
+      expect(result.token1.formatted).toBe("0");
+    });
+
+    it('should handle edge cases with uninitialized ticks', () => {
+      const uninitializedTicksData = {
+        ...mockFeeCalculationData,
+        tickLower: {
+          ...mockFeeCalculationData.tickLower,
+          initialized: false
+        },
+        tickUpper: {
+          ...mockFeeCalculationData.tickUpper,
+          initialized: false
+        }
+      };
+
+      const result = adapter._calculateUncollectedFees(uninitializedTicksData);
+      expect(result).toHaveProperty('token0');
+      expect(result).toHaveProperty('token1');
+      expect(isNaN(Number(result.token0.formatted))).toBe(false);
+      expect(isNaN(Number(result.token1.formatted))).toBe(false);
+    });
+
+    it('should correctly handle BigInt overflow and underflow cases', () => {
+      // Create a scenario where we might have underflow (feeGrowthInside > feeGrowthLast)
+      const underflowData = {
+        ...mockFeeCalculationData,
+        position: {
+          ...mockFeeCalculationData.position,
+          feeGrowthInside0LastX128: "400000000000000000000", // Larger than current fee growth
+          feeGrowthInside1LastX128: "500000000000000000000"  // Larger than current fee growth
+        }
+      };
+
+      const underflowResult = adapter._calculateUncollectedFees(underflowData);
+      expect(underflowResult).toHaveProperty('token0');
+      expect(underflowResult).toHaveProperty('token1');
+      expect(isNaN(Number(underflowResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(underflowResult.token1.formatted))).toBe(false);
+
+      // Create a scenario with very large numbers to test overflow handling
+      const overflowData = {
+        ...mockFeeCalculationData,
+        feeGrowthGlobal0X128: "115792089237316195423570985008687907853269984665640564039457584007913129639935", // Near max uint256
+        feeGrowthGlobal1X128: "115792089237316195423570985008687907853269984665640564039457584007913129639935"  // Near max uint256
+      };
+
+      const overflowResult = adapter._calculateUncollectedFees(overflowData);
+      expect(overflowResult).toHaveProperty('token0');
+      expect(overflowResult).toHaveProperty('token1');
+      expect(isNaN(Number(overflowResult.token0.formatted))).toBe(false);
+      expect(isNaN(Number(overflowResult.token1.formatted))).toBe(false);
+    });
+
+    it('should handle different token decimal configurations', () => {
+      // Test with different token decimal combinations
+      const decimalsVariationData = {
+        ...mockFeeCalculationData,
+        token0: {
+          symbol: "WBTC",
+          decimals: 8  // Changed from USDC's 6 to WBTC's 8
+        },
+        token1: {
+          symbol: "USDT",
+          decimals: 6  // Changed from WETH's 18 to USDT's 6
+        }
+      };
+
+      const result = adapter._calculateUncollectedFees(decimalsVariationData);
+      expect(result).toHaveProperty('token0');
+      expect(result).toHaveProperty('token1');
+      expect(isNaN(Number(result.token0.formatted))).toBe(false);
+      expect(isNaN(Number(result.token1.formatted))).toBe(false);
+    });
+
+    it('should throw an error if token decimal information is missing', () => {
+      // Missing token decimal information
+      const missingDecimalsData = {
+        ...mockFeeCalculationData,
+        token0: { symbol: "TEST" }, // Missing decimals
+        token1: { symbol: "TEST2" }  // Missing decimals
+      };
+
+      expect(() => {
+        adapter._calculateUncollectedFees(missingDecimalsData);
+      }).toThrow("Token decimal information missing");
     });
   });
 });

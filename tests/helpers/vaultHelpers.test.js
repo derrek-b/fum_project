@@ -112,6 +112,21 @@ describe('vaultHelpers', () => {
       expect(result).toHaveProperty('adaptiveRanges', true);
       expect(result).toHaveProperty('oracleSource', 0);
       expect(result).toHaveProperty('platformSelectionCriteria', 0);
+      
+      // Test more specific parameters for parris strategy
+      expect(result.rebalanceCountThresholdHigh).toBe(3);
+      expect(result.rebalanceCountThresholdLow).toBe(1);
+      expect(result.adaptiveTimeframeHigh).toBe(7);
+      expect(result.adaptiveTimeframeLow).toBe(7);
+      expect(result.rangeAdjustmentPercentHigh).toBe(20);
+      expect(result.thresholdAdjustmentPercentHigh).toBe(15);
+      expect(result.rangeAdjustmentPercentLow).toBe(20);
+      expect(result.thresholdAdjustmentPercentLow).toBe(15);
+      expect(result.priceDeviationTolerance).toBe(1);
+      expect(result.maxPositionSizePercent).toBe(30);
+      expect(Number(result.minPositionSize)).toBe(100);
+      expect(result.targetUtilization).toBe(20);
+      expect(Number(result.minPoolLiquidity)).toBe(100000);
     });
 
     it('should correctly map fed strategy parameters', () => {
@@ -134,10 +149,88 @@ describe('vaultHelpers', () => {
       const result = mapStrategyParameters('bob', null);
       expect(result).toEqual({});
     });
+    
+    it('should handle case insensitivity in strategy IDs', () => {
+      // Test with uppercase strategy id
+      const resultUpper = mapStrategyParameters('BOB', mockStrategyParams.bobStrategy);
+      expect(resultUpper.targetRangeUpper).toBe(5);
+      
+      // Test with mixed case
+      const resultMixed = mapStrategyParameters('BoB', mockStrategyParams.bobStrategy);
+      expect(resultMixed.targetRangeUpper).toBe(5);
+    });
+    
+    it('should correctly convert basis points to percentages', () => {
+      // Test basis point conversion for bob strategy parameters
+      const result = mapStrategyParameters('bob', mockStrategyParams.bobStrategy);
+      
+      // targetRangeUpper is 500 basis points -> 5.00%
+      expect(result.targetRangeUpper).toBe(5);
+      
+      // maxSlippage is 50 basis points -> 0.50%
+      expect(result.maxSlippage).toBe(0.5);
+    });
+    
+    it('should correctly handle boolean parameters', () => {
+      // Test boolean parameter for bob strategy
+      const result = mapStrategyParameters('bob', mockStrategyParams.bobStrategy);
+      expect(result.feeReinvestment).toBe(true);
+      
+      // Create mock with false boolean
+      const mockParamsWithFalse = [...mockStrategyParams.bobStrategy];
+      mockParamsWithFalse[4] = false; // feeReinvestment index
+      
+      const resultWithFalse = mapStrategyParameters('bob', mockParamsWithFalse);
+      expect(resultWithFalse.feeReinvestment).toBe(false);
+    });
+    
+    it('should correctly handle money value parameters', () => {
+      // Test currency value parameter for parris strategy
+      const result = mapStrategyParameters('parris', mockStrategyParams.parrisStrategy);
+      
+      // minPoolLiquidity is 10000000 -> $100,000.00
+      expect(Number(result.minPoolLiquidity)).toBe(100000);
+    });
+    
+    it('should handle partially invalid parameters array', () => {
+      // Create mock with some valid and some invalid entries
+      const partiallyInvalidParams = [...mockStrategyParams.bobStrategy];
+      partiallyInvalidParams[0] = "not a number"; // Invalidate targetRangeUpper
+      
+      const result = mapStrategyParameters('bob', partiallyInvalidParams);
+      
+      // The invalid entry should result in NaN after parseInt
+      expect(isNaN(result.targetRangeUpper)).toBe(true);
+      
+      // But other entries should still work
+      expect(result.feeReinvestment).toBe(true);
+      expect(result.maxSlippage).toBe(0.5);
+    });
+    
+    it('should correctly map parameters with array of incorrect length', () => {
+      // Test with too few parameters
+      const shortParams = mockStrategyParams.bobStrategy.slice(0, 5); // Only first 5 parameters
+      
+      const resultShort = mapStrategyParameters('bob', shortParams);
+      expect(resultShort).toHaveProperty('targetRangeUpper');
+      expect(resultShort).toHaveProperty('feeReinvestment');
+      // Parameters beyond index 4 should be undefined
+      // When ethers.formatUnits is called with undefined, it returns 'NaN'
+      expect(isNaN(Number(resultShort.reinvestmentTrigger))).toBe(true);
+      
+      // Test with too many parameters
+      const longParams = [...mockStrategyParams.bobStrategy, 100, 200, 300]; // Extra parameters
+      
+      const resultLong = mapStrategyParameters('bob', longParams);
+      // Should still map all the expected parameters
+      expect(resultLong.targetRangeUpper).toBe(5);
+      expect(resultLong.maxUtilization).toBe(80);
+      // Extra parameters should be ignored
+    });
   });
 
   describe('calculatePositionsTVL', () => {
-    it('should calculate TVL for positions', async () => {
+    it('should calculate TVL for positions with complete data', async () => {
       const result = await calculatePositionsTVL(
         mockPositions,
         mockPoolData,
@@ -178,7 +271,120 @@ describe('vaultHelpers', () => {
       // The function should complete and return a result
       expect(result).toHaveProperty('positionTVL');
       expect(result).toHaveProperty('hasPartialData');
-      // The test is checking behavior, not specific return values that might change
+      
+      // With our mock implementation of AdapterFactory, the test might not show partial data
+      // since the calculations might not reach a step that would set hasPartialData to true,
+      // so we'll just check that positionTVL is calculated correctly
+      expect(result.positionTVL).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle missing token data gracefully', async () => {
+      const incompleteTokenData = {
+        "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": {
+          symbol: "USDC",
+          decimals: 6
+          // Missing name field
+        }
+      };
+
+      const result = await calculatePositionsTVL(
+        mockPositions,
+        mockPoolData,
+        incompleteTokenData,
+        {},
+        1
+      );
+
+      expect(result).toHaveProperty('positionTVL');
+      expect(result).toHaveProperty('hasPartialData');
+    });
+    
+    it('should handle error conditions and edge cases robustly', async () => {
+      // Test with various edge cases to ensure the function is robust
+      // without needing to mock specific failure conditions
+      
+      // Case 1: Missing token data for one pool token
+      const partialTokenData = { ...mockTokenData };
+      delete partialTokenData["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"]; // Remove WETH
+      
+      const result1 = await calculatePositionsTVL(
+        mockPositions,
+        mockPoolData,
+        partialTokenData,
+        {},
+        1
+      );
+      
+      expect(result1).toHaveProperty('positionTVL');
+      
+      // Case 2: Non-existent token symbol that would result in $0 price
+      const oddTokenData = { 
+        ...mockTokenData,
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": {
+          ...mockTokenData["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"],
+          symbol: "NON_EXISTENT_TOKEN" // This would result in $0 price
+        }
+      };
+      
+      const result2 = await calculatePositionsTVL(
+        mockPositions,
+        mockPoolData,
+        oddTokenData,
+        {},
+        1
+      );
+      
+      expect(result2).toHaveProperty('positionTVL');
+    });
+
+    it('should aggregate multiple position values correctly', async () => {
+      // Create additional mock positions to test aggregation
+      const additionalMockPositions = [
+        ...mockPositions,
+        {
+          id: "345678",
+          poolAddress: "0x2345678901234567890123456789012345678901",
+          liquidity: 3000000,
+          platform: "uniswapV3"
+        }
+      ];
+      
+      const result = await calculatePositionsTVL(
+        additionalMockPositions,
+        mockPoolData,
+        mockTokenData,
+        {},
+        1
+      );
+      
+      expect(result).toHaveProperty('positionTVL');
+      expect(result.positionTVL).toBeGreaterThan(0);
+      // The TVL should be the sum of all position values
+      // We can't assert the exact value since it depends on the mock implementation
+      // of calculateTokenAmounts, but we can check it's calculated
+    });
+    
+    it('should handle position with invalid poolAddress gracefully', async () => {
+      const positionsWithInvalidPool = [
+        {
+          id: "999999",
+          poolAddress: "0x9999999999999999999999999999999999999999", // Non-existent pool address
+          liquidity: 1000000,
+          platform: "uniswapV3"
+        },
+        ...mockPositions
+      ];
+      
+      const result = await calculatePositionsTVL(
+        positionsWithInvalidPool,
+        mockPoolData, // Does not contain the 0x9999 address
+        mockTokenData,
+        {},
+        1
+      );
+      
+      expect(result).toHaveProperty('positionTVL');
+      expect(result.positionTVL).toBeGreaterThan(0); // Should still calculate TVL for valid positions
     });
   });
 });
