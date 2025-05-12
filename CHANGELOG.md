@@ -25,6 +25,26 @@
 - Comprehensive documentation for setup and configuration
 - Optimized fee collection and position management logic
 
+## v0.2.2
+
+### Added
+- Comprehensive TESTING.md documentation for test procedures
+- Automated bytecode synchronization for testing
+- Integration tests for the vault authorization flow
+
+### Improved
+- Refactored test environment for consistency with main project
+- Enhanced spy functions for more reliable event testing
+- Fixed WebSocket provider cleanup in the AutomationService
+- Optimized testability with better dependency structure
+- Deterministic deployment addresses between automation and main project
+
+### Fixed
+- Integration tests now properly detect event callbacks
+- Cleaned up WebSocket provider event handling
+- Fixed race conditions in the test environment setup
+- Eliminated unnecessary code duplication in test scripts
+
 ## v0.2.1
 
 ### Added
