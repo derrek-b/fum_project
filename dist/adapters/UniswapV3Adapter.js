@@ -371,7 +371,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         positionsData.push({
           id: positionId,
           tokenPair,
-          poolAddress,
+          pool: poolAddress,
           nonce: Number(nonce.toString()),
           operator,
           fee: feeNumber,

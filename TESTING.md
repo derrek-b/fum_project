@@ -229,38 +229,21 @@ This ensures that tests are run without watch mode and that coverage reports are
 
 Vitest offers many command-line flags to customize test runs:
 
-| Flag                  | Description                                          |
-|-----------------------|------------------------------------------------------|
-| `--run`               | Run tests once (default in CI)                       |
-| `--watch`             | Watch mode (default in dev)                          |
-| `--coverage`          | Generate coverage report                             |
+| Flag                    | Description                                          |
+|-------------------------|------------------------------------------------------|
+| `--run`                 | Run tests once (default in CI)                       |
+| `--watch`               | Watch mode (default in dev)                          |
+| `--coverage`            | Generate coverage report                             |
 | `-t, --testNamePattern` | Run tests with names matching the pattern            |
-| `-d, --dir`           | Directory to search for test files                   |
-| `--update`            | Update snapshots                                     |
-| `--threads`           | Whether to run tests in threads                      |
-| `--silent`            | Silent mode (no output)                              |
-| `--verbose`           | Enable verbose output with detailed test logs        |
-| `--reporter`          | Reporter to use                                      |
-| `--ui`                | Start UI dashboard (requires @vitest/ui)             |
-| `--open`              | Open UI dashboard automatically (with --ui)          |
-| `--api`               | Serve API for UI dashboard (with --ui)               |
-| `--isolate`           | Isolate environment for each test file               |
-
-### Using Verbose Mode
-
-Verbose mode is particularly useful when debugging tests as it shows detailed console output that would otherwise be suppressed:
-
-```bash
-npx vitest run --verbose
-```
-
-In our tests, we use `console.log` statements in several places to show:
-- Test scenario descriptions
-- Expected vs. actual values
-- Calculated values in complex math operations
-- Percentage differences in floating-point comparisons
-
-These logs are only visible when running with the `--verbose` flag or in watch mode when focusing on specific tests.
+| `-d, --dir`             | Directory to search for test files                   |
+| `--update`              | Update snapshots                                     |
+| `--threads`             | Whether to run tests in threads                      |
+| `--silent`              | Silent mode (no output)                              |
+| `--reporter`            | Reporter to use                                      |
+| `--ui`                  | Start UI dashboard (requires @vitest/ui)             |
+| `--open`                | Open UI dashboard automatically (with --ui)          |
+| `--api`                 | Serve API for UI dashboard (with --ui)               |
+| `--isolate`             | Isolate environment for each test file               |
 
 For a complete list of options, run:
 

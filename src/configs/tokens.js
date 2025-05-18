@@ -18,7 +18,7 @@ const tokens = {
   },
 
   // USDT
-  "USDT": {
+  "USD₮0": {
     name: "Tether USD",
     symbol: "USDT",
     decimals: 6,

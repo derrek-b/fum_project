@@ -44,6 +44,8 @@ export function getStrategyDetails(strategyId) {
     maxTokens: strategy.maxTokens,
     minPlatforms: strategy.minPlatforms,
     maxPlatforms: strategy.maxPlatforms,
+    minPositions: strategy.minPositions,
+    maxPositions: strategy.maxPositions,
     parameterGroups: strategy.parameterGroups || [],
   };
 }

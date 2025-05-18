@@ -16,33 +16,7 @@ vi.mock('ethers', () => {
   };
 });
 
-vi.mock('../src/artifacts/contracts.js', () => {
-  return {
-    default: {
-      bob: {
-        addresses: {
-          1: "0xb0b123456789abcdef0123456789abcdef012345",
-          5: "0xb0b987654321fedcba0987654321fedcba09876"
-        },
-        abi: []
-      },
-      parris: {
-        addresses: {
-          1: "0xpar123456789abcdef0123456789abcdef012345",
-          5: "0xpar987654321fedcba0987654321fedcba09876"
-        },
-        abi: []
-      },
-      fed: {
-        addresses: {
-          1: "0xfed123456789abcdef0123456789abcdef012345",
-          5: "0xfed987654321fedcba0987654321fedcba09876"
-        },
-        abi: []
-      }
-    }
-  };
-});
+// Note: We no longer mock the contracts module so tests will use the actual contract artifacts
 
 // Add spy to console methods to suppress or capture output
 global.consoleSpy = {
