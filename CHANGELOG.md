@@ -5,6 +5,24 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2025-01-09
+
+### Added
+- New swap functionality in UniswapV3Adapter:
+  - `generateSwapData` method for creating Uniswap V3 swap transaction data
+  - Support for exactInputSingle swaps with configurable parameters
+  - Proper ETH value handling for ETH swaps
+  - Comprehensive parameter validation and error handling
+- Abstract `generateSwapData` method added to PlatformAdapter base class
+- Unit tests for swap functionality with multiple test scenarios:
+  - Normal ERC20 token swaps
+  - ETH swap scenarios with proper value setting
+  - Error handling for missing parameters
+  - Error handling for unsupported chains
+
+### Fixed
+- Import statements updated to include SwapRouter ABI for swap functionality
+
 ## [0.1.5] - 2025-05-11
 
 ### Added

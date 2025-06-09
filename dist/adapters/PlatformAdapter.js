@@ -212,4 +212,13 @@ export default class PlatformAdapter {
   async createPosition(params) {
     throw new Error("createPosition must be implemented by subclasses");
   }
+
+  /**
+   * Generate swap transaction data
+   * @param {Object} params - Swap parameters
+   * @returns {Promise<Object>} Transaction data with to, data, and value
+   */
+  async generateSwapData(params) {
+    throw new Error("generateSwapData must be implemented by subclasses");
+  }
 }

@@ -564,4 +564,78 @@ describe('UniswapV3Adapter', () => {
       }).toThrow("Token decimal information missing");
     });
   });
+
+  describe('generateSwapData', () => {
+    beforeEach(() => {
+      // Mock ethers Interface for swap router
+      vi.mocked(ethers).Interface = vi.fn().mockImplementation(() => ({
+        encodeFunctionData: vi.fn().mockReturnValue('0x123456789abcdef')
+      }));
+    });
+
+    it('should generate swap transaction data with correct parameters', async () => {
+      const swapParams = {
+        tokenIn: '0x1234567890123456789012345678901234567890',
+        tokenOut: '0x0987654321098765432109876543210987654321',
+        fee: 3000,
+        recipient: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef',
+        amountIn: '1000000000000000000',
+        amountOutMinimum: '500000000',
+        sqrtPriceLimitX96: 0,
+        provider: mockAdapter.provider,
+        chainId: 1
+      };
+
+      const result = await adapter.generateSwapData(swapParams);
+
+      expect(result).toHaveProperty('to');
+      expect(result).toHaveProperty('data');
+      expect(result).toHaveProperty('value');
+      expect(result.data).toBe('0x123456789abcdef');
+      expect(result.value).toBe(0); // Not ETH swap
+    });
+
+    it('should set value for ETH swaps', async () => {
+      const ethSwapParams = {
+        tokenIn: '0x0000000000000000000000000000000000000000', // ETH
+        tokenOut: '0x0987654321098765432109876543210987654321',
+        fee: 3000,
+        recipient: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef',
+        amountIn: '1000000000000000000',
+        amountOutMinimum: '500000000',
+        sqrtPriceLimitX96: 0,
+        provider: mockAdapter.provider,
+        chainId: 1
+      };
+
+      const result = await adapter.generateSwapData(ethSwapParams);
+
+      expect(result.value).toBe('1000000000000000000');
+    });
+
+    it('should throw error for missing required parameters', async () => {
+      const incompleteParams = {
+        tokenIn: '0x1234567890123456789012345678901234567890',
+        // Missing other required fields
+      };
+
+      await expect(adapter.generateSwapData(incompleteParams)).rejects.toThrow('Missing required parameters for swap');
+    });
+
+    it('should throw error for unsupported chainId', async () => {
+      const paramsWithBadChain = {
+        tokenIn: '0x1234567890123456789012345678901234567890',
+        tokenOut: '0x0987654321098765432109876543210987654321',
+        fee: 3000,
+        recipient: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef',
+        amountIn: '1000000000000000000',
+        amountOutMinimum: '500000000',
+        sqrtPriceLimitX96: 0,
+        provider: mockAdapter.provider,
+        chainId: 999999 // Unsupported chain
+      };
+
+      await expect(adapter.generateSwapData(paramsWithBadChain)).rejects.toThrow('No Uniswap V3 router configuration found');
+    });
+  });
 });

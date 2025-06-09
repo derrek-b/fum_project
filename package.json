@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -43,10 +43,9 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@uniswap/sdk-core": "^4.0.6",
-    "@uniswap/v3-sdk": "^3.10.0",
-    "ethers": "^6.13.5",
-    "jsbi": "^4.3.0"
+    "@uniswap/sdk-core": "^7.7.2",
+    "@uniswap/v3-sdk": "^3.25.2",
+    "ethers": "^6.13.5"
   },
   "peerDependencies": {
     "@openzeppelin/contracts": "^5.0.0",
