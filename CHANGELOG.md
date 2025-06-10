@@ -13,6 +13,7 @@
 - Integration with refactored VaultDataService for improved data management
 - Enhanced multi-platform support with platform-specific strategy implementations
 - Centralized event management system for improved monitoring
+- Platform delegation in base strategies for true platform-agnostic architecture
 
 ### Improved
 - Significantly reduced log verbosity with intelligent filtering
@@ -24,6 +25,11 @@
 - Enhanced caching system for optimized RPC usage
 - Comprehensive documentation for setup and configuration
 - Optimized fee collection and position management logic
+- VaultDataService converted from singleton to instance pattern for proper per-chain isolation
+
+### Fixed
+- BabyStepsStrategy now properly delegates to platform-specific implementations
+- Fixed "calculateOptimalAllocation must be implemented" error during price event handling
 
 ## v0.2.2
 
