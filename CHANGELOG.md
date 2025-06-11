@@ -1,6 +1,6 @@
 # F.U.M. Project Changelog
 
-## v0.3.0 (Current Development)
+## v0.3.0
 
 ### Added
 - New frontend logging system with human-readable log formatting
@@ -14,6 +14,11 @@
 - Enhanced multi-platform support with platform-specific strategy implementations
 - Centralized event management system for improved monitoring
 - Platform delegation in base strategies for true platform-agnostic architecture
+
+### Changed
+- **BREAKING**: Removed position.adapter assignments - adapters are now stateless utilities
+- Platform-specific strategies now manage their own adapter instances via getAdapter() method
+- VaultDataService uses position.platform directly without fallbacks
 
 ### Improved
 - Significantly reduced log verbosity with intelligent filtering
@@ -30,6 +35,8 @@
 ### Fixed
 - BabyStepsStrategy now properly delegates to platform-specific implementations
 - Fixed "calculateOptimalAllocation must be implemented" error during price event handling
+- Fixed CommonJS/ESM module compatibility by converting require() to dynamic import()
+- Fixed platform name case sensitivity issues (uniswapv3 vs uniswapV3)
 
 ## v0.2.2
 
