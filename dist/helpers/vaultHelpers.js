@@ -1,13 +1,8 @@
 /**
- * Vault Helpers - Vault Data Management Utilities
- * 
- * This module provides comprehensive vault management functionality:
- * - Fetch and process vault information including positions and balances
- * - Calculate TVL (Total Value Locked) for vaults and positions
- * - Map strategy parameters from contracts to human-readable format
- * - Aggregate user vault data across protocols
- * 
  * @module helpers/vaultHelpers
+ * @description Vault data management utilities for fetching vault information, calculating TVL, and managing strategy parameters.
+ * Provides comprehensive vault management functionality including position tracking, balance calculations, and strategy integration.
+ * @since 1.0.0
  */
 
 import { ethers } from 'ethers';
@@ -22,9 +17,21 @@ const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Map strategy parameters from contract return value to named objects
- * @param {string} strategyId - Strategy ID
- * @param {Array} params - Parameters array from contract
- * @returns {object} Named parameters
+ * @memberof module:helpers/vaultHelpers
+ * @param {string} strategyId - Strategy ID (e.g., 'bob', 'parris', 'fed')
+ * @param {Array} params - Raw parameters array from contract getAllParameters call
+ * @returns {Object} Named parameters with human-readable values
+ * @example
+ * // Map Bob strategy parameters from contract
+ * const rawParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+ * const mapped = mapStrategyParameters('bob', rawParams);
+ * // Returns: {
+ * //   targetRangeUpper: 102,
+ * //   targetRangeLower: 98,
+ * //   rebalanceThresholdUpper: 2,
+ * //   ...
+ * // }
+ * @since 1.0.0
  */
 export const mapStrategyParameters = (strategyId, params) => {
   try {
@@ -112,11 +119,28 @@ export const mapStrategyParameters = (strategyId, params) => {
 
 /**
  * Fetch and map parameter values from a strategy contract
+ * @memberof module:helpers/vaultHelpers
  * @param {string} strategyAddress - The strategy contract address
  * @param {string} strategyId - Strategy ID (e.g., "parris", "fed")
  * @param {string} vaultAddress - The vault address
- * @param {object} provider - Ethers provider
- * @returns {Promise<object>} Strategy parameters and metadata
+ * @param {Object} provider - Ethers provider instance
+ * @returns {Promise<Object|null>} Strategy parameters and metadata including selectedTemplate, parameters - null on error
+ * @throws {Error} If contract interaction fails
+ * @example
+ * // Fetch strategy parameters for a vault
+ * const params = await fetchStrategyParameters(
+ *   '0xStrategyAddress',
+ *   'bob',
+ *   '0xVaultAddress',
+ *   provider
+ * );
+ * // Returns: {
+ * //   selectedTemplate: 'conservative',
+ * //   templateEnum: '0',
+ * //   customizationBitmap: '0',
+ * //   parameters: { targetRangeUpper: 105, ... }
+ * // }
+ * @since 1.0.0
  */
 export const fetchStrategyParameters = async (strategyAddress, strategyId, vaultAddress, provider) => {
   try {
@@ -179,9 +203,18 @@ export const fetchStrategyParameters = async (strategyAddress, strategyId, vault
 
 /**
  * Get available strategy configurations for a chain
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @returns {Promise<object>} Result object containing strategies and mappings
+ * @memberof module:helpers/vaultHelpers
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID to get strategies for
+ * @returns {Promise<Object>} Result object with success flag, strategies array, and address mapping
+ * @example
+ * // Load strategies for Ethereum mainnet
+ * const result = await getVaultStrategies(provider, 1);
+ * if (result.success) {
+ *   console.log('Available strategies:', result.strategies);
+ *   // Use addressToStrategyMap to identify strategies by contract address
+ * }
+ * @since 1.0.0
  */
 export const getVaultStrategies = async (provider, chainId) => {
   try {
@@ -253,10 +286,19 @@ export const getVaultStrategies = async (provider, chainId) => {
 
 /**
  * Load basic vault information and contract details
- * @param {string} vaultAddress - The vault address
- * @param {object} provider - Ethers provider
- * @param {object} addressToStrategyMap - Map of strategy addresses to strategy IDs
- * @returns {Promise<object>} Result object with vault data
+ * @memberof module:helpers/vaultHelpers
+ * @param {string} vaultAddress - The vault address to query
+ * @param {Object} provider - Ethers provider instance
+ * @param {Object} [addressToStrategyMap={}] - Map of strategy addresses to strategy IDs
+ * @returns {Promise<Object>} Result object with success flag and vault data
+ * @example
+ * // Get basic vault information
+ * const result = await getVaultBasicInfo('0xVaultAddress', provider);
+ * if (result.success) {
+ *   console.log('Vault name:', result.vaultData.name);
+ *   console.log('Has strategy:', result.vaultData.hasActiveStrategy);
+ * }
+ * @since 1.0.0
  */
 export const getVaultBasicInfo = async (vaultAddress, provider, addressToStrategyMap = {}) => {
   try {
@@ -377,10 +419,20 @@ export const getVaultBasicInfo = async (vaultAddress, provider, addressToStrateg
 
 /**
  * Load token balances for a vault
- * @param {string} vaultAddress - The vault address
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @returns {Promise<object>} Result object with token data
+ * @memberof module:helpers/vaultHelpers
+ * @param {string} vaultAddress - The vault address to check balances for
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID for token lookups
+ * @returns {Promise<Object>} Result object with token balances and total value
+ * @example
+ * // Get vault token balances
+ * const result = await getVaultTokenBalances('0xVault', provider, 1);
+ * if (result.success) {
+ *   console.log('Total value:', result.totalTokenValue);
+ *   console.log('Tokens:', result.vaultTokens);
+ *   // Each token has: symbol, balance, numericalBalance, valueUsd
+ * }
+ * @since 1.0.0
  */
 export const getVaultTokenBalances = async (vaultAddress, provider, chainId) => {
   try {
@@ -466,10 +518,20 @@ export const getVaultTokenBalances = async (vaultAddress, provider, chainId) => 
 
 /**
  * Load positions for a vault from all adapters
- * @param {string} vaultAddress - The vault address
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @returns {Promise<object>} Result object with position data
+ * @memberof module:helpers/vaultHelpers
+ * @param {string} vaultAddress - The vault address to get positions for
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID to query positions on
+ * @returns {Promise<Object>} Result object with positions array and related data
+ * @example
+ * // Get all positions held by a vault
+ * const result = await getVaultPositions('0xVault', provider, 1);
+ * if (result.success) {
+ *   console.log('Position count:', result.positions.length);
+ *   console.log('Position IDs:', result.positionIds);
+ *   // Also includes poolData and tokenData for TVL calculations
+ * }
+ * @since 1.0.0
  */
 export const getVaultPositions = async (vaultAddress, provider, chainId) => {
   try {
@@ -530,18 +592,28 @@ export const getVaultPositions = async (vaultAddress, provider, chainId) => {
 };
 
 /**
- * Get TVL for positions
- * @param {Array} positions - Position objects
+ * Calculate Total Value Locked (TVL) for positions
+ * @memberof module:helpers/vaultHelpers
+ * @param {Array<Object>} positions - Array of position objects from adapters
  * @param {Object} poolData - Pool data keyed by pool address
- * @param {Object} poolData[poolAddress] - Individual pool data
- * @param {string} poolData[poolAddress].token0 - Token0 address
- * @param {string} poolData[poolAddress].token1 - Token1 address
  * @param {Object} tokenData - Token data keyed by token address
- * @param {Object} tokenData[tokenAddress] - Individual token data
- * @param {string} tokenData[tokenAddress].symbol - Token symbol
- * @param {Object} provider - Ethers provider
- * @param {Number} chainId - Chain ID
- * @returns {Promise<{positionTVL: number, hasPartialData: boolean}>} TVL and data quality flag
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID for calculations
+ * @returns {Promise<{positionTVL: number, hasPartialData: boolean}>} TVL in USD and data completeness flag
+ * @example
+ * // Calculate TVL for vault positions
+ * const { positionTVL, hasPartialData } = await calculatePositionsTVL(
+ *   positions,
+ *   poolData,
+ *   tokenData,
+ *   provider,
+ *   1
+ * );
+ * console.log(`TVL: $${positionTVL}`);
+ * if (hasPartialData) {
+ *   console.warn('Some price data was unavailable');
+ * }
+ * @since 1.0.0
  */
 export const calculatePositionsTVL = async (positions, poolData, tokenData, provider, chainId) => {
   let positionTVL = 0;
@@ -642,11 +714,23 @@ export const calculatePositionsTVL = async (positions, poolData, tokenData, prov
 };
 
 /**
- * Main function to get a specific vault's data and positions
- * @param {string} vaultAddress - The vault address
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @returns {Promise<object>} Result object with success status and vault data
+ * Main function to get a specific vault's complete data including positions and balances
+ * @memberof module:helpers/vaultHelpers
+ * @param {string} vaultAddress - The vault address to query
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID for the vault
+ * @returns {Promise<Object>} Complete vault data including info, positions, tokens, and TVL
+ * @throws {Error} If required parameters are missing
+ * @example
+ * // Get complete vault data
+ * const vaultData = await getVaultData('0xVault', provider, 1);
+ * if (vaultData.success) {
+ *   console.log('Vault:', vaultData.vault);
+ *   console.log('Positions:', vaultData.positions);
+ *   console.log('Token balances:', vaultData.vaultTokens);
+ *   console.log('Total TVL:', vaultData.vault.metrics.tvl);
+ * }
+ * @since 1.0.0
  */
 export const getVaultData = async (vaultAddress, provider, chainId) => {
   if (!vaultAddress || !provider || !chainId) {
@@ -733,11 +817,22 @@ export const getVaultData = async (vaultAddress, provider, chainId) => {
 };
 
 /**
- * Get all user vaults with full data
+ * Get all user vaults with full data and aggregate positions
+ * @memberof module:helpers/vaultHelpers
  * @param {string} userAddress - The user's wallet address
- * @param {object} provider - Ethers provider
- * @param {number} chainId - Chain ID
- * @returns {Promise<object>} Result object with success status and vaults data
+ * @param {Object} provider - Ethers provider instance
+ * @param {number} chainId - Chain ID to query
+ * @returns {Promise<Object>} All user vaults and positions (both in vaults and direct)
+ * @throws {Error} If required parameters are missing
+ * @example
+ * // Get all user vault data
+ * const userData = await getAllUserVaultData('0xUser', provider, 1);
+ * if (userData.success) {
+ *   console.log('Vaults:', userData.vaults);
+ *   console.log('Vault positions:', userData.positions.vaultPositions);
+ *   console.log('Direct positions:', userData.positions.nonVaultPositions);
+ * }
+ * @since 1.0.0
  */
 export const getAllUserVaultData = async (userAddress, provider, chainId) => {
   if (!userAddress || !provider || !chainId) {

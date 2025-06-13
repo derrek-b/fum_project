@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-06-13T19:16:54.480Z
+Generated on: 2025-06-13T22:40:03.457Z
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ Generated on: 2025-06-13T19:16:54.480Z
 
 ### AdapterFactory.js
 
-Factory class for creating and managing platform adapters
+@module adapters/AdapterFactory
 
 **Path:** `src/adapters/AdapterFactory.js`
 
@@ -101,7 +101,7 @@ Contract ABIs and addresses for the F.U.M. project
 
 ### contracts.js
 
-Helper utilities for working with vault contracts
+@module blockchain/contracts
 
 **Path:** `src/blockchain/contracts.js`
 
@@ -133,7 +133,7 @@ Blockchain Module - Ethereum Interaction Utilities
 
 ### wallet.js
 
-Create an ethers provider using browser wallet (MetaMask, etc.)
+@module blockchain/wallet
 
 **Path:** `src/blockchain/wallet.js`
 
@@ -210,7 +210,7 @@ Token configuration with addresses on multiple chains
 
 ### chainHelpers.js
 
-Get chain configuration by chain ID
+@module helpers/chainHelpers
 
 **Path:** `src/helpers/chainHelpers.js`
 
@@ -231,7 +231,7 @@ Get chain configuration by chain ID
 
 ### formatHelpers.js
 
-Format a price value with appropriate precision
+@module helpers/formatHelpers
 
 **Path:** `src/helpers/formatHelpers.js`
 
@@ -259,7 +259,7 @@ Format a price value with appropriate precision
 
 ### platformHelpers.js
 
-Get platform metadata by ID
+@module helpers/platformHelpers
 
 **Path:** `src/helpers/platformHelpers.js`
 
@@ -281,7 +281,7 @@ Get platform metadata by ID
 
 ### strategyHelpers.js
 
-Get the list of available strategy configs (excluding the "none" strategy)
+@module helpers/strategyHelpers
 
 **Path:** `src/helpers/strategyHelpers.js`
 
@@ -309,7 +309,7 @@ Get the list of available strategy configs (excluding the "none" strategy)
 
 ### tokenHelpers.js
 
-Get all tokens
+@module helpers/tokenHelpers
 
 **Path:** `src/helpers/tokenHelpers.js`
 
@@ -332,7 +332,7 @@ Get all tokens
 
 ### vaultHelpers.js
 
-Vault Helpers - Vault Data Management Utilities
+@module helpers/vaultHelpers
 
 **Path:** `src/helpers/vaultHelpers.js`
 
@@ -377,7 +377,7 @@ FUM Library - Main Entry Point
 
 ### coingecko.js
 
-CoinGecko API service for token price data
+@module services/coingecko
 
 **Path:** `src/services/coingecko.js`
 

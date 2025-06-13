@@ -1,8 +1,9 @@
-// src/services/coingecko.js
 /**
- * CoinGecko API service for token price data
- * Provides price fetching, caching, and conversion utilities
+ * @module services/coingecko
+ * @description CoinGecko API service for token price data with caching and conversion utilities
  */
+
+// src/services/coingecko.js
 
 // Default configuration (can be overridden)
 const DEFAULT_CONFIG = {
@@ -52,12 +53,25 @@ const symbolToIdMap = {
 };
 
 /**
- * Configure the CoinGecko service
- * @param {Object} config - Configuration options
- * @param {string} [config.apiBaseUrl] - Base URL for CoinGecko API
- * @param {number} [config.cacheExpiryTime] - Cache expiry time in milliseconds
+ * Configures the CoinGecko service with custom settings
+ * 
+ * @function configureCoingecko
+ * @memberof module:services/coingecko
+ * 
+ * @param {Object} [config={}] - Configuration options
+ * @param {string} [config.apiBaseUrl='https://api.coingecko.com/api/v3'] - Base URL for CoinGecko API
+ * @param {number} [config.cacheExpiryTime=300000] - Cache expiry time in milliseconds
  * @param {string} [config.apiKey] - Direct API key for CoinGecko
- * @param {boolean} [config.useFreeTier] - Whether to use free tier if no API key
+ * @param {boolean} [config.useFreeTier=true] - Whether to use free tier if no API key
+ * 
+ * @example
+ * // Configure with API key
+ * configureCoingecko({
+ *   apiKey: 'your-api-key',
+ *   cacheExpiryTime: 10 * 60 * 1000
+ * });
+ * 
+ * @since 1.0.0
  */
 export function configureCoingecko(config = {}) {
   serviceConfig = { ...DEFAULT_CONFIG, ...config };
@@ -130,12 +144,24 @@ export function registerTokenMapping(symbol, coingeckoId) {
 }
 
 /**
- * Fetch token prices from CoinGecko
+ * Fetches current token prices from CoinGecko with caching
+ * 
+ * @function fetchTokenPrices
+ * @memberof module:services/coingecko
+ * 
  * @param {string[]} tokenSymbols - Array of token symbols
- * @param {string} currency - Currency to get prices in (default: "usd")
- * @param {boolean} bypassCache - Whether to bypass the cache (default: false)
- * @returns {Promise<Object>} - Token prices object
- * @throws {Error} - If API not properly configured and free tier disabled
+ * @param {string} [currency='usd'] - Currency to get prices in
+ * @param {boolean} [bypassCache=false] - Whether to bypass the cache
+ * 
+ * @returns {Promise<Object>} Token prices keyed by uppercase symbol
+ * 
+ * @throws {Error} If API key not configured and free tier disabled
+ * 
+ * @example
+ * const prices = await fetchTokenPrices(['ETH', 'USDC', 'DAI']);
+ * // { ETH: 2345.67, USDC: 1.00, DAI: 0.999 }
+ * 
+ * @since 1.0.0
  */
 export async function fetchTokenPrices(tokenSymbols, currency = 'usd', bypassCache = false) {
   if (!tokenSymbols || tokenSymbols.length === 0) {

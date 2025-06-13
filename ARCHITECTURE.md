@@ -64,15 +64,15 @@ src/
 └── index.js # FUM Library - Main Entry Point
 ├── adapters/
 │   ├── index.js # Adapter system for DeFi platforms
-│   ├── AdapterFactory.js # Factory class for creating and managing platform adapters
+│   ├── AdapterFactory.js # @module adapters/AdapterFactory
 │   ├── PlatformAdapter.js # Base class for DeFi platform adapters.
 │   └── UniswapV3Adapter.js # UniswapV3Adapter - Uniswap V3 Protocol Integration
 ├── artifacts/
 │   └── contracts.js # Contract ABIs and addresses for the F.U.M. project
 ├── blockchain/
 │   ├── index.js # Blockchain Module - Ethereum Interaction Utilities
-│   ├── contracts.js # Helper utilities for working with vault contracts
-│   └── wallet.js # Create an ethers provider using browser wallet (MetaMask, etc.)
+│   ├── contracts.js # @module blockchain/contracts
+│   └── wallet.js # @module blockchain/wallet
 ├── configs/
 │   ├── index.js
 │   ├── chains.js # Chain configuration for F.U.M. project
@@ -81,15 +81,15 @@ src/
 │   └── tokens.js # Token configuration with addresses on multiple chains
 ├── helpers/
 │   ├── index.js
-│   ├── chainHelpers.js # Get chain configuration by chain ID
-│   ├── formatHelpers.js # Format a price value with appropriate precision
-│   ├── platformHelpers.js # Get platform metadata by ID
-│   ├── strategyHelpers.js # Get the list of available strategy configs (excluding the "none" strategy)
-│   ├── tokenHelpers.js # Get all tokens
-│   └── vaultHelpers.js # Vault Helpers - Vault Data Management Utilities
+│   ├── chainHelpers.js # @module helpers/chainHelpers
+│   ├── formatHelpers.js # @module helpers/formatHelpers
+│   ├── platformHelpers.js # @module helpers/platformHelpers
+│   ├── strategyHelpers.js # @module helpers/strategyHelpers
+│   ├── tokenHelpers.js # @module helpers/tokenHelpers
+│   └── vaultHelpers.js # @module helpers/vaultHelpers
 ├── services/
 │   ├── index.js
-│   └── coingecko.js # CoinGecko API service for token price data
+│   └── coingecko.js # @module services/coingecko
 ```
 
 ## Core Components

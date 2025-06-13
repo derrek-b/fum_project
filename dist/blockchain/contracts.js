@@ -1,16 +1,36 @@
-// src/blockchain/contracts.js
 /**
- * Helper utilities for working with vault contracts
+ * @module blockchain/contracts
+ * @description Utilities for interacting with FUM vault contracts and related infrastructure
  */
+
+// src/blockchain/contracts.js
 import { ethers } from 'ethers';
 import contractData from '../artifacts/contracts.js';
 
 /**
- * Gets the contract factory for a contract, using the appropriate address for the current network
- * @param {string} contractName - Name of the contract (e.g., "VaultFactory", "PositionVault", or "BatchExecutor")
+ * Gets a contract instance using the appropriate address for the current network
+ * 
+ * @function getContract
+ * @memberof module:blockchain/contracts
+ * 
+ * @param {string} contractName - Name of the contract ("VaultFactory", "PositionVault", or "BatchExecutor")
  * @param {ethers.JsonRpcProvider} provider - Ethers provider
  * @param {ethers.Signer} [signer] - Optional signer for write operations
+ * 
  * @returns {ethers.Contract} The contract instance
+ * 
+ * @throws {Error} If contract not found in contract data
+ * @throws {Error} If no deployment found for network
+ * 
+ * @example
+ * // Read-only contract
+ * const factory = getContract('VaultFactory', provider);
+ * 
+ * @example
+ * // Contract with signer for transactions
+ * const factoryWithSigner = getContract('VaultFactory', provider, signer);
+ * 
+ * @since 1.0.0
  */
 export function getContract(contractName, provider, signer) {
   const contractInfo = contractData[contractName];
@@ -42,10 +62,21 @@ export function getContract(contractName, provider, signer) {
 
 /**
  * Creates a PositionVault contract instance for a specific vault address
+ * 
+ * @function getVaultContract
+ * @memberof module:blockchain/contracts
+ * 
  * @param {string} vaultAddress - Address of the vault
  * @param {ethers.JsonRpcProvider} provider - Ethers provider
  * @param {ethers.Signer} [signer] - Optional signer for write operations
+ * 
  * @returns {ethers.Contract} The vault contract instance
+ * 
+ * @example
+ * const vault = getVaultContract(vaultAddress, provider, signer);
+ * const owner = await vault.owner();
+ * 
+ * @since 1.0.0
  */
 export function getVaultContract(vaultAddress, provider, signer) {
   const vaultAbi = contractData.PositionVault.abi;
@@ -100,9 +131,22 @@ export function getBatchExecutorAddress(chainId) {
 
 /**
  * Creates a new vault using the VaultFactory
+ * 
+ * @function createVault
+ * @memberof module:blockchain/contracts
+ * 
  * @param {string} name - Name for the new vault
  * @param {ethers.Signer} signer - Signer for the transaction
+ * 
  * @returns {Promise<string>} The address of the newly created vault
+ * 
+ * @throws {Error} If failed to find VaultCreated event
+ * 
+ * @example
+ * const vaultAddress = await createVault('My DeFi Vault', signer);
+ * console.log('Created vault at:', vaultAddress);
+ * 
+ * @since 1.0.0
  */
 export async function createVault(name, signer) {
   const factory = getVaultFactory(signer.provider, signer);
@@ -159,10 +203,24 @@ export async function getVaultInfo(vaultAddress, provider) {
 
 /**
  * Executes a batch of transactions through a vault
+ * 
+ * @function executeVaultTransactions
+ * @memberof module:blockchain/contracts
+ * 
  * @param {string} vaultAddress - Address of the vault
  * @param {Array<{target: string, data: string}>} transactions - Array of transactions to execute
  * @param {ethers.Signer} signer - Signer for the transaction
+ * 
  * @returns {Promise<boolean[]>} Array of success flags for each transaction
+ * 
+ * @example
+ * const transactions = [{
+ *   target: tokenAddress,
+ *   data: tokenContract.interface.encodeFunctionData('approve', [spender, amount])
+ * }];
+ * const results = await executeVaultTransactions(vaultAddress, transactions, signer);
+ * 
+ * @since 1.0.0
  */
 export async function executeVaultTransactions(vaultAddress, transactions, signer) {
   const vault = getVaultContract(vaultAddress, signer.provider, signer);

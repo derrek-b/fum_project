@@ -1,10 +1,26 @@
-// src/helpers/chainHelpers.js
+/**
+ * @module helpers/chainHelpers
+ * @description Chain configuration utilities for managing blockchain network settings and platform integrations.
+ * Provides functions to query chain configurations, RPC endpoints, platform addresses, and executor contracts.
+ * @since 1.0.0
+ */
+
 import chains from '../configs/chains.js';
 
 /**
  * Get chain configuration by chain ID
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {Object|null} Chain configuration object or null if not found
+ * @returns {Object|null} Chain configuration object containing name, rpcUrl, executorAddress, and platformAddresses - null if not found
+ * @example
+ * // Get Ethereum mainnet configuration
+ * const config = getChainConfig(1);
+ * // Returns: { name: "Ethereum", rpcUrl: "https://...", executorAddress: "0x...", platformAddresses: {...} }
+ * 
+ * @example
+ * // Handle unknown chain
+ * const config = getChainConfig(999999);
+ * // Returns: null
  */
 export function getChainConfig(chainId) {
   if (!chainId || !chains[chainId]) return null;
@@ -13,8 +29,18 @@ export function getChainConfig(chainId) {
 
 /**
  * Get chain name by chain ID
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {string} Chain name or "Unknown Chain" if not found
+ * @returns {string} Human-readable chain name or "Unknown Chain" if not found
+ * @example
+ * // Get known chain name
+ * getChainName(1); // "Ethereum"
+ * getChainName(137); // "Polygon"
+ * 
+ * @example
+ * // Handle unknown chain
+ * getChainName(999999); // "Unknown Chain"
+ * @since 1.0.0
  */
 export function getChainName(chainId) {
   return chains[chainId]?.name || "Unknown Chain";
@@ -22,8 +48,22 @@ export function getChainName(chainId) {
 
 /**
  * Get RPC URL for a specific chain
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {string|null} RPC URL or null if chain not found
+ * @returns {string|null} RPC endpoint URL for blockchain interactions - null if chain not found
+ * @example
+ * // Get RPC URL for Ethereum mainnet
+ * const rpcUrl = getChainRpcUrl(1);
+ * // Use with ethers.js
+ * const provider = new ethers.JsonRpcProvider(rpcUrl);
+ * 
+ * @example
+ * // Handle missing RPC URL
+ * const rpcUrl = getChainRpcUrl(999999);
+ * if (!rpcUrl) {
+ *   console.error('Chain not supported');
+ * }
+ * @since 1.0.0
  */
 export function getChainRpcUrl(chainId) {
   return chains[chainId]?.rpcUrl || null;
@@ -31,8 +71,22 @@ export function getChainRpcUrl(chainId) {
 
 /**
  * Get the executor address for the specified chain
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {string|null} The executor address or null if not configured
+ * @returns {string|null} The executor contract address (0x-prefixed) - null if not configured
+ * @throws {TypeError} If chainId is not a number
+ * @example
+ * // Get executor for Ethereum mainnet
+ * const executor = getExecutorAddress(1);
+ * // Returns: "0x742d35Cc6634C0532925a3b844Bc9e7595f7E2e1"
+ * 
+ * @example
+ * // Use in contract interaction
+ * const executorAddress = getExecutorAddress(chainId);
+ * if (executorAddress) {
+ *   const contract = new ethers.Contract(executorAddress, executorABI, provider);
+ * }
+ * @since 1.0.0
  */
 export function getExecutorAddress(chainId) {
   if (!chainId || !chains[chainId]) return null;
@@ -41,8 +95,19 @@ export function getExecutorAddress(chainId) {
 
 /**
  * Check if a chain is supported
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID to check
- * @returns {boolean} Whether the chain is supported
+ * @returns {boolean} True if the chain is supported, false otherwise
+ * @example
+ * // Check before proceeding with chain-specific operations
+ * if (!isChainSupported(chainId)) {
+ *   throw new Error(`Chain ${chainId} is not supported`);
+ * }
+ * 
+ * @example
+ * // Filter supported chains
+ * const supportedNetworks = [1, 137, 42161, 10].filter(isChainSupported);
+ * @since 1.0.0
  */
 export function isChainSupported(chainId) {
   return !!chains[chainId];
@@ -50,7 +115,20 @@ export function isChainSupported(chainId) {
 
 /**
  * Get all supported chain IDs
- * @returns {Array<number>} Array of supported chain IDs
+ * @memberof module:helpers/chainHelpers
+ * @returns {Array<number>} Array of supported chain IDs as integers
+ * @example
+ * // Get all supported chains
+ * const chainIds = getSupportedChainIds();
+ * // Returns: [1, 137, 42161, 10, ...]
+ * 
+ * @example
+ * // Create chain selector dropdown
+ * const chains = getSupportedChainIds().map(id => ({
+ *   id,
+ *   name: getChainName(id)
+ * }));
+ * @since 1.0.0
  */
 export function getSupportedChainIds() {
   return Object.keys(chains).map(id => parseInt(id));
@@ -58,9 +136,26 @@ export function getSupportedChainIds() {
 
 /**
  * Get platform addresses for a specific chain and platform
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @param {string} platformId - The platform identifier
- * @returns {Object|null} Platform addresses or null if not found/enabled
+ * @param {string} platformId - The platform identifier (e.g., 'uniswapV3', 'aaveV3')
+ * @returns {Object|null} Platform addresses object with factoryAddress and positionManagerAddress - null if not found or disabled
+ * @example
+ * // Get Uniswap V3 addresses on Ethereum
+ * const addresses = getPlatformAddresses(1, 'uniswapV3');
+ * // Returns: { 
+ * //   enabled: true,
+ * //   factoryAddress: "0x1F984...",
+ * //   positionManagerAddress: "0xC3650..."
+ * // }
+ * 
+ * @example
+ * // Check if platform is available before using
+ * const platformConfig = getPlatformAddresses(chainId, platformId);
+ * if (!platformConfig) {
+ *   console.error(`Platform ${platformId} not available on chain ${chainId}`);
+ * }
+ * @since 1.0.0
  */
 export function getPlatformAddresses(chainId, platformId) {
   const chainConfig = chains[chainId];
@@ -74,8 +169,23 @@ export function getPlatformAddresses(chainId, platformId) {
 
 /**
  * Get all platform IDs available on a specific chain
+ * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {Array<string>} Array of platform IDs
+ * @returns {Array<string>} Array of enabled platform IDs for the chain
+ * @example
+ * // Get all platforms on Ethereum mainnet
+ * const platforms = getChainPlatformIds(1);
+ * // Returns: ['uniswapV3', 'aaveV3', ...]
+ * 
+ * @example
+ * // Build platform selector for a specific chain
+ * const availablePlatforms = getChainPlatformIds(chainId)
+ *   .map(platformId => ({
+ *     id: platformId,
+ *     name: getPlatformName(platformId),
+ *     addresses: getPlatformAddresses(chainId, platformId)
+ *   }));
+ * @since 1.0.0
  */
 export function getChainPlatformIds(chainId) {
   const chainConfig = chains[chainId];

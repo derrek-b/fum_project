@@ -1,10 +1,26 @@
+/**
+ * @module blockchain/wallet
+ * @description Ethereum wallet integration utilities for browser and RPC providers
+ */
+
 // src/blockchain/wallet.js
 import { ethers } from "ethers";
 
 /**
- * Create an ethers provider using browser wallet (MetaMask, etc.)
+ * Creates an ethers provider using the browser's Ethereum wallet
+ * 
+ * @function createBrowserProvider
+ * @memberof module:blockchain/wallet
+ * 
  * @returns {Promise<ethers.BrowserProvider>} Configured ethers provider
+ * 
  * @throws {Error} If no browser wallet is available
+ * 
+ * @example
+ * // Connect to MetaMask
+ * const provider = await createBrowserProvider();
+ * 
+ * @since 1.0.0
  */
 export async function createBrowserProvider() {
   if (typeof window !== "undefined" && window.ethereum) {
@@ -14,9 +30,21 @@ export async function createBrowserProvider() {
 }
 
 /**
- * Create an ethers provider using RPC URL
+ * Creates an ethers provider using an RPC URL
+ * 
+ * @function createJsonRpcProvider
+ * @memberof module:blockchain/wallet
+ * 
  * @param {string} rpcUrl - The RPC endpoint URL
+ * 
  * @returns {ethers.JsonRpcProvider} Configured ethers provider
+ * 
+ * @throws {Error} If RPC URL is not provided
+ * 
+ * @example
+ * const provider = createJsonRpcProvider('https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY');
+ * 
+ * @since 1.0.0
  */
 export function createJsonRpcProvider(rpcUrl) {
   if (!rpcUrl) {
@@ -26,11 +54,27 @@ export function createJsonRpcProvider(rpcUrl) {
 }
 
 /**
- * Create an appropriate provider based on environment and parameters
- * @param {Object} options - Provider options
+ * Creates an appropriate provider based on environment and parameters
+ * 
+ * @function createProvider
+ * @memberof module:blockchain/wallet
+ * 
+ * @param {Object} [options={}] - Provider options
  * @param {string} [options.rpcUrl] - RPC URL for JsonRpcProvider
  * @param {boolean} [options.preferBrowser=true] - Whether to prefer browser wallet when available
+ * 
  * @returns {Promise<ethers.Provider>} The provider instance
+ * 
+ * @throws {Error} If no provider method is available
+ * 
+ * @example
+ * // Prefer browser wallet, fallback to RPC
+ * const provider = await createProvider({
+ *   rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY',
+ *   preferBrowser: true
+ * });
+ * 
+ * @since 1.0.0
  */
 export async function createProvider(options = {}) {
   const { rpcUrl, preferBrowser = true } = options;
@@ -57,9 +101,21 @@ export async function createProvider(options = {}) {
 }
 
 /**
- * Get the connected accounts from a browser wallet
+ * Gets the connected accounts from a browser wallet
+ * 
+ * @function getConnectedAccounts
+ * @memberof module:blockchain/wallet
+ * 
  * @param {ethers.BrowserProvider} provider - The ethers provider
+ * 
  * @returns {Promise<string[]>} Array of connected account addresses
+ * 
+ * @example
+ * const provider = await createBrowserProvider();
+ * const accounts = await getConnectedAccounts(provider);
+ * console.log('Connected accounts:', accounts);
+ * 
+ * @since 1.0.0
  */
 export async function getConnectedAccounts(provider) {
   if (!provider) {
@@ -77,9 +133,22 @@ export async function getConnectedAccounts(provider) {
 }
 
 /**
- * Request wallet connection (triggers wallet popup)
+ * Requests wallet connection (triggers wallet popup)
+ * 
+ * @function requestWalletConnection
+ * @memberof module:blockchain/wallet
+ * 
  * @param {ethers.BrowserProvider} provider - The ethers provider
+ * 
  * @returns {Promise<string[]>} Array of connected account addresses
+ * 
+ * @throws {Error} If wallet connection fails
+ * 
+ * @example
+ * const provider = await createBrowserProvider();
+ * const accounts = await requestWalletConnection(provider);
+ * 
+ * @since 1.0.0
  */
 export async function requestWalletConnection(provider) {
   if (!provider) {
@@ -96,9 +165,20 @@ export async function requestWalletConnection(provider) {
 }
 
 /**
- * Get the chain ID from provider
+ * Gets the chain ID from the provider
+ * 
+ * @function getChainId
+ * @memberof module:blockchain/wallet
+ * 
  * @param {ethers.Provider} provider - The ethers provider
+ * 
  * @returns {Promise<number>} The chain ID
+ * 
+ * @example
+ * const chainId = await getChainId(provider);
+ * console.log('Connected to chain:', chainId);
+ * 
+ * @since 1.0.0
  */
 export async function getChainId(provider) {
   if (!provider) {
@@ -115,10 +195,21 @@ export async function getChainId(provider) {
 }
 
 /**
- * Switch the connected wallet to a specific chain
+ * Switches the connected wallet to a specific chain
+ * 
+ * @function switchChain
+ * @memberof module:blockchain/wallet
+ * 
  * @param {ethers.BrowserProvider} provider - The ethers provider
  * @param {number|string} chainId - The chain ID to switch to
+ * 
  * @returns {Promise<boolean>} Whether the switch was successful
+ * 
+ * @example
+ * // Switch to Polygon
+ * const success = await switchChain(provider, 137);
+ * 
+ * @since 1.0.0
  */
 export async function switchChain(provider, chainId) {
   if (!provider) {
