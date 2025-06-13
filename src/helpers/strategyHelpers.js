@@ -156,8 +156,8 @@ export function getParametersByContractGroup(strategyId, contractGroup) {
 /**
  * Validate strategy parameters
  * @param {string} strategyId - ID of the strategy
- * @param {Object} params - Parameter values to validate
- * @returns {Object} Validation result with isValid flag and errors object
+ * @param {Object} params - Parameter values to validate (key-value pairs where keys are parameter IDs)
+ * @returns {{isValid: boolean, errors: Object}} Validation result
  */
 export function validateStrategyParams(strategyId, params) {
   const strategy = strategies[strategyId];
@@ -242,7 +242,9 @@ export function getParameterSetterMethod(strategyId, contractGroupId) {
 /**
  * Check if a parameter should be shown based on condition
  * @param {Object} paramConfig - Parameter configuration
- * @param {Object} currentParams - Current parameter values
+ * @param {string} paramConfig.conditionalOn - Parameter ID this depends on
+ * @param {*} paramConfig.conditionalValue - Value required for this parameter to show
+ * @param {Object} currentParams - Current parameter values (key-value pairs)
  * @returns {boolean} Whether the parameter should be shown
  */
 export function shouldShowParameter(paramConfig, currentParams) {
@@ -278,6 +280,9 @@ export function strategySupportsTokens(strategyId, tokenSymbols) {
  * Format parameter value for display
  * @param {any} value - Parameter value
  * @param {Object} paramConfig - Parameter configuration
+ * @param {string} paramConfig.type - Parameter type (boolean, select, number, etc.)
+ * @param {Array} paramConfig.options - Options for select type
+ * @param {string} paramConfig.unit - Unit suffix for display
  * @returns {string} Formatted value
  */
 export function formatParameterValue(value, paramConfig) {
@@ -305,7 +310,7 @@ export function formatParameterValue(value, paramConfig) {
 
 /**
  * Validate if tokens in a vault match those configured in a strategy
- * @param {Object} vaultTokens - Object containing token balances in the vault
+ * @param {Object} vaultTokens - Object containing token balances in the vault (keyed by token symbol)
  * @param {Object} strategyConfig - Strategy configuration containing token selections
  * @returns {Array<string>} Array of validation messages (empty if validation passes)
  */

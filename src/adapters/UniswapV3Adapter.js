@@ -1,4 +1,15 @@
-// fum_library/adapters/UniswapV3Adapter.js
+/**
+ * UniswapV3Adapter - Uniswap V3 Protocol Integration
+ * 
+ * This adapter provides integration with Uniswap V3 concentrated liquidity pools:
+ * - Fetch pool and position data
+ * - Calculate position values and uncollected fees
+ * - Generate swap and liquidity management transactions
+ * - Handle price calculations and tick conversions
+ * 
+ * @module adapters/UniswapV3Adapter
+ */
+
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
@@ -23,8 +34,11 @@ const ERC20ABI = ERC20ARTIFACT.abi;
 export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Constructor
-   * @param {Object} config - Configuration object
-   * @param {Object} provider - Ethers provider
+   * @param {Object} config - Chain configurations object
+   * @param {Object} config[chainId] - Configuration for each chain
+   * @param {Object} config[chainId].platformAddresses - Platform contract addresses
+   * @param {Object} config[chainId].tokenAddresses - Token contract addresses
+   * @param {Object} provider - Ethers provider instance
    */
   constructor(config, provider) {
     super(config, provider, "uniswapV3", "Uniswap V3");
@@ -38,10 +52,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Calculate pool address for the given tokens and fee tier
-   * @param {Object} token0 - First token object with address, decimals, symbol, name
-   * @param {Object} token1 - Second token object with address, decimals, symbol, name
+   * @param {Object} token0 - First token object
+   * @param {string} token0.address - Token contract address
+   * @param {number} token0.decimals - Token decimals
+   * @param {string} token0.symbol - Token symbol
+   * @param {string} token0.name - Token name
+   * @param {Object} token1 - Second token object
+   * @param {string} token1.address - Token contract address
+   * @param {number} token1.decimals - Token decimals
+   * @param {string} token1.symbol - Token symbol
+   * @param {string} token1.name - Token name
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
-   * @returns {Promise<Object>} - Pool address and sorted tokens
+   * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information
    */
   async getPoolAddress(token0, token1, fee) {
     if (!token0?.address || !token1?.address || fee === undefined ||
@@ -110,20 +132,32 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
   }
 
+  /**
+   * Get the Uniswap V3 Pool ABI
+   * @returns {Array} The pool contract ABI
+   */
   getPoolABI() {
     return IUniswapV3PoolABI;
   }
 
+  /**
+   * Get the Nonfungible Position Manager ABI
+   * @returns {Array} The position manager contract ABI
+   */
   getPositionManagerABI() {
     return NonfungiblePositionManagerABI;
   }
 
   /**
    * Check if a pool exists for the given tokens and fee tier
-   * @param {Object} token0 - First token object with address and decimals
-   * @param {Object} token1 - Second token object with address and decimals
+   * @param {Object} token0 - First token object
+   * @param {string} token0.address - Token contract address
+   * @param {number} token0.decimals - Token decimals
+   * @param {Object} token1 - Second token object
+   * @param {string} token1.address - Token contract address
+   * @param {number} token1.decimals - Token decimals
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
-   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>}
+   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
    */
   async checkPoolExists(token0, token1, fee) {
     try {
@@ -154,7 +188,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID
-   * @returns {Promise<Object>} - Object containing positions, poolData, and tokenData
+   * @returns {Promise<{positions: Array, poolData: Object, tokenData: Object}>} Position data
    */
   async getPositions(address, chainId) {
     if (!address || !this.provider || !chainId) {
@@ -409,7 +443,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Check if a position is in range (active)
    * @param {Object} position - Position data
+   * @param {number} position.tickLower - Lower tick of the position
+   * @param {number} position.tickUpper - Upper tick of the position
    * @param {Object} poolData - Pool data
+   * @param {number} poolData.tick - Current tick of the pool
    * @returns {boolean} - Whether the position is in range
    */
   isPositionInRange(position, poolData) {
@@ -421,11 +458,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Calculate price from sqrtPriceX96
    * @param {Object} position - Position data
+   * @param {number} position.tickLower - Lower tick of the position
+   * @param {number} position.tickUpper - Upper tick of the position
    * @param {Object} poolData - Pool data
+   * @param {string} poolData.sqrtPriceX96 - Square root price in X96 format
    * @param {Object} token0Data - Token0 data
+   * @param {number} token0Data.decimals - Token0 decimals
    * @param {Object} token1Data - Token1 data
+   * @param {number} token1Data.decimals - Token1 decimals
    * @param {boolean} invert - Whether to invert the price
-   * @returns {Object} - Formatted price
+   * @returns {{currentPrice: string, lowerPrice: string, upperPrice: string}} Formatted price information
    */
   calculatePrice(position, poolData, token0Data, token1Data, invert = false) {
     if (!poolData || !token0Data || !token1Data)
@@ -462,12 +504,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Helper: Calculate price from sqrtPriceX96
+   * Calculate price from sqrtPriceX96
    * @param {string} sqrtPriceX96 - Square root price in X96 format
    * @param {number} decimals0 - Decimals of token0
    * @param {number} decimals1 - Decimals of token1
    * @param {boolean} invert - Whether to invert the price
-   * @returns {string} - Formatted price
+   * @returns {string} Formatted price
    * @private
    */
   _calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert = false) {
@@ -501,7 +543,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Helper: Convert a tick value to a corresponding price
+   * Convert a tick value to a corresponding price
    * @param {number} tick - The tick value
    * @param {number} decimals0 - Decimals of token0
    * @param {number} decimals1 - Decimals of token1
@@ -545,10 +587,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Calculate uncollected fees for a position
    * @param {Object} position - Position data
+   * @param {string} position.liquidity - Position liquidity
+   * @param {string} position.feeGrowthInside0LastX128 - Fee growth inside for token0
+   * @param {string} position.feeGrowthInside1LastX128 - Fee growth inside for token1
+   * @param {number} position.tickLower - Lower tick of the position
+   * @param {number} position.tickUpper - Upper tick of the position
    * @param {Object} poolData - Pool data
+   * @param {number} poolData.tick - Current pool tick
+   * @param {string} poolData.feeGrowthGlobal0X128 - Global fee growth for token0
+   * @param {string} poolData.feeGrowthGlobal1X128 - Global fee growth for token1
+   * @param {Object} poolData.ticks - Tick data object
    * @param {Object} token0Data - Token0 data
+   * @param {number} token0Data.decimals - Token0 decimals
    * @param {Object} token1Data - Token1 data
-   * @returns {Object|null} - Uncollected fees or null if calculation fails
+   * @param {number} token1Data.decimals - Token1 decimals
+   * @returns {{token0: string, token1: string}|null} Uncollected fees or null if calculation fails
    */
   async calculateFees(position, poolData, token0Data, token1Data) {
     if (!poolData || !poolData.feeGrowthGlobal0X128 || !poolData.feeGrowthGlobal1X128 ||
@@ -559,7 +612,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const tickLower = poolData.ticks[position.tickLower];
     const tickUpper = poolData.ticks[position.tickUpper];
 
-    console.log()
 
     // Create position object for fee calculation
     const positionForFeeCalc = {
@@ -588,9 +640,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Helper: Calculate uncollected fees for a Uniswap V3 position
-   * @param {Object} params - Parameters object
-   * @returns {Object} Uncollected fees for token0 and token1
+   * Calculate uncollected fees for a Uniswap V3 position
+   * @param {Object} params - Parameters object containing position, pool, and price data
+   * @param {Object} params.position - Position object with liquidity and fee growth data
+   * @param {number} params.currentTick - Current tick of the pool
+   * @param {string} params.feeGrowthGlobal0X128 - Global fee growth for token0
+   * @param {string} params.feeGrowthGlobal1X128 - Global fee growth for token1
+   * @param {Object} params.tickLower - Lower tick data object
+   * @param {Object} params.tickUpper - Upper tick data object
+   * @param {Object} params.token0 - Token0 data with decimals
+   * @param {Object} params.token1 - Token1 data with decimals
+   * @returns {{token0: string, token1: string}} Uncollected fees for token0 and token1
    * @private
    */
   _calculateUncollectedFees({
@@ -714,11 +774,26 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Calculate token amounts for a position (if it were to be closed)
    * @param {Object} position - Position object
+   * @param {number} position.liquidity - Position liquidity
+   * @param {number} position.tickLower - Lower tick of the position
+   * @param {number} position.tickUpper - Upper tick of the position
    * @param {Object} poolData - Pool data
+   * @param {number} poolData.fee - Pool fee tier
+   * @param {string} poolData.sqrtPriceX96 - Square root price X96
+   * @param {string} poolData.liquidity - Pool liquidity
+   * @param {number} poolData.tick - Current pool tick
    * @param {Object} token0Data - Token0 data
+   * @param {string} token0Data.address - Token contract address
+   * @param {number} token0Data.decimals - Token decimals
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {string} token0Data.name - Token name
    * @param {Object} token1Data - Token1 data
+   * @param {string} token1Data.address - Token contract address
+   * @param {number} token1Data.decimals - Token decimals
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {string} token1Data.name - Token name
    * @param {number} chainId - Chain ID from the wallet
-   * @returns {Promise<Object>} - Token amounts
+   * @returns {Promise<{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}>} Token amounts
    */
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
     try {
@@ -1109,18 +1184,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         provider
       );
 
-      console.log(`[DEBUG] Fetching position data for ID: ${position.id}`);
       const positionData = await nftManager.positions(position.id);
 
       // CRITICAL: Ensure token order matches the position's actual token order
-      console.log(`[DEBUG] Token ordering check:`, {
-        positionToken0: positionData.token0,
-        positionToken1: positionData.token1,
-        providedToken0: token0Data.address,
-        providedToken1: token1Data.address,
-        poolDataToken0: poolData.token0,
-        poolDataToken1: poolData.token1
-      });
 
       // The tokens MUST be in the same order as the position expects
       let orderedToken0Data, orderedToken1Data;
@@ -1132,7 +1198,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       } else if (positionData.token0.toLowerCase() === token1Data.address.toLowerCase() && 
                  positionData.token1.toLowerCase() === token0Data.address.toLowerCase()) {
         // Order is reversed
-        console.log(`[DEBUG] Token order is reversed, swapping...`);
+        
         orderedToken0Data = token1Data;
         orderedToken1Data = token0Data;
       } else {
@@ -1156,13 +1222,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         orderedToken1Data.name || orderedToken1Data.symbol
       );
 
-      console.log(`[DEBUG] Creating pool with:`, {
-        token0: { address: token0.address, symbol: token0.symbol },
-        token1: { address: token1.address, symbol: token1.symbol },
-        fee: poolData.fee,
-        tick: poolData.tick,
-        sqrtPriceX96: poolData.sqrtPriceX96
-      });
 
       // Create Pool instance
       const pool = new Pool(
@@ -1173,39 +1232,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         poolData.liquidity,
         poolData.tick
       );
-      console.log(`[DEBUG] Position data from NFT manager:`, {
-        nonce: positionData.nonce.toString(),
-        operator: positionData.operator,
-        token0: positionData.token0,
-        token1: positionData.token1,
-        fee: positionData.fee.toString(),
-        tickLower: positionData.tickLower.toString(),
-        tickUpper: positionData.tickUpper.toString(),
-        liquidity: positionData.liquidity.toString(),
-        feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
-        feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
-        tokensOwed0: positionData.tokensOwed0.toString(),
-        tokensOwed1: positionData.tokensOwed1.toString()
-      });
 
       // Create a Position instance using the current position data
-      console.log(`[DEBUG] Creating Position with:`, {
-        poolToken0: token0.address,
-        poolToken1: token1.address,
-        poolFee: pool.fee,
-        liquidity: positionData.liquidity.toString(),
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper
-      });
-      
+
       const currentPosition = new Position({
         pool,
         liquidity: positionData.liquidity.toString(),
         tickLower: position.tickLower,
         tickUpper: position.tickUpper
       });
-      
-      console.log(`[DEBUG] Position created successfully`);
 
       // Calculate uncollected fees if we're collecting them
       let expectedCurrencyOwed0 = CurrencyAmount.fromRawAmount(token0, 0);
@@ -1237,35 +1272,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Debug: Log slippage tolerance calculation
-      console.log(`[DEBUG] Creating slippage tolerance:`, {
-        slippageTolerance,
-        multiplied: slippageTolerance * 100,
-        floored: Math.floor(slippageTolerance * 100),
-        denominator: 10_000
-      });
 
       // Create slippage tolerance Percent
       const slippageTolerancePercent = new Percent(Math.floor(slippageTolerance * 100), 10_000);
-      console.log(`[DEBUG] Slippage tolerance created:`, {
-        numerator: slippageTolerancePercent.numerator.toString(),
-        denominator: slippageTolerancePercent.denominator.toString(),
-        decimal: slippageTolerancePercent.toFixed(4)
-      });
 
       // Debug: Log liquidity percentage calculation
-      console.log(`[DEBUG] Creating liquidity percentage:`, {
-        percentage,
-        numerator: percentage,
-        denominator: 100
-      });
 
       // Create liquidity percentage Percent
       const liquidityPercentage = new Percent(percentage, 100);
-      console.log(`[DEBUG] Liquidity percentage created:`, {
-        numerator: liquidityPercentage.numerator.toString(),
-        denominator: liquidityPercentage.denominator.toString(),
-        decimal: liquidityPercentage.toFixed(4)
-      });
 
       // Create RemoveLiquidityOptions
       const removeLiquidityOptions = {
@@ -1278,34 +1292,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Generate the calldata using the SDK
-      console.log(`[DEBUG] Calling removeCallParameters with:`, {
-        position: {
-          pool: {
-            token0: currentPosition.pool.token0.address,
-            token1: currentPosition.pool.token1.address,
-            fee: currentPosition.pool.fee,
-            sqrtRatioX96: currentPosition.pool.sqrtRatioX96.toString(),
-            liquidity: currentPosition.pool.liquidity.toString(),
-            tickCurrent: currentPosition.pool.tickCurrent
-          },
-          liquidity: currentPosition.liquidity.toString(),
-          tickLower: currentPosition.tickLower,
-          tickUpper: currentPosition.tickUpper,
-          amount0: currentPosition.amount0.toExact(),
-          amount1: currentPosition.amount1.toExact()
-        },
-        options: {
-          deadline: removeLiquidityOptions.deadline,
-          slippageTolerance: `${removeLiquidityOptions.slippageTolerance.numerator}/${removeLiquidityOptions.slippageTolerance.denominator}`,
-          tokenId: removeLiquidityOptions.tokenId,
-          liquidityPercentage: `${removeLiquidityOptions.liquidityPercentage.numerator}/${removeLiquidityOptions.liquidityPercentage.denominator}`,
-          collectOptions: {
-            expectedCurrencyOwed0: expectedCurrencyOwed0.toExact(),
-            expectedCurrencyOwed1: expectedCurrencyOwed1.toExact(),
-            recipient: removeLiquidityOptions.collectOptions.recipient
-          }
-        }
-      });
       
       const { calldata, value } = NonfungiblePositionManager.removeCallParameters(
         currentPosition,
@@ -1672,11 +1658,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Convert token amounts to JSBI for the SDK
       const amount0 = token0Amount
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, token0Data.decimals).toString())
+        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token0Amount).toFixed(token0Data.decimals), token0Data.decimals).toString())
         : JSBI.BigInt(0);
 
       const amount1 = token1Amount
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, token1Data.decimals).toString())
+        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token1Amount).toFixed(token1Data.decimals), token1Data.decimals).toString())
         : JSBI.BigInt(0);
 
       // Create a Position instance to represent the amount we want to add
@@ -1788,11 +1774,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       let amount1InWei = '0';
 
       if (token0Amount && parseFloat(token0Amount) > 0) {
-        amount0InWei = ethers.parseUnits(token0Amount, token0Data.decimals).toString();
+        const roundedAmount0 = parseFloat(token0Amount).toFixed(token0Data.decimals);
+        amount0InWei = ethers.parseUnits(roundedAmount0, token0Data.decimals).toString();
       }
 
       if (token1Amount && parseFloat(token1Amount) > 0) {
-        amount1InWei = ethers.parseUnits(token1Amount, token1Data.decimals).toString();
+        const roundedAmount1 = parseFloat(token1Amount).toFixed(token1Data.decimals);
+        amount1InWei = ethers.parseUnits(roundedAmount1, token1Data.decimals).toString();
       }
 
       // STEP 1: Check and approve tokens
@@ -2094,11 +2082,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Step 7: Convert token amounts to JSBI
       const amount0 = token0Amount && parseFloat(token0Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
+        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token0Amount).toFixed(decimals0), decimals0).toString())
         : JSBI.BigInt(0);
 
       const amount1 = token1Amount && parseFloat(token1Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
+        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token1Amount).toFixed(decimals1), decimals1).toString())
         : JSBI.BigInt(0);
 
       // Step 8: Create the Position instance
@@ -2253,11 +2241,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Convert token amounts to wei/smallest units
       const amount0InWei = needsToken0Approval
-        ? ethers.parseUnits(token0Amount, token0Decimals).toString()
+        ? ethers.parseUnits(parseFloat(token0Amount).toFixed(token0Decimals), token0Decimals).toString()
         : '0';
 
       const amount1InWei = needsToken1Approval
-        ? ethers.parseUnits(token1Amount, token1Decimals).toString()
+        ? ethers.parseUnits(parseFloat(token1Amount).toFixed(token1Decimals), token1Decimals).toString()
         : '0';
 
       // STEP 1: Check and approve tokens

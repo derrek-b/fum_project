@@ -77,7 +77,10 @@ export function getTokenByAddress(address, chainId) {
 
 /**
  * Register a new token or update an existing one
- * @param {Object} token Token object
+ * @param {Object} token - Token object
+ * @param {string} token.symbol - Token symbol (required)
+ * @param {string} token.name - Token name
+ * @param {Object} token.addresses - Chain-specific addresses
  * @returns {boolean} True if successful
  */
 export function registerToken(token) {

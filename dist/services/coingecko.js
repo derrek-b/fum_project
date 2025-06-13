@@ -75,7 +75,7 @@ function getApiKey() {
 /**
  * Build the CoinGecko API URL with authentication
  * @param {string} endpoint - API endpoint
- * @param {Object} params - Query parameters
+ * @param {Object} params - Query parameters (key-value pairs)
  * @returns {string} - Full API URL
  */
 function buildApiUrl(endpoint, params = {}) {

@@ -5,7 +5,42 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6] - 2025-01-09
+## [0.1.9] - 2025-06-13
+
+### Changed
+- Improved JSDoc documentation throughout the codebase
+  - Added detailed object property descriptions for all object parameters
+  - Added comprehensive file-level documentation to core modules
+  - Standardized return type documentation format
+- Code cleanup and maintenance
+  - Removed unused imports from source files
+  - Removed unused imports from test files
+
+### Documentation
+- Enhanced IntelliSense support with detailed parameter property descriptions
+- Added module-level documentation for better code navigation
+- Improved consistency in documentation format across all files
+
+## [0.1.8] - 2025-06-09
+
+### Fixed
+- Fixed decimal precision errors in all parseUnits calls across UniswapV3Adapter
+  - Round token amounts to token decimals before calling parseUnits in generateAddLiquidityData
+  - Round token amounts to token decimals before calling parseUnits in generateRemoveLiquidityData  
+  - Round token amounts to token decimals before calling parseUnits in generateMintData
+  - Round token amounts to token decimals before calling parseUnits in generateCollectFeesData
+  - Resolves "too many decimals for format" errors when processing high-precision amounts
+
+## [0.1.7] - 2025-06-09
+
+### Fixed
+- Added missing Uniswap V3 router addresses to chain configurations
+  - Added routerAddress to Ethereum mainnet (0xE592427A0AEce92De3Edee1F18E0157C05861564)
+  - Added routerAddress to Arbitrum One (0xE592427A0AEce92De3Edee1F18E0157C05861564)  
+  - Added routerAddress to local fork (1337) using same address as Arbitrum
+  - Resolves "No Uniswap V3 router configuration found for chainId" errors
+
+## [0.1.6] - 2025-06-09
 
 ### Added
 - New swap functionality in UniswapV3Adapter:

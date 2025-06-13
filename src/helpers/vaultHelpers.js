@@ -1,5 +1,16 @@
-// src/helpers/vaultHelpers.js
-import { assert, ethers } from 'ethers';
+/**
+ * Vault Helpers - Vault Data Management Utilities
+ * 
+ * This module provides comprehensive vault management functionality:
+ * - Fetch and process vault information including positions and balances
+ * - Calculate TVL (Total Value Locked) for vaults and positions
+ * - Map strategy parameters from contracts to human-readable format
+ * - Aggregate user vault data across protocols
+ * 
+ * @module helpers/vaultHelpers
+ */
+
+import { ethers } from 'ethers';
 import { AdapterFactory } from '../adapters/index.js';
 import { getUserVaults, getVaultInfo } from '../blockchain/index.js';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from '../services/index.js';
@@ -521,8 +532,13 @@ export const getVaultPositions = async (vaultAddress, provider, chainId) => {
 /**
  * Get TVL for positions
  * @param {Array} positions - Position objects
- * @param {Object} poolData - Pool data
- * @param {Object} tokenData - Token data
+ * @param {Object} poolData - Pool data keyed by pool address
+ * @param {Object} poolData[poolAddress] - Individual pool data
+ * @param {string} poolData[poolAddress].token0 - Token0 address
+ * @param {string} poolData[poolAddress].token1 - Token1 address
+ * @param {Object} tokenData - Token data keyed by token address
+ * @param {Object} tokenData[tokenAddress] - Individual token data
+ * @param {string} tokenData[tokenAddress].symbol - Token symbol
  * @param {Object} provider - Ethers provider
  * @param {Number} chainId - Chain ID
  * @returns {Promise<{positionTVL: number, hasPartialData: boolean}>} TVL and data quality flag

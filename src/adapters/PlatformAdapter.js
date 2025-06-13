@@ -7,8 +7,11 @@
 export default class PlatformAdapter {
   /**
    * Constructor for the platform adapter
-   * @param {Object} config - Configuration object
-   * @param {Object} provider - Ethers provider
+   * @param {Object} config - Chain configurations object
+   * @param {Object} config[chainId] - Configuration for each chain
+   * @param {Object} config[chainId].platformAddresses - Platform contract addresses
+   * @param {Object} config[chainId].tokenAddresses - Token contract addresses
+   * @param {Object} provider - Ethers provider instance
    * @param {string} platformId - Platform Id
    * @param {string} platformName - Platform Name
    */
@@ -35,9 +38,17 @@ export default class PlatformAdapter {
   /**
    * Get pool address for tokens and fee
    * @param {Object} token0 - First token details
+   * @param {string} token0.address - Token contract address
+   * @param {number} token0.decimals - Token decimals
+   * @param {string} token0.symbol - Token symbol
+   * @param {string} token0.name - Token name
    * @param {Object} token1 - Second token details
+   * @param {string} token1.address - Token contract address
+   * @param {number} token1.decimals - Token decimals
+   * @param {string} token1.symbol - Token symbol
+   * @param {string} token1.name - Token name
    * @param {number} fee - Fee tier
-   * @returns {Promise<Object>} - Pool address and sorted tokens
+   * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information (incl. sorted tokens)
    */
   async getPoolAddress(token0, token1, fee) {
     throw new Error("getPoolAddress must be implemented by subclasses");
@@ -45,7 +56,7 @@ export default class PlatformAdapter {
 
   /**
    * Get pool ABI
-   * @returns {Object} - Pool ABI
+   * @returns {Array} - Pool ABI
    */
   async getPoolABI() {
     throw new Error("getPoolABI must be implemented by subclasses");
@@ -53,7 +64,7 @@ export default class PlatformAdapter {
 
   /**
    * Get position manager ABI
-   * @returns {Object} - Position Manager ABI
+   * @returns {Array} - Position Manager ABI
    */
   getPositionManagerABI() {
     throw new Error("getPositionManagerABI must be implemented by subclasses");
@@ -62,9 +73,13 @@ export default class PlatformAdapter {
   /**
    * Check if a pool exists for the given tokens and fee tier
    * @param {Object} token0 - First token details
+   * @param {string} token0.address - Token contract address
+   * @param {number} token0.decimals - Token decimals
    * @param {Object} token1 - Second token details
+   * @param {string} token1.address - Token contract address
+   * @param {number} token1.decimals - Token decimals
    * @param {number} fee - Fee tier
-   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>}
+   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
    */
   async checkPoolExists(token0, token1, fee) {
     throw new Error("checkPoolExists must be implemented by subclasses");
@@ -74,7 +89,7 @@ export default class PlatformAdapter {
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID
-   * @returns {Promise<Object>} - Object containing positions, poolData, and tokenData
+   * @returns {Promise<{positions: Array, poolData: Object, tokenData: Object}>} Position data
    */
   async getPositions(address, chainId) {
     throw new Error("getPositions must be implemented by subclasses");
