@@ -1,9 +1,17 @@
+/**
+ * @module adapters/AdapterFactory
+ * @description Factory class for creating platform-specific adapter instances
+ */
+
 // fum_library/adapters/AdapterFactory.js
 import UniswapV3Adapter from "./UniswapV3Adapter.js";
 import chains from "../configs/chains.js";
 
 /**
  * Factory class for creating and managing platform adapters
+ * 
+ * @class AdapterFactory
+ * @memberof module:adapters/AdapterFactory
  */
 export default class AdapterFactory {
   /**
@@ -17,10 +25,22 @@ export default class AdapterFactory {
   };
 
   /**
-   * Get all available adapters for a chain
+   * Gets all available adapters for a specific chain
+   * 
+   * @function getAdaptersForChain
+   * @memberof module:adapters/AdapterFactory
+   * @static
+   * 
    * @param {number} chainId - Chain ID
    * @param {Object} provider - Ethers provider
-   * @returns {Array} - Array of platform adapters
+   * 
+   * @returns {Array} Array of platform adapter instances
+   * 
+   * @example
+   * const adapters = AdapterFactory.getAdaptersForChain(1, provider);
+   * console.log(`Found ${adapters.length} adapters for mainnet`);
+   * 
+   * @since 1.0.0
    */
   static getAdaptersForChain(chainId, provider) {
     const adapters = [];
@@ -44,10 +64,26 @@ export default class AdapterFactory {
   }
 
   /**
-   * Get an adapter for a specific platform
-   * @param {string} platformId - Platform ID
+   * Gets an adapter for a specific platform
+   * 
+   * @function getAdapter
+   * @memberof module:adapters/AdapterFactory
+   * @static
+   * 
+   * @param {string} platformId - Platform ID (e.g., 'uniswapV3')
    * @param {Object} provider - Ethers provider
-   * @returns {Object|null} - Platform adapter or null if not found
+   * 
+   * @returns {Object|null} Platform adapter instance or null if not found
+   * 
+   * @throws {Error} If platform ID or provider not provided
+   * 
+   * @example
+   * const adapter = AdapterFactory.getAdapter('uniswapV3', provider);
+   * if (adapter) {
+   *   const poolInfo = await adapter.getPoolAddress(token0, token1, 3000);
+   * }
+   * 
+   * @since 1.0.0
    */
   static getAdapter(platformId, provider) {
     if (!platformId || !provider) {

@@ -1,9 +1,38 @@
-// src/helpers/strategyHelpers.js
+/**
+ * @module helpers/strategyHelpers
+ * @description Strategy configuration utilities for managing trading strategies, parameters, and templates.
+ * Provides functions to query strategies, validate parameters, and manage strategy configurations.
+ * @since 1.0.0
+ */
+
 import strategies from '../configs/strategies.js';
 
 /**
  * Get the list of available strategy configs (excluding the "none" strategy)
- * @returns {Array} Array of strategy objects with id, name, and subtitle
+ * @memberof module:helpers/strategyHelpers
+ * @returns {Array<Object>} Array of strategy objects with complete configuration data
+ * @example
+ * // Get all available strategies
+ * const strategies = getAvailableStrategies();
+ * // Returns: [
+ * //   {
+ * //     id: "bob",
+ * //     name: "Bob",
+ * //     subtitle: "Range-bound trading",
+ * //     description: "...",
+ * //     templateEnumMap: { conservative: 0, balanced: 1, ... },
+ * //     parameters: { ... },
+ * //     parameterGroups: [...],
+ * //     comingSoon: false
+ * //   },
+ * //   ...
+ * // ]
+ * 
+ * @example
+ * // Filter active strategies only
+ * const activeStrategies = getAvailableStrategies()
+ *   .filter(strategy => !strategy.comingSoon);
+ * @since 1.0.0
  */
 export function getAvailableStrategies() {
   return Object.values(strategies)
@@ -23,8 +52,32 @@ export function getAvailableStrategies() {
 
 /**
  * Get details about a specific strategy
- * @param {string} strategyId - ID of the strategy to get details for
- * @returns {Object} Strategy details object
+ * @memberof module:helpers/strategyHelpers
+ * @param {string} strategyId - ID of the strategy to get details for (e.g., 'bob', 'parris')
+ * @returns {Object|null} Strategy details object with complete configuration - null if not found
+ * @example
+ * // Get Bob strategy details
+ * const bobStrategy = getStrategyDetails('bob');
+ * // Returns: {
+ * //   id: "bob",
+ * //   name: "Bob",
+ * //   subtitle: "Range-bound trading",
+ * //   description: "...",
+ * //   icon: "📊",
+ * //   color: "#4CAF50",
+ * //   supportedTokens: { ETH: true, USDC: true, ... },
+ * //   minTokens: 2,
+ * //   maxTokens: 5,
+ * //   ...
+ * // }
+ * 
+ * @example
+ * // Handle unknown strategy
+ * const strategy = getStrategyDetails('unknown');
+ * if (!strategy) {
+ *   console.error('Strategy not found');
+ * }
+ * @since 1.0.0
  */
 export function getStrategyDetails(strategyId) {
   const strategy = strategies[strategyId];
@@ -52,8 +105,26 @@ export function getStrategyDetails(strategyId) {
 
 /**
  * Get templates for a specific strategy
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @returns {Array} Array of template objects
+ * @returns {Array<Object>} Array of template objects with predefined parameter sets
+ * @example
+ * // Get Bob strategy templates
+ * const templates = getStrategyTemplates('bob');
+ * // Returns: [
+ * //   { id: "conservative", name: "Conservative", defaults: {...} },
+ * //   { id: "balanced", name: "Balanced", defaults: {...} },
+ * //   { id: "aggressive", name: "Aggressive", defaults: {...} }
+ * // ]
+ * 
+ * @example
+ * // Build template selector
+ * const templateOptions = getStrategyTemplates(strategyId).map(template => ({
+ *   value: template.id,
+ *   label: template.name,
+ *   description: template.description
+ * }));
+ * @since 1.0.0
  */
 export function getStrategyTemplates(strategyId) {
   const strategy = strategies[strategyId];
@@ -64,9 +135,25 @@ export function getStrategyTemplates(strategyId) {
 
 /**
  * Get default parameters for a specific template
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @param {string} templateId - ID of the template
+ * @param {string} templateId - ID of the template (or 'custom' for base defaults)
  * @returns {Object} Default parameter values for the template
+ * @example
+ * // Get conservative template defaults for Bob
+ * const defaults = getTemplateDefaults('bob', 'conservative');
+ * // Returns: {
+ * //   targetRangeUpper: 105,
+ * //   targetRangeLower: 95,
+ * //   rebalanceThresholdUpper: 2,
+ * //   ...
+ * // }
+ * 
+ * @example
+ * // Get custom/base defaults
+ * const customDefaults = getTemplateDefaults('bob', 'custom');
+ * // Returns default values from parameter definitions
+ * @since 1.0.0
  */
 export function getTemplateDefaults(strategyId, templateId) {
   const strategy = strategies[strategyId];
@@ -92,8 +179,14 @@ export function getTemplateDefaults(strategyId, templateId) {
 
 /**
  * Get the default parameters for a strategy
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @returns {Object} Object with default parameter values
+ * @returns {Object} Object with default parameter values from base configuration
+ * @example
+ * // Get base defaults for a strategy
+ * const defaults = getDefaultParams('parris');
+ * // Returns all parameter default values
+ * @since 1.0.0
  */
 export function getDefaultParams(strategyId) {
   return getTemplateDefaults(strategyId, "custom");
@@ -101,8 +194,24 @@ export function getDefaultParams(strategyId) {
 
 /**
  * Get parameter definitions for a strategy
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @returns {Object} Object with parameter definitions
+ * @returns {Object} Object with parameter definitions keyed by parameter ID
+ * @example
+ * // Get all parameter definitions for Bob
+ * const params = getStrategyParameters('bob');
+ * // Returns: {
+ * //   targetRangeUpper: {
+ * //     name: "Target Range Upper",
+ * //     type: "percent",
+ * //     defaultValue: 102,
+ * //     min: 100,
+ * //     max: 200,
+ * //     ...
+ * //   },
+ * //   ...
+ * // }
+ * @since 1.0.0
  */
 export function getStrategyParameters(strategyId) {
   const strategy = strategies[strategyId];
@@ -113,9 +222,22 @@ export function getStrategyParameters(strategyId) {
 
 /**
  * Get parameters for a specific group
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @param {number} groupId - Group ID
+ * @param {number} groupId - Group ID to filter by
  * @returns {Object} Object with parameter definitions for the specified group
+ * @example
+ * // Get all parameters in group 0 (Range Settings)
+ * const rangeParams = getStrategyParametersByGroup('bob', 0);
+ * // Returns parameters that belong to group 0
+ * 
+ * @example
+ * // Build grouped parameter form
+ * strategy.parameterGroups.forEach(group => {
+ *   const params = getStrategyParametersByGroup(strategyId, group.id);
+ *   renderParameterGroup(group.title, params);
+ * });
+ * @since 1.0.0
  */
 export function getStrategyParametersByGroup(strategyId, groupId) {
   const strategy = strategies[strategyId];
@@ -134,9 +256,20 @@ export function getStrategyParametersByGroup(strategyId, groupId) {
 
 /**
  * Get parameters by contract group
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @param {string} contractGroup - Contract group ID
+ * @param {string} contractGroup - Contract group ID (e.g., 'rangeParams', 'feeParams')
  * @returns {Object} Object with parameter definitions for the contract group
+ * @example
+ * // Get all range-related parameters
+ * const rangeParams = getParametersByContractGroup('bob', 'rangeParams');
+ * // Returns parameters that map to the same contract method
+ * 
+ * @example
+ * // Prepare parameters for contract call
+ * const feeParams = getParametersByContractGroup(strategyId, 'feeParams');
+ * const values = Object.keys(feeParams).map(paramId => userValues[paramId]);
+ * @since 1.0.0
  */
 export function getParametersByContractGroup(strategyId, contractGroup) {
   const strategy = strategies[strategyId];
@@ -155,9 +288,31 @@ export function getParametersByContractGroup(strategyId, contractGroup) {
 
 /**
  * Validate strategy parameters
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
  * @param {Object} params - Parameter values to validate (key-value pairs where keys are parameter IDs)
- * @returns {{isValid: boolean, errors: Object}} Validation result
+ * @returns {{isValid: boolean, errors: Object}} Validation result with isValid flag and error messages
+ * @example
+ * // Validate user input
+ * const validation = validateStrategyParams('bob', {
+ *   targetRangeUpper: 110,
+ *   targetRangeLower: 90,
+ *   rebalanceThresholdUpper: 5
+ * });
+ * 
+ * if (!validation.isValid) {
+ *   console.error('Validation errors:', validation.errors);
+ *   // errors: { targetRangeLower: "Target Range Lower must be at least 95%" }
+ * }
+ * 
+ * @example
+ * // Handle conditional parameters
+ * const params = {
+ *   feeReinvestment: true,
+ *   reinvestmentTrigger: 100 // Only validated if feeReinvestment is true
+ * };
+ * const result = validateStrategyParams('bob', params);
+ * @since 1.0.0
  */
 export function validateStrategyParams(strategyId, params) {
   const strategy = strategies[strategyId];
@@ -227,9 +382,22 @@ export function validateStrategyParams(strategyId, params) {
 
 /**
  * Get parameter setter method for a contract parameter group
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
  * @param {string} contractGroupId - Contract group ID
- * @returns {string|null} Setter method name or null if not found
+ * @returns {string|null} Contract setter method name - null if not found
+ * @example
+ * // Get setter method for range parameters
+ * const method = getParameterSetterMethod('bob', 'rangeParams');
+ * // Returns: "setRangeParameters"
+ * 
+ * @example
+ * // Use to call contract method
+ * const setterMethod = getParameterSetterMethod(strategyId, groupId);
+ * if (setterMethod) {
+ *   await contract[setterMethod](...parameterValues);
+ * }
+ * @since 1.0.0
  */
 export function getParameterSetterMethod(strategyId, contractGroupId) {
   const strategy = strategies[strategyId];
@@ -241,11 +409,26 @@ export function getParameterSetterMethod(strategyId, contractGroupId) {
 
 /**
  * Check if a parameter should be shown based on condition
- * @param {Object} paramConfig - Parameter configuration
+ * @memberof module:helpers/strategyHelpers
+ * @param {Object} paramConfig - Parameter configuration object
  * @param {string} paramConfig.conditionalOn - Parameter ID this depends on
  * @param {*} paramConfig.conditionalValue - Value required for this parameter to show
  * @param {Object} currentParams - Current parameter values (key-value pairs)
  * @returns {boolean} Whether the parameter should be shown
+ * @example
+ * // Check if reinvestment trigger should be shown
+ * const paramConfig = {
+ *   conditionalOn: 'feeReinvestment',
+ *   conditionalValue: true
+ * };
+ * const show = shouldShowParameter(paramConfig, { feeReinvestment: true });
+ * // Returns: true
+ * 
+ * @example
+ * // Hide parameter when condition not met
+ * const show = shouldShowParameter(paramConfig, { feeReinvestment: false });
+ * // Returns: false
+ * @since 1.0.0
  */
 export function shouldShowParameter(paramConfig, currentParams) {
   if (!paramConfig.conditionalOn) return true;
@@ -256,7 +439,19 @@ export function shouldShowParameter(paramConfig, currentParams) {
 
 /**
  * Get all strategy IDs
- * @returns {Array<string>} Array of strategy IDs
+ * @memberof module:helpers/strategyHelpers
+ * @returns {Array<string>} Array of all configured strategy IDs
+ * @example
+ * // Get all strategy IDs
+ * const ids = getAllStrategyIds();
+ * // Returns: ['none', 'bob', 'parris', 'fed', ...]
+ * 
+ * @example
+ * // Check if strategy exists
+ * if (getAllStrategyIds().includes(userStrategy)) {
+ *   loadStrategy(userStrategy);
+ * }
+ * @since 1.0.0
  */
 export function getAllStrategyIds() {
   return Object.keys(strategies);
@@ -264,9 +459,22 @@ export function getAllStrategyIds() {
 
 /**
  * Check if a strategy supports specific tokens
+ * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @param {Array<string>} tokenSymbols - Array of token symbols
- * @returns {boolean} Whether the strategy supports all tokens
+ * @param {Array<string>} tokenSymbols - Array of token symbols to check
+ * @returns {boolean} Whether the strategy supports all specified tokens
+ * @example
+ * // Check if Bob supports ETH/USDC pair
+ * const supported = strategySupportsTokens('bob', ['ETH', 'USDC']);
+ * // Returns: true
+ * 
+ * @example
+ * // Filter strategies by token support
+ * const compatibleStrategies = getAvailableStrategies()
+ *   .filter(strategy => 
+ *     strategySupportsTokens(strategy.id, selectedTokens)
+ *   );
+ * @since 1.0.0
  */
 export function strategySupportsTokens(strategyId, tokenSymbols) {
   const strategy = strategies[strategyId];
@@ -278,12 +486,33 @@ export function strategySupportsTokens(strategyId, tokenSymbols) {
 
 /**
  * Format parameter value for display
- * @param {any} value - Parameter value
- * @param {Object} paramConfig - Parameter configuration
- * @param {string} paramConfig.type - Parameter type (boolean, select, number, etc.)
- * @param {Array} paramConfig.options - Options for select type
- * @param {string} paramConfig.unit - Unit suffix for display
- * @returns {string} Formatted value
+ * @memberof module:helpers/strategyHelpers
+ * @param {any} value - Parameter value to format
+ * @param {Object} paramConfig - Parameter configuration object
+ * @param {string} paramConfig.type - Parameter type (boolean, select, number, percent, fiat-currency)
+ * @param {Array} [paramConfig.options] - Options for select type
+ * @param {string} [paramConfig.suffix] - Unit suffix for display
+ * @param {string} [paramConfig.prefix] - Unit prefix for display
+ * @returns {string} Formatted value for user display
+ * @example
+ * // Format boolean
+ * formatParameterValue(true, { type: 'boolean' }); // "Yes"
+ * 
+ * @example
+ * // Format percent
+ * formatParameterValue(5.5, { type: 'percent' }); // "5.5%"
+ * 
+ * @example
+ * // Format currency
+ * formatParameterValue(100, { type: 'fiat-currency', prefix: '$' }); // "$100"
+ * 
+ * @example
+ * // Format select option
+ * formatParameterValue('high', {
+ *   type: 'select',
+ *   options: [{ value: 'high', label: 'High Priority' }]
+ * }); // "High Priority"
+ * @since 1.0.0
  */
 export function formatParameterValue(value, paramConfig) {
   if (value === undefined || value === null) return '';
@@ -310,9 +539,25 @@ export function formatParameterValue(value, paramConfig) {
 
 /**
  * Validate if tokens in a vault match those configured in a strategy
+ * @memberof module:helpers/strategyHelpers
  * @param {Object} vaultTokens - Object containing token balances in the vault (keyed by token symbol)
- * @param {Object} strategyConfig - Strategy configuration containing token selections
+ * @param {Array<string>} strategyTokens - Array of token symbols configured in the strategy
  * @returns {Array<string>} Array of validation messages (empty if validation passes)
+ * @throws {TypeError} If parameters are not in expected format
+ * @example
+ * // Validate vault tokens against strategy
+ * const vaultTokens = { ETH: 1.5, USDC: 1000, DAI: 500 };
+ * const strategyTokens = ['ETH', 'USDC'];
+ * const messages = validateTokensForStrategy(vaultTokens, strategyTokens);
+ * // Returns: ["The following tokens in your vault are not part of your strategy: DAI..."]
+ * 
+ * @example
+ * // All tokens match
+ * const vaultTokens = { ETH: 1.5, USDC: 1000 };
+ * const strategyTokens = ['ETH', 'USDC'];
+ * const messages = validateTokensForStrategy(vaultTokens, strategyTokens);
+ * // Returns: [] (no messages)
+ * @since 1.0.0
  */
 export function validateTokensForStrategy (vaultTokens, strategyTokens) {
   const messages = [];

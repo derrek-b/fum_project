@@ -5,6 +5,42 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-06-13
+
+### Added
+- **Comprehensive API Documentation**: Complete function-level documentation system
+  - Created detailed API reference documentation for all modules in `/docs/api-reference/`
+  - Added comprehensive parameter tables, return values, and examples for all functions
+  - Included error handling documentation and usage patterns
+  - Added TypeScript-style type definitions for better development experience
+
+### Changed
+- **Enhanced JSDoc Comments**: Upgraded all JSDoc comments to professional standard
+  - Added `@module` declarations for all source files
+  - Implemented `@memberof` tags for proper function association
+  - Added `@example` blocks with practical use cases for all functions
+  - Added `@throws` documentation for error conditions
+  - Added `@since` version tags for API stability tracking
+  - Fixed `@returns` format to use single-line object syntax for better IntelliSense support
+
+### Documentation
+- **New API Reference Structure**:
+  - `/docs/api-reference/adapters/` - Platform adapter documentation
+  - `/docs/api-reference/blockchain/` - Wallet and contract utilities
+  - `/docs/api-reference/helpers/` - All helper function documentation
+  - `/docs/api-reference/services/` - CoinGecko service documentation
+- **Function Documentation Includes**:
+  - Function signatures with TypeScript-style types
+  - Detailed parameter descriptions with types and requirements
+  - Return value specifications with object property breakdowns
+  - Practical code examples for each function
+  - Error handling scenarios and best practices
+  - Common usage patterns and workflows
+- **Improved Developer Experience**:
+  - Better IDE IntelliSense support with enhanced JSDoc
+  - Comprehensive cross-references between related functions
+  - Clear documentation hierarchy and navigation
+
 ## [0.1.9] - 2025-06-13
 
 ### Changed
