@@ -1,0 +1,324 @@
+@startuml FUM Library Class Diagram
+
+!define ABSTRACT_COLOR #F8E6FF
+!define INTERFACE_COLOR #E6F3FF
+!define CLASS_COLOR #FFFFCC
+!define ENUM_COLOR #FFE6CC
+
+package "Adapters" {
+    abstract class PlatformAdapter <<abstract>> {
+        # config: Object
+        # provider: Object
+        # platformId: string
+        # platformName: string
+        --
+        + constructor(config, provider, platformId, platformName)
+        + {abstract} getPoolAddress(token0, token1, fee): Promise<Object>
+        + {abstract} getPoolABI(): Array
+        + {abstract} getPositionManagerABI(): Array
+        + {abstract} checkPoolExists(token0, token1, fee): Promise<Object>
+        + {abstract} getPositions(address, chainId): Promise<Object>
+        + {abstract} calculateFees(position, poolData, token0Data, token1Data): Promise<Object>
+        + {abstract} isPositionInRange(position, poolData): boolean
+        + {abstract} calculatePrice(position, poolData, token0Data, token1Data, invert): Object
+        + {abstract} calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId): Promise<Object>
+        + {abstract} generateClaimFeesData(params): Promise<Object>
+        + {abstract} claimFees(params): Promise<Object>
+        + {abstract} generateRemoveLiquidityData(params): Promise<Object>
+        + {abstract} decreaseLiquidity(params): Promise<Object>
+        + {abstract} closePosition(params): Promise<Object>
+        + {abstract} generateAddLiquidityData(params): Promise<Object>
+        + {abstract} addLiquidity(params): Promise<Object>
+        + {abstract} generateCreatePositionData(params): Promise<Object>
+        + {abstract} createPosition(params): Promise<Object>
+        + {abstract} generateSwapData(params): Promise<Object>
+    }
+    
+    class UniswapV3Adapter {
+        - nonfungiblePositionManagerABI: Array
+        - poolABI: Array
+        - swapRouterABI: Array
+        --
+        + constructor(config, provider)
+        + getPoolAddress(token0, token1, fee): Promise<Object>
+        + getPoolABI(): Array
+        + getPositionManagerABI(): Array
+        + checkPoolExists(token0, token1, fee): Promise<Object>
+        + getPositions(address, chainId): Promise<Object>
+        + isPositionInRange(position, poolData): boolean
+        + calculatePrice(position, poolData, token0Data, token1Data, invert): Object
+        - _calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert): string
+        - _tickToPrice(tick, decimals0, decimals1, invert): string
+        + calculateFees(position, poolData, token0Data, token1Data): Promise<Object>
+        - _calculateUncollectedFees(params): Object
+        + calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId): Promise<Object>
+        + generateClaimFeesData(params): Promise<Object>
+        + claimFees(params): Promise<Object>
+        + generateRemoveLiquidityData(params): Promise<Object>
+        + decreaseLiquidity(params): Promise<Object>
+        + closePosition(params): Promise<Object>
+        + generateAddLiquidityData(params): Promise<Object>
+        + addLiquidity(params): Promise<Object>
+        + generateCreatePositionData(params): Promise<Object>
+        + createPosition(params): Promise<Object>
+        + generateSwapData(params): Promise<Object>
+    }
+    
+    class AdapterFactory <<singleton>> {
+        - {static} PLATFORM_ADAPTERS: Map<string, Class>
+        --
+        + {static} getAdaptersForChain(chainId, provider): Array<PlatformAdapter>
+        + {static} getAdapter(platformId, provider): PlatformAdapter
+        + {static} registerAdapter(platformId, AdapterClass): void
+        + {static} getSupportedPlatforms(): Array<string>
+    }
+    
+    PlatformAdapter <|-- UniswapV3Adapter
+    AdapterFactory ..> PlatformAdapter : creates
+    AdapterFactory ..> UniswapV3Adapter : instantiates
+}
+
+package "Blockchain" {
+    class WalletManager {
+        + createBrowserProvider(): Promise<BrowserProvider>
+        + createJsonRpcProvider(rpcUrl): JsonRpcProvider
+        + createProvider(options): Promise<Provider>
+        + getConnectedAccounts(provider): Promise<Array<string>>
+        + requestWalletConnection(provider): Promise<Array<string>>
+        + getChainId(provider): Promise<number>
+        + switchChain(provider, chainId): Promise<void>
+    }
+    
+    class ContractManager {
+        + getContractAddress(contractName, chainId): string
+        + getContractABI(contractName): Array
+        + createContractInstance(contractName, chainId, provider): Contract
+        + getUserVaults(userAddress, provider): Promise<Array<string>>
+        + getVaultInfo(vaultAddress, provider): Promise<Object>
+    }
+}
+
+package "Helpers" {
+    class VaultHelpers {
+        + mapStrategyParameters(strategyId, params): Object
+        + fetchStrategyParameters(strategyAddress, strategyId, vaultAddress, provider): Promise<Object>
+        + getVaultStrategies(provider, chainId): Promise<Object>
+        + getVaultBasicInfo(vaultAddress, provider, addressToStrategyMap): Promise<Object>
+        + getVaultTokenBalances(vaultAddress, provider, chainId): Promise<Object>
+        + getVaultPositions(vaultAddress, provider, chainId): Promise<Object>
+        + calculatePositionsTVL(positions, poolData, tokenData, provider, chainId): Promise<Object>
+        + getVaultData(vaultAddress, provider, chainId): Promise<Object>
+        + getAllUserVaultData(userAddress, provider, chainId): Promise<Object>
+    }
+    
+    class TokenHelpers {
+        + getAllTokens(): Object
+        + getTokenBySymbol(symbol): Object
+        + getTokenAddress(symbol, chainId): string
+        + getStablecoins(): Object
+        + areTokensSupportedOnChain(tokenSymbols, chainId): boolean
+        + getTokenByAddress(address, chainId): Object
+        + registerToken(token): boolean
+        + getTokensForChain(chainId): Array<Object>
+    }
+    
+    class ChainHelpers {
+        + getAllChains(): Object
+        + getChainById(chainId): Object
+        + getChainName(chainId): string
+        + getExplorerUrl(chainId): string
+        + getNativeToken(chainId): Object
+        + isChainSupported(chainId): boolean
+        + getDefaultChainId(): number
+        + getRpcUrl(chainId): string
+        + getAvailableChainIds(): Array<number>
+    }
+    
+    class StrategyHelpers {
+        + getAvailableStrategies(): Array<Object>
+        + getStrategyDetails(strategyId): Object
+        + getStrategyTemplates(strategyId): Array<Object>
+        + getTemplateDefaults(strategyId, templateName): Object
+        + getDefaultParams(strategyId): Object
+        + getStrategyParameters(strategyId): Object
+        + getStrategyParametersByGroup(strategyId, groupKey): Object
+        + getParametersByContractGroup(strategyId, contractGroup): Object
+        + validateStrategyParams(strategyId, params): Object
+        + getParameterSetterMethod(strategyId, paramId): string
+        + shouldShowParameter(paramConfig, currentParams): boolean
+        + getAllStrategyIds(): Array<string>
+        + formatParameterValue(value, paramConfig): string
+        + validateTokensForStrategy(vaultTokens, strategyTokens): Array<string>
+    }
+    
+    class FormatHelpers {
+        + formatNumber(value, decimals): string
+        + formatCurrency(value, decimals): string
+        + formatPercentage(value, decimals): string
+        + formatToken(value, decimals): string
+        + parseNumber(value, decimals): BigNumber
+        + abbreviateNumber(value, decimals): string
+        + formatUnits(value, decimals): string
+        + parseUnits(value, decimals): BigInt
+    }
+}
+
+package "Services" {
+    class CoinGeckoService {
+        - serviceConfig: Object
+        - priceCache: Map
+        - batchQueue: Array
+        - batchTimer: Timer
+        --
+        + configureCoingecko(config): void
+        - getApiKey(): string
+        - buildApiUrl(endpoint, params): string
+        - makeApiRequest(endpoint, params): Promise<Object>
+        + fetchTokenPrices(tokenSymbols): Promise<Object>
+        + calculateUsdValue(amount, tokenSymbol, decimals): number
+        + prefetchTokenPrices(tokenSymbols): Promise<void>
+        + calculateUsdValueSync(amount, tokenSymbol, decimals): number
+        + clearPriceCache(): void
+        + getPriceCache(): Object
+        - executeBatch(): Promise<void>
+    }
+}
+
+' Relationships between packages
+VaultHelpers ..> AdapterFactory : uses
+VaultHelpers ..> ContractManager : uses
+VaultHelpers ..> CoinGeckoService : uses
+VaultHelpers ..> TokenHelpers : uses
+VaultHelpers ..> StrategyHelpers : uses
+
+UniswapV3Adapter ..> FormatHelpers : uses
+TokenHelpers ..> CoinGeckoService : uses
+
+@enduml
+
+@startuml FUM Library Component Diagram
+
+!define COMPONENT_COLOR #FFE6CC
+!define INTERFACE_COLOR #E6F3FF
+!define DATABASE_COLOR #E6FFE6
+
+package "FUM Library" {
+    [Public API] as API
+    
+    package "Adapters" {
+        [Adapter Factory] as AF
+        [Platform Adapters] as PA
+        interface "IAdapter" as IA
+    }
+    
+    package "Core Services" {
+        [Vault Helpers] as VH
+        [Token Helpers] as TH
+        [Strategy Helpers] as SH
+        [Chain Helpers] as CH
+        [Format Helpers] as FH
+    }
+    
+    package "Infrastructure" {
+        [Blockchain Module] as BC
+        [Price Service] as PS
+        database "Price Cache" as PC
+    }
+    
+    package "Configuration" {
+        database "Chains Config" as CC
+        database "Tokens Config" as TC
+        database "Strategies Config" as SC
+        database "Platforms Config" as PLC
+        database "Contract ABIs" as ABI
+    }
+}
+
+cloud "External Services" {
+    [Ethereum Network] as ETH
+    [Arbitrum Network] as ARB
+    [CoinGecko API] as CG
+}
+
+' Internal connections
+API --> AF
+API --> VH
+AF --> PA
+PA -up- IA
+VH --> AF
+VH --> TH
+VH --> SH
+VH --> BC
+VH --> PS
+TH --> TC
+SH --> SC
+CH --> CC
+BC --> ABI
+PS --> PC
+PS --> CG
+
+' External connections
+BC --> ETH
+BC --> ARB
+
+' Configuration connections
+AF --> CC
+PA --> PLC
+
+@enduml
+
+@startuml FUM Library Deployment Diagram
+
+!define NODE_COLOR #E6F3FF
+!define COMPONENT_COLOR #FFE6CC
+!define ARTIFACT_COLOR #E6FFE6
+
+node "User's Browser" {
+    component "Web Application" as WebApp
+    component "FUM Library" as FUMLib
+    component "Web3 Provider" as W3P
+}
+
+node "NPM Registry" {
+    artifact "fum_library package" as NPM
+}
+
+node "IPFS/CDN" {
+    artifact "Contract ABIs" as ABIs
+}
+
+cloud "Blockchain Networks" {
+    node "Ethereum Mainnet" {
+        component "Uniswap V3 Contracts" as UV3_ETH
+        component "User Vault Contracts" as UVC_ETH
+    }
+    
+    node "Arbitrum One" {
+        component "Uniswap V3 Contracts" as UV3_ARB
+        component "User Vault Contracts" as UVC_ARB
+    }
+}
+
+cloud "External APIs" {
+    node "CoinGecko Server" {
+        component "Price API" as CGAPI
+        database "Price Database" as CGDB
+    }
+}
+
+' Deployment relationships
+WebApp --> FUMLib : uses
+FUMLib --> W3P : connects
+NPM --> FUMLib : deploys
+ABIs --> FUMLib : loads
+
+' Runtime relationships
+W3P --> UV3_ETH : reads/writes
+W3P --> UVC_ETH : reads/writes
+W3P --> UV3_ARB : reads/writes
+W3P --> UVC_ARB : reads/writes
+
+FUMLib --> CGAPI : requests prices
+CGAPI --> CGDB : queries
+
+@enduml

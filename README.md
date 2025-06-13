@@ -1,6 +1,19 @@
 # F.U.M. Library
 
+![Version](https://img.shields.io/badge/version-0.1.9-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)
+![Status](https://img.shields.io/badge/status-beta-yellow.svg)
+
 A comprehensive JavaScript library for DeFi liquidity management, focusing on Uniswap V3 positions and automated strategy execution.
+
+## 📚 Documentation
+
+- **[Architecture Overview](./ARCHITECTURE.md)** - System design and module structure
+- **[Getting Started Guide](./docs/getting-started/README.md)** - Quick start tutorial
+- **[API Reference](./docs/api-reference/README.md)** - Complete API documentation
+- **[Module Reference](./docs/api-reference/modules.md)** - Detailed module documentation
+- **[Changelog](./CHANGELOG.md)** - Version history and updates
 
 ## Overview
 
@@ -126,6 +139,48 @@ npm install
 
 # Build distribution package
 npm run build
+```
+
+## 🏗️ Architecture
+
+The library follows a modular architecture with clear separation of concerns:
+
+```
+┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Adapters      │────▶│  Blockchain  │────▶│  Contracts  │
+└─────────────────┘     └──────────────┘     └─────────────┘
+        │                                              │
+        ▼                                              ▼
+┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
+│    Helpers      │────▶│   Services   │────▶│   External  │
+└─────────────────┘     └──────────────┘     │     APIs    │
+                                              └─────────────┘
+```
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed system design and [interactive diagrams](./docs/diagrams/).
+
+## 📖 Documentation
+
+### Architecture Diagrams
+
+The library includes comprehensive architecture documentation in multiple formats:
+
+- **[Mermaid Diagrams](./docs/diagrams/mermaid/)** - Interactive diagrams (GitHub renders automatically)
+  - Module Dependencies
+  - Data Flow
+  - Component Interactions
+  - Sequence Diagrams
+- **[ASCII Diagrams](./docs/diagrams/ascii/)** - Text-based architecture views
+- **[PlantUML Diagrams](./docs/diagrams/plantuml/)** - Detailed UML diagrams
+- **[Draw.io Diagrams](./docs/diagrams/drawio/)** - Editable visual diagrams
+
+### Generating Documentation
+
+Documentation is automatically generated during the build process:
+
+```bash
+npm run build  # Builds code and generates docs
+npm run docs   # Generate documentation only
 ```
 
 ## License

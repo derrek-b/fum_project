@@ -36,7 +36,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/",
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
+    "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
