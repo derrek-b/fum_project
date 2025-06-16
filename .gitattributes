@@ -3,6 +3,7 @@
 *.sol filter=git-crypt diff=git-crypt
 *.json filter=git-crypt diff=git-crypt
 /src/** filter=git-crypt diff=git-crypt
+/docs/** filter=git-crypt diff=git-crypt
 
 # Files that should NOT be encrypted
 .gitattributes !filter !diff
