@@ -2463,4 +2463,72 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Failed to generate swap data: ${error.message}`);
     }
   }
+
+  /**
+   * Discover available pools for a token pair across all fee tiers
+   * @param {string} token0Address - Address of first token
+   * @param {string} token1Address - Address of second token
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<Array>} Array of pool information objects
+   */
+  async discoverAvailablePools(token0Address, token1Address, chainId) {
+    const feeTiers = [100, 500, 3000, 10000];
+    const pools = [];
+
+    for (const fee of feeTiers) {
+      try {
+        const poolAddress = await this.getPoolAddressFromFactory(token0Address, token1Address, fee, chainId);
+        
+        if (poolAddress && poolAddress !== ethers.ZeroAddress) {
+          const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
+          
+          try {
+            const [slot0, liquidity] = await Promise.all([
+              poolContract.slot0(),
+              poolContract.liquidity()
+            ]);
+
+            if (liquidity > 0) {
+              pools.push({
+                address: poolAddress,
+                fee,
+                liquidity: liquidity.toString(),
+                sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+                tick: slot0.tick
+              });
+            }
+          } catch (poolError) {
+            console.log(`Pool at ${poolAddress} (fee: ${fee}) is not active`);
+          }
+        }
+      } catch (error) {
+        console.log(`No pool found for fee tier ${fee}`);
+      }
+    }
+
+    return pools;
+  }
+
+  /**
+   * Get pool address from factory contract
+   * @param {string} token0Address - Address of first token
+   * @param {string} token1Address - Address of second token
+   * @param {number} fee - Fee tier
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<string>} Pool address
+   */
+  async getPoolAddressFromFactory(token0Address, token1Address, fee, chainId) {
+    const chainConfig = this.config[chainId];
+    if (!chainConfig?.platformAddresses?.uniswapV3?.factoryAddress) {
+      throw new Error(`No Uniswap V3 factory configuration found for chainId: ${chainId}`);
+    }
+
+    const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
+    const factoryABI = [
+      "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)"
+    ];
+    
+    const factoryContract = new ethers.Contract(factoryAddress, factoryABI, this.provider);
+    return await factoryContract.getPool(token0Address, token1Address, fee);
+  }
 }

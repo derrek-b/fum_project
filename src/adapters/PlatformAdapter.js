@@ -236,4 +236,15 @@ export default class PlatformAdapter {
   async generateSwapData(params) {
     throw new Error("generateSwapData must be implemented by subclasses");
   }
+
+  /**
+   * Discover available pools for a token pair across all fee tiers
+   * @param {string} token0Address - Address of first token
+   * @param {string} token1Address - Address of second token
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<Array>} Array of pool information objects with { address, fee, liquidity, sqrtPriceX96, tick }
+   */
+  async discoverAvailablePools(token0Address, token1Address, chainId) {
+    throw new Error("discoverAvailablePools must be implemented by subclasses");
+  }
 }

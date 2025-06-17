@@ -5,7 +5,38 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2025-06-13
+## [0.2.0] - 2025-06-17
+
+### Added
+- **Pool Discovery System**: New `discoverAvailablePools` method added to PlatformAdapter base class
+  - Abstract method that all adapters must implement for standardized pool discovery
+  - Returns array of pool information objects with address, fee, liquidity, sqrtPriceX96, and tick data
+  - Enables dynamic fee tier evaluation across all DeFi platforms
+- **UniswapV3 Pool Discovery Implementation**: Complete implementation in UniswapV3Adapter
+  - `discoverAvailablePools` method that checks all fee tiers (100, 500, 3000, 10000 basis points)
+  - `getPoolAddressFromFactory` helper method for factory contract interactions
+  - Only returns pools with active liquidity to ensure viable trading options
+  - Comprehensive error handling for non-existent or inactive pools
+
+### Changed
+- **BREAKING**: PlatformAdapter now requires `discoverAvailablePools` implementation
+  - All future adapters must implement this method for pool discovery
+  - Provides consistent interface for fee tier evaluation across platforms
+  - Enables platform-agnostic pool optimization in strategies
+
+### Architecture
+- **Enhanced Adapter Pattern**: Pool discovery logic now centralized in adapters where it belongs
+  - Removes platform-specific logic from strategies
+  - Enables consistent pool discovery across all DeFi platforms
+  - Supports future adapter implementations (PancakeSwap, SushiSwap, etc.)
+
+### Developer Experience
+- **Standardized Pool Interface**: All adapters return consistent pool data format
+  - Simplifies strategy development by providing uniform pool information
+  - Enables cross-platform fee tier optimization
+  - Reduces code duplication in strategy implementations
+
+## [0.1.9] - 2025-06-13
 
 ### Added
 - **Comprehensive API Documentation**: Complete function-level documentation system
