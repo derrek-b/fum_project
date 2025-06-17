@@ -1,5 +1,53 @@
 # F.U.M. Project Changelog
 
+## v0.4.0
+
+### Security & Production Readiness
+- **BREAKING**: Removed all hardcoded fallback values in production financial application
+- **BREAKING**: AutomationService now requires explicit configuration for all timing parameters
+  - `pollInterval` must be explicitly configured (no default polling allowed)
+  - `debug` flag must be explicitly set to true or false
+  - `dataRefreshInterval` must be explicitly configured for VaultDataService
+- **BREAKING**: Removed magic number heuristic for token balance format detection
+  - Token balances are now guaranteed to be consistently formatted by vault helpers
+  - Eliminated unreliable 1e6 threshold that could cause double-formatting in edge cases
+
+### Added
+- Intelligent fee tier selection for Uniswap V3 swaps and position creation
+- `discoverAvailablePools` method added to PlatformAdapter base class (abstract method)
+- `discoverAvailablePools` implementation in UniswapV3Adapter for all fee tiers (100, 500, 3000, 10000 bp)
+- Multi-factor scoring system for optimal swap routing based on:
+  - Output amount optimization
+  - Price impact minimization
+  - Pool liquidity depth
+- Position creation pool optimization for long-term fee generation potential
+- `findBestSwapRoute` and `findBestPositionPool` methods in UniswapV3BabyStepsStrategy
+
+### Changed
+- **BREAKING**: All timing configurations must be explicitly provided - no production defaults
+- **BREAKING**: VaultDataService refresh interval must be explicitly set during initialization
+- Fee tier selection now uses dynamic pool discovery instead of hardcoded 3000 basis points
+- Swap routing now evaluates all available fee tiers for optimal execution
+- Position creation now selects optimal fee tier based on liquidity and fee generation potential
+
+### Removed
+- **BREAKING**: Hardcoded fee tier (3000) from UniswapV3BabyStepsStrategy
+- **BREAKING**: Magic number balance threshold detection (1e6 heuristic)
+- **BREAKING**: Default polling intervals and refresh rates
+- All hardcoded gas estimates and timing constants in production paths
+
+### Improved
+- Production safety through explicit configuration requirements
+- Swap efficiency through intelligent fee tier selection
+- Position profitability through optimal pool selection
+- Code maintainability by centralizing pool discovery in adapters
+- Data integrity by eliminating balance format guessing
+
+### Fixed
+- Token balance processing now uses guaranteed formatted values from vault helpers
+- Eliminated potential double-formatting of token balances in edge cases
+- Removed unreliable heuristics that could cause data integrity issues
+
 ## v0.3.0
 
 ### Added
