@@ -137,16 +137,29 @@ async getConnectedAccounts(provider: ethers.BrowserProvider): Promise<string[]>
 
 `Promise<string[]>` - Array of connected account addresses
 
+#### Throws
+
+| Error | Condition |
+|-------|-----------|
+| `Error` | Provider is required |
+| `Error` | Failed to get connected accounts |
+
 #### Example
 
 ```javascript
 const provider = await createBrowserProvider();
-const accounts = await getConnectedAccounts(provider);
 
-if (accounts.length > 0) {
-  console.log('Connected account:', accounts[0]);
-} else {
-  console.log('No accounts connected');
+try {
+  const accounts = await getConnectedAccounts(provider);
+  
+  if (accounts.length > 0) {
+    console.log('Connected account:', accounts[0]);
+  } else {
+    console.log('No accounts connected');
+  }
+} catch (error) {
+  console.error('Failed to get connected accounts:', error.message);
+  // Handle wallet connection errors appropriately
 }
 ```
 
@@ -351,6 +364,8 @@ async function safeWalletConnect() {
   } catch (error) {
     if (error.message.includes('No Ethereum provider')) {
       console.error('Please install MetaMask');
+    } else if (error.message.includes('Failed to get connected accounts')) {
+      console.error('Wallet connection issue - check wallet state');
     } else if (error.code === 4001) {
       console.error('User rejected connection');
     } else if (error.code === 4902) {

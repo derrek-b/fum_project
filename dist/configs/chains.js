@@ -7,10 +7,9 @@
 const chains = {
   // Arbitrum One
   42161: {
-    rpcUrl: process.env.NEXT_PUBLIC_ARBITRUM_RPC || "https://arb1.arbitrum.io/rpc",
     name: "Arbitrum One",
-    envPK: "NEXT_PUBLIC_ARBITRUM_DEPLOYER_PK", // Private key env variable name for deployment
-    executorEnvPK: "NEXT_PUBLIC_ARBITRUM_EXECUTOR_PK",
+    envPK: process.env.ARBITRUM_DEPLOYER_PK,
+    executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
     executorAddress: "0x0",
     platformAddresses: {
       uniswapV3: {
@@ -24,11 +23,9 @@ const chains = {
 
   // Local Hardhat Fork
   1337: {
-    rpcUrl: "http://localhost:8545",
-    wsUrl: 'ws://localhost:8545',
-    name: "Forked Arbitrum",
-    envPK: "NEXT_PUBLIC_LOCALHOST_DEPLOYER_PK", // Optional, script uses hardcoded value for localhost
-    executorEnvPK: "NEXT_PUBLIC_LOCALHOST_EXECUTOR_PK",
+    name: "Forked Arbitrum", 
+    envPK: process.env.LOCAL_DEPLOYER_PK,
+    executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
     platformAddresses: {
       uniswapV3: {
@@ -42,10 +39,9 @@ const chains = {
 
   // Ethereum Mainnet
   1: {
-    rpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_RPC || "https://mainnet.infura.io/v3/YOUR_INFURA_KEY",
     name: "Ethereum",
-    envPK: "NEXT_PUBLIC_ETHEREUM_DEPLOYER_PK", // Private key env variable name for deployment
-    executorEnvPK: "NEXT_PUBLIC_ETHEREUM_EXECUTOR_PK",
+    envPK: process.env.ETHEREUM_DEPLOYER_PK,
+    executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
     platformAddresses: {
       uniswapV3: {

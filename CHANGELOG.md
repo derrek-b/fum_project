@@ -5,6 +5,71 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-06-17
+
+### Security & Reliability Improvements
+- **BREAKING**: `fetchTokenPrices()` now requires explicit cache strategy parameter
+  - Added mandatory `cacheStrategy` parameter: '0-SECONDS', '5-SECONDS', '30-SECONDS', '1-MINUTE', '2-MINUTES', '10-MINUTES'
+  - Forces developers to make conscious decisions about data freshness vs performance
+  - Prevents accidental use of stale price data in financial calculations
+- **BREAKING**: `getCoingeckoId()` now throws errors instead of returning fallback values
+  - No longer returns `symbol.toLowerCase()` for unknown tokens
+  - Prevents wrong price data from being used for unmapped tokens
+  - Forces explicit token mapping registration for new tokens
+- **BREAKING**: `getContract()` fails fast on network detection issues
+  - No longer defaults to localhost chainId (1337) when provider network is unavailable
+  - Throws error: "Provider network not available. Cannot determine which contracts to use."
+  - Prevents cross-chain transaction disasters and wrong contract deployments
+- **BREAKING**: `getConnectedAccounts()` throws errors instead of silent failures
+  - No longer returns empty array `[]` when wallet connection fails
+  - Throws error: "Failed to get connected accounts: {error details}"
+  - Prevents wallet connection state confusion in applications
+
+### Configuration Security
+- **Environment Variable Migration**: Removed hardcoded RPC URLs and API keys
+  - Created `.env.example` template for secure configuration
+  - Updated `src/configs/chains.js` to use environment variables for private keys
+  - Eliminated placeholder API keys and localhost fallbacks
+  - Developers must provide their own RPC endpoints when creating providers
+
+### API Failures & Error Handling
+- **Price Service Reliability**: `fetchTokenPrices()` now fails fast on API errors
+  - No longer returns stale cached data when CoinGecko API fails
+  - Throws error: "Failed to fetch current token prices: {details}. Cannot proceed with stale data."
+  - Prevents catastrophic trading decisions based on outdated price information
+
+### Documentation Updates
+- **Complete Documentation Sync**: Updated all documentation to reflect breaking changes
+  - Fixed `fetchTokenPrices()` examples throughout documentation to include required cache strategy
+  - Added comprehensive error handling examples for new failure modes
+  - Updated architecture diagrams and sequence flows
+  - Marked broken functions (`calculateUsdValue`, `prefetchTokenPrices`) in documentation
+
+### Broken Functions (Will be fixed in next release)
+- `calculateUsdValue()` - Calls `fetchTokenPrices()` without required cache strategy
+- `prefetchTokenPrices()` - Calls `fetchTokenPrices()` without required cache strategy
+
+### Migration Guide
+```javascript
+// Before (0.2.x)
+const prices = await fetchTokenPrices(['ETH', 'USDC']);
+
+// After (0.3.x)
+const prices = await fetchTokenPrices(['ETH', 'USDC'], '30-SECONDS');
+
+// Register unknown tokens instead of relying on fallbacks
+registerTokenMapping('MYTOKEN', 'my-token-coingecko-id');
+
+// Handle network validation errors
+try {
+  const contract = getContract('VaultFactory', provider, signer);
+} catch (error) {
+  if (error.message.includes('Provider network not available')) {
+    // Handle network connection issues
+  }
+}
+```
+
 ## [0.2.0] - 2025-06-17
 
 ### Added

@@ -1,5 +1,6 @@
 ToDo
 node_modules/
 coverage/
+.env
 
 **/.claude/settings.local.json

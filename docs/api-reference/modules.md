@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-06-17T20:06:04.765Z
+Generated on: 2025-06-17T22:39:23.325Z
 
 ## Table of Contents
 
@@ -366,6 +366,11 @@ Token configuration with addresses on multiple chains
 FUM Library - Main Entry Point
 
 **Path:** `src/index.js`
+
+**Imports:**
+- from `dotenv`
+- from `path`
+- from `url`
 
 **Exports:**
 - re-exports from `./configs/index.js`

@@ -44,7 +44,7 @@ sequenceDiagram
         
         UA-->>VH: Positions with pool/token data
         
-        VH->>PS: prefetchTokenPrices(tokenSymbols)
+        VH->>PS: fetchTokenPrices(tokenSymbols, '2-MINUTES')
         PS->>PS: Check cache
         
         alt Cache miss
@@ -202,13 +202,13 @@ sequenceDiagram
     
     Note over C1, API: Multiple components request prices simultaneously
     
-    C1->>PS: fetchTokenPrices(['ETH'])
+    C1->>PS: fetchTokenPrices(['ETH'], '30-SECONDS')
     PS->>Cache: Check ETH price
     Cache-->>PS: Cache miss
     PS->>Batch: Add ETH to queue
     PS-->>C1: Promise (pending)
     
-    C2->>PS: fetchTokenPrices(['ETH', 'USDC'])
+    C2->>PS: fetchTokenPrices(['ETH', 'USDC'], '30-SECONDS')
     PS->>Cache: Check ETH price
     Cache-->>PS: Cache miss (already queued)
     PS->>Cache: Check USDC price
@@ -216,7 +216,7 @@ sequenceDiagram
     PS->>Batch: Add USDC to queue
     PS-->>C2: Promise (pending)
     
-    C3->>PS: fetchTokenPrices(['DAI'])
+    C3->>PS: fetchTokenPrices(['DAI'], '30-SECONDS')
     PS->>Cache: Check DAI price
     Cache-->>PS: Cache miss
     PS->>Batch: Add DAI to queue
@@ -238,7 +238,7 @@ sequenceDiagram
     
     Note over C1, API: Subsequent request uses cache
     
-    C1->>PS: fetchTokenPrices(['ETH'])
+    C1->>PS: fetchTokenPrices(['ETH'], '30-SECONDS')
     PS->>Cache: Check ETH price
     Cache-->>PS: Cache hit (fresh)
     PS-->>C1: ETH price (immediate)

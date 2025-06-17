@@ -83,8 +83,8 @@ import { getTokenBySymbol, fetchTokenPrices } from 'fum_library';
 const usdc = getTokenBySymbol('USDC');
 console.log('USDC address on Arbitrum:', usdc.addresses[42161]);
 
-// Fetch current prices
-const prices = await fetchTokenPrices(['USDC', 'ETH']);
+// Fetch current prices (cacheStrategy is required)
+const prices = await fetchTokenPrices(['USDC', 'ETH'], '30-SECONDS');
 console.log('ETH price:', prices.ETH);
 ```
 

@@ -8,5 +8,16 @@
  * @module fum-library
  */
 
+// Load environment variables from .env file
+import { config } from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env file from library root
+config({ path: resolve(__dirname, '../.env') });
+
 export * from './configs/index.js';
 export * from './adapters/index.js';

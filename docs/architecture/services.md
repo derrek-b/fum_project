@@ -40,8 +40,8 @@ class CoinGeckoService {
   }
   
   // Public interface
-  async fetchTokenPrices(tokenSymbols) {
-    return this.processRequest(tokenSymbols);
+  async fetchTokenPrices(tokenSymbols, cacheStrategy) {
+    return this.processRequest(tokenSymbols, cacheStrategy);
   }
   
   // Private implementation
@@ -99,7 +99,7 @@ export async function prefetchTokenPrices(tokenSymbols) {
   
   if (tokensToFetch.length > 0) {
     // Fetch in background without blocking
-    fetchTokenPrices(tokensToFetch).catch(error => {
+    fetchTokenPrices(tokensToFetch, '2-MINUTES').catch(error => {
       console.warn('Background price fetch failed:', error);
     });
   }
@@ -158,7 +158,7 @@ class BatchQueue {
 
 #### Promise Coordination
 ```javascript
-export function fetchTokenPrices(tokenSymbols) {
+export function fetchTokenPrices(tokenSymbols, cacheStrategy) {
   const promises = tokenSymbols.map(symbol => {
     // Check cache first
     const cached = priceCache.get(symbol);
@@ -246,16 +246,16 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 
 #### Fallback Strategies
 ```javascript
-export async function fetchTokenPrices(tokenSymbols) {
+export async function fetchTokenPrices(tokenSymbols, cacheStrategy) {
   try {
     // Primary: CoinGecko API
-    return await fetchFromCoinGecko(tokenSymbols);
+    return await fetchFromCoinGecko(tokenSymbols, cacheStrategy);
   } catch (error) {
     console.error('CoinGecko failed, trying fallback:', error);
     
     try {
       // Fallback 1: Alternative API
-      return await fetchFromAlternativeAPI(tokenSymbols);
+      return await fetchFromAlternativeAPI(tokenSymbols, cacheStrategy);
     } catch (fallbackError) {
       console.error('All price services failed:', fallbackError);
       
@@ -634,11 +634,11 @@ class PriceAggregator {
     ];
   }
   
-  async fetchTokenPrices(symbols) {
+  async fetchTokenPrices(symbols, cacheStrategy) {
     // Try providers in order of preference
     for (const provider of this.providers) {
       try {
-        return await provider.fetchTokenPrices(symbols);
+        return await provider.fetchTokenPrices(symbols, cacheStrategy);
       } catch (error) {
         console.warn(`Provider ${provider.name} failed:`, error);
         continue;

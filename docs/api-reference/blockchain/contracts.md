@@ -34,6 +34,7 @@ getContract(contractName: string, provider: ethers.JsonRpcProvider, signer?: eth
 | Error | Condition |
 |-------|-----------|
 | `Error` | Contract not found in contract data |
+| `Error` | Provider network not available |
 | `Error` | No deployment found for network |
 
 #### Example
@@ -469,7 +470,9 @@ async function safeCreateVault(name, signer) {
     const vaultAddress = await contracts.createVault(name, signer);
     return vaultAddress;
   } catch (error) {
-    if (error.message.includes('No VaultFactory deployment')) {
+    if (error.message.includes('Provider network not available')) {
+      console.error('Wallet network connection issue - check provider');
+    } else if (error.message.includes('No VaultFactory deployment')) {
       console.error('VaultFactory not deployed on this network');
     } else if (error.message.includes('VaultCreated event')) {
       console.error('Vault creation failed - check transaction');
