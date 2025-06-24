@@ -39,9 +39,12 @@ export function getContract(contractName, provider, signer) {
     throw new Error(`Contract ${contractName} not found in contract data`);
   }
 
-  // Get network info to find the right address
-  const network = provider.network || { chainId: 1337 }; // Default to localhost/hardhat if no network
-  const chainId = network.chainId.toString();
+  // Require valid network - don't guess
+  if (!provider.network || !provider.network.chainId) {
+    throw new Error('Provider network not available. Cannot determine which contracts to use.');
+  }
+
+  const chainId = provider.network.chainId.toString();
 
   // Get address for this network
   const address = contractInfo.addresses?.[chainId];

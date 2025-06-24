@@ -65,14 +65,17 @@ async getPositions(address, chainId)
 // Check if position is currently in range
 isPositionInRange(position, poolData)
 
-// Calculate current price information
-calculatePrice(position, poolData, token0Data, token1Data, invert)
+// Calculate price from sqrtPriceX96
+calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
+
+// Convert tick to price
+tickToPrice(tick, baseToken, quoteToken, chainId)
 
 // Calculate token amounts if position were closed
 async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
 
 // Calculate uncollected fees
-async calculateFees(position, poolData, token0Data, token1Data)
+calculateUncollectedFees(position, poolData, token0Data, token1Data)
 ```
 
 #### Transaction Generation
@@ -156,21 +159,25 @@ async createPosition(params)
 
 #### Price Calculation Strategy
 **Challenge**: Uniswap V3 uses `sqrtPriceX96` format which is complex to work with
-**Solution**: Private helper methods for price conversions
+**Solution**: Public methods using the Uniswap V3 SDK for accurate price conversions
 ```javascript
-_calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert)
-_tickToPrice(tick, decimals0, decimals1, invert)
+calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
+tickToPrice(tick, baseToken, quoteToken, chainId)
 ```
 
+These methods leverage the official Uniswap SDK's `tickToPrice` function and `TickMath` utilities for accurate calculations that match the Uniswap frontend exactly.
+
 #### Fee Calculation Strategy
-**Challenge**: Uncollected fees require complex calculations involving tick data
-**Solution**: Separate calculation method with detailed parameter passing
+**Challenge**: Uncollected fees require complex calculations involving on-chain tick data that the SDK doesn't provide
+**Solution**: Custom implementation of Uniswap V3's fee calculation logic
 ```javascript
-_calculateUncollectedFees({
-  position, currentTick, feeGrowthGlobal0X128, feeGrowthGlobal1X128,
-  tickLower, tickUpper, token0, token1
-})
+calculateUncollectedFees(position, poolData, token0Data, token1Data)
 ```
+
+This method implements the fee calculation manually because:
+- The Uniswap V3 SDK doesn't provide fee calculation methods
+- Fee calculations require real-time on-chain data (fee growth globals, tick data)
+- The SDK focuses on transaction building rather than state queries
 
 #### Transaction Data Strategy
 **Challenge**: Different operations require different contract interactions

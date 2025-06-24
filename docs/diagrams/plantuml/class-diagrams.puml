@@ -18,9 +18,10 @@ package "Adapters" {
         + {abstract} getPositionManagerABI(): Array
         + {abstract} checkPoolExists(token0, token1, fee): Promise<Object>
         + {abstract} getPositions(address, chainId): Promise<Object>
-        + {abstract} calculateFees(position, poolData, token0Data, token1Data): Promise<Object>
+        + {abstract} calculateUncollectedFees(position, poolData, token0Data, token1Data): Object
         + {abstract} isPositionInRange(position, poolData): boolean
-        + {abstract} calculatePrice(position, poolData, token0Data, token1Data, invert): Object
+        + {abstract} calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId): string
+        + {abstract} tickToPrice(tick, baseToken, quoteToken, chainId): string
         + {abstract} calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId): Promise<Object>
         + {abstract} generateClaimFeesData(params): Promise<Object>
         + {abstract} claimFees(params): Promise<Object>
@@ -46,11 +47,10 @@ package "Adapters" {
         + checkPoolExists(token0, token1, fee): Promise<Object>
         + getPositions(address, chainId): Promise<Object>
         + isPositionInRange(position, poolData): boolean
-        + calculatePrice(position, poolData, token0Data, token1Data, invert): Object
-        - _calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert): string
-        - _tickToPrice(tick, decimals0, decimals1, invert): string
-        + calculateFees(position, poolData, token0Data, token1Data): Promise<Object>
-        - _calculateUncollectedFees(params): Object
+        + calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId): string
+        + tickToPrice(tick, baseToken, quoteToken, chainId): string
+        + calculateUncollectedFees(position, poolData, token0Data, token1Data): Object
+        - _calculateUncollectedFeesInternal(params): Object
         + calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId): Promise<Object>
         + generateClaimFeesData(params): Promise<Object>
         + claimFees(params): Promise<Object>

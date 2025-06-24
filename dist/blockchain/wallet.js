@@ -127,8 +127,8 @@ export async function getConnectedAccounts(provider) {
       accounts.map(account => account.address)
     );
   } catch (err) {
-    console.error("Error getting connected accounts:", err);
-    return [];
+    // Don't hide wallet errors - they're critical for user experience
+    throw new Error(`Failed to get connected accounts: ${err.message}`);
   }
 }
 

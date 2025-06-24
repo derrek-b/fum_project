@@ -13,8 +13,8 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
-import { Position, Pool, NonfungiblePositionManager } from '@uniswap/v3-sdk';
-import { Percent, Token, CurrencyAmount } from '@uniswap/sdk-core';
+import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
+import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
 import JSBI from "jsbi";
 
 // Import ABIs from Uniswap and OpenZeppelin libraries
@@ -455,205 +455,189 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     return currentTick >= position.tickLower && currentTick <= position.tickUpper;
   }
 
-  /**
-   * Calculate price from sqrtPriceX96
-   * @param {Object} position - Position data
-   * @param {number} position.tickLower - Lower tick of the position
-   * @param {number} position.tickUpper - Upper tick of the position
-   * @param {Object} poolData - Pool data
-   * @param {string} poolData.sqrtPriceX96 - Square root price in X96 format
-   * @param {Object} token0Data - Token0 data
-   * @param {number} token0Data.decimals - Token0 decimals
-   * @param {Object} token1Data - Token1 data
-   * @param {number} token1Data.decimals - Token1 decimals
-   * @param {boolean} invert - Whether to invert the price
-   * @returns {{currentPrice: string, lowerPrice: string, upperPrice: string}} Formatted price information
-   */
-  calculatePrice(position, poolData, token0Data, token1Data, invert = false) {
-    if (!poolData || !token0Data || !token1Data)
-      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
-
-    const currentPrice = this._calculatePriceFromSqrtPrice(
-      poolData.sqrtPriceX96,
-      token0Data.decimals,
-      token1Data.decimals,
-      invert
-    );
-
-    const lowerPrice = this._tickToPrice(
-      position.tickLower,
-      token0Data.decimals,
-      token1Data.decimals,
-      invert
-    );
-
-    const upperPrice = this._tickToPrice(
-      position.tickUpper,
-      token0Data.decimals,
-      token1Data.decimals,
-      invert
-    );
-
-    return {
-      currentPrice,
-      lowerPrice,
-      upperPrice,
-      token0Symbol: token0Data.symbol,
-      token1Symbol: token1Data.symbol
-    };
-  }
 
   /**
-   * Calculate price from sqrtPriceX96
+   * Calculate price from sqrtPriceX96 using the Uniswap V3 SDK
    * @param {string} sqrtPriceX96 - Square root price in X96 format
-   * @param {number} decimals0 - Decimals of token0
-   * @param {number} decimals1 - Decimals of token1
-   * @param {boolean} invert - Whether to invert the price
+   * @param {Object} baseToken - Base token (token0 unless inverted)
+   * @param {string} baseToken.address - Token address
+   * @param {number} baseToken.decimals - Token decimals
+   * @param {string} baseToken.symbol - Token symbol
+   * @param {Object} quoteToken - Quote token (token1 unless inverted)
+   * @param {string} quoteToken.address - Token address
+   * @param {number} quoteToken.decimals - Token decimals
+   * @param {string} quoteToken.symbol - Token symbol
+   * @param {number} chainId - Chain ID
    * @returns {string} Formatted price
-   * @private
    */
-  _calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert = false) {
-    if (!sqrtPriceX96 || sqrtPriceX96 === "0") return "N/A";
-
-    // Convert sqrtPriceX96 to a number and calculate price
-    const sqrtPriceX96AsNumber = Number(sqrtPriceX96) / (2 ** 96);
-    const priceInt = sqrtPriceX96AsNumber * sqrtPriceX96AsNumber;
-
-    // Apply decimal adjustment - must handle both positive and negative cases
-    const decimalsDiff = decimals1 - decimals0;
-    let price = priceInt;
-
-    // Apply correct decimal adjustment for both positive and negative differences
-    if (decimalsDiff > 0) {
-      // If token1 has more decimals than token0, multiply by 10^(decimals1-decimals0)
-      price = price * Math.pow(10, decimalsDiff);
-    } else if (decimalsDiff < 0) {
-      // If token0 has more decimals than token1, divide by 10^(decimals0-decimals1)
-      price = price / Math.pow(10, -decimalsDiff);
+  calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId) {
+    if (!sqrtPriceX96 || sqrtPriceX96 === "0") {
+      throw new Error("Invalid sqrtPriceX96 value");
     }
 
-    // Invert the price if requested
-    if (invert) {
-      price = 1 / price;
+    if (!baseToken?.address || !quoteToken?.address || !chainId) {
+      throw new Error("Missing required token information or chainId");
     }
 
-    // Format with appropriate precision
-    const formattedPrice = Number.isFinite(price) ? price.toFixed(6) : "N/A";
-    return formattedPrice;
+    try {
+      // Create Token instances
+      const base = new Token(
+        chainId,
+        baseToken.address,
+        baseToken.decimals,
+        baseToken.symbol || "",
+        baseToken.name || ""
+      );
+
+      const quote = new Token(
+        chainId,
+        quoteToken.address,
+        quoteToken.decimals,
+        quoteToken.symbol || "",
+        quoteToken.name || ""
+      );
+
+      // Convert sqrtPriceX96 to JSBI if needed
+      const sqrtRatioX96 = JSBI.BigInt(sqrtPriceX96.toString());
+
+      // Get the tick at this sqrt ratio
+      const tick = TickMath.getTickAtSqrtRatio(sqrtRatioX96);
+
+      // Use SDK's tickToPrice to get the price
+      const price = tickToPrice(base, quote, tick);
+
+      // Return formatted price with appropriate precision
+      return price.toFixed(6);
+    } catch (error) {
+      console.error("Error calculating price from sqrtPriceX96:", error);
+      throw new Error(`Failed to calculate price: ${error.message}`);
+    }
   }
 
   /**
-   * Convert a tick value to a corresponding price
+   * Convert a tick value to a corresponding price using the Uniswap V3 SDK
    * @param {number} tick - The tick value
-   * @param {number} decimals0 - Decimals of token0
-   * @param {number} decimals1 - Decimals of token1
-   * @param {boolean} invert - Whether to invert the price
+   * @param {Object} baseToken - Base token (token0 unless inverted)
+   * @param {string} baseToken.address - Token address
+   * @param {number} baseToken.decimals - Token decimals
+   * @param {string} baseToken.symbol - Token symbol
+   * @param {Object} quoteToken - Quote token (token1 unless inverted)
+   * @param {string} quoteToken.address - Token address
+   * @param {number} quoteToken.decimals - Token decimals
+   * @param {string} quoteToken.symbol - Token symbol
+   * @param {number} chainId - Chain ID
    * @returns {string} The formatted price corresponding to the tick
-   * @private
    */
-  _tickToPrice(tick, decimals0, decimals1, invert = false) {
-    if (!Number.isFinite(tick)) return "N/A";
-
-    // Calculate raw price using the same formula from Uniswap: 1.0001^tick
-    const rawPrice = Math.pow(1.0001, tick);
-
-    // Apply the decimal adjustment
-    const decimalsDiff = decimals1 - decimals0;
-    let price = rawPrice;
-
-    // Apply correct decimal adjustment for both positive and negative differences
-    if (decimalsDiff > 0) {
-      // If token1 has more decimals than token0, multiply by 10^(decimals1-decimals0)
-      price = price * Math.pow(10, decimalsDiff);
-    } else if (decimalsDiff < 0) {
-      // If token0 has more decimals than token1, divide by 10^(decimals0-decimals1)
-      price = price / Math.pow(10, -decimalsDiff);
+  tickToPrice(tick, baseToken, quoteToken, chainId) {
+    if (!Number.isFinite(tick)) {
+      throw new Error("Invalid tick value");
     }
 
-    // Invert if requested (token0 per token1 instead of token1 per token0)
-    if (invert) {
-      price = 1 / price;
+    if (!baseToken?.address || !quoteToken?.address || !chainId) {
+      throw new Error("Missing required token information or chainId");
     }
 
-    // Format based on value
-    if (!Number.isFinite(price)) return "N/A";
-    if (price < 0.0001) return "< 0.0001";
-    if (price > 1000000) return price.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    try {
+      // Create Token instances
+      const base = new Token(
+        chainId,
+        baseToken.address,
+        baseToken.decimals,
+        baseToken.symbol || "",
+        baseToken.name || ""
+      );
 
-    // Return with appropriate precision
-    return price.toFixed(6);
+      const quote = new Token(
+        chainId,
+        quoteToken.address,
+        quoteToken.decimals,
+        quoteToken.symbol || "",
+        quoteToken.name || ""
+      );
+
+      // Use SDK's tickToPrice function
+      const price = tickToPrice(base, quote, tick);
+
+      // Format based on value
+      const priceNumber = parseFloat(price.toFixed(10));
+      if (priceNumber < 0.0001) return "< 0.0001";
+      if (priceNumber > 1000000) return priceNumber.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+      // Return with appropriate precision
+      return price.toFixed(6);
+    } catch (error) {
+      console.error("Error converting tick to price:", error);
+      throw new Error(`Failed to convert tick to price: ${error.message}`);
+    }
   }
 
+
   /**
-   * Calculate uncollected fees for a position
+   * Calculate uncollected fees for a Uniswap V3 position
+   * 
+   * This method implements the Uniswap V3 fee calculation logic, which requires
+   * on-chain data that the SDK doesn't fetch. The calculation accounts for:
+   * - Global fee growth since the position was last updated
+   * - Fee growth inside/outside the position's price range
+   * - The position's liquidity and tick range
+   * 
    * @param {Object} position - Position data
-   * @param {string} position.liquidity - Position liquidity
-   * @param {string} position.feeGrowthInside0LastX128 - Fee growth inside for token0
-   * @param {string} position.feeGrowthInside1LastX128 - Fee growth inside for token1
+   * @param {string|number|bigint} position.liquidity - Position liquidity
+   * @param {string|number|bigint} position.feeGrowthInside0LastX128 - Fee growth inside for token0 at last action
+   * @param {string|number|bigint} position.feeGrowthInside1LastX128 - Fee growth inside for token1 at last action
    * @param {number} position.tickLower - Lower tick of the position
    * @param {number} position.tickUpper - Upper tick of the position
-   * @param {Object} poolData - Pool data
+   * @param {string|number|bigint} position.tokensOwed0 - Already accumulated fees for token0
+   * @param {string|number|bigint} position.tokensOwed1 - Already accumulated fees for token1
+   * @param {Object} poolData - Current pool state data
    * @param {number} poolData.tick - Current pool tick
-   * @param {string} poolData.feeGrowthGlobal0X128 - Global fee growth for token0
-   * @param {string} poolData.feeGrowthGlobal1X128 - Global fee growth for token1
-   * @param {Object} poolData.ticks - Tick data object
-   * @param {Object} token0Data - Token0 data
-   * @param {number} token0Data.decimals - Token0 decimals
-   * @param {Object} token1Data - Token1 data
-   * @param {number} token1Data.decimals - Token1 decimals
-   * @returns {{token0: string, token1: string}|null} Uncollected fees or null if calculation fails
+   * @param {string} poolData.feeGrowthGlobal0X128 - Current global fee growth for token0
+   * @param {string} poolData.feeGrowthGlobal1X128 - Current global fee growth for token1
+   * @param {Object} poolData.ticks - Object containing tick data for the position's ticks
+   * @param {Object} poolData.ticks[tickLower] - Lower tick data with feeGrowthOutside values
+   * @param {Object} poolData.ticks[tickUpper] - Upper tick data with feeGrowthOutside values
+   * @param {Object} token0Data - Token0 metadata
+   * @param {number} token0Data.decimals - Token0 decimals for formatting
+   * @param {Object} token1Data - Token1 metadata
+   * @param {number} token1Data.decimals - Token1 decimals for formatting
+   * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
+   * @throws {Error} If required pool or token data is missing
    */
-  async calculateFees(position, poolData, token0Data, token1Data) {
-    if (!poolData || !poolData.feeGrowthGlobal0X128 || !poolData.feeGrowthGlobal1X128 ||
-        !poolData.ticks || !poolData.ticks[position.tickLower] || !poolData.ticks[position.tickUpper]) {
-      return null;
+  calculateUncollectedFees(position, poolData, token0Data, token1Data) {
+    // Validate inputs
+    if (!poolData || !poolData.feeGrowthGlobal0X128 || !poolData.feeGrowthGlobal1X128) {
+      throw new Error("Missing required pool data for fee calculation");
+    }
+
+    if (!poolData.ticks || !poolData.ticks[position.tickLower] || !poolData.ticks[position.tickUpper]) {
+      throw new Error("Missing required tick data for fee calculation");
+    }
+
+    if (!token0Data?.decimals || !token1Data?.decimals) {
+      throw new Error("Missing token decimal information for fee calculation");
     }
 
     const tickLower = poolData.ticks[position.tickLower];
     const tickUpper = poolData.ticks[position.tickUpper];
 
-
-    // Create position object for fee calculation
-    const positionForFeeCalc = {
-      ...position,
-      // Convert to BigInt compatible format
-      liquidity: BigInt(position.liquidity),
-      feeGrowthInside0LastX128: BigInt(position.feeGrowthInside0LastX128),
-      feeGrowthInside1LastX128: BigInt(position.feeGrowthInside1LastX128),
-    };
-
-    try {
-      return this._calculateUncollectedFees({
-        position: positionForFeeCalc,
-        currentTick: poolData.tick,
-        feeGrowthGlobal0X128: poolData.feeGrowthGlobal0X128,
-        feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
-        tickLower,
-        tickUpper,
-        token0: token0Data,
-        token1: token1Data
-      });
-    } catch (error) {
-      console.error("Error calculating fees for position", position.id, ":", error);
-      return null;
-    }
+    // Internal calculation with all parameters
+    return this._calculateUncollectedFeesInternal({
+      position,
+      currentTick: poolData.tick,
+      feeGrowthGlobal0X128: poolData.feeGrowthGlobal0X128,
+      feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
+      tickLower,
+      tickUpper,
+      token0: token0Data,
+      token1: token1Data
+    });
   }
 
   /**
-   * Calculate uncollected fees for a Uniswap V3 position
-   * @param {Object} params - Parameters object containing position, pool, and price data
-   * @param {Object} params.position - Position object with liquidity and fee growth data
-   * @param {number} params.currentTick - Current tick of the pool
-   * @param {string} params.feeGrowthGlobal0X128 - Global fee growth for token0
-   * @param {string} params.feeGrowthGlobal1X128 - Global fee growth for token1
-   * @param {Object} params.tickLower - Lower tick data object
-   * @param {Object} params.tickUpper - Upper tick data object
-   * @param {Object} params.token0 - Token0 data with decimals
-   * @param {Object} params.token1 - Token1 data with decimals
-   * @returns {{token0: string, token1: string}} Uncollected fees for token0 and token1
+   * Internal implementation of fee calculation logic
    * @private
    */
-  _calculateUncollectedFees({
+  _calculateUncollectedFeesInternal({
     position,
     currentTick,
     feeGrowthGlobal0X128,

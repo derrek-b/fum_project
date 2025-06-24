@@ -45,7 +45,9 @@ classDiagram
         +getPoolABI()*
         +checkPoolExists(token0, token1, fee)*
         +getPositions(address, chainId)*
-        +calculateFees(position, poolData, token0Data, token1Data)*
+        +calculateUncollectedFees(position, poolData, token0Data, token1Data)*
+        +calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)*
+        +tickToPrice(tick, baseToken, quoteToken, chainId)*
         +generateSwapData(params)*
     }
     
@@ -55,10 +57,11 @@ classDiagram
         +getPoolABI()
         +checkPoolExists(token0, token1, fee)
         +getPositions(address, chainId)
-        +calculateFees(position, poolData, token0Data, token1Data)
+        +calculateUncollectedFees(position, poolData, token0Data, token1Data)
+        +calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
+        +tickToPrice(tick, baseToken, quoteToken, chainId)
         +generateSwapData(params)
-        -_calculateUncollectedFees(params)
-        -_calculatePriceFromSqrtPrice(sqrtPriceX96, decimals0, decimals1, invert)
+        -_calculateUncollectedFeesInternal(params)
     }
     
     class AdapterFactory {

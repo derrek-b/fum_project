@@ -97,14 +97,14 @@ export default class PlatformAdapter {
 
   /**
    * Calculate uncollected fees for a position
-   * @param {Object} position - Position object
-   * @param {Object} poolData - Pool data
-   * @param {Object} token0Data - Token0 data
-   * @param {Object} token1Data - Token1 data
-   * @returns {Promise<Object>} - Uncollected fees
+   * @param {Object} position - Position object with liquidity and fee growth data
+   * @param {Object} poolData - Current pool state including fee growth globals and tick data
+   * @param {Object} token0Data - Token0 metadata including decimals
+   * @param {Object} token1Data - Token1 metadata including decimals
+   * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
    */
-  async calculateFees(position, poolData, token0Data, token1Data) {
-    throw new Error("calculateFees must be implemented by subclasses");
+  calculateUncollectedFees(position, poolData, token0Data, token1Data) {
+    throw new Error("calculateUncollectedFees must be implemented by subclasses");
   }
 
   /**
@@ -137,16 +137,27 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Calculate and format the price for a position
-   * @param {Object} position - Position object
-   * @param {Object} poolData - Pool data
-   * @param {Object} token0Data - Token0 data
-   * @param {Object} token1Data - Token1 data
-   * @param {boolean} invert - Whether to invert the price
-   * @returns {Object} - Formatted price information
+   * Calculate price from sqrtPriceX96
+   * @param {string} sqrtPriceX96 - Square root price in X96 format
+   * @param {Object} baseToken - Base token metadata
+   * @param {Object} quoteToken - Quote token metadata
+   * @param {number} chainId - Chain ID
+   * @returns {string} Formatted price
    */
-  calculatePrice(position, poolData, token0Data, token1Data, invert = false) {
-    throw new Error("calculatePrice must be implemented by subclasses");
+  calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId) {
+    throw new Error("calculatePriceFromSqrtPrice must be implemented by subclasses");
+  }
+
+  /**
+   * Convert a tick value to a corresponding price
+   * @param {number} tick - The tick value
+   * @param {Object} baseToken - Base token metadata
+   * @param {Object} quoteToken - Quote token metadata
+   * @param {number} chainId - Chain ID
+   * @returns {string} The formatted price corresponding to the tick
+   */
+  tickToPrice(tick, baseToken, quoteToken, chainId) {
+    throw new Error("tickToPrice must be implemented by subclasses");
   }
 
   /**
