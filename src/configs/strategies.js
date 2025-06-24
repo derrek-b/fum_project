@@ -237,7 +237,6 @@ const strategies = {
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
-        type: "number",
         defaultValue: 50,
         min: 1,
         max: 1000,
@@ -583,7 +582,6 @@ const strategies = {
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
-        type: "number",
         defaultValue: 50,
         min: 1,
         max: 1000,
