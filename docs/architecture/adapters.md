@@ -56,8 +56,20 @@ async getPoolAddress(token0, token1, fee)
 // Check if pool exists and get basic info
 async checkPoolExists(token0, token1, fee)
 
-// Get all user positions for the protocol
+// Get all user positions for the protocol (refactored for better performance)
 async getPositions(address, chainId)
+```
+
+#### Public Data Utilities
+```javascript
+// Fetch token metadata and user balances
+async fetchTokenData(token0Address, token1Address, userAddress, chainId)
+
+// Fetch pool state data
+async fetchPoolData(token0, token1, fee, chainId)
+
+// Fetch tick-specific data for fee calculations
+async fetchTickData(poolAddress, tickLower, tickUpper)
 ```
 
 #### Position Analysis
@@ -74,8 +86,8 @@ tickToPrice(tick, baseToken, quoteToken, chainId)
 // Calculate token amounts if position were closed
 async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
 
-// Calculate uncollected fees
-calculateUncollectedFees(position, poolData, token0Data, token1Data)
+// Calculate uncollected fees (optimized parameters)
+calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals)
 ```
 
 #### Transaction Generation
@@ -154,6 +166,24 @@ async createPosition(params)
 ```
 
 ## Uniswap V3 Adapter Implementation
+
+### Recent Improvements (v0.5.0)
+
+#### Modular Data Fetching
+**Problem**: The original `getPositions()` method was 250+ lines doing too much
+**Solution**: Broken into focused public utilities for reusability
+```javascript
+// New public utilities available independently
+await adapter.fetchTokenData(token0Address, token1Address, userAddress, chainId)
+await adapter.fetchPoolData(token0Data, token1Data, fee, chainId) 
+await adapter.fetchTickData(poolAddress, tickLower, tickUpper)
+```
+
+#### Performance Optimizations
+- **Intelligent Caching**: Token and pool data cached to prevent redundant calls
+- **Simplified Type Handling**: Removed unnecessary `.toString()` conversion chains
+- **Parameter Optimization**: Functions now take only required parameters vs full objects
+- **Better Error Handling**: Granular per-position error catching
 
 ### Architecture Decisions
 

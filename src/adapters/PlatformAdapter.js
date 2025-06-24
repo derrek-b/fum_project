@@ -99,11 +99,11 @@ export default class PlatformAdapter {
    * Calculate uncollected fees for a position
    * @param {Object} position - Position object with liquidity and fee growth data
    * @param {Object} poolData - Current pool state including fee growth globals and tick data
-   * @param {Object} token0Data - Token0 metadata including decimals
-   * @param {Object} token1Data - Token1 metadata including decimals
+   * @param {number} token0Decimals - Token0 decimals for formatting
+   * @param {number} token1Decimals - Token1 decimals for formatting
    * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
    */
-  calculateUncollectedFees(position, poolData, token0Data, token1Data) {
+  calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals) {
     throw new Error("calculateUncollectedFees must be implemented by subclasses");
   }
 

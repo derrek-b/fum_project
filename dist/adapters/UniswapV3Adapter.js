@@ -132,21 +132,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
   }
 
-  /**
-   * Get the Uniswap V3 Pool ABI
-   * @returns {Array} The pool contract ABI
-   */
-  getPoolABI() {
-    return IUniswapV3PoolABI;
-  }
-
-  /**
-   * Get the Nonfungible Position Manager ABI
-   * @returns {Array} The position manager contract ABI
-   */
-  getPositionManagerABI() {
-    return NonfungiblePositionManagerABI;
-  }
 
   /**
    * Check if a pool exists for the given tokens and fee tier
@@ -185,6 +170,273 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get position manager contract instance for a given chain
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<ethers.Contract>} Position manager contract instance
+   * @private
+   */
+  async _getPositionManager(chainId) {
+    const chainConfig = this.config[chainId];
+    if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
+      throw new Error(`No configuration found for chainId: ${chainId}`);
+    }
+
+    const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+    
+    return new ethers.Contract(
+      positionManagerAddress,
+      this.nonfungiblePositionManagerABI,
+      this.provider
+    );
+  }
+
+  /**
+   * Fetch user's position token IDs
+   * @param {string} address - User's wallet address
+   * @param {ethers.Contract} positionManager - Position manager contract
+   * @returns {Promise<string[]>} Array of position token IDs
+   * @private
+   */
+  async _fetchUserPositionIds(address, positionManager) {
+    const balance = await positionManager.balanceOf(address);
+    const tokenIds = [];
+    
+    for (let i = 0; i < balance; i++) {
+      const tokenId = await positionManager.tokenOfOwnerByIndex(address, i);
+      tokenIds.push(String(tokenId));
+    }
+    
+    return tokenIds;
+  }
+
+  /**
+   * Fetch token metadata and user balances
+   * @param {string} token0Address - Token0 contract address
+   * @param {string} token1Address - Token1 contract address 
+   * @param {string} userAddress - User's wallet address
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<{token0Data: Object, token1Data: Object}>} Token metadata and balances
+   */
+  async fetchTokenData(token0Address, token1Address, userAddress, chainId) {
+    if (!token0Address || !token1Address || !userAddress || !chainId) {
+      throw new Error("Missing required parameters for token data fetch");
+    }
+
+    const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, this.provider);
+    const token1Contract = new ethers.Contract(token1Address, this.erc20ABI, this.provider);
+
+    let token0Data, token1Data;
+
+    try {
+      const [decimals0, name0, symbol0, balance0] = await Promise.all([
+        token0Contract.decimals(),
+        token0Contract.name(),
+        token0Contract.symbol(),
+        token0Contract.balanceOf(userAddress),
+      ]);
+
+      token0Data = {
+        address: token0Address,
+        decimals: Number(decimals0),
+        name: name0,
+        symbol: symbol0,
+        balance: Number(ethers.formatUnits(balance0, Number(decimals0))),
+        chainId
+      };
+    } catch (err) {
+      console.error("Error retrieving token0 data:", err);
+      throw new Error(`Failed to fetch token0 data: ${err.message}`);
+    }
+
+    try {
+      const [decimals1, name1, symbol1, balance1] = await Promise.all([
+        token1Contract.decimals(),
+        token1Contract.name(),
+        token1Contract.symbol(),
+        token1Contract.balanceOf(userAddress),
+      ]);
+
+      token1Data = {
+        address: token1Address,
+        decimals: Number(decimals1),
+        name: name1,
+        symbol: symbol1,
+        balance: Number(ethers.formatUnits(balance1, Number(decimals1))),
+        chainId
+      };
+    } catch (err) {
+      console.error("Error retrieving token1 data:", err);
+      throw new Error(`Failed to fetch token1 data: ${err.message}`);
+    }
+
+    return { token0Data, token1Data };
+  }
+
+  /**
+   * Fetch pool state data
+   * @param {Object} token0 - Token0 data object
+   * @param {Object} token1 - Token1 data object
+   * @param {number} fee - Pool fee tier
+   * @param {number} chainId - Chain ID
+   * @returns {Promise<Object>} Pool state data
+   */
+  async fetchPoolData(token0, token1, fee, chainId) {
+    if (!token0?.address || !token1?.address || !fee || !chainId) {
+      throw new Error("Missing required parameters for pool data fetch");
+    }
+
+    // Create Token instances for pool address calculation
+    const token0Instance = new Token(chainId, token0.address, token0.decimals, token0.symbol, token0.name);
+    const token1Instance = new Token(chainId, token1.address, token1.decimals, token1.symbol, token1.name);
+
+    // Calculate pool address
+    const feeNumber = Number(fee);
+    const poolAddress = Pool.getAddress(token0Instance, token1Instance, feeNumber);
+
+    // Create pool contract
+    const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
+
+    try {
+      const slot0 = await poolContract.slot0();
+      const observationIndex = Number(slot0[2]);
+      const lastObservation = await poolContract.observations(observationIndex);
+      const protocolFees = await poolContract.protocolFees();
+
+      return {
+        poolAddress,
+        token0,
+        token1,
+        sqrtPriceX96: slot0[0].toString(),
+        tick: Number(slot0[1]),
+        observationIndex: Number(slot0[2]),
+        observationCardinality: Number(slot0[3]),
+        observationCardinalityNext: Number(slot0[4]),
+        feeProtocol: Number(slot0[5]),
+        unlocked: slot0[6],
+        liquidity: (await poolContract.liquidity()).toString(),
+        feeGrowthGlobal0X128: (await poolContract.feeGrowthGlobal0X128()).toString(),
+        feeGrowthGlobal1X128: (await poolContract.feeGrowthGlobal1X128()).toString(),
+        protocolFeeToken0: protocolFees[0].toString(),
+        protocolFeeToken1: protocolFees[1].toString(),
+        tickSpacing: Number(await poolContract.tickSpacing()),
+        fee: Number(await poolContract.fee()),
+        maxLiquidityPerTick: (await poolContract.maxLiquidityPerTick()).toString(),
+        lastObservation: {
+          blockTimestamp: Number(lastObservation.blockTimestamp),
+          tickCumulative: lastObservation.tickCumulative.toString(),
+          secondsPerLiquidityCumulativeX128: lastObservation.secondsPerLiquidityCumulativeX128.toString(),
+          initialized: lastObservation.initialized,
+        },
+        ticks: {} // Will be populated by fetchTickData
+      };
+    } catch (error) {
+      console.error("Error fetching pool data:", error);
+      throw new Error(`Failed to fetch pool data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fetch tick-specific data for fee calculations
+   * @param {string} poolAddress - Pool contract address
+   * @param {number} tickLower - Lower tick of the position
+   * @param {number} tickUpper - Upper tick of the position
+   * @returns {Promise<{tickLower: Object, tickUpper: Object}>} Tick data
+   */
+  async fetchTickData(poolAddress, tickLower, tickUpper) {
+    if (!poolAddress || tickLower === undefined || tickUpper === undefined) {
+      throw new Error("Missing required parameters for tick data fetch");
+    }
+
+    const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
+
+    try {
+      const [lowerTickData, upperTickData] = await Promise.all([
+        poolContract.ticks(tickLower),
+        poolContract.ticks(tickUpper)
+      ]);
+
+      return {
+        tickLower: {
+          liquidityGross: lowerTickData.liquidityGross.toString(),
+          liquidityNet: lowerTickData.liquidityNet.toString(),
+          feeGrowthOutside0X128: lowerTickData.feeGrowthOutside0X128.toString(),
+          feeGrowthOutside1X128: lowerTickData.feeGrowthOutside1X128.toString(),
+          tickCumulativeOutside: lowerTickData.tickCumulativeOutside.toString(),
+          secondsPerLiquidityOutsideX128: lowerTickData.secondsPerLiquidityOutsideX128.toString(),
+          secondsOutside: Number(lowerTickData.secondsOutside),
+          initialized: lowerTickData.initialized,
+        },
+        tickUpper: {
+          liquidityGross: upperTickData.liquidityGross.toString(),
+          liquidityNet: upperTickData.liquidityNet.toString(),
+          feeGrowthOutside0X128: upperTickData.feeGrowthOutside0X128.toString(),
+          feeGrowthOutside1X128: upperTickData.feeGrowthOutside1X128.toString(),
+          tickCumulativeOutside: upperTickData.tickCumulativeOutside.toString(),
+          secondsPerLiquidityOutsideX128: upperTickData.secondsPerLiquidityOutsideX128.toString(),
+          secondsOutside: Number(upperTickData.secondsOutside),
+          initialized: upperTickData.initialized,
+        }
+      };
+    } catch (error) {
+      console.error("Error fetching tick data:", error);
+      throw new Error(`Failed to fetch tick data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Assemble position data from contract data and cached pool/token data
+   * @param {string} tokenId - Position token ID
+   * @param {Object} positionData - Raw position data from contract
+   * @param {Object} poolDataMap - Cached pool data
+   * @param {Object} tokenDataMap - Cached token data
+   * @returns {Object} Assembled position object
+   * @private
+   */
+  _assemblePositionData(tokenId, positionData, poolDataMap, tokenDataMap) {
+    const {
+      nonce,
+      operator,
+      token0,
+      token1,
+      fee,
+      tickLower,
+      tickUpper,
+      liquidity,
+      feeGrowthInside0LastX128,
+      feeGrowthInside1LastX128,
+      tokensOwed0,
+      tokensOwed1
+    } = positionData;
+
+    const token0Data = tokenDataMap[token0];
+    const token1Data = tokenDataMap[token1];
+    const tokenPair = `${token0Data.symbol}/${token1Data.symbol}`;
+
+    // Get pool address
+    const token0Instance = new Token(token0Data.chainId, token0, token0Data.decimals, token0Data.symbol);
+    const token1Instance = new Token(token1Data.chainId, token1, token1Data.decimals, token1Data.symbol);
+    const poolAddress = Pool.getAddress(token0Instance, token1Instance, Number(fee));
+
+    return {
+      id: String(tokenId),
+      tokenPair,
+      pool: poolAddress,
+      nonce: Number(nonce),
+      operator,
+      fee: Number(fee),
+      tickLower: Number(tickLower),
+      tickUpper: Number(tickUpper),
+      liquidity: liquidity.toString(),
+      feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
+      feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
+      tokensOwed0: tokensOwed0.toString(),
+      tokensOwed1: tokensOwed1.toString(),
+      platform: this.platformId,
+      platformName: this.platformName
+    };
+  }
+
+  /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID
@@ -196,240 +448,75 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     try {
-      // Get chain configuration
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
+      // Get position manager contract
+      const positionManager = await this._getPositionManager(chainId);
+      
+      // Fetch user's position token IDs
+      const tokenIds = await this._fetchUserPositionIds(address, positionManager);
+      
+      if (tokenIds.length === 0) {
+        return { positions: [], poolData: {}, tokenData: {} };
       }
 
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-      // Create contract instance
-      const positionManager = new ethers.Contract(
-        positionManagerAddress,
-        this.nonfungiblePositionManagerABI,
-        this.provider
-      );
-
-      // Get the number of positions owned by the user
-      const balance = await positionManager.balanceOf(address);
-      const positionsData = [];
+      const positions = [];
       const poolDataMap = {};
       const tokenDataMap = {};
-
-      // Fetch data for each position
-      for (let i = 0; i < balance; i++) {
-        const tokenId = await positionManager.tokenOfOwnerByIndex(address, i);
-        const positionId = String(tokenId);
-
-        // Get position details
-        const positionData = await positionManager.positions(tokenId);
-        const {
-          nonce,
-          operator,
-          token0,
-          token1,
-          fee,
-          tickLower,
-          tickUpper,
-          liquidity,
-          feeGrowthInside0LastX128,
-          feeGrowthInside1LastX128,
-          tokensOwed0,
-          tokensOwed1
-        } = positionData;
-
-        // Get token details
-        const token0Contract = new ethers.Contract(token0, this.erc20ABI, this.provider);
-        const token1Contract = new ethers.Contract(token1, this.erc20ABI, this.provider);
-
-        let decimals0, name0, symbol0, balance0, decimals1, name1, symbol1, balance1;
-
+      
+      // Process each position
+      for (const tokenId of tokenIds) {
         try {
-          [decimals0, name0, symbol0, balance0] = await Promise.all([
-            token0Contract.decimals(),
-            token0Contract.name(),
-            token0Contract.symbol(),
-            token0Contract.balanceOf(address),
-          ]);
-
-          decimals0 = Number(decimals0.toString());
-          balance0 = Number(ethers.formatUnits(balance0, decimals0));
-
-        } catch (err) {
-          console.error("Error retrieving token0 data:", err);
-          continue;
-        }
-
-        try {
-          [decimals1, name1, symbol1, balance1] = await Promise.all([
-            token1Contract.decimals(),
-            token1Contract.name(),
-            token1Contract.symbol(),
-            token1Contract.balanceOf(address),
-          ]);
-
-          decimals1 = Number(decimals1.toString());
-          balance1 = Number(ethers.formatUnits(balance1, decimals1));
-
-        } catch (err) {
-          console.error("Error retrieving token1 data:", err);
-          continue;
-        }
-
-        // Store token data
-        if (!tokenDataMap[token0]) {
-          tokenDataMap[token0] = {
-            address: token0,
-            decimals: decimals0,
-            symbol: symbol0,
-            name: name0,
-            balance: balance0
-          };
-        }
-
-        if (!tokenDataMap[token1]) {
-          tokenDataMap[token1] = {
-            address: token1,
-            decimals: decimals1,
-            symbol: symbol1,
-            name: name1,
-            balance: balance1
-          };
-        }
-
-        // Create Token instances for pool address calculation
-        const token0Instance = new Token(chainId, token0, decimals0, symbol0);
-        const token1Instance = new Token(chainId, token1, decimals1, symbol1);
-
-        // Create a descriptive token pair name
-        const tokenPair = `${symbol0}/${symbol1}`;
-
-        // Calculate pool address
-        const feeNumber = Number(fee.toString());
-        const poolAddress = Pool.getAddress(token0Instance, token1Instance, feeNumber);
-
-        // Fetch pool data if not already fetched
-        if (!poolDataMap[poolAddress]) {
-          const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
-
-          try {
-            const slot0 = await poolContract.slot0();
-            const observationIndex = Number(slot0[2].toString());
-            const lastObservation = await poolContract.observations(observationIndex);
-            const protocolFees = await poolContract.protocolFees();
-
-            poolDataMap[poolAddress] = {
-              poolAddress,
-              token0,
-              token1,
-              sqrtPriceX96: slot0[0].toString(),
-              tick: Number(slot0[1].toString()),
-              observationIndex: Number(slot0[2].toString()),
-              observationCardinality: Number(slot0[3].toString()),
-              observationCardinalityNext: Number(slot0[4].toString()),
-              feeProtocol: Number(slot0[5].toString()),
-              unlocked: slot0[6],
-              liquidity: (await poolContract.liquidity()).toString(),
-              feeGrowthGlobal0X128: (await poolContract.feeGrowthGlobal0X128()).toString(),
-              feeGrowthGlobal1X128: (await poolContract.feeGrowthGlobal1X128()).toString(),
-              protocolFeeToken0: protocolFees[0].toString(),
-              protocolFeeToken1: protocolFees[1].toString(),
-              tickSpacing: Number((await poolContract.tickSpacing()).toString()),
-              fee: Number((await poolContract.fee()).toString()),
-              maxLiquidityPerTick: (await poolContract.maxLiquidityPerTick()).toString(),
-              lastObservation: {
-                blockTimestamp: Number(lastObservation.blockTimestamp.toString()),
-                tickCumulative: lastObservation.tickCumulative.toString(),
-                secondsPerLiquidityCumulativeX128: lastObservation.secondsPerLiquidityCumulativeX128.toString(),
-                initialized: lastObservation.initialized,
-              },
-              ticks: {} // Initialize ticks object
-            };
-
-            // Fetch tick data for this position
-            try {
-              // Fetch lower tick data
-              const lowerTickData = await poolContract.ticks(tickLower);
-              poolDataMap[poolAddress].ticks[tickLower] = {
-                feeGrowthOutside0X128: lowerTickData.feeGrowthOutside0X128.toString(),
-                feeGrowthOutside1X128: lowerTickData.feeGrowthOutside1X128.toString(),
-                initialized: lowerTickData.initialized
-              };
-
-              // Fetch upper tick data
-              const upperTickData = await poolContract.ticks(tickUpper);
-              poolDataMap[poolAddress].ticks[tickUpper] = {
-                feeGrowthOutside0X128: upperTickData.feeGrowthOutside0X128.toString(),
-                feeGrowthOutside1X128: upperTickData.feeGrowthOutside1X128.toString(),
-                initialized: upperTickData.initialized
-              };
-
-            } catch (tickError) {
-              console.error(`Failed to fetch tick data for position ${positionId}:`, tickError);
+          // Get position data from contract
+          const positionData = await positionManager.positions(tokenId);
+          const { token0, token1, fee, tickLower, tickUpper } = positionData;
+          
+          // Fetch token data if not cached
+          if (!tokenDataMap[token0] || !tokenDataMap[token1]) {
+            const { token0Data, token1Data } = await this.fetchTokenData(token0, token1, address, chainId);
+            
+            if (!tokenDataMap[token0]) {
+              tokenDataMap[token0] = token0Data;
             }
-
-          } catch (slot0Error) {
-            console.error(`Failed to fetch slot0 or pool data for pool ${poolAddress}:`, slot0Error);
-            poolDataMap[poolAddress] = { poolAddress }; // Minimal data on failure
+            if (!tokenDataMap[token1]) {
+              tokenDataMap[token1] = token1Data;
+            }
           }
-
-        } else if (poolDataMap[poolAddress].ticks) {
-          // If pool data exists but we haven't fetched these specific ticks yet
-          const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
-
-          try {
-            // Check if we need to fetch the lower tick
-            if (!poolDataMap[poolAddress].ticks[tickLower]) {
-              const lowerTickData = await poolContract.ticks(tickLower);
-              poolDataMap[poolAddress].ticks[tickLower] = {
-                feeGrowthOutside0X128: lowerTickData.feeGrowthOutside0X128.toString(),
-                feeGrowthOutside1X128: lowerTickData.feeGrowthOutside1X128.toString(),
-                initialized: lowerTickData.initialized
-              };
-            }
-
-            // Check if we need to fetch the upper tick
-            if (!poolDataMap[poolAddress].ticks[tickUpper]) {
-              const upperTickData = await poolContract.ticks(tickUpper);
-              poolDataMap[poolAddress].ticks[tickUpper] = {
-                feeGrowthOutside0X128: upperTickData.feeGrowthOutside0X128.toString(),
-                feeGrowthOutside1X128: upperTickData.feeGrowthOutside1X128.toString(),
-                initialized: upperTickData.initialized
-              };
-            }
-
-          } catch (tickError) {
-            console.error(`Failed to fetch additional tick data for position ${positionId}:`, tickError);
+          
+          // Get pool address and fetch pool data if not cached
+          const token0Data = tokenDataMap[token0];
+          const token1Data = tokenDataMap[token1];
+          const token0Instance = new Token(chainId, token0, token0Data.decimals, token0Data.symbol);
+          const token1Instance = new Token(chainId, token1, token1Data.decimals, token1Data.symbol);
+          const poolAddress = Pool.getAddress(token0Instance, token1Instance, Number(fee));
+          
+          if (!poolDataMap[poolAddress]) {
+            const poolData = await this.fetchPoolData(token0Data, token1Data, fee, chainId);
+            poolDataMap[poolAddress] = poolData;
           }
+          
+          // Fetch tick data if not already present
+          const poolData = poolDataMap[poolAddress];
+          if (!poolData.ticks[tickLower] || !poolData.ticks[tickUpper]) {
+            const tickData = await this.fetchTickData(poolAddress, tickLower, tickUpper);
+            poolData.ticks[tickLower] = tickData.tickLower;
+            poolData.ticks[tickUpper] = tickData.tickUpper;
+          }
+          
+          // Assemble position data
+          const position = this._assemblePositionData(tokenId, positionData, poolDataMap, tokenDataMap);
+          positions.push(position);
+          
+        } catch (error) {
+          console.error(`Error processing position ${tokenId}:`, error);
+          // Continue with other positions even if one fails
         }
-
-        // Create position object with platform identifier
-        positionsData.push({
-          id: positionId,
-          tokenPair,
-          pool: poolAddress,
-          nonce: Number(nonce.toString()),
-          operator,
-          fee: feeNumber,
-          tickLower: Number(tickLower.toString()),
-          tickUpper: Number(tickUpper.toString()),
-          liquidity: Number(liquidity.toString()),
-          feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
-          tokensOwed0: Number(tokensOwed0.toString()),
-          tokensOwed1: Number(tokensOwed1.toString()),
-          platform: this.platformId,
-          platformName: this.platformName
-        });
       }
-
+      
       return {
-        positions: positionsData,
+        positions,
         poolData: poolDataMap,
         tokenData: tokenDataMap
       };
-
+      
     } catch (error) {
       console.error("Error fetching Uniswap V3 positions:", error);
       return {
@@ -596,14 +683,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} poolData.ticks - Object containing tick data for the position's ticks
    * @param {Object} poolData.ticks[tickLower] - Lower tick data with feeGrowthOutside values
    * @param {Object} poolData.ticks[tickUpper] - Upper tick data with feeGrowthOutside values
-   * @param {Object} token0Data - Token0 metadata
-   * @param {number} token0Data.decimals - Token0 decimals for formatting
-   * @param {Object} token1Data - Token1 metadata
-   * @param {number} token1Data.decimals - Token1 decimals for formatting
+   * @param {number} token0Decimals - Token0 decimals for formatting
+   * @param {number} token1Decimals - Token1 decimals for formatting
    * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
    * @throws {Error} If required pool or token data is missing
    */
-  calculateUncollectedFees(position, poolData, token0Data, token1Data) {
+  calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals) {
     // Validate inputs
     if (!poolData || !poolData.feeGrowthGlobal0X128 || !poolData.feeGrowthGlobal1X128) {
       throw new Error("Missing required pool data for fee calculation");
@@ -613,7 +698,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Missing required tick data for fee calculation");
     }
 
-    if (!token0Data?.decimals || !token1Data?.decimals) {
+    if (typeof token0Decimals !== 'number' || typeof token1Decimals !== 'number') {
       throw new Error("Missing token decimal information for fee calculation");
     }
 
@@ -628,8 +713,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
       tickLower,
       tickUpper,
-      token0: token0Data,
-      token1: token1Data
+      token0Decimals,
+      token1Decimals
     });
   }
 
@@ -644,27 +729,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     feeGrowthGlobal1X128,
     tickLower,
     tickUpper,
-    token0,
-    token1,
+    token0Decimals,
+    token1Decimals,
   }) {
-    // Convert all inputs to proper types
-    const toBigInt = (val) => {
-      if (typeof val === 'bigint') return val;
-      if (typeof val === 'string') return BigInt(val);
-      if (typeof val === 'number') return BigInt(Math.floor(val));
-      if (val?._isBigNumber) return BigInt(val.toString());
-      if (val?.toString) return BigInt(val.toString());
-      return BigInt(0);
-    };
-
     // Position data extraction
     const tickLowerValue = Number(position.tickLower);
     const tickUpperValue = Number(position.tickUpper);
-    const liquidity = toBigInt(position.liquidity);
-    const feeGrowthInside0LastX128 = toBigInt(position.feeGrowthInside0LastX128);
-    const feeGrowthInside1LastX128 = toBigInt(position.feeGrowthInside1LastX128);
-    const tokensOwed0 = toBigInt(position.tokensOwed0);
-    const tokensOwed1 = toBigInt(position.tokensOwed1);
+    const liquidity = BigInt(position.liquidity);
+    const feeGrowthInside0LastX128 = BigInt(position.feeGrowthInside0LastX128);
+    const feeGrowthInside1LastX128 = BigInt(position.feeGrowthInside1LastX128);
+    const tokensOwed0 = BigInt(position.tokensOwed0);
+    const tokensOwed1 = BigInt(position.tokensOwed1);
 
     // Ensure we have tick data
     if (!tickLower || !tickUpper) {
@@ -672,20 +747,20 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     const lowerTickData = {
-      feeGrowthOutside0X128: tickLower ? toBigInt(tickLower.feeGrowthOutside0X128) : 0n,
-      feeGrowthOutside1X128: tickLower ? toBigInt(tickLower.feeGrowthOutside1X128) : 0n,
+      feeGrowthOutside0X128: tickLower ? BigInt(tickLower.feeGrowthOutside0X128) : 0n,
+      feeGrowthOutside1X128: tickLower ? BigInt(tickLower.feeGrowthOutside1X128) : 0n,
       initialized: tickLower ? Boolean(tickLower.initialized) : false
     };
 
     const upperTickData = {
-      feeGrowthOutside0X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside0X128) : 0n,
-      feeGrowthOutside1X128: tickUpper ? toBigInt(tickUpper.feeGrowthOutside1X128) : 0n,
+      feeGrowthOutside0X128: tickUpper ? BigInt(tickUpper.feeGrowthOutside0X128) : 0n,
+      feeGrowthOutside1X128: tickUpper ? BigInt(tickUpper.feeGrowthOutside1X128) : 0n,
       initialized: tickUpper ? Boolean(tickUpper.initialized) : false
     };
 
     // Convert global fee growth to BigInt
-    const feeGrowthGlobal0X128BigInt = toBigInt(feeGrowthGlobal0X128);
-    const feeGrowthGlobal1X128BigInt = toBigInt(feeGrowthGlobal1X128);
+    const feeGrowthGlobal0X128BigInt = BigInt(feeGrowthGlobal0X128);
+    const feeGrowthGlobal1X128BigInt = BigInt(feeGrowthGlobal1X128);
 
     // Calculate current fee growth inside the position's range
     let feeGrowthInside0X128, feeGrowthInside1X128;
@@ -735,11 +810,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const uncollectedFees1Raw = tokensOwed1 + (liquidity * feeGrowthDelta1) / DENOMINATOR;
 
     // Format with proper decimals
-    if (!token0?.decimals || !token1?.decimals) {
-      throw new Error("Token decimal information missing - cannot calculate fees accurately");
-    }
-    const token0Decimals = token0.decimals;
-    const token1Decimals = token1.decimals;
 
     // Return both raw and formatted values for flexibility
     return {
@@ -1037,8 +1107,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         // Create an updated position object that reflects the fee claim
         const updatedPosition = {
           ...position,
-          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
-          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
+          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
+          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
           feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
           feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
         };
@@ -1399,9 +1469,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         // Create an updated position object that reflects the liquidity decrease
         const updatedPosition = {
           ...position,
-          liquidity: Number(updatedPositionData.liquidity.toString()),
-          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
-          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
+          liquidity: updatedPositionData.liquidity.toString(),
+          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
+          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
           feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
           feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
         };
@@ -1642,11 +1712,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Convert token amounts to JSBI for the SDK
       const amount0 = token0Amount
-        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token0Amount).toFixed(token0Data.decimals), token0Data.decimals).toString())
+        ? JSBI.BigInt(ethers.parseUnits(token0Amount, token0Data.decimals).toString())
         : JSBI.BigInt(0);
 
       const amount1 = token1Amount
-        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token1Amount).toFixed(token1Data.decimals), token1Data.decimals).toString())
+        ? JSBI.BigInt(ethers.parseUnits(token1Amount, token1Data.decimals).toString())
         : JSBI.BigInt(0);
 
       // Create a Position instance to represent the amount we want to add
@@ -1758,13 +1828,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       let amount1InWei = '0';
 
       if (token0Amount && parseFloat(token0Amount) > 0) {
-        const roundedAmount0 = parseFloat(token0Amount).toFixed(token0Data.decimals);
-        amount0InWei = ethers.parseUnits(roundedAmount0, token0Data.decimals).toString();
+        amount0InWei = ethers.parseUnits(token0Amount, token0Data.decimals).toString();
       }
 
       if (token1Amount && parseFloat(token1Amount) > 0) {
-        const roundedAmount1 = parseFloat(token1Amount).toFixed(token1Data.decimals);
-        amount1InWei = ethers.parseUnits(roundedAmount1, token1Data.decimals).toString();
+        amount1InWei = ethers.parseUnits(token1Amount, token1Data.decimals).toString();
       }
 
       // STEP 1: Check and approve tokens
@@ -1861,9 +1929,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         // Create an updated position object that reflects the liquidity increase
         const updatedPosition = {
           ...position,
-          liquidity: Number(updatedPositionData.liquidity.toString()),
-          tokensOwed0: Number(updatedPositionData.tokensOwed0.toString()),
-          tokensOwed1: Number(updatedPositionData.tokensOwed1.toString()),
+          liquidity: updatedPositionData.liquidity.toString(),
+          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
+          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
           feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
           feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
         };
@@ -2066,11 +2134,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Step 7: Convert token amounts to JSBI
       const amount0 = token0Amount && parseFloat(token0Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token0Amount).toFixed(decimals0), decimals0).toString())
+        ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
         : JSBI.BigInt(0);
 
       const amount1 = token1Amount && parseFloat(token1Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(parseFloat(token1Amount).toFixed(decimals1), decimals1).toString())
+        ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
         : JSBI.BigInt(0);
 
       // Step 8: Create the Position instance
@@ -2225,11 +2293,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Convert token amounts to wei/smallest units
       const amount0InWei = needsToken0Approval
-        ? ethers.parseUnits(parseFloat(token0Amount).toFixed(token0Decimals), token0Decimals).toString()
+        ? ethers.parseUnits(token0Amount, token0Decimals).toString()
         : '0';
 
       const amount1InWei = needsToken1Approval
-        ? ethers.parseUnits(parseFloat(token1Amount).toFixed(token1Decimals), token1Decimals).toString()
+        ? ethers.parseUnits(token1Amount, token1Decimals).toString()
         : '0';
 
       // STEP 1: Check and approve tokens
