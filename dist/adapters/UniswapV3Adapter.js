@@ -48,6 +48,117 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.uniswapV3PoolABI = IUniswapV3PoolABI;
     this.swapRouterABI = SwapRouterABI;
     this.erc20ABI = ERC20ABI;
+
+    // Default transaction parameters
+    this.defaultSlippageTolerance = 0.5; // 0.5%
+    this.defaultDeadlineMinutes = 20; // 20 minutes
+    this.gasMultiplier = 1.2; // 20% buffer for gas estimation
+  }
+
+  /**
+   * Validate and normalize slippage tolerance
+   * @param {number} slippageTolerance - Slippage tolerance percentage (0-100)
+   * @returns {number} Validated slippage tolerance
+   * @throws {Error} If slippage tolerance is invalid
+   */
+  _validateSlippageTolerance(slippageTolerance) {
+    const slippage = slippageTolerance ?? this.defaultSlippageTolerance;
+    
+    if (typeof slippage !== 'number' || slippage < 0 || slippage > 100) {
+      throw new Error(`Invalid slippage tolerance: ${slippage}. Must be between 0 and 100.`);
+    }
+    
+    return slippage;
+  }
+
+  /**
+   * Create deadline timestamp from minutes offset
+   * @param {number} [deadlineMinutes] - Minutes from now (default: 20)
+   * @returns {number} Unix timestamp
+   */
+  _createDeadline(deadlineMinutes) {
+    const minutes = deadlineMinutes ?? this.defaultDeadlineMinutes;
+    return Math.floor(Date.now() / 1000) + (minutes * 60);
+  }
+
+  /**
+   * Estimate gas for a transaction with buffer
+   * @param {ethers.Contract} contract - Contract instance
+   * @param {string} method - Method name
+   * @param {Array} args - Method arguments
+   * @param {Object} [overrides] - Transaction overrides
+   * @returns {Promise<number>} Estimated gas limit with buffer
+   * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
+   */
+  async _estimateGasWithBuffer(contract, method, args, overrides = {}) {
+    try {
+      const estimatedGas = await contract[method].estimateGas(...args, overrides);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      return gasWithBuffer;
+    } catch (error) {
+      // In DeFi, gas estimation failure usually means transaction will revert
+      // Better to fail fast than waste user's money on a doomed transaction
+      throw new Error(
+        `Gas estimation failed for ${method}. This usually indicates the transaction would revert. ` +
+        `Possible causes: insufficient balance, excessive slippage, or invalid parameters. ` +
+        `Original error: ${error.message}`
+      );
+    }
+  }
+
+  /**
+   * Estimate gas from transaction data with buffer
+   * @param {ethers.Signer} signer - Signer instance
+   * @param {Object} txData - Transaction data object
+   * @returns {Promise<number>} Estimated gas limit with buffer
+   * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
+   */
+  async _estimateGasFromTxData(signer, txData) {
+    try {
+      const estimatedGas = await signer.estimateGas(txData);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      return gasWithBuffer;
+    } catch (error) {
+      // In DeFi, gas estimation failure usually means transaction will revert
+      // Better to fail fast than waste user's money on a doomed transaction
+      throw new Error(
+        `Gas estimation failed. This usually indicates the transaction would revert. ` +
+        `Possible causes: insufficient balance, excessive slippage, insufficient allowance, or invalid parameters. ` +
+        `Original error: ${error.message}`
+      );
+    }
+  }
+
+  /**
+   * Estimate gas for token approval with buffer
+   * @param {ethers.Contract} tokenContract - Token contract instance
+   * @param {string} spender - Spender address
+   * @param {bigint} amount - Amount to approve
+   * @returns {Promise<number>} Estimated gas limit with buffer
+   * @throws {Error} If gas estimation fails
+   */
+  async _estimateApprovalGas(tokenContract, spender, amount) {
+    try {
+      const estimatedGas = await tokenContract.approve.estimateGas(spender, amount);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      return gasWithBuffer;
+    } catch (error) {
+      throw new Error(
+        `Gas estimation failed for token approval. ` +
+        `Possible causes: insufficient balance for gas, invalid spender address, or contract issues. ` +
+        `Original error: ${error.message}`
+      );
+    }
+  }
+
+  /**
+   * Create standardized slippage tolerance Percent object
+   * @param {number} slippageTolerance - Slippage tolerance percentage
+   * @returns {Percent} Uniswap SDK Percent object
+   */
+  _createSlippagePercent(slippageTolerance) {
+    const validatedSlippage = this._validateSlippageTolerance(slippageTolerance);
+    return new Percent(Math.floor(validatedSlippage * 100), 10_000);
   }
 
   /**
@@ -1069,13 +1180,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Get signer
       const signer = await provider.getSigner();
 
+      // Estimate gas using the transaction data
+      const gasLimit = await this._estimateGasFromTxData(signer, {
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        from: address
+      });
+
       // Construct transaction
       const transaction = {
         to: txData.to,
         data: txData.data,
         value: txData.value,
         from: address,
-        gasLimit: 300000
+        gasLimit
       };
 
       // Send transaction
@@ -1325,19 +1444,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         recipient: address
       };
 
-      // Debug: Log slippage tolerance calculation
-
-      // Create slippage tolerance Percent
-      const slippageTolerancePercent = new Percent(Math.floor(slippageTolerance * 100), 10_000);
-
-      // Debug: Log liquidity percentage calculation
+      // Create slippage tolerance using standardized method
+      const slippageTolerancePercent = this._createSlippagePercent(slippageTolerance);
 
       // Create liquidity percentage Percent
       const liquidityPercentage = new Percent(percentage, 100);
 
       // Create RemoveLiquidityOptions
       const removeLiquidityOptions = {
-        deadline: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+        deadline: this._createDeadline(), // Use standardized deadline
         slippageTolerance: slippageTolerancePercent,
         tokenId: position.id,
         // Percentage of liquidity to remove
@@ -1431,13 +1546,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Get signer
       const signer = await provider.getSigner();
 
+      // Estimate gas using the transaction data
+      const gasLimit = await this._estimateGasFromTxData(signer, {
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        from: address
+      });
+
       // Construct transaction
       const transaction = {
         to: txData.to,
         data: txData.data,
         value: txData.value,
         from: address,
-        gasLimit: 500000 // Higher gas limit for complex operation
+        gasLimit
       };
 
       // Send transaction
@@ -1731,8 +1854,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Create AddLiquidityOptions
       const addLiquidityOptions = {
-        deadline: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
-        slippageTolerance: new Percent(Math.floor(slippageTolerance * 100), 10_000), // Convert to SDK format
+        deadline: this._createDeadline(), // Use standardized deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
         tokenId: position.id,
       };
 
@@ -1845,11 +1968,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance0 = await token0Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
+          // Estimate gas for approval
+          const approvalGasLimit = await this._estimateApprovalGas(
+            token0Contract,
+            positionManagerAddress,
+            ethers.MaxUint256
+          );
+
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
             positionManagerAddress,
             ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: 100000 }
+            { gasLimit: approvalGasLimit }
           );
 
           tokenApprovals.push(approveTx.wait());
@@ -1863,12 +1993,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         const allowance1 = await token1Contract.allowance(address, positionManagerAddress);
 
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
+          // Estimate gas for approval
+          const approvalGasLimit = await this._estimateApprovalGas(
+            token1Contract,
+            positionManagerAddress,
+            ethers.MaxUint256
+          );
 
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
             positionManagerAddress,
             ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: 100000 }
+            { gasLimit: approvalGasLimit }
           );
 
           tokenApprovals.push(approveTx.wait());
@@ -1895,13 +2031,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         slippageTolerance
       });
 
+      // Estimate gas using the transaction data
+      const gasLimit = await this._estimateGasFromTxData(signer, {
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        from: address
+      });
+
       // Construct transaction
       const transaction = {
         to: txData.to,
         data: txData.data,
         value: txData.value,
         from: address,
-        gasLimit: 500000 // Higher gas limit for add liquidity operation
+        gasLimit
       };
 
       // Send transaction
@@ -2154,8 +2298,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Step 9: Create mint options
       const mintOptions = {
         recipient: address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from now
-        slippageTolerance: new Percent(Math.floor(slippageTolerance * 100), 10_000),
+        deadline: this._createDeadline(), // Use standardized deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
       };
 
       // Step 10: Get calldata for minting
@@ -2309,11 +2453,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
 
+          // Estimate gas for approval
+          const approvalGasLimit = await this._estimateApprovalGas(
+            token0Contract,
+            positionManagerAddress,
+            ethers.MaxUint256
+          );
+
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
             positionManagerAddress,
             ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: 100000 }
+            { gasLimit: approvalGasLimit }
           );
 
           tokenApprovals.push(approveTx.wait());
@@ -2326,11 +2477,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
 
+          // Estimate gas for approval
+          const approvalGasLimit = await this._estimateApprovalGas(
+            token1Contract,
+            positionManagerAddress,
+            ethers.MaxUint256
+          );
+
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
             positionManagerAddress,
             ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: 100000 }
+            { gasLimit: approvalGasLimit }
           );
 
           tokenApprovals.push(approveTx.wait());
@@ -2358,13 +2516,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokensSwapped
       });
 
+      // Estimate gas using the transaction data
+      const gasLimit = await this._estimateGasFromTxData(signer, {
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        from: address
+      });
+
       // Construct transaction
       const transaction = {
         to: txData.to,
         data: txData.data,
         value: txData.value,
         from: address,
-        gasLimit: 1000000 // Higher gas limit for position creation
+        gasLimit
       };
 
       // Send transaction
@@ -2495,7 +2661,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokenOut,
         fee,
         recipient,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes from now
+        deadline: this._createDeadline(), // Use standardized deadline
         amountIn,
         amountOutMinimum: amountOutMinimum || 0,
         sqrtPriceLimitX96: sqrtPriceLimitX96 || 0

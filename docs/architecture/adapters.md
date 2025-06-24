@@ -167,19 +167,39 @@ async createPosition(params)
 
 ## Uniswap V3 Adapter Implementation
 
-### Recent Improvements (v0.5.0)
+### Recent Improvements
 
-#### Modular Data Fetching
+#### v0.6.0 - Financial Safety & Gas Optimization
+**Problem**: Hardcoded gas limits and inconsistent slippage handling risked user funds
+**Solution**: Fail-fast gas estimation and standardized transaction parameters
+
+```javascript
+// NEW: Dynamic gas estimation with fail-fast safety
+const gasLimit = await adapter._estimateGasFromTxData(signer, txData);
+// Throws clear error if transaction would revert, protecting user funds
+
+// NEW: Standardized slippage and deadline handling
+const slippagePercent = adapter._createSlippagePercent(0.5); // Validates 0-100%
+const deadline = adapter._createDeadline(20); // Configurable minutes from now
+```
+
+**Financial Safety Features:**
+- **No Fallback Gas Limits**: Fails fast instead of wasting gas on doomed transactions
+- **Input Validation**: Slippage tolerance validated (0-100%) with clear error messages
+- **Consistent Deadlines**: Configurable timeouts prevent stuck transactions
+- **Real-time Estimation**: Gas calculated per transaction based on current network state
+
+#### v0.5.0 - Modular Data Fetching
 **Problem**: The original `getPositions()` method was 250+ lines doing too much
 **Solution**: Broken into focused public utilities for reusability
 ```javascript
-// New public utilities available independently
+// Public utilities available independently
 await adapter.fetchTokenData(token0Address, token1Address, userAddress, chainId)
 await adapter.fetchPoolData(token0Data, token1Data, fee, chainId) 
 await adapter.fetchTickData(poolAddress, tickLower, tickUpper)
 ```
 
-#### Performance Optimizations
+**Performance Optimizations:**
 - **Intelligent Caching**: Token and pool data cached to prevent redundant calls
 - **Simplified Type Handling**: Removed unnecessary `.toString()` conversion chains
 - **Parameter Optimization**: Functions now take only required parameters vs full objects
@@ -208,6 +228,24 @@ This method implements the fee calculation manually because:
 - The Uniswap V3 SDK doesn't provide fee calculation methods
 - Fee calculations require real-time on-chain data (fee growth globals, tick data)
 - The SDK focuses on transaction building rather than state queries
+
+#### Gas Estimation Strategy (v0.6.0)
+**Challenge**: Hardcoded gas limits waste user money on failed transactions
+**Solution**: Dynamic estimation with fail-fast error handling
+```javascript
+// Fail-fast approach protects user funds
+try {
+  const gasLimit = await this._estimateGasFromTxData(signer, txData);
+} catch (error) {
+  // Clear error prevents wasted gas: "insufficient balance", "excessive slippage", etc.
+  throw new Error(`Transaction would likely revert: ${error.message}`);
+}
+```
+
+**Benefits:**
+- **Financial Protection**: No gas wasted on doomed transactions
+- **User Guidance**: Specific error messages help fix problems
+- **Network Adaptive**: Gas estimates adjust to current conditions
 
 #### Transaction Data Strategy
 **Challenge**: Different operations require different contract interactions
