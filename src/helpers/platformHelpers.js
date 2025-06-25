@@ -242,6 +242,38 @@ export function platformSupportsTokens(platformId, tokenSymbols, chainId) {
 }
 
 /**
+ * Get fee tiers supported by a platform
+ * @memberof module:helpers/platformHelpers
+ * @param {string} platformId - The platform ID to get fee tiers for
+ * @returns {Array<number>} Array of supported fee tiers in basis points - empty array if platform not found
+ * @example
+ * // Get Uniswap V3 fee tiers
+ * const feeTiers = getPlatformFeeTiers('uniswapV3');
+ * // Returns: [100, 500, 3000, 10000]
+ * 
+ * @example
+ * // Build fee tier dropdown options
+ * const feeOptions = getPlatformFeeTiers(platformId).map(tier => ({
+ *   value: tier,
+ *   label: `${tier / 100}%`,
+ *   description: tier === 500 ? 'Most common' : tier === 3000 ? 'Standard' : ''
+ * }));
+ * 
+ * @example
+ * // Automation service checking available pools
+ * const supportedFeeTiers = getPlatformFeeTiers('uniswapV3');
+ * for (const feeTier of supportedFeeTiers) {
+ *   const poolExists = await checkPoolExists(token0, token1, feeTier);
+ *   // Process pool...
+ * }
+ * @since 1.0.0
+ */
+export function getPlatformFeeTiers(platformId) {
+  if (!platformId || !platforms[platformId]) return [];
+  return platforms[platformId].feeTiers || [];
+}
+
+/**
  * Get all supported platform IDs
  * @memberof module:helpers/platformHelpers
  * @returns {Array<string>} Array of all configured platform IDs

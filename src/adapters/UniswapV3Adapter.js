@@ -1,18 +1,19 @@
 /**
  * UniswapV3Adapter - Uniswap V3 Protocol Integration
- * 
+ *
  * This adapter provides integration with Uniswap V3 concentrated liquidity pools:
  * - Fetch pool and position data
  * - Calculate position values and uncollected fees
  * - Generate swap and liquidity management transactions
  * - Handle price calculations and tick conversions
- * 
+ *
  * @module adapters/UniswapV3Adapter
  */
 
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
+import { getPlatformFeeTiers } from "../helpers/platformHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
 import JSBI from "jsbi";
@@ -63,11 +64,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    */
   _validateSlippageTolerance(slippageTolerance) {
     const slippage = slippageTolerance ?? this.defaultSlippageTolerance;
-    
+
     if (typeof slippage !== 'number' || slippage < 0 || slippage > 100) {
       throw new Error(`Invalid slippage tolerance: ${slippage}. Must be between 0 and 100.`);
     }
-    
+
     return slippage;
   }
 
@@ -238,7 +239,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokensSwapped
       };
     } catch (error) {
-      console.error("Error calculating pool address:", error);
       throw new Error(`Failed to calculate pool address: ${error.message}`);
     }
   }
@@ -293,7 +293,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-    
+
     return new ethers.Contract(
       positionManagerAddress,
       this.nonfungiblePositionManagerABI,
@@ -311,19 +311,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   async _fetchUserPositionIds(address, positionManager) {
     const balance = await positionManager.balanceOf(address);
     const tokenIds = [];
-    
+
     for (let i = 0; i < balance; i++) {
       const tokenId = await positionManager.tokenOfOwnerByIndex(address, i);
       tokenIds.push(String(tokenId));
     }
-    
+
     return tokenIds;
   }
 
   /**
    * Fetch token metadata and user balances
    * @param {string} token0Address - Token0 contract address
-   * @param {string} token1Address - Token1 contract address 
+   * @param {string} token1Address - Token1 contract address
    * @param {string} userAddress - User's wallet address
    * @param {number} chainId - Chain ID
    * @returns {Promise<{token0Data: Object, token1Data: Object}>} Token metadata and balances
@@ -441,7 +441,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         ticks: {} // Will be populated by fetchTickData
       };
     } catch (error) {
-      console.error("Error fetching pool data:", error);
       throw new Error(`Failed to fetch pool data: ${error.message}`);
     }
   }
@@ -489,7 +488,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         }
       };
     } catch (error) {
-      console.error("Error fetching tick data:", error);
       throw new Error(`Failed to fetch tick data: ${error.message}`);
     }
   }
@@ -561,10 +559,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     try {
       // Get position manager contract
       const positionManager = await this._getPositionManager(chainId);
-      
+
       // Fetch user's position token IDs
       const tokenIds = await this._fetchUserPositionIds(address, positionManager);
-      
+
       if (tokenIds.length === 0) {
         return { positions: [], poolData: {}, tokenData: {} };
       }
@@ -572,18 +570,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const positions = [];
       const poolDataMap = {};
       const tokenDataMap = {};
-      
+
       // Process each position
       for (const tokenId of tokenIds) {
         try {
           // Get position data from contract
           const positionData = await positionManager.positions(tokenId);
           const { token0, token1, fee, tickLower, tickUpper } = positionData;
-          
+
           // Fetch token data if not cached
           if (!tokenDataMap[token0] || !tokenDataMap[token1]) {
             const { token0Data, token1Data } = await this.fetchTokenData(token0, token1, address, chainId);
-            
+
             if (!tokenDataMap[token0]) {
               tokenDataMap[token0] = token0Data;
             }
@@ -591,19 +589,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
               tokenDataMap[token1] = token1Data;
             }
           }
-          
+
           // Get pool address and fetch pool data if not cached
           const token0Data = tokenDataMap[token0];
           const token1Data = tokenDataMap[token1];
           const token0Instance = new Token(chainId, token0, token0Data.decimals, token0Data.symbol);
           const token1Instance = new Token(chainId, token1, token1Data.decimals, token1Data.symbol);
           const poolAddress = Pool.getAddress(token0Instance, token1Instance, Number(fee));
-          
+
           if (!poolDataMap[poolAddress]) {
             const poolData = await this.fetchPoolData(token0Data, token1Data, fee, chainId);
             poolDataMap[poolAddress] = poolData;
           }
-          
+
           // Fetch tick data if not already present
           const poolData = poolDataMap[poolAddress];
           if (!poolData.ticks[tickLower] || !poolData.ticks[tickUpper]) {
@@ -611,23 +609,23 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             poolData.ticks[tickLower] = tickData.tickLower;
             poolData.ticks[tickUpper] = tickData.tickUpper;
           }
-          
+
           // Assemble position data
           const position = this._assemblePositionData(tokenId, positionData, poolDataMap, tokenDataMap);
           positions.push(position);
-          
+
         } catch (error) {
           console.error(`Error processing position ${tokenId}:`, error);
           // Continue with other positions even if one fails
         }
       }
-      
+
       return {
         positions,
         poolData: poolDataMap,
         tokenData: tokenDataMap
       };
-      
+
     } catch (error) {
       console.error("Error fetching Uniswap V3 positions:", error);
       return {
@@ -772,13 +770,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Calculate uncollected fees for a Uniswap V3 position
-   * 
+   *
    * This method implements the Uniswap V3 fee calculation logic, which requires
    * on-chain data that the SDK doesn't fetch. The calculation accounts for:
    * - Global fee growth since the position was last updated
    * - Fee growth inside/outside the position's price range
    * - The position's liquidity and tick range
-   * 
+   *
    * @param {Object} position - Position data
    * @param {string|number|bigint} position.liquidity - Position liquidity
    * @param {string|number|bigint} position.feeGrowthInside0LastX128 - Fee growth inside for token0 at last action
@@ -1363,15 +1361,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // The tokens MUST be in the same order as the position expects
       let orderedToken0Data, orderedToken1Data;
-      if (positionData.token0.toLowerCase() === token0Data.address.toLowerCase() && 
+      if (positionData.token0.toLowerCase() === token0Data.address.toLowerCase() &&
           positionData.token1.toLowerCase() === token1Data.address.toLowerCase()) {
         // Order matches
         orderedToken0Data = token0Data;
         orderedToken1Data = token1Data;
-      } else if (positionData.token0.toLowerCase() === token1Data.address.toLowerCase() && 
+      } else if (positionData.token0.toLowerCase() === token1Data.address.toLowerCase() &&
                  positionData.token1.toLowerCase() === token0Data.address.toLowerCase()) {
         // Order is reversed
-        
+
         orderedToken0Data = token1Data;
         orderedToken1Data = token0Data;
       } else {
@@ -1461,7 +1459,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
       // Generate the calldata using the SDK
-      
+
       const { calldata, value } = NonfungiblePositionManager.removeCallParameters(
         currentPosition,
         removeLiquidityOptions
@@ -2245,21 +2243,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           poolContract.tickSpacing()
         ]);
       } catch (error) {
-        console.warn("Pool doesn't exist yet, using default values");
-        liquidity = "0";
-        slot0 = {
-          sqrtPriceX96: Math.sqrt(1) * (2 ** 96),
-          tick: 0
-        };
-
-        // Default tick spacing based on fee
-        switch (Number(feeTier)) {
-          case 100: tickSpacing = 1; break;
-          case 500: tickSpacing = 10; break;
-          case 3000: tickSpacing = 60; break;
-          case 10000: tickSpacing = 200; break;
-          default: throw new Error(`Unsupported fee tier: ${feeTier}`);
-        }
+        throw new Error(`Cannot create position: pool does not exist for ${symbol0}/${symbol1} with ${feeTier} fee tier. Pool must be created first.`);
       }
 
       // Step 5: Create the Pool instance
@@ -2614,7 +2598,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Generate swap transaction data for Uniswap V3
    * @param {Object} params - Parameters for swap
    * @param {string} params.tokenIn - Address of input token
-   * @param {string} params.tokenOut - Address of output token  
+   * @param {string} params.tokenOut - Address of output token
    * @param {number} params.fee - Fee tier (500, 3000, 10000)
    * @param {string} params.recipient - Address to receive output tokens
    * @param {string} params.amountIn - Amount of input tokens (in wei)
@@ -2677,7 +2661,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
     } catch (error) {
-      console.error("Error generating swap data:", error);
       throw new Error(`Failed to generate swap data: ${error.message}`);
     }
   }
@@ -2690,16 +2673,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Array>} Array of pool information objects
    */
   async discoverAvailablePools(token0Address, token1Address, chainId) {
-    const feeTiers = [100, 500, 3000, 10000];
+    const feeTiers = getPlatformFeeTiers('uniswapV3');
     const pools = [];
 
     for (const fee of feeTiers) {
       try {
         const poolAddress = await this.getPoolAddressFromFactory(token0Address, token1Address, fee, chainId);
-        
+
         if (poolAddress && poolAddress !== ethers.ZeroAddress) {
           const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
-          
+
           try {
             const [slot0, liquidity] = await Promise.all([
               poolContract.slot0(),
@@ -2716,11 +2699,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
               });
             }
           } catch (poolError) {
-            console.log(`Pool at ${poolAddress} (fee: ${fee}) is not active`);
+            // Pool exists but is not active, skip it
           }
         }
       } catch (error) {
-        console.log(`No pool found for fee tier ${fee}`);
+        // No pool found for this fee tier, skip it
       }
     }
 
@@ -2745,7 +2728,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const factoryABI = [
       "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)"
     ];
-    
+
     const factoryContract = new ethers.Contract(factoryAddress, factoryABI, this.provider);
     return await factoryContract.getPool(token0Address, token1Address, fee);
   }

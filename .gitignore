@@ -2,5 +2,8 @@ ToDo
 node_modules/
 coverage/
 .env
+.env.*
+!.env.example
+!test/.env.test.example
 
 **/.claude/settings.local.json

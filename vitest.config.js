@@ -5,7 +5,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./tests/setup.js'],
-    include: ['./tests/**/*.test.js'],
+    setupFiles: ['./test/setup.js'],
+    include: ['./test/**/*.test.js'],
+    testTimeout: 30000, // 30 seconds for integration tests
+    hookTimeout: 30000, // 30 seconds for setup/teardown
   }
 });

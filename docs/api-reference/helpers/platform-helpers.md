@@ -146,6 +146,67 @@ None - Pure function
 
 ---
 
+## getPlatformFeeTiers
+
+Get fee tiers supported by a platform.
+
+### Signature
+```javascript
+getPlatformFeeTiers(platformId: string): Array<number>
+```
+
+### Parameters
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| platformId | `string` | Yes | - | The platform ID to get fee tiers for |
+
+### Returns
+
+`Array<number>` - Array of supported fee tiers in basis points - empty array if platform not found
+
+### Examples
+
+```javascript
+// Get Uniswap V3 fee tiers
+const feeTiers = getPlatformFeeTiers('uniswapV3');
+// Returns: [100, 500, 3000, 10000]
+
+// Build fee tier dropdown options
+const feeOptions = getPlatformFeeTiers(platformId).map(tier => ({
+  value: tier,
+  label: `${tier / 100}%`,
+  description: tier === 500 ? 'Most common' : tier === 3000 ? 'Standard' : ''
+}));
+
+// Automation service checking available pools
+const supportedFeeTiers = getPlatformFeeTiers('uniswapV3');
+for (const feeTier of supportedFeeTiers) {
+  const poolExists = await checkPoolExists(token0, token1, feeTier);
+  // Process pool...
+}
+
+// Handle unknown platform
+const feeTiers = getPlatformFeeTiers('unknownPlatform');
+// Returns: [] (empty array)
+```
+
+### Use Cases
+
+- **Frontend**: Building fee tier dropdown menus for user strategy configuration
+- **Automation**: Discovering which fee tier pools exist for token pairs
+- **Analytics**: Understanding platform fee structure variations
+- **Validation**: Checking if user-selected fee tier is supported
+
+### Important Notes
+
+⚠️ **Fee Tier Format**: All fee tiers are returned in basis points (e.g., 500 = 0.05%, 3000 = 0.30%)
+
+### Side Effects
+None - Pure function
+
+---
+
 ## getPlatformLogo
 
 Get platform logo URL.
