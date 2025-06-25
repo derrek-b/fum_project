@@ -7,23 +7,22 @@
 export default class PlatformAdapter {
   /**
    * Constructor for the platform adapter
-   * @param {Object} config - Chain configurations object
-   * @param {Object} config[chainId] - Configuration for each chain
-   * @param {Object} config[chainId].platformAddresses - Platform contract addresses
-   * @param {Object} config[chainId].tokenAddresses - Token contract addresses
-   * @param {Object} provider - Ethers provider instance
+   * @param {number} chainId - Chain ID for the adapter
    * @param {string} platformId - Platform Id
    * @param {string} platformName - Platform Name
    */
-  constructor(config, provider, platformId, platformName) {
-    this.config = config;
-    this.provider = provider;
+  constructor(chainId, platformId, platformName) {
+    this.chainId = chainId;
     this.platformId = platformId;
     this.platformName = platformName;
 
     // Validation
     if (this.constructor === PlatformAdapter) {
       throw new Error("Abstract class cannot be instantiated");
+    }
+
+    if (!chainId || typeof chainId !== 'number') {
+      throw new Error("chainId must be a valid number");
     }
 
     if (!this.platformId) {

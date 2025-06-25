@@ -1,6 +1,7 @@
 ToDo
 node_modules/
 coverage/
+bytecode/
 .env
 .env.*
 !.env.example

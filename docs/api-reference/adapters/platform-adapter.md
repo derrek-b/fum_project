@@ -18,18 +18,14 @@ PlatformAdapter (abstract)
 
 ### Signature
 ```javascript
-constructor(config: Object, provider: Object, platformId: string, platformName: string)
+constructor(chainId: number, platformId: string, platformName: string)
 ```
 
 ### Parameters
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| config | `Object` | Yes | Chain configurations object |
-| config[chainId] | `Object` | Yes | Configuration for each chain |
-| config[chainId].platformAddresses | `Object` | Yes | Platform contract addresses |
-| config[chainId].tokenAddresses | `Object` | Yes | Token contract addresses |
-| provider | `Object` | Yes | Ethers provider instance |
+| chainId | `number` | Yes | Chain ID for the adapter |
 | platformId | `string` | Yes | Unique platform identifier |
 | platformName | `string` | Yes | Human-readable platform name |
 
@@ -38,6 +34,7 @@ constructor(config: Object, provider: Object, platformId: string, platformName: 
 | Error | Condition |
 |-------|-----------|
 | `Error` | When trying to instantiate the abstract class directly |
+| `Error` | When chainId is not a valid number |
 | `Error` | When platformId is not defined |
 | `Error` | When platformName is not defined |
 
@@ -45,11 +42,11 @@ constructor(config: Object, provider: Object, platformId: string, platformName: 
 
 ```javascript
 // Cannot instantiate directly - this will throw
-const adapter = new PlatformAdapter(config, provider, "uniswap", "Uniswap V3"); // ❌
+const adapter = new PlatformAdapter(42161, "uniswap", "Uniswap V3"); // ❌
 
 // Must use a concrete implementation
 import UniswapV3Adapter from './UniswapV3Adapter.js';
-const adapter = new UniswapV3Adapter(config, provider); // ✅
+const adapter = new UniswapV3Adapter(42161); // ✅ Arbitrum
 ```
 
 ## Abstract Methods
@@ -367,8 +364,10 @@ Complex parameter object - see implementation for details.
 import PlatformAdapter from './PlatformAdapter.js';
 
 class MyDEXAdapter extends PlatformAdapter {
-  constructor(config, provider) {
-    super(config, provider, 'mydex', 'My DEX');
+  constructor(chainId) {
+    super(chainId, 'mydex', 'My DEX');
+    // Cache platform configuration data
+    this.addresses = getPlatformAddresses(chainId, 'mydex');
     // Additional initialization
   }
 

@@ -23,8 +23,8 @@ describe('UniswapV3Adapter - Integration Tests', () => {
         deployContracts: true, // Re-enable vault setup to debug the timeout
       });
       
-      // Create adapter instance using real library config
-      adapter = new UniswapV3Adapter(chains, env.provider);
+      // Create adapter instance using chainId
+      adapter = new UniswapV3Adapter(1337);
     } catch (error) {
       console.error('Failed to setup test environment:', error);
       throw error;

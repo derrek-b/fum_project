@@ -101,7 +101,7 @@ export async function setupTestEnvironment(options = {}) {
     const uniswapV3 = chainConfig.platformAddresses.uniswapV3;
     
     // Create adapter for interacting with Uniswap
-    const adapter = new UniswapV3Adapter(chains, ganache.provider);
+    const adapter = new UniswapV3Adapter(1337);
     
     // Setup tokens - we'll need WETH and USDC
     const owner = ganache.signers[0];
@@ -176,7 +176,7 @@ export async function setupTestEnvironment(options = {}) {
     const wethToken = { ...tokens.WETH, address: tokens.WETH.addresses[1337] };
     const usdcToken = { ...tokens.USDC, address: tokens.USDC.addresses[1337] };
     
-    const poolData = await adapter.fetchPoolData(wethToken, usdcToken, 500, 1337);
+    const poolData = await adapter.fetchPoolData(wethToken, usdcToken, 500, 1337, ganache.provider);
     
     // Create position centered around current tick
     const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing

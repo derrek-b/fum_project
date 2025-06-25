@@ -14,6 +14,8 @@ import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
 import { getPlatformFeeTiers } from "../helpers/platformHelpers.js";
+import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
+import { getTokensForChain } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
 import JSBI from "jsbi";
@@ -31,18 +33,55 @@ const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Adapter for Uniswap V3 platform
+ * 
+ * This adapter is designed for single-chain operation and caches all necessary
+ * configuration data during construction for optimal performance:
+ * - Platform contract addresses (factory, position manager, router)
+ * - Supported fee tiers and chain configuration
+ * - Token lookup maps for fast address/symbol resolution
+ * - Pre-compiled contract interfaces for transaction encoding
+ * 
+ * Note: Methods requiring blockchain interaction accept a provider parameter
+ * rather than storing one in the adapter instance.
+ * 
+ * @example
+ * // Create adapter for Arbitrum
+ * const adapter = new UniswapV3Adapter(42161);
+ * 
+ * // Use with provider for blockchain calls
+ * const poolData = await adapter.fetchPoolData(token0, token1, 500, 42161, provider);
  */
 export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Constructor
-   * @param {Object} config - Chain configurations object
-   * @param {Object} config[chainId] - Configuration for each chain
-   * @param {Object} config[chainId].platformAddresses - Platform contract addresses
-   * @param {Object} config[chainId].tokenAddresses - Token contract addresses
-   * @param {Object} provider - Ethers provider instance
+   * @param {number} chainId - Chain ID for the adapter
    */
-  constructor(config, provider) {
-    super(config, provider, "uniswapV3", "Uniswap V3");
+  constructor(chainId) {
+    super(chainId, "uniswapV3", "Uniswap V3");
+
+    // Cache platform addresses
+    this.addresses = getPlatformAddresses(chainId, "uniswapV3");
+    if (!this.addresses || !this.addresses.enabled) {
+      throw new Error(`Uniswap V3 not available on chain ${chainId}`);
+    }
+
+    // Cache platform configuration data
+    this.feeTiers = getPlatformFeeTiers("uniswapV3");
+    this.chainConfig = getChainConfig(chainId);
+
+    // Cache token data for this chain with address lookup maps
+    this.tokensByAddress = new Map();
+    this.tokensBySymbol = new Map();
+
+    const chainTokens = getTokensForChain(chainId);
+    chainTokens.forEach(token => {
+      if (token.addresses && token.addresses[chainId]) {
+        // Store with checksummed address (preserves EIP-55 checksum)
+        const checksummedAddress = ethers.getAddress(token.addresses[chainId]);
+        this.tokensByAddress.set(checksummedAddress, token);
+        this.tokensBySymbol.set(token.symbol, token);
+      }
+    });
 
     // Store the imported ABIs
     this.nonfungiblePositionManagerABI = NonfungiblePositionManagerABI;
@@ -50,7 +89,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.swapRouterABI = SwapRouterABI;
     this.erc20ABI = ERC20ABI;
 
-    // Default transaction parameters
+    // Pre-create contract interfaces for better performance
+    this.swapRouterInterface = new ethers.Interface(this.swapRouterABI);
+    this.positionManagerInterface = new ethers.Interface(this.nonfungiblePositionManagerABI);
+    this.poolInterface = new ethers.Interface(this.uniswapV3PoolABI);
+    this.erc20Interface = new ethers.Interface(this.erc20ABI);
+
+    // Default transaction parameters (temporary - to be removed when methods are updated)
     this.defaultSlippageTolerance = 0.5; // 0.5%
     this.defaultDeadlineMinutes = 20; // 20 minutes
     this.gasMultiplier = 1.2; // 20% buffer for gas estimation
@@ -63,23 +108,25 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @throws {Error} If slippage tolerance is invalid
    */
   _validateSlippageTolerance(slippageTolerance) {
-    const slippage = slippageTolerance ?? this.defaultSlippageTolerance;
-
-    if (typeof slippage !== 'number' || slippage < 0 || slippage > 100) {
-      throw new Error(`Invalid slippage tolerance: ${slippage}. Must be between 0 and 100.`);
+    if (typeof slippageTolerance !== 'number' || isNaN(slippageTolerance) || slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error(`Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 100.`);
     }
 
-    return slippage;
+    return slippageTolerance;
   }
 
   /**
    * Create deadline timestamp from minutes offset
-   * @param {number} [deadlineMinutes] - Minutes from now (default: 20)
+   * @param {number} deadlineMinutes - Minutes from now
    * @returns {number} Unix timestamp
+   * @throws {Error} If deadlineMinutes is invalid
    */
   _createDeadline(deadlineMinutes) {
-    const minutes = deadlineMinutes ?? this.defaultDeadlineMinutes;
-    return Math.floor(Date.now() / 1000) + (minutes * 60);
+    if (typeof deadlineMinutes !== 'number' || isNaN(deadlineMinutes) || deadlineMinutes < 0) {
+      throw new Error(`Invalid deadline minutes: ${deadlineMinutes}. Must be a non-negative number.`);
+    }
+
+    return Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
   }
 
   /**
@@ -391,7 +438,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} chainId - Chain ID
    * @returns {Promise<Object>} Pool state data
    */
-  async fetchPoolData(token0, token1, fee, chainId) {
+  async fetchPoolData(token0, token1, fee, chainId, provider) {
     if (!token0?.address || !token1?.address || !fee || !chainId) {
       throw new Error("Missing required parameters for pool data fetch");
     }
@@ -405,7 +452,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const poolAddress = Pool.getAddress(token0Instance, token1Instance, feeNumber);
 
     // Create pool contract
-    const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
+    const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
 
     try {
       const slot0 = await poolContract.slot0();
@@ -2628,13 +2675,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         throw new Error("Missing required parameters for swap");
       }
 
-      // Get chain configuration
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.routerAddress) {
-        throw new Error(`No Uniswap V3 router configuration found for chainId: ${chainId}`);
+      // Validate chainId matches our adapter's chainId
+      if (chainId !== this.chainId) {
+        throw new Error(`ChainId ${chainId} does not match adapter chainId ${this.chainId}`);
       }
 
-      const routerAddress = chainConfig.platformAddresses.uniswapV3.routerAddress;
+      // Use cached router address
+      if (!this.addresses?.routerAddress) {
+        throw new Error(`No Uniswap V3 router address found for chainId: ${chainId}`);
+      }
+
+      const routerAddress = this.addresses.routerAddress;
 
       // Create swap router interface
       const swapRouterInterface = new ethers.Interface(this.swapRouterABI);

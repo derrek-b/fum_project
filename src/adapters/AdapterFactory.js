@@ -32,20 +32,19 @@ export default class AdapterFactory {
    * @static
    * 
    * @param {number} chainId - Chain ID
-   * @param {Object} provider - Ethers provider
    * 
    * @returns {Array} Array of platform adapter instances
    * 
    * @example
-   * const adapters = AdapterFactory.getAdaptersForChain(1, provider);
-   * console.log(`Found ${adapters.length} adapters for mainnet`);
+   * const adapters = AdapterFactory.getAdaptersForChain(42161);
+   * console.log(`Found ${adapters.length} adapters for Arbitrum`);
    * 
    * @since 1.0.0
    */
-  static getAdaptersForChain(chainId, provider) {
+  static getAdaptersForChain(chainId) {
     const adapters = [];
 
-    if (!chainId || !provider || !chains?.[chainId]) {
+    if (!chainId || !chains?.[chainId]) {
       return adapters;
     }
 
@@ -56,7 +55,12 @@ export default class AdapterFactory {
       const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
 
       if (AdapterClass) {
-        adapters.push(new AdapterClass(chains, provider));
+        try {
+          adapters.push(new AdapterClass(chainId));
+        } catch (error) {
+          // Skip adapters that can't be created for this chain
+          console.warn(`Failed to create ${platformId} adapter for chain ${chainId}:`, error.message);
+        }
       }
     });
 
@@ -71,23 +75,23 @@ export default class AdapterFactory {
    * @static
    * 
    * @param {string} platformId - Platform ID (e.g., 'uniswapV3')
-   * @param {Object} provider - Ethers provider
+   * @param {number} chainId - Chain ID
    * 
    * @returns {Object|null} Platform adapter instance or null if not found
    * 
-   * @throws {Error} If platform ID or provider not provided
+   * @throws {Error} If platform ID or chainId not provided
    * 
    * @example
-   * const adapter = AdapterFactory.getAdapter('uniswapV3', provider);
+   * const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
    * if (adapter) {
-   *   const poolInfo = await adapter.getPoolAddress(token0, token1, 3000);
+   *   const poolInfo = await adapter.fetchPoolData(token0, token1, 3000, 42161, provider);
    * }
    * 
    * @since 1.0.0
    */
-  static getAdapter(platformId, provider) {
-    if (!platformId || !provider) {
-      throw new Error("Platform ID and provider are required");
+  static getAdapter(platformId, chainId) {
+    if (!platformId || !chainId) {
+      throw new Error("Platform ID and chainId are required");
     }
 
     const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
@@ -97,7 +101,7 @@ export default class AdapterFactory {
       return null;
     }
 
-    return new AdapterClass(chains, provider);
+    return new AdapterClass(chainId);
   }
 
   /**

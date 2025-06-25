@@ -14,7 +14,7 @@ Creates a platform adapter instance based on the specified type.
 
 #### Signature
 ```javascript
-static createAdapter(platformType: string, config: Object, provider: Object): PlatformAdapter
+static createAdapter(platformType: string, chainId: number): PlatformAdapter
 ```
 
 #### Parameters
@@ -22,8 +22,7 @@ static createAdapter(platformType: string, config: Object, provider: Object): Pl
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | platformType | `string` | Yes | Platform identifier (e.g., 'UNISWAP_V3') |
-| config | `Object` | Yes | Chain and platform configuration |
-| provider | `Object` | Yes | Ethers provider instance |
+| chainId | `number` | Yes | Chain ID for the adapter |
 
 #### Returns
 
@@ -48,28 +47,14 @@ static createAdapter(platformType: string, config: Object, provider: Object): Pl
 import AdapterFactory from './adapters/AdapterFactory.js';
 import { ethers } from 'ethers';
 
-// Create provider
+// Create adapter for Arbitrum
+const adapter = AdapterFactory.createAdapter('UNISWAP_V3', 42161);
+
+// Create provider when needed for blockchain calls
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
-// Platform configuration
-const config = {
-  1: { // mainnet
-    platformAddresses: {
-      factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-      positionManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88'
-    },
-    tokenAddresses: {
-      WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-      USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-    }
-  }
-};
-
-// Create adapter
-const adapter = AdapterFactory.createAdapter('UNISWAP_V3', config, provider);
-
-// Use adapter methods
-const poolInfo = await adapter.getPoolAddress(token0, token1, 3000);
+// Use adapter methods (provider passed to methods that need it)
+const poolInfo = await adapter.fetchPoolData(token0, token1, 3000, 42161, provider);
 ```
 
 ## Adding New Platform Support
@@ -84,50 +69,39 @@ To add support for a new platform:
 // In AdapterFactory.js
 import MyNewAdapter from './MyNewAdapter.js';
 
-static createAdapter(platformType, config, provider) {
+static createAdapter(platformType, chainId) {
   switch (platformType) {
     case 'UNISWAP_V3':
-      return new UniswapV3Adapter(config, provider);
+      return new UniswapV3Adapter(chainId);
     case 'MY_NEW_PLATFORM':
-      return new MyNewAdapter(config, provider);
+      return new MyNewAdapter(chainId);
     default:
       throw new Error(`Unknown platform type: ${platformType}`);
   }
 }
 ```
 
-## Configuration Structure
+## Adapter Configuration
 
-The configuration object should follow this structure:
+Adapters automatically load their configuration from the library's internal config system based on the chainId. The configuration includes:
 
-```javascript
-{
-  [chainId]: {
-    platformAddresses: {
-      // Platform-specific contract addresses
-      factory: '0x...',
-      router: '0x...',
-      positionManager: '0x...',
-      // ... other contracts
-    },
-    tokenAddresses: {
-      // Common token addresses
-      WETH: '0x...',
-      USDC: '0x...',
-      // ... other tokens
-    }
-  }
-}
-```
+- Platform contract addresses (factory, router, position manager, etc.)
+- Supported fee tiers
+- Token definitions for the chain
+- Chain-specific metadata
+
+This eliminates the need to manually pass configuration objects to adapters.
 
 ## Error Handling
 
 ```javascript
 try {
-  const adapter = AdapterFactory.createAdapter(platformType, config, provider);
+  const adapter = AdapterFactory.createAdapter(platformType, chainId);
 } catch (error) {
   if (error.message.includes('Unknown platform type')) {
     console.error('Platform not supported:', platformType);
+  } else if (error.message.includes('not available on chain')) {
+    console.error('Platform not supported on chain:', chainId);
   } else {
     console.error('Failed to create adapter:', error);
   }
@@ -136,10 +110,11 @@ try {
 
 ## Best Practices
 
-1. **Validation**: Always validate platform type before creation
-2. **Configuration**: Ensure complete configuration for target chains
-3. **Provider**: Use appropriate provider for target network
+1. **Validation**: Always validate platform type and chainId before creation
+2. **Chain Support**: Verify the platform is available on the target chain
+3. **Provider Management**: Create providers as needed for blockchain calls
 4. **Error Handling**: Implement proper error handling for factory failures
+5. **Adapter Reuse**: Cache adapter instances when possible since they're stateless
 
 ## Future Enhancements
 
