@@ -141,6 +141,7 @@ describe('UniswapV3Adapter - Integration Tests', () => {
         sqrtPriceLimitX96: 0,
         provider: env.provider,
         chainId: 1337,
+        deadlineMinutes: 2  // 2 minutes for L2
       };
       
       const swapData = await adapter.generateSwapData(swapParams);
@@ -221,11 +222,12 @@ describe('UniswapV3Adapter - Integration Tests', () => {
       );
       
       // Get tick data for fee calculations
-      const poolAddress = poolData.poolAddress || await adapter.getPoolAddress(
+      const poolAddress = poolData.poolAddress || (await adapter.getPoolData(
         { address: position.token0, decimals: position.token0 === env.testPosition.token0 ? 6 : 18, symbol: position.token0 === env.testPosition.token0 ? 'USDC' : 'WETH', name: 'Token' },
         { address: position.token1, decimals: position.token1 === env.testPosition.token1 ? 18 : 6, symbol: position.token1 === env.testPosition.token1 ? 'WETH' : 'USDC', name: 'Token' },
-        position.fee
-      );
+        position.fee,
+        env.provider
+      )).poolAddress;
       
       const tickData = await adapter.fetchTickData(poolAddress, position.tickLower, position.tickUpper);
       

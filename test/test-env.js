@@ -143,6 +143,7 @@ export async function setupTestEnvironment(options = {}) {
       sqrtPriceLimitX96: 0,
       provider: ganache.provider,
       chainId: 1337,
+      deadlineMinutes: 2  // 2 minutes for L2
     };
     
     const swapData = await adapter.generateSwapData(swapParams);

@@ -49,8 +49,8 @@ export default class PlatformAdapter {
    * @param {number} fee - Fee tier
    * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information (incl. sorted tokens)
    */
-  async getPoolAddress(token0, token1, fee) {
-    throw new Error("getPoolAddress must be implemented by subclasses");
+  async getPoolData(token0, token1, fee) {
+    throw new Error("getPoolData must be implemented by subclasses");
   }
 
   /**

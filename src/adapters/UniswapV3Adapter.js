@@ -33,21 +33,21 @@ const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Adapter for Uniswap V3 platform
- * 
+ *
  * This adapter is designed for single-chain operation and caches all necessary
  * configuration data during construction for optimal performance:
  * - Platform contract addresses (factory, position manager, router)
  * - Supported fee tiers and chain configuration
  * - Token lookup maps for fast address/symbol resolution
  * - Pre-compiled contract interfaces for transaction encoding
- * 
+ *
  * Note: Methods requiring blockchain interaction accept a provider parameter
  * rather than storing one in the adapter instance.
- * 
+ *
  * @example
  * // Create adapter for Arbitrum
  * const adapter = new UniswapV3Adapter(42161);
- * 
+ *
  * // Use with provider for blockchain calls
  * const poolData = await adapter.fetchPoolData(token0, token1, 500, 42161, provider);
  */
@@ -95,10 +95,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.poolInterface = new ethers.Interface(this.uniswapV3PoolABI);
     this.erc20Interface = new ethers.Interface(this.erc20ABI);
 
-    // Default transaction parameters (temporary - to be removed when methods are updated)
-    this.defaultSlippageTolerance = 0.5; // 0.5%
-    this.defaultDeadlineMinutes = 20; // 20 minutes
-    this.gasMultiplier = 1.2; // 20% buffer for gas estimation
   }
 
   /**
@@ -135,13 +131,35 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} method - Method name
    * @param {Array} args - Method arguments
    * @param {Object} [overrides] - Transaction overrides
+   * @param {number} gasMultiplier - Gas buffer multiplier
    * @returns {Promise<number>} Estimated gas limit with buffer
    * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
    */
-  async _estimateGasWithBuffer(contract, method, args, overrides = {}) {
+  async _estimateGasWithBuffer(contract, method, args, overrides, gasMultiplier) {
+    // Validate inputs
+    if (!contract || typeof contract !== 'object') {
+      throw new Error('Invalid contract instance');
+    }
+
+    if (!method || typeof method !== 'string') {
+      throw new Error('Method must be a non-empty string');
+    }
+
+    if (!contract[method] || typeof contract[method].estimateGas !== 'function') {
+      throw new Error(`Method '${method}' does not exist or cannot estimate gas`);
+    }
+
+    if (!Array.isArray(args)) {
+      throw new Error('Args must be an array');
+    }
+
+    if (overrides !== undefined && (typeof overrides !== 'object' || overrides === null)) {
+      throw new Error('Overrides must be an object if provided');
+    }
+
     try {
       const estimatedGas = await contract[method].estimateGas(...args, overrides);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
       return gasWithBuffer;
     } catch (error) {
       // In DeFi, gas estimation failure usually means transaction will revert
@@ -158,13 +176,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Estimate gas from transaction data with buffer
    * @param {ethers.Signer} signer - Signer instance
    * @param {Object} txData - Transaction data object
+   * @param {number} gasMultiplier - Gas buffer multiplier
    * @returns {Promise<number>} Estimated gas limit with buffer
    * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
    */
-  async _estimateGasFromTxData(signer, txData) {
+  async _estimateGasFromTxData(signer, txData, gasMultiplier) {
     try {
       const estimatedGas = await signer.estimateGas(txData);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
       return gasWithBuffer;
     } catch (error) {
       // In DeFi, gas estimation failure usually means transaction will revert
@@ -182,13 +201,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {ethers.Contract} tokenContract - Token contract instance
    * @param {string} spender - Spender address
    * @param {bigint} amount - Amount to approve
+   * @param {number} gasMultiplier - Gas buffer multiplier
    * @returns {Promise<number>} Estimated gas limit with buffer
    * @throws {Error} If gas estimation fails
    */
-  async _estimateApprovalGas(tokenContract, spender, amount) {
+  async _estimateApprovalGas(tokenContract, spender, amount, gasMultiplier) {
     try {
       const estimatedGas = await tokenContract.approve.estimateGas(spender, amount);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * this.gasMultiplier);
+      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
       return gasWithBuffer;
     } catch (error) {
       throw new Error(
@@ -222,9 +242,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} token1.symbol - Token symbol
    * @param {string} token1.name - Token name
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
+   * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information
    */
-  async getPoolAddress(token0, token1, fee) {
+  async getPoolData(token0, token1, fee, provider) {
     if (!token0?.address || !token1?.address || fee === undefined ||
         token0.decimals === undefined || token1.decimals === undefined) {
       throw new Error("Missing required token information for pool address calculation");
@@ -245,7 +266,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     // Get chainId from provider
     let chainId;
     try {
-      const network = await this.provider.getNetwork();
+      const network = await provider.getNetwork();
       // Handle ethers v6 where chainId might be a bigint
       chainId = typeof network.chainId === 'bigint'
         ? Number(network.chainId)
@@ -304,7 +325,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    */
   async checkPoolExists(token0, token1, fee) {
     try {
-      const { poolAddress } = await this.getPoolAddress(token0, token1, fee);
+      const { poolAddress } = await this.getPoolData(token0, token1, fee);
 
       // Create a minimal pool contract to check if the pool exists
       const poolABI = [
@@ -1199,7 +1220,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Transaction receipt and updated data
    */
   async claimFees(params) {
-    const { position, provider, address, chainId, poolData, token0Data, token1Data, onStart, onSuccess, onError, onFinish } = params;
+    const { position, provider, address, chainId, poolData, token0Data, token1Data, gasMultiplier = 1.1, onStart, onSuccess, onError, onFinish } = params;
 
     // Input validation
     if (!provider || !address || !chainId) {
@@ -1226,12 +1247,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const signer = await provider.getSigner();
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData(signer, {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address
-      });
+      const gasLimit = await this._estimateGasFromTxData
+      (
+        signer,
+        {
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          from: address
+        },
+        gasMultiplier
+      );
 
       // Construct transaction
       const transaction = {
@@ -1358,8 +1384,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       poolData,
       token0Data,
       token1Data,
-      slippageTolerance = 0.5,
-      collectFees = true // Whether to collect fees during removal
+      slippageTolerance,
+      collectFees = true, // Whether to collect fees during removal
+      deadlineMinutes
     } = params;
 
     // Input validation
@@ -1385,6 +1412,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     if (!poolData || !token0Data || !token1Data) {
       throw new Error("Pool and token data are required");
+    }
+
+    if (!deadlineMinutes) {
+      throw new Error("Deadline minutes is required");
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("Slippage tolerance is required");
     }
 
     try {
@@ -1497,7 +1532,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Create RemoveLiquidityOptions
       const removeLiquidityOptions = {
-        deadline: this._createDeadline(), // Use standardized deadline
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
         slippageTolerance: slippageTolerancePercent,
         tokenId: position.id,
         // Percentage of liquidity to remove
@@ -1552,7 +1587,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       poolData,
       token0Data,
       token1Data,
-      slippageTolerance = 0.5,
+      slippageTolerance,
+      deadlineMinutes,
+      gasMultiplier = 1.1,
       onStart,
       onSuccess,
       onError,
@@ -1567,6 +1604,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     if (!percentage || percentage <= 0 || percentage > 100) {
       onError && onError("Percentage must be between 1 and 100");
+      return;
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      onError && onError("Slippage tolerance is required");
+      return;
+    }
+
+    if (!deadlineMinutes) {
+      onError && onError("Deadline minutes is required");
       return;
     }
 
@@ -1585,6 +1632,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         token0Data,
         token1Data,
         slippageTolerance,
+        deadlineMinutes,
         collectFees: true
       });
 
@@ -1592,12 +1640,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const signer = await provider.getSigner();
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData(signer, {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address
-      });
+      const gasLimit = await this._estimateGasFromTxData
+      (
+        signer,
+        {
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          from: address
+        },
+        gasMultiplier
+      );
 
       // Construct transaction
       const transaction = {
@@ -1733,7 +1786,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       token1Data,
       collectFees = true,
       burnPosition = false,
-      slippageTolerance = 0.5,
+      slippageTolerance,
+      deadlineMinutes,
+      gasMultiplier = 1.1,
       onStart,
       onSuccess,
       onError,
@@ -1755,6 +1810,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         token0Data,
         token1Data,
         slippageTolerance, // Use the provided slippage tolerance
+        deadlineMinutes, // Pass through deadline
+        gasMultiplier, // Pass through gas multiplier
         onStart: () => {}, // We already called onStart
         onFinish: () => {}, // Don't call onFinish yet
         onError, // Pass through the error callback
@@ -1899,7 +1956,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       // Create AddLiquidityOptions
       const addLiquidityOptions = {
-        deadline: this._createDeadline(), // Use standardized deadline
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
         slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
         tokenId: position.id,
       };
@@ -1952,7 +2009,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       poolData,
       token0Data,
       token1Data,
-      slippageTolerance = 0.5,
+      slippageTolerance,
+      deadlineMinutes,
+      gasMultiplier = 1.1,
       onStart,
       onSuccess,
       onError,
@@ -1968,6 +2027,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
         (!token1Amount || parseFloat(token1Amount) <= 0)) {
       onError && onError("At least one token amount must be provided");
+      return;
+    }
+
+    if (!deadlineMinutes) {
+      onError && onError("Deadline minutes is required");
+      return;
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      onError && onError("Slippage tolerance is required");
       return;
     }
 
@@ -2017,7 +2086,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const approvalGasLimit = await this._estimateApprovalGas(
             token0Contract,
             positionManagerAddress,
-            ethers.MaxUint256
+            ethers.MaxUint256,
+            gasMultiplier
           );
 
           // Create approval transaction
@@ -2042,7 +2112,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const approvalGasLimit = await this._estimateApprovalGas(
             token1Contract,
             positionManagerAddress,
-            ethers.MaxUint256
+            ethers.MaxUint256,
+            gasMultiplier
           );
 
           // Create approval transaction
@@ -2073,16 +2144,22 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         poolData,
         token0Data,
         token1Data,
-        slippageTolerance
+        slippageTolerance,
+        deadlineMinutes
       });
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData(signer, {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address
-      });
+      const gasLimit = await this._estimateGasFromTxData
+      (
+        signer,
+        {
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          from: address
+        },
+        gasMultiplier
+      );
 
       // Construct transaction
       const transaction = {
@@ -2210,8 +2287,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       provider,
       address,
       chainId,
-      slippageTolerance = 0.5,
-      tokensSwapped = false
+      slippageTolerance,
+      tokensSwapped = false,
+      deadlineMinutes
     } = params;
 
     // Input validation
@@ -2225,6 +2303,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     if (!address) {
       throw new Error("Wallet address is required");
+    }
+
+    if (!deadlineMinutes) {
+      throw new Error("Deadline minutes is required");
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("Slippage tolerance is required");
     }
 
     try {
@@ -2329,7 +2415,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Step 9: Create mint options
       const mintOptions = {
         recipient: address,
-        deadline: this._createDeadline(), // Use standardized deadline
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
         slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
       };
 
@@ -2402,8 +2488,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       provider,
       address,
       chainId,
-      slippageTolerance = 0.5,
+      slippageTolerance,
       tokensSwapped = false,
+      deadlineMinutes,
+      gasMultiplier = 1.1,
       onStart,
       onSuccess,
       onError,
@@ -2424,6 +2512,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
         (!token1Amount || parseFloat(token1Amount) <= 0)) {
       onError && onError("At least one token amount must be provided");
+      return;
+    }
+
+    if (!deadlineMinutes) {
+      onError && onError("Deadline minutes is required");
+      return;
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      onError && onError("Slippage tolerance is required");
       return;
     }
 
@@ -2488,7 +2586,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const approvalGasLimit = await this._estimateApprovalGas(
             token0Contract,
             positionManagerAddress,
-            ethers.MaxUint256
+            ethers.MaxUint256,
+            gasMultiplier
           );
 
           // Create approval transaction
@@ -2512,7 +2611,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const approvalGasLimit = await this._estimateApprovalGas(
             token1Contract,
             positionManagerAddress,
-            ethers.MaxUint256
+            ethers.MaxUint256,
+            gasMultiplier
           );
 
           // Create approval transaction
@@ -2544,16 +2644,22 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         address,
         chainId,
         slippageTolerance,
-        tokensSwapped
+        tokensSwapped,
+        deadlineMinutes
       });
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData(signer, {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address
-      });
+      const gasLimit = await this._estimateGasFromTxData
+      (
+        signer,
+        {
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          from: address
+        },
+        gasMultiplier
+      );
 
       // Construct transaction
       const transaction = {
@@ -2665,13 +2771,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       amountIn,
       amountOutMinimum,
       sqrtPriceLimitX96,
+      deadlineMinutes,
       provider,
       chainId
     } = params;
 
     try {
       // Validate required parameters
-      if (!tokenIn || !tokenOut || !fee || !recipient || !amountIn || !provider || !chainId) {
+      if (!tokenIn || !tokenOut || !fee || !recipient || !amountIn || !provider || !chainId || !deadlineMinutes) {
         throw new Error("Missing required parameters for swap");
       }
 
@@ -2696,7 +2803,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokenOut,
         fee,
         recipient,
-        deadline: this._createDeadline(), // Use standardized deadline
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
         amountIn,
         amountOutMinimum: amountOutMinimum || 0,
         sqrtPriceLimitX96: sqrtPriceLimitX96 || 0
