@@ -9,6 +9,7 @@ import { ethers } from 'ethers';
 import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
+import { getTokenBySymbol } from '../../../src/helpers/tokenHelpers.js';
 
 describe('UniswapV3Adapter - Unit Tests', () => {
   let env;
@@ -113,18 +114,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(adapter.chainConfig).toBeTypeOf('object');
       });
 
-      it('should create token lookup maps', () => {
-        expect(adapter.tokensByAddress).toBeInstanceOf(Map);
-        expect(adapter.tokensBySymbol).toBeInstanceOf(Map);
-
-        // Maps should have some entries for chain 1337
-        expect(adapter.tokensByAddress.size).toBeGreaterThan(0);
-        expect(adapter.tokensBySymbol.size).toBeGreaterThan(0);
-
-        // Should have common tokens like WETH and USDC
-        expect(adapter.tokensBySymbol.has('WETH')).toBe(true);
-        expect(adapter.tokensBySymbol.has('USDC')).toBe(true);
-      });
 
       it('should store ABIs correctly', () => {
         expect(adapter.nonfungiblePositionManagerABI).toBeDefined();
@@ -325,7 +314,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('_estimateGasWithBuffer', () => {
+  describe('_estimateGas', () => {
     let poolContract;
     let wethContract;
     let positionManagerContract;
@@ -341,10 +330,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Test provider connectivity before using it
         await env.provider.getNetwork();
 
+        // Get token data using helpers
+        const usdcToken = getTokenBySymbol('USDC');
+        const wethToken = getTokenBySymbol('WETH');
+
         // Create real contract instances using addresses from adapter config
         const poolData = await adapter.getPoolData(
-          { address: adapter.tokensBySymbol.get('USDC').addresses[1337], decimals: 6 },
-          { address: adapter.tokensBySymbol.get('WETH').addresses[1337], decimals: 18 },
+          { address: usdcToken.addresses[1337], decimals: 6 },
+          { address: wethToken.addresses[1337], decimals: 18 },
           500,
           env.provider
         );
@@ -355,7 +348,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         );
 
         wethContract = new ethers.Contract(
-          adapter.tokensBySymbol.get('WETH').addresses[1337],
+          wethToken.addresses[1337],
           adapter.erc20ABI,
           env.provider
         );
@@ -366,40 +359,35 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           env.provider
         );
       } catch (error) {
-        console.warn('Failed to setup contracts for _estimateGasWithBuffer tests:', error.message);
+        console.warn('Failed to setup contracts for _estimateGas tests:', error.message);
         // Gracefully skip setup if provider is unavailable
       }
     });
 
     describe('Success Cases', () => {
-      it('should estimate gas for view function and apply buffer', async () => {
+      it('should estimate gas for view function', async () => {
         // slot0 is a view function that still has gas cost
-        const gasEstimate = await adapter._estimateGasWithBuffer(
+        const gasEstimate = await adapter._estimateGas(
           poolContract,
           'slot0',
-          [], // no arguments
-          {}, // overrides
-          1.2 // gasMultiplier
+          [] // no arguments
         );
 
         expect(gasEstimate).toBeTypeOf('number');
         expect(gasEstimate).toBeGreaterThan(0);
-
-        // Verify buffer was applied (can't check exact 1.2x due to not knowing raw estimate)
-        // But we know view functions are relatively cheap
-        expect(gasEstimate).toBeLessThan(100000); // View functions should be under 100k gas
+        // View functions should be relatively cheap
+        expect(gasEstimate).toBeLessThan(100000);
       });
 
       it('should estimate gas for state-changing function with arguments', async () => {
         const spender = adapter.addresses.routerAddress;
         const amount = ethers.parseEther('1');
 
-        const gasEstimate = await adapter._estimateGasWithBuffer(
+        const gasEstimate = await adapter._estimateGas(
           wethContract,
           'approve',
           [spender, amount],
-          { from: env.signers[0].address }, // overrides - use address with WETH balance
-          1.2 // gasMultiplier
+          { from: env.signers[0].address } // overrides - use address with WETH balance
         );
 
         expect(gasEstimate).toBeTypeOf('number');
@@ -408,12 +396,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle empty args array', async () => {
-        const gasEstimate = await adapter._estimateGasWithBuffer(
+        const gasEstimate = await adapter._estimateGas(
           poolContract,
           'slot0',
-          [],
-          {}, // overrides
-          1.2 // gasMultiplier
+          []
         );
 
         expect(gasEstimate).toBeTypeOf('number');
@@ -421,65 +407,60 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle overrides parameter', async () => {
-        const gasEstimate = await adapter._estimateGasWithBuffer(
+        const gasEstimate = await adapter._estimateGas(
           poolContract,
           'slot0',
           [],
-          { from: env.signers[0].address }, // Override 'from' address
-          1.2 // gasMultiplier
+          { from: env.signers[0].address } // Override 'from' address
         );
 
         expect(gasEstimate).toBeTypeOf('number');
         expect(gasEstimate).toBeGreaterThan(0);
       });
 
-      it('should apply correct buffer multiplier', async () => {
-        // Test multiplier by comparing different multiplier values
-        const baselineGas = await adapter._estimateGasWithBuffer(
+      it('should return raw gas estimate without buffer', async () => {
+        // Verify the method returns raw estimates, no buffer applied
+        const gasEstimate1 = await adapter._estimateGas(
           poolContract,
           'slot0',
-          [],
-          {}, // overrides
-          1.0 // no multiplier
+          []
         );
 
-        const bufferedGas = await adapter._estimateGasWithBuffer(
+        const gasEstimate2 = await adapter._estimateGas(
           poolContract,
           'slot0',
-          [],
-          {}, // overrides
-          1.5 // 1.5x multiplier
+          []
         );
 
-        // Verify the multiplier was applied (allow for rounding)
-        const expectedGas = Math.ceil(baselineGas * 1.5);
-        expect(bufferedGas).toBe(expectedGas);
-        expect(bufferedGas).toBeGreaterThan(baselineGas);
+        // Same method call should return same estimate (no buffer variation)
+        expect(gasEstimate1).toBe(gasEstimate2);
+        expect(gasEstimate1).toBeTypeOf('number');
+        expect(gasEstimate1).toBeGreaterThan(0);
       });
     });
 
     describe('Invalid Type Cases', () => {
       it('should throw error for invalid contract', async () => {
         await expect(
-          adapter._estimateGasWithBuffer(null, 'slot0', [], {}, 1.2)
+          adapter._estimateGas(null, 'slot0', [])
         ).rejects.toThrow('Invalid contract instance');
       });
 
       it('should throw error for invalid method name', async () => {
         await expect(
-          adapter._estimateGasWithBuffer(poolContract, '', [], {}, 1.2)
+          adapter._estimateGas(poolContract, '', [])
         ).rejects.toThrow('Method must be a non-empty string');
       });
 
       it('should throw error for invalid args', async () => {
         await expect(
-          adapter._estimateGasWithBuffer(poolContract, 'slot0', 'not-an-array', {}, 1.2)
+          adapter._estimateGas(poolContract, 'slot0', 'not-an-array')
         ).rejects.toThrow('Args must be an array');
       });
 
       it('should throw error for invalid overrides', async () => {
         await expect(
-          adapter._estimateGasWithBuffer(poolContract, 'slot0', [], 'invalid-overrides', 1.2)
+          adapter._estimateGas(poolContract, 'slot0', [], 'invalid-overrides')
         ).rejects.toThrow('Overrides must be an object if provided');
       });
     });
@@ -487,7 +468,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Error Cases', () => {
       it('should throw error for non-existent method', async () => {
         await expect(
-          adapter._estimateGasWithBuffer(poolContract, 'nonExistentMethod', [], {}, 1.2)
+          adapter._estimateGas(poolContract, 'nonExistentMethod', [])
         ).rejects.toThrow("Method 'nonExistentMethod' does not exist or cannot estimate gas");
       });
 
@@ -496,14 +477,346 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Approve with insufficient balance should still estimate (approvals don't check balance)
         // So let's use a method that will actually fail estimation
         await expect(
-          adapter._estimateGasWithBuffer(
+          adapter._estimateGas(
             positionManagerContract,
             'positions',
-            [999999999], // Non-existent position ID
-            {}, // overrides
-            1.2 // gasMultiplier
+            [999999999] // Non-existent position ID
           )
         ).rejects.toThrow('Gas estimation failed for positions');
+      });
+    });
+  });
+
+  describe('_estimateGasFromTxData', () => {
+    let signer;
+    let wethContract;
+    let usdcContract;
+
+    beforeAll(async () => {
+      try {
+        // Check if environment is still available
+        if (!env || !env.provider) {
+          console.warn('Test environment not available, skipping contract setup');
+          return;
+        }
+
+        // Get signer from test environment
+        signer = env.signers[0];
+
+        // Get token data using helpers
+        const wethToken = getTokenBySymbol('WETH');
+        const usdcToken = getTokenBySymbol('USDC');
+
+        // Create contract instances for building transaction data
+        wethContract = new ethers.Contract(
+          wethToken.addresses[1337],
+          adapter.erc20ABI,
+          env.provider
+        );
+
+        usdcContract = new ethers.Contract(
+          usdcToken.addresses[1337],
+          adapter.erc20ABI,
+          env.provider
+        );
+      } catch (error) {
+        console.warn('Failed to setup contracts for _estimateGasFromTxData tests:', error.message);
+      }
+    });
+
+    describe('Success Cases', () => {
+      it('should estimate gas for ETH transfer transaction', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: ethers.parseEther('0.1'),
+          data: '0x' // Empty data for simple ETH transfer
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBeGreaterThan(0);
+        // ETH transfers should be exactly 21000 gas
+        expect(gasEstimate).toBe(21000);
+      });
+
+      it('should estimate gas for ERC20 transfer transaction', async () => {
+        // Test vault.execute() calling USDC.transfer() - the actual usage pattern
+        const recipient = env.signers[1].address;
+        const amount = ethers.parseUnits('100', 6); // 100 USDC
+        const transferData = usdcContract.interface.encodeFunctionData('transfer', [recipient, amount]);
+
+        // Encode call to vault's execute function
+        const vaultExecuteData = env.testVault.interface.encodeFunctionData('execute', [
+          [usdcContract.target], // targets array
+          [transferData]         // data array
+        ]);
+
+        const txData = {
+          to: env.testVault.target, // Call the vault
+          data: vaultExecuteData,   // Execute the transfer
+          value: 0
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBeGreaterThan(21000); // More than simple ETH transfer
+        expect(gasEstimate).toBeLessThan(200000); // Vault execute + ERC20 transfer
+      });
+
+      it('should estimate gas for ERC20 approve transaction', async () => {
+        const spender = adapter.addresses.routerAddress;
+        const amount = ethers.parseEther('10');
+        const approveData = wethContract.interface.encodeFunctionData('approve', [spender, amount]);
+
+        const txData = {
+          to: wethContract.target,
+          data: approveData,
+          value: 0
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBeGreaterThan(0);
+        expect(gasEstimate).toBeLessThan(100000); // Approvals typically under 100k
+      });
+
+      it('should estimate gas for complex swap transaction', async () => {
+        // Create swap transaction data using adapter's generateSwapData  
+        const swapParams = {
+          tokenIn: wethContract.target,
+          tokenOut: usdcContract.target,
+          fee: 500,
+          recipient: env.testVault.target,
+          amountIn: ethers.parseEther('0.1'),
+          amountOutMinimum: 0,
+          sqrtPriceLimitX96: 0,
+          provider: env.provider,
+          chainId: 1337,
+          deadlineMinutes: 2
+        };
+
+        const swapTxData = await adapter.generateSwapData(swapParams);
+        
+        // Create approval transaction data - vault needs to approve router first
+        const approveData = wethContract.interface.encodeFunctionData('approve', [
+          swapTxData.to,  // router address
+          ethers.parseEther('0.1')  // approve exact amount needed
+        ]);
+        
+        // Encode call to vault's execute function with BOTH approve and swap
+        const vaultExecuteData = env.testVault.interface.encodeFunctionData('execute', [
+          [wethContract.target, swapTxData.to],   // targets: [WETH, router]
+          [approveData, swapTxData.data]          // data: [approve, swap]
+        ]);
+
+        const txData = {
+          to: env.testVault.target, // Call the vault
+          data: vaultExecuteData,   // Execute approve + swap batch
+          value: 0
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBeGreaterThan(100000); // Swaps are complex
+        expect(gasEstimate).toBeLessThan(500000); // But shouldn't be too high
+      });
+
+      it('should return raw gas estimate without buffer', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: ethers.parseEther('0.1'),
+          data: '0x'
+        };
+
+        const estimate1 = await adapter._estimateGasFromTxData(signer, txData);
+        const estimate2 = await adapter._estimateGasFromTxData(signer, txData);
+
+        // Same transaction should return same estimate (no buffer variation)
+        expect(estimate1).toBe(estimate2);
+        expect(estimate1).toBe(21000); // ETH transfers are always 21000
+      });
+
+      it('should handle transaction with from field in txData', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: ethers.parseEther('0.1'),
+          data: '0x',
+          from: signer.address // Include from field
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBe(21000);
+      });
+    });
+
+    describe('Invalid Type Cases', () => {
+      it('should throw error for null signer', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: 0,
+          data: '0x'
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(null, txData)
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for undefined signer', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: 0,
+          data: '0x'
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(undefined, txData)
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for non-signer object', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          value: 0,
+          data: '0x'
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData({}, txData) // Plain object, not a signer
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for null txData', async () => {
+        await expect(
+          adapter._estimateGasFromTxData(signer, null)
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for undefined txData', async () => {
+        await expect(
+          adapter._estimateGasFromTxData(signer, undefined)
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for txData missing to field', async () => {
+        const txData = {
+          // Missing 'to' field
+          value: 0,
+          data: '0x'
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(signer, txData)
+        ).rejects.toThrow();
+      });
+
+      it('should throw error for invalid to address', async () => {
+        const txData = {
+          to: 'invalid-address', // Not a valid address
+          value: 0,
+          data: '0x'
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(signer, txData)
+        ).rejects.toThrow();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw descriptive error for transaction that would revert', async () => {
+        // Try to transfer more WETH than available
+        const recipient = env.signers[1].address;
+        const amount = ethers.parseEther('999999'); // Way more than balance
+        const transferData = wethContract.interface.encodeFunctionData('transfer', [recipient, amount]);
+
+        const txData = {
+          to: wethContract.target,
+          data: transferData,
+          value: 0
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(signer, txData)
+        ).rejects.toThrow('Gas estimation failed');
+      });
+
+      it('should throw error for invalid function selector', async () => {
+        const txData = {
+          to: wethContract.target,
+          data: '0x12345678', // Invalid function selector
+          value: 0
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(signer, txData)
+        ).rejects.toThrow('Gas estimation failed');
+      });
+
+      it('should throw error for null to field', async () => {
+        const txData = {
+          to: null, // Invalid - to field required
+          data: '0x',
+          value: 0
+        };
+
+        await expect(
+          adapter._estimateGasFromTxData(signer, txData)
+        ).rejects.toThrow("Transaction data must include 'to' field");
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle empty transaction data', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          data: '0x', // Empty data
+          value: 0
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBe(21000); // Basic transaction
+      });
+
+      it('should handle very large transaction data', async () => {
+        // Create a large data payload (e.g., storing data on-chain)
+        const largeData = '0x' + 'ff'.repeat(1000); // 1KB of data
+
+        const txData = {
+          to: env.signers[1].address,
+          data: largeData,
+          value: 0
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBeGreaterThan(21000); // More than basic transfer due to data
+      });
+
+      it('should handle transaction with all optional fields', async () => {
+        const txData = {
+          to: env.signers[1].address,
+          data: '0x',
+          value: ethers.parseEther('0.01'),
+          from: signer.address,
+          gasLimit: 100000, // These should be ignored for estimation
+          gasPrice: ethers.parseUnits('20', 'gwei'),
+          nonce: 10
+        };
+
+        const gasEstimate = await adapter._estimateGasFromTxData(signer, txData);
+
+        expect(gasEstimate).toBeTypeOf('number');
+        expect(gasEstimate).toBe(21000); // Still just an ETH transfer
       });
     });
   });

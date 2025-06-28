@@ -69,20 +69,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.feeTiers = getPlatformFeeTiers("uniswapV3");
     this.chainConfig = getChainConfig(chainId);
 
-    // Cache token data for this chain with address lookup maps
-    this.tokensByAddress = new Map();
-    this.tokensBySymbol = new Map();
-
-    const chainTokens = getTokensForChain(chainId);
-    chainTokens.forEach(token => {
-      if (token.addresses && token.addresses[chainId]) {
-        // Store with checksummed address (preserves EIP-55 checksum)
-        const checksummedAddress = ethers.getAddress(token.addresses[chainId]);
-        this.tokensByAddress.set(checksummedAddress, token);
-        this.tokensBySymbol.set(token.symbol, token);
-      }
-    });
-
     // Store the imported ABIs
     this.nonfungiblePositionManagerABI = NonfungiblePositionManagerABI;
     this.uniswapV3PoolABI = IUniswapV3PoolABI;
@@ -131,11 +117,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} method - Method name
    * @param {Array} args - Method arguments
    * @param {Object} [overrides] - Transaction overrides
-   * @param {number} gasMultiplier - Gas buffer multiplier
-   * @returns {Promise<number>} Estimated gas limit with buffer
+   * @returns {Promise<number>} Estimated gas limit
    * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
    */
-  async _estimateGasWithBuffer(contract, method, args, overrides, gasMultiplier) {
+  async _estimateGas(contract, method, args, overrides = {}) {
     // Validate inputs
     if (!contract || typeof contract !== 'object') {
       throw new Error('Invalid contract instance');
@@ -159,8 +144,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       const estimatedGas = await contract[method].estimateGas(...args, overrides);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
-      return gasWithBuffer;
+      return Number(estimatedGas);
     } catch (error) {
       // In DeFi, gas estimation failure usually means transaction will revert
       // Better to fail fast than waste user's money on a doomed transaction
@@ -176,15 +160,49 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Estimate gas from transaction data with buffer
    * @param {ethers.Signer} signer - Signer instance
    * @param {Object} txData - Transaction data object
-   * @param {number} gasMultiplier - Gas buffer multiplier
-   * @returns {Promise<number>} Estimated gas limit with buffer
+   * @returns {Promise<number>} Estimated gas limit
    * @throws {Error} If gas estimation fails (indicating transaction would likely revert)
    */
-  async _estimateGasFromTxData(signer, txData, gasMultiplier) {
+  async _estimateGasFromTxData(signer, txData) {
+    // Validate signer
+    if (!signer || typeof signer !== 'object') {
+      throw new Error('Invalid signer instance');
+    }
+
+    if (typeof signer.estimateGas !== 'function') {
+      throw new Error('Signer must have estimateGas method');
+    }
+
+    // Validate txData
+    if (!txData || typeof txData !== 'object') {
+      throw new Error('Transaction data must be an object');
+    }
+
+    // Require 'to' field for all transactions
+    if (txData.to === null || txData.to === undefined) {
+      throw new Error("Transaction data must include 'to' field");
+    }
+
+    // Validate 'to' address format
+    try {
+      ethers.getAddress(txData.to); // This will throw if invalid
+    } catch (error) {
+      throw new Error(`Invalid 'to' address: ${txData.to}`);
+    }
+
+    // Validate data field if provided
+    if (txData.data !== undefined && typeof txData.data !== 'string') {
+      throw new Error('Transaction data field must be a string');
+    }
+
+    // Validate value field if provided
+    if (txData.value !== undefined && typeof txData.value !== 'bigint' && typeof txData.value !== 'string' && typeof txData.value !== 'number') {
+      throw new Error('Transaction value must be a valid bigint, string, or number');
+    }
+
     try {
       const estimatedGas = await signer.estimateGas(txData);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
-      return gasWithBuffer;
+      return Number(estimatedGas);
     } catch (error) {
       // In DeFi, gas estimation failure usually means transaction will revert
       // Better to fail fast than waste user's money on a doomed transaction
@@ -196,28 +214,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
   }
 
-  /**
-   * Estimate gas for token approval with buffer
-   * @param {ethers.Contract} tokenContract - Token contract instance
-   * @param {string} spender - Spender address
-   * @param {bigint} amount - Amount to approve
-   * @param {number} gasMultiplier - Gas buffer multiplier
-   * @returns {Promise<number>} Estimated gas limit with buffer
-   * @throws {Error} If gas estimation fails
-   */
-  async _estimateApprovalGas(tokenContract, spender, amount, gasMultiplier) {
-    try {
-      const estimatedGas = await tokenContract.approve.estimateGas(spender, amount);
-      const gasWithBuffer = Math.ceil(Number(estimatedGas) * gasMultiplier);
-      return gasWithBuffer;
-    } catch (error) {
-      throw new Error(
-        `Gas estimation failed for token approval. ` +
-        `Possible causes: insufficient balance for gas, invalid spender address, or contract issues. ` +
-        `Original error: ${error.message}`
-      );
-    }
-  }
 
   /**
    * Create standardized slippage tolerance Percent object
@@ -1247,17 +1243,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const signer = await provider.getSigner();
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData
-      (
+      const gasEstimate = await this._estimateGasFromTxData(
         signer,
         {
           to: txData.to,
           data: txData.data,
           value: txData.value,
           from: address
-        },
-        gasMultiplier
+        }
       );
+      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
 
       // Construct transaction
       const transaction = {
@@ -1640,17 +1635,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const signer = await provider.getSigner();
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData
-      (
+      const gasEstimate = await this._estimateGasFromTxData(
         signer,
         {
           to: txData.to,
           data: txData.data,
           value: txData.value,
           from: address
-        },
-        gasMultiplier
+        }
       );
+      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
 
       // Construct transaction
       const transaction = {
@@ -2083,12 +2077,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
           // Estimate gas for approval
-          const approvalGasLimit = await this._estimateApprovalGas(
+          const approvalGasEstimate = await this._estimateGas(
             token0Contract,
-            positionManagerAddress,
-            ethers.MaxUint256,
-            gasMultiplier
+            'approve',
+            [positionManagerAddress, ethers.MaxUint256]
           );
+          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
 
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
@@ -2109,12 +2103,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
           // Estimate gas for approval
-          const approvalGasLimit = await this._estimateApprovalGas(
+          const approvalGasEstimate = await this._estimateGas(
             token1Contract,
-            positionManagerAddress,
-            ethers.MaxUint256,
-            gasMultiplier
+            'approve',
+            [positionManagerAddress, ethers.MaxUint256]
           );
+          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
 
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
@@ -2149,17 +2143,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       });
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData
-      (
+      const gasEstimate = await this._estimateGasFromTxData(
         signer,
         {
           to: txData.to,
           data: txData.data,
           value: txData.value,
           from: address
-        },
-        gasMultiplier
+        }
       );
+      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
 
       // Construct transaction
       const transaction = {
@@ -2583,12 +2576,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         if (BigInt(allowance0) < BigInt(amount0InWei)) {
 
           // Estimate gas for approval
-          const approvalGasLimit = await this._estimateApprovalGas(
+          const approvalGasEstimate = await this._estimateGas(
             token0Contract,
-            positionManagerAddress,
-            ethers.MaxUint256,
-            gasMultiplier
+            'approve',
+            [positionManagerAddress, ethers.MaxUint256]
           );
+          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
 
           // Create approval transaction
           const approveTx = await token0Contract.connect(signer).approve(
@@ -2608,12 +2601,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         if (BigInt(allowance1) < BigInt(amount1InWei)) {
 
           // Estimate gas for approval
-          const approvalGasLimit = await this._estimateApprovalGas(
+          const approvalGasEstimate = await this._estimateGas(
             token1Contract,
-            positionManagerAddress,
-            ethers.MaxUint256,
-            gasMultiplier
+            'approve',
+            [positionManagerAddress, ethers.MaxUint256]
           );
+          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
 
           // Create approval transaction
           const approveTx = await token1Contract.connect(signer).approve(
@@ -2649,17 +2642,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       });
 
       // Estimate gas using the transaction data
-      const gasLimit = await this._estimateGasFromTxData
-      (
+      const gasEstimate = await this._estimateGasFromTxData(
         signer,
         {
           to: txData.to,
           data: txData.data,
           value: txData.value,
           from: address
-        },
-        gasMultiplier
+        }
       );
+      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
 
       // Construct transaction
       const transaction = {
