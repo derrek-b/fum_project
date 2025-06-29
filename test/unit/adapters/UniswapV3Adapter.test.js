@@ -621,63 +621,38 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('getChainId', () => {
+  describe('_validateProviderChain', () => {
     describe('Success Cases', () => {
-      it('should return chain ID as number from bigint (ethers v6)', async () => {
+      it('should validate correct chain without throwing', async () => {
+        await expect(
+          adapter._validateProviderChain(env.provider)
+        ).resolves.not.toThrow();
+      });
+
+      it('should work with provider returning correct chainId as bigint', async () => {
         const mockProvider = {
           getNetwork: async () => ({
-            chainId: 1337n, // bigint as returned by ethers v6
+            chainId: 1337n, // Correct chain as bigint
             name: 'ganache'
           })
         };
 
-        const result = await adapter.getChainId(mockProvider);
-        
-        expect(result).toBe(1337);
-        expect(typeof result).toBe('number');
-      });
-
-      it('should handle different chain IDs correctly', async () => {
-        const testCases = [
-          { input: 1n, expected: 1 },      // Ethereum mainnet
-          { input: 42161n, expected: 42161 }, // Arbitrum
-          { input: 137n, expected: 137 },   // Polygon
-          { input: 1337n, expected: 1337 }  // Ganache
-        ];
-
-        for (const testCase of testCases) {
-          const mockProvider = {
-            getNetwork: async () => ({
-              chainId: testCase.input,
-              name: 'test-network'
-            })
-          };
-
-          const result = await adapter.getChainId(mockProvider);
-          expect(result).toBe(testCase.expected);
-        }
-      });
-
-      it('should work with real provider from test environment', async () => {
-        if (env && env.provider) {
-          const result = await adapter.getChainId(env.provider);
-          
-          expect(result).toBe(1337); // Ganache chain ID
-          expect(typeof result).toBe('number');
-        }
+        await expect(
+          adapter._validateProviderChain(mockProvider)
+        ).resolves.not.toThrow();
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for null provider', async () => {
         await expect(
-          adapter.getChainId(null)
+          adapter._validateProviderChain(null)
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
       });
 
       it('should throw error for undefined provider', async () => {
         await expect(
-          adapter.getChainId(undefined)
+          adapter._validateProviderChain(undefined)
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
       });
 
@@ -685,8 +660,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const invalidProvider = {};
         
         await expect(
-          adapter.getChainId(invalidProvider)
+          adapter._validateProviderChain(invalidProvider)
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error when provider is on wrong chain', async () => {
+        const wrongChainProvider = {
+          getNetwork: async () => ({
+            chainId: 1n, // Wrong chain (mainnet instead of ganache)
+            name: 'mainnet'
+          })
+        };
+
+        await expect(
+          adapter._validateProviderChain(wrongChainProvider)
+        ).rejects.toThrow('Provider chain 1 doesn\'t match adapter chain 1337');
       });
 
       it('should throw error when getNetwork throws', async () => {
@@ -697,8 +685,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         await expect(
-          adapter.getChainId(failingProvider)
-        ).rejects.toThrow('Failed to get chainId from provider: Network error');
+          adapter._validateProviderChain(failingProvider)
+        ).rejects.toThrow('Failed to validate provider chain: Network error');
       });
 
       it('should throw error when network is null', async () => {
@@ -707,7 +695,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         await expect(
-          adapter.getChainId(mockProvider)
+          adapter._validateProviderChain(mockProvider)
         ).rejects.toThrow('Provider returned invalid network data');
       });
 
@@ -720,81 +708,50 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         await expect(
-          adapter.getChainId(mockProvider)
+          adapter._validateProviderChain(mockProvider)
         ).rejects.toThrow('Provider returned invalid network data');
-      });
-
-      it('should throw error for zero chainId', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 0n,
-            name: 'invalid-network'
-          })
-        };
-
-        await expect(
-          adapter.getChainId(mockProvider)
-        ).rejects.toThrow('Invalid chainId received: 0');
-      });
-
-      it('should throw error for negative chainId', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: -1n,
-            name: 'invalid-network'
-          })
-        };
-
-        await expect(
-          adapter.getChainId(mockProvider)
-        ).rejects.toThrow('Invalid chainId received: -1');
       });
     });
 
     describe('Special Cases', () => {
-      it('should handle very large chain IDs', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 999999999n,
-            name: 'custom-network'
-          })
-        };
-
-        const result = await adapter.getChainId(mockProvider);
-        
-        expect(result).toBe(999999999);
-        expect(typeof result).toBe('number');
-      });
-
-      it('should be consistent for multiple calls', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 1337n,
-            name: 'ganache'
-          })
-        };
-
-        const result1 = await adapter.getChainId(mockProvider);
-        const result2 = await adapter.getChainId(mockProvider);
-        
-        expect(result1).toBe(result2);
-        expect(result1).toBe(1337);
-      });
-
       it('should handle provider with additional network properties', async () => {
         const mockProvider = {
           getNetwork: async () => ({
-            chainId: 42161n,
-            name: 'arbitrum-one',
+            chainId: 1337n, // Correct chain
+            name: 'ganache',
             ensAddress: '0x123...',
             customProperty: 'test'
           })
         };
 
-        const result = await adapter.getChainId(mockProvider);
-        
-        expect(result).toBe(42161);
-        expect(typeof result).toBe('number');
+        await expect(
+          adapter._validateProviderChain(mockProvider)
+        ).resolves.not.toThrow();
+      });
+
+      it('should distinguish between network errors and chain mismatch', async () => {
+        // Chain mismatch error should be thrown as-is
+        const wrongChainProvider = {
+          getNetwork: async () => ({
+            chainId: 42161n,
+            name: 'arbitrum'
+          })
+        };
+
+        await expect(
+          adapter._validateProviderChain(wrongChainProvider)
+        ).rejects.toThrow('Provider chain 42161 doesn\'t match adapter chain 1337');
+
+        // Network error should be wrapped
+        const networkErrorProvider = {
+          getNetwork: async () => {
+            throw new Error('Connection failed');
+          }
+        };
+
+        await expect(
+          adapter._validateProviderChain(networkErrorProvider)
+        ).rejects.toThrow('Failed to validate provider chain: Connection failed');
       });
     });
   });
@@ -852,29 +809,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof address3000).toBe('string');
       });
 
-      it('should handle different chain IDs correctly', async () => {
-        // Mock provider with different chain ID
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 42161n, // Arbitrum
-            name: 'arbitrum'
-          })
-        };
-
-        const token0 = { 
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
-          decimals: 18 
-        };
-        const token1 = { 
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
-          decimals: 6 
-        };
-        
-        const address = await adapter.getPoolAddress(token0, token1, 500, mockProvider);
-        
-        expect(typeof address).toBe('string');
-        expect(address).toMatch(/^0x[a-fA-F0-9]{40}$/);
-      });
     });
 
     describe('Error Cases', () => {
@@ -943,6 +877,292 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.getPoolAddress(token0, token1, 500, env.provider)
         ).rejects.toThrow();
+      });
+    });
+  });
+
+  describe('checkPoolExists', () => {
+    describe('Success Cases', () => {
+      it('should return pool data when pool exists', async () => {
+        const weth = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const usdc = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const result = await adapter.checkPoolExists(weth, usdc, 500, env.provider);
+        
+        expect(result).toBeDefined();
+        expect(result.exists).toBe(true);
+        expect(result.poolAddress).toBeDefined();
+        expect(typeof result.poolAddress).toBe('string');
+        expect(result.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.slot0).toBeDefined();
+      });
+
+      it('should handle token order correctly', async () => {
+        const weth = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const usdc = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const result1 = await adapter.checkPoolExists(weth, usdc, 500, env.provider);
+        const result2 = await adapter.checkPoolExists(usdc, weth, 500, env.provider);
+        
+        expect(result1.poolAddress).toBe(result2.poolAddress);
+        expect(result1.exists).toBe(result2.exists);
+      });
+
+      it('should work with real provider', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const result = await adapter.checkPoolExists(token0, token1, 500, env.provider);
+        
+        expect(result).toBeDefined();
+        expect(typeof result.exists).toBe('boolean');
+        expect(result.poolAddress).toBeDefined();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw when token0 missing address', async () => {
+        const token0 = { decimals: 18 };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Missing required token information');
+      });
+
+      it('should throw when token1 missing address', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { decimals: 6 };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Missing required token information');
+      });
+
+      it('should throw when fee is undefined', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, undefined, env.provider)
+        ).rejects.toThrow('Missing required token information');
+      });
+
+      it('should throw when provider is null', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, null)
+        ).rejects.toThrow('Invalid provider');
+      });
+
+      it('should return exists: false for non-existent pool', async () => {
+        const fakeToken1 = {
+          address: '0x0000000000000000000000000000000000000001',
+          decimals: 18
+        };
+        const fakeToken2 = {
+          address: '0x0000000000000000000000000000000000000002',
+          decimals: 18
+        };
+        
+        const result = await adapter.checkPoolExists(fakeToken1, fakeToken2, 500, env.provider);
+        
+        expect(result).toBeDefined();
+        expect(result.exists).toBe(false);
+        expect(result.poolAddress).toBeNull();
+        expect(result.slot0).toBeNull();
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should be consistent across multiple calls', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const result1 = await adapter.checkPoolExists(token0, token1, 500, env.provider);
+        const result2 = await adapter.checkPoolExists(token0, token1, 500, env.provider);
+        
+        expect(result1.exists).toBe(result2.exists);
+        expect(result1.poolAddress).toBe(result2.poolAddress);
+      });
+
+      it('should handle provider network errors gracefully', async () => {
+        const failingProvider = {
+          getNetwork: async () => {
+            throw new Error('Network error');
+          }
+        };
+        
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, failingProvider)
+        ).rejects.toThrow('Failed to validate provider chain: Network error');
+      });
+
+      it('should throw when provider is on wrong chain', async () => {
+        const wrongChainProvider = {
+          getNetwork: async () => ({
+            chainId: 1n, // Wrong chain
+            name: 'mainnet'
+          })
+        };
+        
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, wrongChainProvider)
+        ).rejects.toThrow('Provider chain 1 doesn\'t match adapter chain 1337');
+      });
+    });
+  });
+
+  describe('_getPositionManager', () => {
+    describe('Success Cases', () => {
+      it('should return position manager contract with valid provider', () => {
+        const contract = adapter._getPositionManager(env.provider);
+        
+        expect(contract).toBeDefined();
+        expect(contract.target).toBe(adapter.addresses.positionManagerAddress);
+        expect(contract.interface).toBeDefined();
+      });
+
+      it('should return contract with correct ABI', () => {
+        const contract = adapter._getPositionManager(env.provider);
+        
+        // Check that it has some expected position manager functions
+        expect(contract.interface.hasFunction('positions')).toBe(true);
+        expect(contract.interface.hasFunction('balanceOf')).toBe(true);
+        expect(contract.interface.hasFunction('tokenOfOwnerByIndex')).toBe(true);
+      });
+
+      it('should work with different provider instances', () => {
+        const mockProvider1 = { 
+          _isMockProvider: true,
+          call: async () => '0x' 
+        };
+        const mockProvider2 = { 
+          _isMockProvider: true,
+          send: async () => ({}) 
+        };
+        
+        const contract1 = adapter._getPositionManager(mockProvider1);
+        const contract2 = adapter._getPositionManager(mockProvider2);
+        
+        expect(contract1.target).toBe(contract2.target);
+        expect(contract1.target).toBe(adapter.addresses.positionManagerAddress);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error when provider is null', () => {
+        expect(() => adapter._getPositionManager(null)).toThrow('Provider is required');
+      });
+
+      it('should throw error when provider is undefined', () => {
+        expect(() => adapter._getPositionManager(undefined)).toThrow('Provider is required');
+      });
+
+      it('should throw error when addresses are missing', () => {
+        // Create adapter with modified addresses to test error case
+        const originalAddresses = adapter.addresses;
+        adapter.addresses = null;
+        
+        expect(() => adapter._getPositionManager(env.provider)).toThrow('Position manager not available for chain 1337');
+        
+        // Restore addresses
+        adapter.addresses = originalAddresses;
+      });
+
+      it('should throw error when positionManagerAddress is missing', () => {
+        // Create adapter with modified addresses to test error case
+        const originalAddress = adapter.addresses.positionManagerAddress;
+        delete adapter.addresses.positionManagerAddress;
+        
+        expect(() => adapter._getPositionManager(env.provider)).toThrow('Position manager not available for chain 1337');
+        
+        // Restore address
+        adapter.addresses.positionManagerAddress = originalAddress;
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should return consistent contracts for same provider', () => {
+        const contract1 = adapter._getPositionManager(env.provider);
+        const contract2 = adapter._getPositionManager(env.provider);
+        
+        expect(contract1.target).toBe(contract2.target);
+      });
+
+      it('should handle provider with additional properties', () => {
+        const extendedProvider = {
+          ...env.provider,
+          customProperty: 'test',
+          extraMethod: () => {}
+        };
+        
+        const contract = adapter._getPositionManager(extendedProvider);
+        
+        expect(contract).toBeDefined();
+        expect(contract.target).toBe(adapter.addresses.positionManagerAddress);
       });
     });
   });

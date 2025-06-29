@@ -249,12 +249,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get chain ID from provider (ethers v6)
+   * Validate that provider is on the correct chain
    * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<number>} Chain ID as number
-   * @throws {Error} If provider is invalid or network fetch fails
+   * @throws {Error} If provider is invalid or on wrong chain
    */
-  async getChainId(provider) {
+  async _validateProviderChain(provider) {
     if (!provider || typeof provider.getNetwork !== 'function') {
       throw new Error('Invalid provider - must have getNetwork method');
     }
@@ -267,15 +266,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
 
       // In ethers v6, chainId is always a bigint
-      const chainId = Number(network.chainId);
+      const providerChainId = Number(network.chainId);
 
-      if (!chainId || chainId <= 0) {
-        throw new Error(`Invalid chainId received: ${chainId}`);
+      if (providerChainId !== this.chainId) {
+        throw new Error(`Provider chain ${providerChainId} doesn't match adapter chain ${this.chainId}`);
       }
-
-      return chainId;
     } catch (error) {
-      throw new Error(`Failed to get chainId from provider: ${error.message}`);
+      if (error.message.includes("doesn't match adapter chain")) {
+        throw error; // Re-throw chain mismatch errors as-is
+      }
+      throw new Error(`Failed to validate provider chain: ${error.message}`);
     }
   }
 
@@ -297,22 +297,22 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Missing required token information for pool address calculation");
     }
 
+    // Validate provider is on correct chain
+    await this._validateProviderChain(provider);
+
     // Sort tokens according to Uniswap V3 rules
     const { sortedToken0, sortedToken1, tokensSwapped } = this.sortTokens(token0, token1);
-
-    // Get chainId from provider
-    const chainId = await this.getChainId(provider);
 
     try {      // Use the Uniswap SDK to calculate pool address
 
       const sdkToken0 = new Token(
-        chainId,
+        this.chainId,
         sortedToken0.address,
         sortedToken0.decimals
       );
 
       const sdkToken1 = new Token(
-        chainId,
+        this.chainId,
         sortedToken1.address,
         sortedToken1.decimals
       );
@@ -339,15 +339,20 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
    */
   async checkPoolExists(token0, token1, fee, provider) {
+    // Validate input parameters
+    if (!token0?.address || !token1?.address || fee === undefined ||
+        token0.decimals === undefined || token1.decimals === undefined) {
+      throw new Error("Missing required token information for pool existence check");
+    }
+
+    // Validate provider is on correct chain
+    await this._validateProviderChain(provider);
+
     try {
       const poolAddress = await this.getPoolAddress(token0, token1, fee, provider);
 
-      // Create a minimal pool contract to check if the pool exists
-      const poolABI = [
-        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
-      ];
-
-      const poolContract = new ethers.Contract(poolAddress, poolABI, this.provider);
+      // Use the full pool ABI that we already have at the class level
+      const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
 
       try {
         // Try to call slot0() to see if the pool exists
@@ -355,32 +360,33 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         return { exists: true, poolAddress, slot0 };
       } catch (error) {
         // If the call fails, the pool likely doesn't exist
-        return { exists: false, poolAddress, slot0: null };
+        return { exists: false, poolAddress: null, slot0: null };
       }
     } catch (error) {
-      console.error("Error checking pool existence:", error);
-      return { exists: false, poolAddress: null, slot0: null };
+      // If getPoolAddress fails, propagate the error (could be validation or network error)
+      throw error;
     }
   }
 
   /**
-   * Get position manager contract instance for a given chain
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<ethers.Contract>} Position manager contract instance
+   * Get position manager contract instance
+   * @param {Object} provider - Ethers provider instance
+   * @returns {ethers.Contract} Position manager contract instance
    * @private
    */
-  async _getPositionManager(chainId) {
-    const chainConfig = this.config[chainId];
-    if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-      throw new Error(`No configuration found for chainId: ${chainId}`);
+  _getPositionManager(provider) {
+    if (!provider) {
+      throw new Error('Provider is required');
     }
 
-    const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+    if (!this.addresses?.positionManagerAddress) {
+      throw new Error(`Position manager not available for chain ${this.chainId}`);
+    }
 
     return new ethers.Contract(
-      positionManagerAddress,
+      this.addresses.positionManagerAddress,
       this.nonfungiblePositionManagerABI,
-      this.provider
+      provider
     );
   }
 
