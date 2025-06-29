@@ -222,12 +222,12 @@ describe('UniswapV3Adapter - Integration Tests', () => {
       );
       
       // Get tick data for fee calculations
-      const poolAddress = poolData.poolAddress || (await adapter.getPoolData(
-        { address: position.token0, decimals: position.token0 === env.testPosition.token0 ? 6 : 18, symbol: position.token0 === env.testPosition.token0 ? 'USDC' : 'WETH', name: 'Token' },
-        { address: position.token1, decimals: position.token1 === env.testPosition.token1 ? 18 : 6, symbol: position.token1 === env.testPosition.token1 ? 'WETH' : 'USDC', name: 'Token' },
+      const poolAddress = poolData.poolAddress || (await adapter.getPoolAddress(
+        { address: position.token0, decimals: position.token0 === env.testPosition.token0 ? 6 : 18 },
+        { address: position.token1, decimals: position.token1 === env.testPosition.token1 ? 18 : 6 },
         position.fee,
         env.provider
-      )).poolAddress;
+      ));
       
       const tickData = await adapter.fetchTickData(poolAddress, position.tickLower, position.tickUpper);
       

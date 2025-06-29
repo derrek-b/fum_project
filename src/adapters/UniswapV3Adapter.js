@@ -48,7 +48,10 @@ const ERC20ABI = ERC20ARTIFACT.abi;
  * // Create adapter for Arbitrum
  * const adapter = new UniswapV3Adapter(42161);
  *
- * // Use with provider for blockchain calls
+ * // Get pool address (no blockchain calls)
+ * const poolAddress = await adapter.getPoolAddress(token0, token1, 500, provider);
+ *
+ * // Get live pool data (makes blockchain calls)
  * const poolData = await adapter.fetchPoolData(token0, token1, 500, 42161, provider);
  */
 export default class UniswapV3Adapter extends PlatformAdapter {
@@ -226,82 +229,97 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Sort tokens according to Uniswap V3 rules (lower address first)
+   * @param {Object} token0 - First token object
+   * @param {string} token0.address - Token contract address
+   * @param {Object} token1 - Second token object  
+   * @param {string} token1.address - Token contract address
+   * @returns {{sortedToken0: Object, sortedToken1: Object, tokensSwapped: boolean}} Sorted tokens and swap flag
+   */
+  sortTokens(token0, token1) {
+    if (!token0?.address || !token1?.address) {
+      throw new Error("Both tokens must have valid addresses");
+    }
+
+    const tokensSwapped = token0.address.toLowerCase() > token1.address.toLowerCase();
+    
+    return tokensSwapped 
+      ? { sortedToken0: token1, sortedToken1: token0, tokensSwapped: true }
+      : { sortedToken0: token0, sortedToken1: token1, tokensSwapped: false };
+  }
+
+  /**
+   * Get chain ID from provider (ethers v6)
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<number>} Chain ID as number
+   * @throws {Error} If provider is invalid or network fetch fails
+   */
+  async getChainId(provider) {
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error('Invalid provider - must have getNetwork method');
+    }
+
+    try {
+      const network = await provider.getNetwork();
+      
+      if (!network || network.chainId === undefined) {
+        throw new Error('Provider returned invalid network data');
+      }
+
+      // In ethers v6, chainId is always a bigint
+      const chainId = Number(network.chainId);
+
+      if (!chainId || chainId <= 0) {
+        throw new Error(`Invalid chainId received: ${chainId}`);
+      }
+
+      return chainId;
+    } catch (error) {
+      throw new Error(`Failed to get chainId from provider: ${error.message}`);
+    }
+  }
+
+  /**
    * Calculate pool address for the given tokens and fee tier
    * @param {Object} token0 - First token object
    * @param {string} token0.address - Token contract address
    * @param {number} token0.decimals - Token decimals
-   * @param {string} token0.symbol - Token symbol
-   * @param {string} token0.name - Token name
    * @param {Object} token1 - Second token object
-   * @param {string} token1.address - Token contract address
+   * @param {string} token1.address - Token contract address  
    * @param {number} token1.decimals - Token decimals
-   * @param {string} token1.symbol - Token symbol
-   * @param {string} token1.name - Token name
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
    * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information
+   * @returns {Promise<string>} Pool contract address
    */
-  async getPoolData(token0, token1, fee, provider) {
+  async getPoolAddress(token0, token1, fee, provider) {
     if (!token0?.address || !token1?.address || fee === undefined ||
         token0.decimals === undefined || token1.decimals === undefined) {
       throw new Error("Missing required token information for pool address calculation");
     }
 
     // Sort tokens according to Uniswap V3 rules
-    let sortedToken0, sortedToken1;
-    const tokensSwapped = token0.address.toLowerCase() > token1.address.toLowerCase();
-
-    if (tokensSwapped) {
-      sortedToken0 = token1;
-      sortedToken1 = token0;
-    } else {
-      sortedToken0 = token0;
-      sortedToken1 = token1;
-    }
+    const { sortedToken0, sortedToken1, tokensSwapped } = this.sortTokens(token0, token1);
 
     // Get chainId from provider
-    let chainId;
-    try {
-      const network = await provider.getNetwork();
-      // Handle ethers v6 where chainId might be a bigint
-      chainId = typeof network.chainId === 'bigint'
-        ? Number(network.chainId)
-        : network.chainId;
-    } catch (error) {
-      console.error("Failed to get network from provider:", error);
-      throw new Error("Could not determine chainId from provider");
-    }
-
-    if (!chainId) {
-      throw new Error("Invalid chainId from provider");
-    }
+    const chainId = await this.getChainId(provider);
 
     try {      // Use the Uniswap SDK to calculate pool address
 
       const sdkToken0 = new Token(
         chainId,
         sortedToken0.address,
-        sortedToken0.decimals,
-        sortedToken0.symbol || "",
-        sortedToken0.name || ""
+        sortedToken0.decimals
       );
 
       const sdkToken1 = new Token(
         chainId,
         sortedToken1.address,
-        sortedToken1.decimals,
-        sortedToken1.symbol || "",
-        sortedToken1.name || ""
+        sortedToken1.decimals
       );
 
       const poolAddress = Pool.getAddress(sdkToken0, sdkToken1, fee);
 
-      return {
-        poolAddress,
-        sortedToken0,
-        sortedToken1,
-        tokensSwapped
-      };
+      return poolAddress;
     } catch (error) {
       throw new Error(`Failed to calculate pool address: ${error.message}`);
     }
@@ -317,11 +335,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} token1.address - Token contract address
    * @param {number} token1.decimals - Token decimals
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
+   * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
    */
-  async checkPoolExists(token0, token1, fee) {
+  async checkPoolExists(token0, token1, fee, provider) {
     try {
-      const { poolAddress } = await this.getPoolData(token0, token1, fee);
+      const poolAddress = await this.getPoolAddress(token0, token1, fee, provider);
 
       // Create a minimal pool contract to check if the pool exists
       const poolABI = [

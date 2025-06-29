@@ -314,6 +314,639 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('_createSlippagePercent', () => {
+    describe('Success Cases', () => {
+      it('should create Percent object for integer percentage', () => {
+        const result = adapter._createSlippagePercent(5);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('500');
+        expect(result.denominator.toString()).toBe('10000');
+        // 5% = 500/10000
+      });
+
+      it('should create Percent object for decimal percentage', () => {
+        const result = adapter._createSlippagePercent(1.5);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('150');
+        expect(result.denominator.toString()).toBe('10000');
+        // 1.5% = 150/10000
+      });
+
+      it('should create Percent object for zero percentage', () => {
+        const result = adapter._createSlippagePercent(0);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('0');
+        expect(result.denominator.toString()).toBe('10000');
+        // 0% = 0/10000
+      });
+
+      it('should create Percent object for maximum percentage', () => {
+        const result = adapter._createSlippagePercent(100);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('10000');
+        expect(result.denominator.toString()).toBe('10000');
+        // 100% = 10000/10000
+      });
+
+      it('should floor decimal values in conversion', () => {
+        const result = adapter._createSlippagePercent(1.99);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('199');
+        expect(result.denominator.toString()).toBe('10000');
+        // 1.99% = 199/10000 (not 200)
+      });
+
+      it('should handle very small percentages', () => {
+        const result = adapter._createSlippagePercent(0.01);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('1');
+        expect(result.denominator.toString()).toBe('10000');
+        // 0.01% = 1/10000
+      });
+
+      it('should handle percentage with many decimal places', () => {
+        const result = adapter._createSlippagePercent(12.3456789);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('1234');
+        expect(result.denominator.toString()).toBe('10000');
+        // 12.3456789% = 1234/10000 (floored)
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for negative percentage', () => {
+        expect(() => adapter._createSlippagePercent(-1)).toThrow('Invalid slippage tolerance: -1. Must be between 0 and 100.');
+      });
+
+      it('should throw error for percentage over 100', () => {
+        expect(() => adapter._createSlippagePercent(101)).toThrow('Invalid slippage tolerance: 101. Must be between 0 and 100.');
+      });
+
+      it('should throw error for NaN', () => {
+        expect(() => adapter._createSlippagePercent(NaN)).toThrow('Invalid slippage tolerance: NaN. Must be between 0 and 100.');
+      });
+
+      it('should throw error for string input', () => {
+        expect(() => adapter._createSlippagePercent("5")).toThrow('Invalid slippage tolerance: 5. Must be between 0 and 100.');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should return consistent Percent objects for same input', () => {
+        const result1 = adapter._createSlippagePercent(2.5);
+        const result2 = adapter._createSlippagePercent(2.5);
+
+        expect(result1.numerator.toString()).toBe(result2.numerator.toString());
+        expect(result1.denominator.toString()).toBe(result2.denominator.toString());
+      });
+
+      it('should create valid Percent that can be used in calculations', () => {
+        const percent = adapter._createSlippagePercent(10);
+
+        // Test that it's a valid Percent object by checking it has expected methods
+        expect(typeof percent.toSignificant).toBe('function');
+        expect(typeof percent.toFixed).toBe('function');
+
+        // 10% should display as "10.00"
+        expect(percent.toFixed(2)).toBe('10.00');
+      });
+
+      it('should handle edge case of 0.009% (rounds down to 0)', () => {
+        const result = adapter._createSlippagePercent(0.009);
+
+        expect(result).toBeDefined();
+        expect(result.constructor.name).toBe('Percent');
+        expect(result.numerator.toString()).toBe('0');
+        expect(result.denominator.toString()).toBe('10000');
+        // 0.009% * 100 = 0.9, Math.floor(0.9) = 0
+      });
+    });
+  });
+
+  describe('sortTokens', () => {
+    describe('Success Cases', () => {
+      it('should not swap tokens when token0 has lower address', () => {
+        const token0 = { address: '0x1000000000000000000000000000000000000000', symbol: 'TOKEN0' };
+        const token1 = { address: '0x2000000000000000000000000000000000000000', symbol: 'TOKEN1' };
+
+        const result = adapter.sortTokens(token0, token1);
+
+        expect(result.sortedToken0).toBe(token0);
+        expect(result.sortedToken1).toBe(token1);
+        expect(result.tokensSwapped).toBe(false);
+      });
+
+      it('should swap tokens when token0 has higher address', () => {
+        const token0 = { address: '0x3000000000000000000000000000000000000000', symbol: 'TOKEN0' };
+        const token1 = { address: '0x1000000000000000000000000000000000000000', symbol: 'TOKEN1' };
+
+        const result = adapter.sortTokens(token0, token1);
+
+        expect(result.sortedToken0).toBe(token1);
+        expect(result.sortedToken1).toBe(token0);
+        expect(result.tokensSwapped).toBe(true);
+      });
+
+      it('should handle mixed case addresses correctly', () => {
+        const token0 = { address: '0xABCDEF0000000000000000000000000000000000', symbol: 'TOKEN0' };
+        const token1 = { address: '0x123456FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF', symbol: 'TOKEN1' };
+
+        const result = adapter.sortTokens(token0, token1);
+
+        // ABCDEF (lowercase) > 123456 (lowercase), so tokens should be swapped
+        expect(result.sortedToken0).toBe(token1);
+        expect(result.sortedToken1).toBe(token0);
+        expect(result.tokensSwapped).toBe(true);
+      });
+
+      it('should handle real token addresses (WETH vs USDC)', () => {
+        const weth = {
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+          symbol: 'WETH',
+          decimals: 18
+        };
+        const usdc = {
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+          symbol: 'USDC',
+          decimals: 6
+        };
+
+        const result = adapter.sortTokens(weth, usdc);
+
+        // WETH address (82af...) < USDC address (af88...), so no swap needed
+        expect(result.sortedToken0).toBe(weth);
+        expect(result.sortedToken1).toBe(usdc);
+        expect(result.tokensSwapped).toBe(false);
+      });
+
+      it('should preserve all token properties', () => {
+        const token0 = {
+          address: '0x3000000000000000000000000000000000000000',
+          symbol: 'TOKEN0',
+          decimals: 18,
+          name: 'Token Zero',
+          customProperty: 'test'
+        };
+        const token1 = {
+          address: '0x1000000000000000000000000000000000000000',
+          symbol: 'TOKEN1',
+          decimals: 6,
+          name: 'Token One'
+        };
+
+        const result = adapter.sortTokens(token0, token1);
+
+        // Tokens should be swapped, but all properties preserved
+        expect(result.sortedToken0).toEqual(token1);
+        expect(result.sortedToken1).toEqual(token0);
+        expect(result.sortedToken1.customProperty).toBe('test');
+      });
+
+      it('should handle addresses that differ by one character', () => {
+        const token0 = { address: '0x1000000000000000000000000000000000000001' };
+        const token1 = { address: '0x1000000000000000000000000000000000000000' };
+
+        const result = adapter.sortTokens(token0, token1);
+
+        // token1 ends in 0, token0 ends in 1, so token1 < token0
+        expect(result.sortedToken0).toBe(token1);
+        expect(result.sortedToken1).toBe(token0);
+        expect(result.tokensSwapped).toBe(true);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error when token0 has no address', () => {
+        const token0 = { symbol: 'TOKEN0' };
+        const token1 = { address: '0x1000000000000000000000000000000000000000' };
+
+        expect(() => adapter.sortTokens(token0, token1)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when token1 has no address', () => {
+        const token0 = { address: '0x1000000000000000000000000000000000000000' };
+        const token1 = { symbol: 'TOKEN1' };
+
+        expect(() => adapter.sortTokens(token0, token1)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when token0 is null', () => {
+        const token1 = { address: '0x1000000000000000000000000000000000000000' };
+
+        expect(() => adapter.sortTokens(null, token1)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when token1 is undefined', () => {
+        const token0 = { address: '0x1000000000000000000000000000000000000000' };
+
+        expect(() => adapter.sortTokens(token0, undefined)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when both tokens are missing', () => {
+        expect(() => adapter.sortTokens(null, undefined)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when token0 address is empty string', () => {
+        const token0 = { address: '' };
+        const token1 = { address: '0x1000000000000000000000000000000000000000' };
+
+        expect(() => adapter.sortTokens(token0, token1)).toThrow('Both tokens must have valid addresses');
+      });
+
+      it('should throw error when token1 address is empty string', () => {
+        const token0 = { address: '0x1000000000000000000000000000000000000000' };
+        const token1 = { address: '' };
+
+        expect(() => adapter.sortTokens(token0, token1)).toThrow('Both tokens must have valid addresses');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should be deterministic for same input', () => {
+        const token0 = { address: '0x3000000000000000000000000000000000000000' };
+        const token1 = { address: '0x1000000000000000000000000000000000000000' };
+
+        const result1 = adapter.sortTokens(token0, token1);
+        const result2 = adapter.sortTokens(token0, token1);
+
+        expect(result1.sortedToken0).toBe(result2.sortedToken0);
+        expect(result1.sortedToken1).toBe(result2.sortedToken1);
+        expect(result1.tokensSwapped).toBe(result2.tokensSwapped);
+      });
+
+      it('should be consistent regardless of input order', () => {
+        const tokenA = { address: '0x1000000000000000000000000000000000000000', symbol: 'A' };
+        const tokenB = { address: '0x2000000000000000000000000000000000000000', symbol: 'B' };
+
+        const result1 = adapter.sortTokens(tokenA, tokenB);
+        const result2 = adapter.sortTokens(tokenB, tokenA);
+
+        // Both should result in the same sorted order
+        expect(result1.sortedToken0).toBe(tokenA);
+        expect(result1.sortedToken1).toBe(tokenB);
+        expect(result2.sortedToken0).toBe(tokenA);
+        expect(result2.sortedToken1).toBe(tokenB);
+
+        // But tokensSwapped should reflect the input order
+        expect(result1.tokensSwapped).toBe(false);
+        expect(result2.tokensSwapped).toBe(true);
+      });
+
+      it('should handle checksum vs lowercase addresses correctly', () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' }; // Mixed case
+        const token1 = { address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1' }; // Lowercase
+
+        const result = adapter.sortTokens(token0, token1);
+
+        // Should treat them as the same address (both convert to lowercase)
+        // Since they're the same when lowercased, no swap should occur
+        expect(result.sortedToken0).toBe(token0);
+        expect(result.sortedToken1).toBe(token1);
+        expect(result.tokensSwapped).toBe(false);
+      });
+    });
+  });
+
+  describe('getChainId', () => {
+    describe('Success Cases', () => {
+      it('should return chain ID as number from bigint (ethers v6)', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 1337n, // bigint as returned by ethers v6
+            name: 'ganache'
+          })
+        };
+
+        const result = await adapter.getChainId(mockProvider);
+        
+        expect(result).toBe(1337);
+        expect(typeof result).toBe('number');
+      });
+
+      it('should handle different chain IDs correctly', async () => {
+        const testCases = [
+          { input: 1n, expected: 1 },      // Ethereum mainnet
+          { input: 42161n, expected: 42161 }, // Arbitrum
+          { input: 137n, expected: 137 },   // Polygon
+          { input: 1337n, expected: 1337 }  // Ganache
+        ];
+
+        for (const testCase of testCases) {
+          const mockProvider = {
+            getNetwork: async () => ({
+              chainId: testCase.input,
+              name: 'test-network'
+            })
+          };
+
+          const result = await adapter.getChainId(mockProvider);
+          expect(result).toBe(testCase.expected);
+        }
+      });
+
+      it('should work with real provider from test environment', async () => {
+        if (env && env.provider) {
+          const result = await adapter.getChainId(env.provider);
+          
+          expect(result).toBe(1337); // Ganache chain ID
+          expect(typeof result).toBe('number');
+        }
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null provider', async () => {
+        await expect(
+          adapter.getChainId(null)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error for undefined provider', async () => {
+        await expect(
+          adapter.getChainId(undefined)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error for provider without getNetwork method', async () => {
+        const invalidProvider = {};
+        
+        await expect(
+          adapter.getChainId(invalidProvider)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error when getNetwork throws', async () => {
+        const failingProvider = {
+          getNetwork: async () => {
+            throw new Error('Network error');
+          }
+        };
+
+        await expect(
+          adapter.getChainId(failingProvider)
+        ).rejects.toThrow('Failed to get chainId from provider: Network error');
+      });
+
+      it('should throw error when network is null', async () => {
+        const mockProvider = {
+          getNetwork: async () => null
+        };
+
+        await expect(
+          adapter.getChainId(mockProvider)
+        ).rejects.toThrow('Provider returned invalid network data');
+      });
+
+      it('should throw error when chainId is undefined', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            name: 'test-network'
+            // missing chainId
+          })
+        };
+
+        await expect(
+          adapter.getChainId(mockProvider)
+        ).rejects.toThrow('Provider returned invalid network data');
+      });
+
+      it('should throw error for zero chainId', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 0n,
+            name: 'invalid-network'
+          })
+        };
+
+        await expect(
+          adapter.getChainId(mockProvider)
+        ).rejects.toThrow('Invalid chainId received: 0');
+      });
+
+      it('should throw error for negative chainId', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: -1n,
+            name: 'invalid-network'
+          })
+        };
+
+        await expect(
+          adapter.getChainId(mockProvider)
+        ).rejects.toThrow('Invalid chainId received: -1');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle very large chain IDs', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 999999999n,
+            name: 'custom-network'
+          })
+        };
+
+        const result = await adapter.getChainId(mockProvider);
+        
+        expect(result).toBe(999999999);
+        expect(typeof result).toBe('number');
+      });
+
+      it('should be consistent for multiple calls', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 1337n,
+            name: 'ganache'
+          })
+        };
+
+        const result1 = await adapter.getChainId(mockProvider);
+        const result2 = await adapter.getChainId(mockProvider);
+        
+        expect(result1).toBe(result2);
+        expect(result1).toBe(1337);
+      });
+
+      it('should handle provider with additional network properties', async () => {
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 42161n,
+            name: 'arbitrum-one',
+            ensAddress: '0x123...',
+            customProperty: 'test'
+          })
+        };
+
+        const result = await adapter.getChainId(mockProvider);
+        
+        expect(result).toBe(42161);
+        expect(typeof result).toBe('number');
+      });
+    });
+  });
+
+  describe('getPoolAddress', () => {
+    describe('Success Cases', () => {
+      it('should return pool address as string for valid tokens and fee', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const poolAddress = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+        
+        expect(typeof poolAddress).toBe('string');
+        expect(poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(poolAddress.length).toBe(42);
+      });
+
+      it('should return same address regardless of token input order', async () => {
+        const weth = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const usdc = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const address1 = await adapter.getPoolAddress(weth, usdc, 500, env.provider);
+        const address2 = await adapter.getPoolAddress(usdc, weth, 500, env.provider);
+        
+        expect(address1).toBe(address2);
+      });
+
+      it('should return different addresses for different fee tiers', async () => {
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const address500 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+        const address3000 = await adapter.getPoolAddress(token0, token1, 3000, env.provider);
+        
+        expect(address500).not.toBe(address3000);
+        expect(typeof address500).toBe('string');
+        expect(typeof address3000).toBe('string');
+      });
+
+      it('should handle different chain IDs correctly', async () => {
+        // Mock provider with different chain ID
+        const mockProvider = {
+          getNetwork: async () => ({
+            chainId: 42161n, // Arbitrum
+            name: 'arbitrum'
+          })
+        };
+
+        const token0 = { 
+          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', 
+          decimals: 18 
+        };
+        const token1 = { 
+          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 
+          decimals: 6 
+        };
+        
+        const address = await adapter.getPoolAddress(token0, token1, 500, mockProvider);
+        
+        expect(typeof address).toBe('string');
+        expect(address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing token0 address', async () => {
+        const token0 = { decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Missing required token information for pool address calculation');
+      });
+
+      it('should throw error for missing token1 address', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { decimals: 6 };
+        
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Missing required token information for pool address calculation');
+      });
+
+      it('should throw error for missing token0 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Missing required token information for pool address calculation');
+      });
+
+      it('should throw error for undefined fee', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        
+        await expect(
+          adapter.getPoolAddress(token0, token1, undefined, env.provider)
+        ).rejects.toThrow('Missing required token information for pool address calculation');
+      });
+
+      it('should throw error for invalid provider', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, null)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should be deterministic for same inputs', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        
+        const address1 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+        const address2 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+        
+        expect(address1).toBe(address2);
+      });
+
+      it('should handle tokens with same address (should still work)', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        
+        // This might throw from Uniswap SDK, but should handle gracefully
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow();
+      });
+    });
+  });
+
   describe('_estimateGas', () => {
     let poolContract;
     let wethContract;
@@ -335,14 +968,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const wethToken = getTokenBySymbol('WETH');
 
         // Create real contract instances using addresses from adapter config
-        const poolData = await adapter.getPoolData(
+        const poolAddress = await adapter.getPoolAddress(
           { address: usdcToken.addresses[1337], decimals: 6 },
           { address: wethToken.addresses[1337], decimals: 18 },
           500,
           env.provider
         );
         poolContract = new ethers.Contract(
-          poolData.poolAddress,
+          poolAddress,
           adapter.uniswapV3PoolABI,
           env.provider
         );
@@ -584,7 +1217,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should estimate gas for complex swap transaction', async () => {
-        // Create swap transaction data using adapter's generateSwapData  
+        // Create swap transaction data using adapter's generateSwapData
         const swapParams = {
           tokenIn: wethContract.target,
           tokenOut: usdcContract.target,
@@ -599,13 +1232,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         const swapTxData = await adapter.generateSwapData(swapParams);
-        
+
         // Create approval transaction data - vault needs to approve router first
         const approveData = wethContract.interface.encodeFunctionData('approve', [
           swapTxData.to,  // router address
           ethers.parseEther('0.1')  // approve exact amount needed
         ]);
-        
+
         // Encode call to vault's execute function with BOTH approve and swap
         const vaultExecuteData = env.testVault.interface.encodeFunctionData('execute', [
           [wethContract.target, swapTxData.to],   // targets: [WETH, router]
