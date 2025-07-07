@@ -15,7 +15,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { formatUnits } from "../helpers/formatHelpers.js";
 import { getPlatformFeeTiers } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
-import { getTokensForChain } from "../helpers/tokenHelpers.js";
+import { getTokensForChain, getTokenByAddress } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
 import JSBI from "jsbi";
@@ -52,7 +52,7 @@ const ERC20ABI = ERC20ARTIFACT.abi;
  * const poolAddress = await adapter.getPoolAddress(token0, token1, 500, provider);
  *
  * // Get live pool data (makes blockchain calls)
- * const poolData = await adapter.fetchPoolData(token0, token1, 500, 42161, provider);
+ * const poolData = await adapter.fetchPoolData(token0Address, token1Address, 500, provider);
  */
 export default class UniswapV3Adapter extends PlatformAdapter {
   /**
@@ -232,7 +232,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Sort tokens according to Uniswap V3 rules (lower address first)
    * @param {Object} token0 - First token object
    * @param {string} token0.address - Token contract address
-   * @param {Object} token1 - Second token object  
+   * @param {Object} token1 - Second token object
    * @param {string} token1.address - Token contract address
    * @returns {{sortedToken0: Object, sortedToken1: Object, tokensSwapped: boolean}} Sorted tokens and swap flag
    */
@@ -242,8 +242,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     const tokensSwapped = token0.address.toLowerCase() > token1.address.toLowerCase();
-    
-    return tokensSwapped 
+
+    return tokensSwapped
       ? { sortedToken0: token1, sortedToken1: token0, tokensSwapped: true }
       : { sortedToken0: token0, sortedToken1: token1, tokensSwapped: false };
   }
@@ -260,7 +260,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       const network = await provider.getNetwork();
-      
+
       if (!network || network.chainId === undefined) {
         throw new Error('Provider returned invalid network data');
       }
@@ -285,7 +285,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} token0.address - Token contract address
    * @param {number} token0.decimals - Token decimals
    * @param {Object} token1 - Second token object
-   * @param {string} token1.address - Token contract address  
+   * @param {string} token1.address - Token contract address
    * @param {number} token1.decimals - Token decimals
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
    * @param {Object} provider - Ethers provider instance
@@ -324,7 +324,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Failed to calculate pool address: ${error.message}`);
     }
   }
-
 
   /**
    * Check if a pool exists for the given tokens and fee tier
@@ -398,6 +397,29 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @private
    */
   async _fetchUserPositionIds(address, positionManager) {
+    // Validate address parameter
+    if (!address) {
+      throw new Error("Address parameter is required");
+    }
+
+    // Validate address format
+    try {
+      ethers.getAddress(address); // This will throw if invalid
+    } catch (error) {
+      throw new Error("Invalid Ethereum address");
+    }
+
+    // Validate positionManager parameter
+    if (!positionManager) {
+      throw new Error("Position manager parameter is required");
+    }
+
+    // Check if positionManager has required methods
+    if (typeof positionManager.balanceOf !== 'function' ||
+        typeof positionManager.tokenOfOwnerByIndex !== 'function') {
+      throw new Error("Invalid position manager contract - missing required methods");
+    }
+
     const balance = await positionManager.balanceOf(address);
     const tokenIds = [];
 
@@ -409,89 +431,75 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     return tokenIds;
   }
 
-  /**
-   * Fetch token metadata and user balances
-   * @param {string} token0Address - Token0 contract address
-   * @param {string} token1Address - Token1 contract address
-   * @param {string} userAddress - User's wallet address
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<{token0Data: Object, token1Data: Object}>} Token metadata and balances
-   */
-  async fetchTokenData(token0Address, token1Address, userAddress, chainId) {
-    if (!token0Address || !token1Address || !userAddress || !chainId) {
-      throw new Error("Missing required parameters for token data fetch");
-    }
-
-    const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, this.provider);
-    const token1Contract = new ethers.Contract(token1Address, this.erc20ABI, this.provider);
-
-    let token0Data, token1Data;
-
-    try {
-      const [decimals0, name0, symbol0, balance0] = await Promise.all([
-        token0Contract.decimals(),
-        token0Contract.name(),
-        token0Contract.symbol(),
-        token0Contract.balanceOf(userAddress),
-      ]);
-
-      token0Data = {
-        address: token0Address,
-        decimals: Number(decimals0),
-        name: name0,
-        symbol: symbol0,
-        balance: Number(ethers.formatUnits(balance0, Number(decimals0))),
-        chainId
-      };
-    } catch (err) {
-      console.error("Error retrieving token0 data:", err);
-      throw new Error(`Failed to fetch token0 data: ${err.message}`);
-    }
-
-    try {
-      const [decimals1, name1, symbol1, balance1] = await Promise.all([
-        token1Contract.decimals(),
-        token1Contract.name(),
-        token1Contract.symbol(),
-        token1Contract.balanceOf(userAddress),
-      ]);
-
-      token1Data = {
-        address: token1Address,
-        decimals: Number(decimals1),
-        name: name1,
-        symbol: symbol1,
-        balance: Number(ethers.formatUnits(balance1, Number(decimals1))),
-        chainId
-      };
-    } catch (err) {
-      console.error("Error retrieving token1 data:", err);
-      throw new Error(`Failed to fetch token1 data: ${err.message}`);
-    }
-
-    return { token0Data, token1Data };
-  }
 
   /**
    * Fetch pool state data
-   * @param {Object} token0 - Token0 data object
-   * @param {Object} token1 - Token1 data object
+   * @param {string} token0Address - Token0 contract address
+   * @param {string} token1Address - Token1 contract address
    * @param {number} fee - Pool fee tier
-   * @param {number} chainId - Chain ID
+   * @param {Object} provider - Ethers provider
    * @returns {Promise<Object>} Pool state data
    */
-  async fetchPoolData(token0, token1, fee, chainId, provider) {
-    if (!token0?.address || !token1?.address || !fee || !chainId) {
-      throw new Error("Missing required parameters for pool data fetch");
+  async fetchPoolData(token0Address, token1Address, fee, provider) {
+    // Validate token0 address
+    if (!token0Address) {
+      throw new Error("Token0 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token0Address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Address}`);
     }
 
-    // Create Token instances for pool address calculation
-    const token0Instance = new Token(chainId, token0.address, token0.decimals, token0.symbol, token0.name);
-    const token1Instance = new Token(chainId, token1.address, token1.decimals, token1.symbol, token1.name);
+    // Validate token1 address
+    if (!token1Address) {
+      throw new Error("Token1 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token1Address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Address}`);
+    }
+
+    // Validate fee
+    if (fee === null || fee === undefined) {
+      throw new Error("Fee parameter is required");
+    }
+    if (typeof fee !== 'number' || !Number.isFinite(fee)) {
+      throw new Error("Fee must be a valid number");
+    }
+
+    // Validate provider
+    await this._validateProviderChain(provider);
+
+    // Get token data from config
+    const token0Config = getTokenByAddress(token0Address, this.chainId);
+    if (!token0Config) {
+      throw new Error(`Unsupported token: ${token0Address} on chain ${this.chainId}`);
+    }
+
+    const token1Config = getTokenByAddress(token1Address, this.chainId);
+    if (!token1Config) {
+      throw new Error(`Unsupported token: ${token1Address} on chain ${this.chainId}`);
+    }
+
+    // Create token data objects
+    const token0Data = {
+      address: token0Address,
+      decimals: token0Config.decimals,
+      symbol: token0Config.symbol,
+      chainId: this.chainId
+    };
+
+    const token1Data = {
+      address: token1Address,
+      decimals: token1Config.decimals,
+      symbol: token1Config.symbol,
+      chainId: this.chainId
+    };
 
     // Calculate pool address
-    const feeNumber = Number(fee);
-    const poolAddress = Pool.getAddress(token0Instance, token1Instance, feeNumber);
+    const poolAddress = await this.getPoolAddress(token0Data, token1Data, fee, provider);
 
     // Create pool contract
     const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
@@ -504,8 +512,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       return {
         poolAddress,
-        token0,
-        token1,
+        token0: token0Data,
+        token1: token1Data,
         sqrtPriceX96: slot0[0].toString(),
         tick: Number(slot0[1]),
         observationIndex: Number(slot0[2]),
@@ -667,16 +675,31 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const positionData = await positionManager.positions(tokenId);
           const { token0, token1, fee, tickLower, tickUpper } = positionData;
 
-          // Fetch token data if not cached
-          if (!tokenDataMap[token0] || !tokenDataMap[token1]) {
-            const { token0Data, token1Data } = await this.fetchTokenData(token0, token1, address, chainId);
+          // Get token data from config if not cached
+          if (!tokenDataMap[token0]) {
+            const token0Config = getTokenByAddress(token0, chainId);
+            if (!token0Config) {
+              throw new Error(`Unsupported token: ${token0} on chain ${chainId}`);
+            }
+            tokenDataMap[token0] = {
+              address: token0,
+              decimals: token0Config.decimals,
+              symbol: token0Config.symbol,
+              chainId
+            };
+          }
 
-            if (!tokenDataMap[token0]) {
-              tokenDataMap[token0] = token0Data;
+          if (!tokenDataMap[token1]) {
+            const token1Config = getTokenByAddress(token1, chainId);
+            if (!token1Config) {
+              throw new Error(`Unsupported token: ${token1} on chain ${chainId}`);
             }
-            if (!tokenDataMap[token1]) {
-              tokenDataMap[token1] = token1Data;
-            }
+            tokenDataMap[token1] = {
+              address: token1,
+              decimals: token1Config.decimals,
+              symbol: token1Config.symbol,
+              chainId
+            };
           }
 
           // Get pool address and fetch pool data if not cached
@@ -687,7 +710,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const poolAddress = Pool.getAddress(token0Instance, token1Instance, Number(fee));
 
           if (!poolDataMap[poolAddress]) {
-            const poolData = await this.fetchPoolData(token0Data, token1Data, fee, chainId);
+            const poolData = await this.fetchPoolData(token0, token1, fee, this.provider);
             poolDataMap[poolAddress] = poolData;
           }
 

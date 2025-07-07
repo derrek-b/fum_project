@@ -130,12 +130,12 @@ export async function setupTestEnvironment(options = {}) {
     await approveTx.wait();
     
     // Get USDC address from tokens config
-    const USDC_ADDRESS = tokens.USDC.addresses[1337];
+    const usdcAddress = tokens.USDC.addresses[1337];
     
     // Create swap params
     const swapParams = {
       tokenIn: wethAddress,
-      tokenOut: USDC_ADDRESS,
+      tokenOut: usdcAddress,
       fee: 500, // 0.05% fee pool
       recipient: owner.address,
       amountIn: ethers.parseEther('2'),
@@ -156,7 +156,7 @@ export async function setupTestEnvironment(options = {}) {
     console.log('  - Swap completed successfully');
     
     // 3. Get current balances
-    const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, owner);
+    const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, owner);
     const wethBalance = await weth.balanceOf(owner.address);
     const usdcBalance = await usdc.balanceOf(owner.address);
     
@@ -174,10 +174,7 @@ export async function setupTestEnvironment(options = {}) {
     await (await usdc.approve(uniswapV3.positionManagerAddress, usdcAmount)).wait();
     
     // Get current pool data to center position around current tick
-    const wethToken = { ...tokens.WETH, address: tokens.WETH.addresses[1337] };
-    const usdcToken = { ...tokens.USDC, address: tokens.USDC.addresses[1337] };
-    
-    const poolData = await adapter.fetchPoolData(wethToken, usdcToken, 500, 1337, ganache.provider);
+    const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, ganache.provider);
     
     // Create position centered around current tick
     const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
@@ -193,9 +190,9 @@ export async function setupTestEnvironment(options = {}) {
     
     // Sort tokens to match pool order
     const [token0, token1, amount0Desired, amount1Desired] = 
-      wethAddress.toLowerCase() < USDC_ADDRESS.toLowerCase() 
-        ? [wethAddress, USDC_ADDRESS, wethAmount, usdcAmount]
-        : [USDC_ADDRESS, wethAddress, usdcAmount, wethAmount];
+      wethAddress.toLowerCase() < usdcAddress.toLowerCase() 
+        ? [wethAddress, usdcAddress, wethAmount, usdcAmount]
+        : [usdcAddress, wethAddress, usdcAmount, wethAmount];
     
     const mintParams = {
       token0,
