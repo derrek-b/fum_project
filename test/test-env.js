@@ -65,6 +65,7 @@ export async function setupTestEnvironment(options = {}) {
   let testVault = null;
   let testPosition = null;
   let positionTokenId = null;
+  let wethAddress, usdcAddress, uniswapV3;
   
   if (deployContracts) {
     console.log('💰 Setting up test vault with assets...');
@@ -98,7 +99,7 @@ export async function setupTestEnvironment(options = {}) {
     
     // Get chain config for our forked network
     const chainConfig = chains[1337];
-    const uniswapV3 = chainConfig.platformAddresses.uniswapV3;
+    uniswapV3 = chainConfig.platformAddresses.uniswapV3;
     
     // Create adapter for interacting with Uniswap
     const adapter = new UniswapV3Adapter(1337);
@@ -115,7 +116,7 @@ export async function setupTestEnvironment(options = {}) {
     ];
     
     // Get WETH address from tokens config
-    const wethAddress = tokens.WETH.addresses[1337];
+    wethAddress = tokens.WETH.addresses[1337];
     const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
     
     const wrapTx = await weth.deposit({ value: ethers.parseEther('10') });
@@ -130,7 +131,7 @@ export async function setupTestEnvironment(options = {}) {
     await approveTx.wait();
     
     // Get USDC address from tokens config
-    const usdcAddress = tokens.USDC.addresses[1337];
+    usdcAddress = tokens.USDC.addresses[1337];
     
     // Create swap params
     const swapParams = {
@@ -218,19 +219,21 @@ export async function setupTestEnvironment(options = {}) {
     await mintTx.wait();
     console.log(`  - Created position NFT with ID: ${positionTokenId}`);
     
-    // 5. Transfer all assets to vault
+    // 5. Transfer most assets to vault (keep some for second position in tests)
     console.log('  - Transferring assets to vault...');
     
-    // Transfer remaining WETH
+    // Transfer 60% of remaining WETH to vault, keep 40% in owner wallet
     const remainingWeth = await weth.balanceOf(owner.address);
     if (remainingWeth > 0n) {
-      await (await weth.transfer(vaultAddress, remainingWeth)).wait();
+      const wethToTransfer = (remainingWeth * 60n) / 100n;
+      await (await weth.transfer(vaultAddress, wethToTransfer)).wait();
     }
     
-    // Transfer remaining USDC
+    // Transfer 60% of remaining USDC to vault, keep 40% in owner wallet
     const remainingUsdc = await usdc.balanceOf(owner.address);
     if (remainingUsdc > 0n) {
-      await (await usdc.transfer(vaultAddress, remainingUsdc)).wait();
+      const usdcToTransfer = (remainingUsdc * 60n) / 100n;
+      await (await usdc.transfer(vaultAddress, usdcToTransfer)).wait();
     }
     
     // Transfer position NFT to vault (vault can receive ERC721)
@@ -266,6 +269,13 @@ export async function setupTestEnvironment(options = {}) {
     testVault,
     testPosition,
     positionTokenId,
+    
+    // Token addresses
+    wethAddress,
+    usdcAddress,
+    
+    // Uniswap V3 addresses
+    uniswapV3,
     
     
     // Helper functions

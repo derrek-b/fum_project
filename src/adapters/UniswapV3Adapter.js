@@ -512,7 +512,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     return tokenIds;
   }
 
-
   /**
    * Fetch pool state data
    * @param {string} token0Address - Token0 contract address
@@ -744,17 +743,26 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
-   * @param {number} chainId - Chain ID
+   * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{positions: Array, poolData: Object}>} Position data
    */
-  async getPositions(address, chainId) {
-    if (!address || !this.provider || !chainId) {
-      return { positions: [], poolData: {} };
+  async getPositions(address, provider) {
+    // Validate address
+    if (!address) {
+      throw new Error("Address parameter is required");
     }
+    try {
+      ethers.getAddress(address);
+    } catch (error) {
+      throw new Error(`Invalid address: ${address}`);
+    }
+
+    // Validate provider
+    await this._validateProviderChain(provider);
 
     try {
       // Get position manager contract
-      const positionManager = await this._getPositionManager(chainId);
+      const positionManager = this._getPositionManager(provider);
 
       // Fetch user's position token IDs
       const tokenIds = await this._fetchUserPositionIds(address, positionManager);
@@ -765,6 +773,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       const positions = [];
       const poolDataMap = {};
+      const processingErrors = [];
 
       // Process each position
       for (const tokenId of tokenIds) {
@@ -774,7 +783,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const { token0, token1, fee, tickLower, tickUpper } = positionData;
 
           // Fetch pool data (which includes token data and canonical pool address)
-          const poolData = await this.fetchPoolData(token0, token1, fee, this.provider);
+          const poolData = await this.fetchPoolData(token0, token1, Number(fee), provider);
           const poolAddress = poolData.poolAddress;
 
           // Cache pool data using canonical pool address
@@ -784,10 +793,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
           // Fetch tick data if not already present
           const cachedPoolData = poolDataMap[poolAddress];
-          if (!cachedPoolData.ticks[tickLower] || !cachedPoolData.ticks[tickUpper]) {
-            const tickData = await this.fetchTickData(poolAddress, tickLower, tickUpper, this.provider);
-            cachedPoolData.ticks[tickLower] = tickData.tickLower;
-            cachedPoolData.ticks[tickUpper] = tickData.tickUpper;
+          const tickLowerNum = Number(tickLower);
+          const tickUpperNum = Number(tickUpper);
+          if (!cachedPoolData.ticks[tickLowerNum] || !cachedPoolData.ticks[tickUpperNum]) {
+            const tickData = await this.fetchTickData(poolAddress, tickLowerNum, tickUpperNum, provider);
+            cachedPoolData.ticks[tickLowerNum] = tickData.tickLower;
+            cachedPoolData.ticks[tickUpperNum] = tickData.tickUpper;
           }
 
           // Assemble position data
@@ -795,9 +806,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           positions.push(position);
 
         } catch (error) {
-          console.error(`Error processing position ${tokenId}:`, error);
-          // Continue with other positions even if one fails
+          processingErrors.push(`Position ${tokenId}: ${error.message}`);
         }
+      }
+
+      // If any positions failed to process, throw error with all failures
+      if (processingErrors.length > 0) {
+        throw new Error(`Failed to process ${processingErrors.length} position(s): ${processingErrors.join('; ')}`);
       }
 
       return {
@@ -806,11 +821,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
 
     } catch (error) {
-      console.error("Error fetching Uniswap V3 positions:", error);
-      return {
-        positions: [],
-        poolData: {}
-      };
+      throw new Error(`Failed to fetch Uniswap V3 positions: ${error.message}`);
     }
   }
 
@@ -828,7 +839,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const currentTick = poolData.tick;
     return currentTick >= position.tickLower && currentTick <= position.tickUpper;
   }
-
 
   /**
    * Calculate price from sqrtPriceX96 using the Uniswap V3 SDK
