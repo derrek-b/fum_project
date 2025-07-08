@@ -1319,22 +1319,42 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
 
     describe('Error Cases', () => {
+      it('should throw error for missing token0', async () => {
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        await expect(
+          adapter.getPoolAddress(null, token1, 500, env.provider)
+        ).rejects.toThrow('Token0 parameter is required');
+
+        await expect(
+          adapter.getPoolAddress(undefined, token1, 500, env.provider)
+        ).rejects.toThrow('Token0 parameter is required');
+      });
+
       it('should throw error for missing token0 address', async () => {
         const token0 = { decimals: 18 };
         const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
 
         await expect(
           adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Missing required token information for pool address calculation');
+        ).rejects.toThrow('Token0 address is required');
       });
 
-      it('should throw error for missing token1 address', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { decimals: 6 };
+      it('should throw error for invalid token0 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
 
-        await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Missing required token information for pool address calculation');
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        for (const invalidAddress of invalidAddresses) {
+          const token0 = { address: invalidAddress, decimals: 18 };
+          await expect(
+            adapter.getPoolAddress(token0, token1, 500, env.provider)
+          ).rejects.toThrow(); // Be permissive due to potential ENS resolution
+        }
       });
 
       it('should throw error for missing token0 decimals', async () => {
@@ -1343,16 +1363,130 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Missing required token information for pool address calculation');
+        ).rejects.toThrow('Token0 decimals is required');
       });
 
-      it('should throw error for undefined fee', async () => {
+      it('should throw error for invalid token0 decimals', async () => {
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        const invalidDecimals = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidDecimal of invalidDecimals) {
+          const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: invalidDecimal };
+          await expect(
+            adapter.getPoolAddress(token0, token1, 500, env.provider)
+          ).rejects.toThrow('Token0 decimals must be a valid number');
+        }
+      });
+
+      it('should throw error for missing token1', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        await expect(
+          adapter.getPoolAddress(token0, null, 500, env.provider)
+        ).rejects.toThrow('Token1 parameter is required');
+
+        await expect(
+          adapter.getPoolAddress(token0, undefined, 500, env.provider)
+        ).rejects.toThrow('Token1 parameter is required');
+      });
+
+      it('should throw error for missing token1 address', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { decimals: 6 };
+
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Token1 address is required');
+      });
+
+      it('should throw error for invalid token1 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
+
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        for (const invalidAddress of invalidAddresses) {
+          const token1 = { address: invalidAddress, decimals: 6 };
+          await expect(
+            adapter.getPoolAddress(token0, token1, 500, env.provider)
+          ).rejects.toThrow(); // Be permissive due to potential ENS resolution
+        }
+      });
+
+      it('should throw error for missing token1 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' };
+
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Token1 decimals is required');
+      });
+
+      it('should throw error for invalid token1 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        const invalidDecimals = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidDecimal of invalidDecimals) {
+          const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: invalidDecimal };
+          await expect(
+            adapter.getPoolAddress(token0, token1, 500, env.provider)
+          ).rejects.toThrow('Token1 decimals must be a valid number');
+        }
+      });
+
+      it('should throw error for missing fee', async () => {
         const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
         const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
 
         await expect(
+          adapter.getPoolAddress(token0, token1, null, env.provider)
+        ).rejects.toThrow('Fee parameter is required');
+
+        await expect(
           adapter.getPoolAddress(token0, token1, undefined, env.provider)
-        ).rejects.toThrow('Missing required token information for pool address calculation');
+        ).rejects.toThrow('Fee parameter is required');
+      });
+
+      it('should throw error for invalid fee type', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        const invalidFees = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidFee of invalidFees) {
+          await expect(
+            adapter.getPoolAddress(token0, token1, invalidFee, env.provider)
+          ).rejects.toThrow('Fee must be a valid number');
+        }
       });
 
       it('should throw error for invalid provider', async () => {
@@ -1361,6 +1495,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.getPoolAddress(token0, token1, 500, null)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+
+        await expect(
+          adapter.getPoolAddress(token0, token1, 500, {})
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
       });
     });
@@ -1446,58 +1584,187 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
 
     describe('Error Cases', () => {
-      it('should throw when token0 missing address', async () => {
+      it('should throw error for missing token0', async () => {
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        await expect(
+          adapter.checkPoolExists(null, token1, 500, env.provider)
+        ).rejects.toThrow('Token0 parameter is required');
+
+        await expect(
+          adapter.checkPoolExists(undefined, token1, 500, env.provider)
+        ).rejects.toThrow('Token0 parameter is required');
+      });
+
+      it('should throw error for missing token0 address', async () => {
         const token0 = { decimals: 18 };
-        const token1 = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
 
         await expect(
           adapter.checkPoolExists(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Missing required token information');
+        ).rejects.toThrow('Token0 address is required');
       });
 
-      it('should throw when token1 missing address', async () => {
-        const token0 = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
+      it('should throw error for invalid token0 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
+
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        for (const invalidAddress of invalidAddresses) {
+          const token0 = { address: invalidAddress, decimals: 18 };
+          await expect(
+            adapter.checkPoolExists(token0, token1, 500, env.provider)
+          ).rejects.toThrow();
+        }
+      });
+
+      it('should throw error for missing token0 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Token0 decimals is required');
+      });
+
+      it('should throw error for invalid token0 decimals', async () => {
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        const invalidDecimals = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidDecimal of invalidDecimals) {
+          const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: invalidDecimal };
+          await expect(
+            adapter.checkPoolExists(token0, token1, 500, env.provider)
+          ).rejects.toThrow('Token0 decimals must be a valid number');
+        }
+      });
+
+      it('should throw error for missing token1', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        await expect(
+          adapter.checkPoolExists(token0, null, 500, env.provider)
+        ).rejects.toThrow('Token1 parameter is required');
+
+        await expect(
+          adapter.checkPoolExists(token0, undefined, 500, env.provider)
+        ).rejects.toThrow('Token1 parameter is required');
+      });
+
+      it('should throw error for missing token1 address', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
         const token1 = { decimals: 6 };
 
         await expect(
           adapter.checkPoolExists(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Missing required token information');
+        ).rejects.toThrow('Token1 address is required');
       });
 
-      it('should throw when fee is undefined', async () => {
-        const token0 = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
-        const token1 = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
+      it('should throw error for invalid token1 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
+
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        for (const invalidAddress of invalidAddresses) {
+          const token1 = { address: invalidAddress, decimals: 6 };
+          await expect(
+            adapter.checkPoolExists(token0, token1, 500, env.provider)
+          ).rejects.toThrow();
+        }
+      });
+
+      it('should throw error for missing token1 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' };
+
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, env.provider)
+        ).rejects.toThrow('Token1 decimals is required');
+      });
+
+      it('should throw error for invalid token1 decimals', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+
+        const invalidDecimals = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidDecimal of invalidDecimals) {
+          const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: invalidDecimal };
+          await expect(
+            adapter.checkPoolExists(token0, token1, 500, env.provider)
+          ).rejects.toThrow('Token1 decimals must be a valid number');
+        }
+      });
+
+      it('should throw error for missing fee', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        await expect(
+          adapter.checkPoolExists(token0, token1, null, env.provider)
+        ).rejects.toThrow('Fee parameter is required');
 
         await expect(
           adapter.checkPoolExists(token0, token1, undefined, env.provider)
-        ).rejects.toThrow('Missing required token information');
+        ).rejects.toThrow('Fee parameter is required');
       });
 
-      it('should throw when provider is null', async () => {
-        const token0 = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
-        const token1 = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
+      it('should throw error for invalid fee type', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+        const invalidFees = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidFee of invalidFees) {
+          await expect(
+            adapter.checkPoolExists(token0, token1, invalidFee, env.provider)
+          ).rejects.toThrow('Fee must be a valid number');
+        }
+      });
+
+      it('should throw error for invalid provider', async () => {
+        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
 
         await expect(
           adapter.checkPoolExists(token0, token1, 500, null)
-        ).rejects.toThrow('Invalid provider');
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+
+        await expect(
+          adapter.checkPoolExists(token0, token1, 500, {})
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
       });
 
       it('should return exists: false for non-existent pool', async () => {
@@ -1535,6 +1802,25 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         expect(result1.exists).toBe(result2.exists);
         expect(result1.poolAddress).toBe(result2.poolAddress);
+      });
+
+      it('should return exists: false for valid address format but fake tokens', async () => {
+        // These are valid address formats that ethers normalizes, but represent fake tokens
+        const fakeToken1 = {
+          address: '0x1234567890123456789012345678901234567890',
+          decimals: 18
+        };
+        const fakeToken2 = {
+          address: '0x9876543210987654321098765432109876543210',
+          decimals: 6
+        };
+
+        const result = await adapter.checkPoolExists(fakeToken1, fakeToken2, 500, env.provider);
+
+        expect(result).toBeDefined();
+        expect(result.exists).toBe(false);
+        expect(result.poolAddress).toBeNull();
+        expect(result.slot0).toBeNull();
       });
 
       it('should handle provider network errors gracefully', async () => {
@@ -1703,7 +1989,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    describe('Failure Cases', () => {
+    describe('Error Cases', () => {
       it('should throw error when address is missing', async () => {
         await expect(
           adapter._fetchUserPositionIds(null, positionManager)
@@ -1766,7 +2052,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    describe('Edge Cases', () => {
+    describe('Special Cases', () => {
       it('should handle contract call failures', async () => {
         const validAddress = env.signers[0].address;
 
@@ -1839,19 +2125,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    describe('Special Cases', () => {
-      it('should throw error for non-existent pool', async () => {
-        // Use fake token addresses that would create a non-existent pool
-        const fakeToken1 = '0x0000000000000000000000000000000000000001';
-        const fakeToken2 = '0x0000000000000000000000000000000000000002';
-
-        await expect(
-          adapter.fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
-        ).rejects.toThrow(/Unsupported token/);
-      });
-    });
-
-    describe('Parameter Validation', () => {
+    describe('Error Cases', () => {
       const validWethAddress = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
       const validUsdcAddress = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 
@@ -1968,6 +2242,209 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.fetchPoolData(validWethAddress, unknownToken, 500, env.provider)
         ).rejects.toThrow(/Unsupported token.*on chain/);
+      });
+
+      it('should throw error for non-existent pool', async () => {
+        // Use fake token addresses that would create a non-existent pool
+        const fakeToken1 = '0x0000000000000000000000000000000000000001';
+        const fakeToken2 = '0x0000000000000000000000000000000000000002';
+
+        await expect(
+          adapter.fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
+        ).rejects.toThrow(/Unsupported token/);
+      });
+    });
+  });
+
+  describe('fetchTickData', () => {
+    let validPoolAddress;
+    let validTickLower;
+    let validTickUpper;
+
+    beforeAll(async () => {
+      try {
+        // Get valid pool data to use for testing
+        const wethToken = getTokenBySymbol('WETH');
+        const usdcToken = getTokenBySymbol('USDC');
+        const wethAddress = wethToken.addresses[1337];
+        const usdcAddress = usdcToken.addresses[1337];
+
+        const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
+        validPoolAddress = poolData.poolAddress;
+
+        // Use valid tick values around current tick
+        const currentTick = poolData.tick;
+        validTickLower = currentTick - 1000;
+        validTickUpper = currentTick + 1000;
+      } catch (error) {
+        console.warn('Failed to setup fetchTickData test data:', error.message);
+      }
+    });
+
+    describe('Success Cases', () => {
+      it('should fetch tick data successfully with valid parameters', async () => {
+        const tickData = await adapter.fetchTickData(
+          validPoolAddress,
+          validTickLower,
+          validTickUpper,
+          env.provider
+        );
+
+        expect(tickData).toBeDefined();
+        expect(tickData.tickLower).toBeDefined();
+        expect(tickData.tickUpper).toBeDefined();
+
+        // Check tickLower structure
+        expect(tickData.tickLower.liquidityGross).toBeTypeOf('string');
+        expect(tickData.tickLower.liquidityNet).toBeTypeOf('string');
+        expect(tickData.tickLower.feeGrowthOutside0X128).toBeTypeOf('string');
+        expect(tickData.tickLower.feeGrowthOutside1X128).toBeTypeOf('string');
+        expect(tickData.tickLower.initialized).toBeTypeOf('boolean');
+
+        // Check tickUpper structure
+        expect(tickData.tickUpper.liquidityGross).toBeTypeOf('string');
+        expect(tickData.tickUpper.liquidityNet).toBeTypeOf('string');
+        expect(tickData.tickUpper.feeGrowthOutside0X128).toBeTypeOf('string');
+        expect(tickData.tickUpper.feeGrowthOutside1X128).toBeTypeOf('string');
+        expect(tickData.tickUpper.initialized).toBeTypeOf('boolean');
+      });
+
+
+      it('should handle zero tick values', async () => {
+        const tickData = await adapter.fetchTickData(
+          validPoolAddress,
+          0,
+          0,
+          env.provider
+        );
+
+        expect(tickData).toBeDefined();
+        expect(tickData.tickLower).toBeDefined();
+        expect(tickData.tickUpper).toBeDefined();
+      });
+
+      it('should handle negative tick values', async () => {
+        const tickData = await adapter.fetchTickData(
+          validPoolAddress,
+          -1000,
+          -500,
+          env.provider
+        );
+
+        expect(tickData).toBeDefined();
+        expect(tickData.tickLower).toBeDefined();
+        expect(tickData.tickUpper).toBeDefined();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing pool address', async () => {
+        await expect(
+          adapter.fetchTickData(null, validTickLower, validTickUpper, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+
+        await expect(
+          adapter.fetchTickData(undefined, validTickLower, validTickUpper, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+
+        await expect(
+          adapter.fetchTickData('', validTickLower, validTickUpper, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+      });
+
+      it('should throw error for invalid pool address format', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+          '1234567890123456789012345678901234567890', // missing 0x prefix
+        ];
+
+        for (const invalidAddress of invalidAddresses) {
+          await expect(
+            adapter.fetchTickData(invalidAddress, validTickLower, validTickUpper, env.provider)
+          ).rejects.toThrow(); // Just check that it throws, don't check specific message
+        }
+      });
+
+      it('should throw error for missing tickLower', async () => {
+        await expect(
+          adapter.fetchTickData(validPoolAddress, null, validTickUpper, env.provider)
+        ).rejects.toThrow('tickLower parameter is required');
+
+        await expect(
+          adapter.fetchTickData(validPoolAddress, undefined, validTickUpper, env.provider)
+        ).rejects.toThrow('tickLower parameter is required');
+      });
+
+      it('should throw error for missing tickUpper', async () => {
+        await expect(
+          adapter.fetchTickData(validPoolAddress, validTickLower, null, env.provider)
+        ).rejects.toThrow('tickUpper parameter is required');
+
+        await expect(
+          adapter.fetchTickData(validPoolAddress, validTickLower, undefined, env.provider)
+        ).rejects.toThrow('tickUpper parameter is required');
+      });
+
+      it('should throw error for invalid tickLower type', async () => {
+        const invalidTicks = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidTick of invalidTicks) {
+          await expect(
+            adapter.fetchTickData(validPoolAddress, invalidTick, validTickUpper, env.provider)
+          ).rejects.toThrow('tickLower must be a valid number');
+        }
+      });
+
+      it('should throw error for invalid tickUpper type', async () => {
+        const invalidTicks = [
+          'not-a-number',
+          NaN,
+          Infinity,
+          -Infinity,
+          {},
+          [],
+          true
+        ];
+
+        for (const invalidTick of invalidTicks) {
+          await expect(
+            adapter.fetchTickData(validPoolAddress, validTickLower, invalidTick, env.provider)
+          ).rejects.toThrow('tickUpper must be a valid number');
+        }
+      });
+
+      it('should throw error for missing provider', async () => {
+        await expect(
+          adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error for invalid provider', async () => {
+        await expect(
+          adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper, null)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+
+        await expect(
+          adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper, {})
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw descriptive error for non-existent pool', async () => {
+        const nonExistentPool = '0x1234567890123456789012345678901234567890';
+
+        await expect(
+          adapter.fetchTickData(nonExistentPool, validTickLower, validTickUpper, env.provider)
+        ).rejects.toThrow('Failed to fetch tick data');
       });
     });
   });
