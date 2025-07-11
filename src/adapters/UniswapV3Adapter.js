@@ -93,7 +93,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @throws {Error} If slippage tolerance is invalid
    */
   _validateSlippageTolerance(slippageTolerance) {
-    if (typeof slippageTolerance !== 'number' || isNaN(slippageTolerance) || slippageTolerance < 0 || slippageTolerance > 100) {
+    if (!Number.isFinite(slippageTolerance) || slippageTolerance < 0 || slippageTolerance > 100) {
       throw new Error(`Invalid slippage tolerance: ${slippageTolerance}. Must be between 0 and 100.`);
     }
 
@@ -107,7 +107,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @throws {Error} If deadlineMinutes is invalid
    */
   _createDeadline(deadlineMinutes) {
-    if (typeof deadlineMinutes !== 'number' || isNaN(deadlineMinutes) || deadlineMinutes < 0) {
+    if (!Number.isFinite(deadlineMinutes) || deadlineMinutes < 0) {
       throw new Error(`Invalid deadline minutes: ${deadlineMinutes}. Must be a non-negative number.`);
     }
 
@@ -827,17 +827,28 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Check if a position is in range (active)
-   * @param {Object} position - Position data
-   * @param {number} position.tickLower - Lower tick of the position
-   * @param {number} position.tickUpper - Upper tick of the position
-   * @param {Object} poolData - Pool data
-   * @param {number} poolData.tick - Current tick of the pool
+   * @param {number} currentTick - Current tick of the pool
+   * @param {number} tickLower - Lower tick of the position
+   * @param {number} tickUpper - Upper tick of the position
    * @returns {boolean} - Whether the position is in range
+   * @throws {Error} - If parameters are invalid
    */
-  isPositionInRange(position, poolData) {
-    if (!poolData || !position) return false;
-    const currentTick = poolData.tick;
-    return currentTick >= position.tickLower && currentTick <= position.tickUpper;
+  isPositionInRange(currentTick, tickLower, tickUpper) {
+    if (typeof currentTick !== 'number' || !isFinite(currentTick)) {
+      throw new Error('Invalid currentTick: must be a number');
+    }
+    if (typeof tickLower !== 'number' || !isFinite(tickLower)) {
+      throw new Error('Invalid tickLower: must be a number');
+    }
+    if (typeof tickUpper !== 'number' || !isFinite(tickUpper)) {
+      throw new Error('Invalid tickUpper: must be a number');
+    }
+
+    if (tickLower >= tickUpper) {
+      throw new Error('Invalid tick range: tickLower must be less than tickUpper');
+    }
+
+    return currentTick >= tickLower && currentTick <= tickUpper;
   }
 
   /**
@@ -846,43 +857,80 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} baseToken - Base token (token0 unless inverted)
    * @param {string} baseToken.address - Token address
    * @param {number} baseToken.decimals - Token decimals
-   * @param {string} baseToken.symbol - Token symbol
    * @param {Object} quoteToken - Quote token (token1 unless inverted)
    * @param {string} quoteToken.address - Token address
    * @param {number} quoteToken.decimals - Token decimals
-   * @param {string} quoteToken.symbol - Token symbol
-   * @param {number} chainId - Chain ID
-   * @returns {string} Formatted price
+   * @returns {Price} Uniswap SDK Price object with methods like toFixed(), toSignificant(), etc.
    */
-  calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId) {
+  calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken) {
+    // Validate sqrtPriceX96 is a string
+    if (typeof sqrtPriceX96 !== 'string') {
+      throw new Error('sqrtPriceX96 must be a string');
+    }
+
     if (!sqrtPriceX96 || sqrtPriceX96 === "0") {
       throw new Error("Invalid sqrtPriceX96 value");
     }
 
-    if (!baseToken?.address || !quoteToken?.address || !chainId) {
-      throw new Error("Missing required token information or chainId");
+    if (!baseToken || !quoteToken) {
+      throw new Error("Missing required token information");
+    }
+
+    // Validate addresses
+    if (!baseToken.address) {
+      throw new Error("baseToken.address is required");
+    }
+    if (!quoteToken.address) {
+      throw new Error("quoteToken.address is required");
+    }
+
+    let validatedBaseAddress, validatedQuoteAddress;
+    try {
+      validatedBaseAddress = ethers.getAddress(baseToken.address);
+    } catch (error) {
+      throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
+    }
+
+    try {
+      validatedQuoteAddress = ethers.getAddress(quoteToken.address);
+    } catch (error) {
+      throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
+    }
+
+    // Validate decimals
+    if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
+      throw new Error("baseToken.decimals must be a finite number between 0 and 255");
+    }
+    if (!Number.isFinite(quoteToken.decimals) || quoteToken.decimals < 0 || quoteToken.decimals > 255) {
+      throw new Error("quoteToken.decimals must be a finite number between 0 and 255");
     }
 
     try {
       // Create Token instances
       const base = new Token(
-        chainId,
-        baseToken.address,
-        baseToken.decimals,
-        baseToken.symbol || "",
-        baseToken.name || ""
+        this.chainId,
+        validatedBaseAddress,
+        baseToken.decimals
       );
 
       const quote = new Token(
-        chainId,
-        quoteToken.address,
-        quoteToken.decimals,
-        quoteToken.symbol || "",
-        quoteToken.name || ""
+        this.chainId,
+        validatedQuoteAddress,
+        quoteToken.decimals
       );
 
-      // Convert sqrtPriceX96 to JSBI if needed
-      const sqrtRatioX96 = JSBI.BigInt(sqrtPriceX96.toString());
+      // Convert sqrtPriceX96 to JSBI BigInt
+      let sqrtRatioX96;
+      try {
+        sqrtRatioX96 = JSBI.BigInt(sqrtPriceX96);
+      } catch (error) {
+        throw new Error('Invalid sqrtPriceX96: must be a valid numeric string');
+      }
+
+      // Validate that sqrtPriceX96 is positive
+      if (JSBI.lessThanOrEqual(sqrtRatioX96, JSBI.BigInt(0))) {
+        throw new Error('Invalid sqrtPriceX96: must be a valid numeric string');
+      }
 
       // Get the tick at this sqrt ratio
       const tick = TickMath.getTickAtSqrtRatio(sqrtRatioX96);
@@ -890,10 +938,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Use SDK's tickToPrice to get the price
       const price = tickToPrice(base, quote, tick);
 
-      // Return formatted price with appropriate precision
-      return price.toFixed(6);
+      // Return the raw Price object - let consumers decide how to format
+      return price;
     } catch (error) {
-      console.error("Error calculating price from sqrtPriceX96:", error);
       throw new Error(`Failed to calculate price: ${error.message}`);
     }
   }
@@ -904,57 +951,73 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} baseToken - Base token (token0 unless inverted)
    * @param {string} baseToken.address - Token address
    * @param {number} baseToken.decimals - Token decimals
-   * @param {string} baseToken.symbol - Token symbol
    * @param {Object} quoteToken - Quote token (token1 unless inverted)
    * @param {string} quoteToken.address - Token address
    * @param {number} quoteToken.decimals - Token decimals
-   * @param {string} quoteToken.symbol - Token symbol
-   * @param {number} chainId - Chain ID
-   * @returns {string} The formatted price corresponding to the tick
+   * @returns {Price} Uniswap SDK Price object with methods like toFixed(), toSignificant(), etc.
    */
-  tickToPrice(tick, baseToken, quoteToken, chainId) {
+  tickToPrice(tick, baseToken, quoteToken) {
     if (!Number.isFinite(tick)) {
       throw new Error("Invalid tick value");
     }
 
-    if (!baseToken?.address || !quoteToken?.address || !chainId) {
-      throw new Error("Missing required token information or chainId");
+    if (!baseToken || !quoteToken) {
+      throw new Error("Missing required token information");
+    }
+
+    // Validate addresses
+    if (!baseToken.address) {
+      throw new Error("baseToken.address is required");
+    }
+    if (!quoteToken.address) {
+      throw new Error("quoteToken.address is required");
+    }
+
+    let validatedBaseAddress, validatedQuoteAddress;
+    try {
+      validatedBaseAddress = ethers.getAddress(baseToken.address);
+    } catch (error) {
+      throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
+    }
+
+    try {
+      validatedQuoteAddress = ethers.getAddress(quoteToken.address);
+    } catch (error) {
+      throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
+    }
+
+    // Validate decimals
+    if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
+      throw new Error("baseToken.decimals must be a finite number between 0 and 255");
+    }
+    if (!Number.isFinite(quoteToken.decimals) || quoteToken.decimals < 0 || quoteToken.decimals > 255) {
+      throw new Error("quoteToken.decimals must be a finite number between 0 and 255");
     }
 
     try {
       // Create Token instances
       const base = new Token(
-        chainId,
-        baseToken.address,
-        baseToken.decimals,
-        baseToken.symbol || "",
-        baseToken.name || ""
+        this.chainId,
+        validatedBaseAddress,
+        baseToken.decimals
       );
 
       const quote = new Token(
-        chainId,
-        quoteToken.address,
-        quoteToken.decimals,
-        quoteToken.symbol || "",
-        quoteToken.name || ""
+        this.chainId,
+        validatedQuoteAddress,
+        quoteToken.decimals
       );
 
       // Use SDK's tickToPrice function
       const price = tickToPrice(base, quote, tick);
 
-      // Format based on value
-      const priceNumber = parseFloat(price.toFixed(10));
-      if (priceNumber < 0.0001) return "< 0.0001";
-      if (priceNumber > 1000000) return priceNumber.toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-      // Return with appropriate precision
-      return price.toFixed(6);
+      // Return the raw Price object - let consumers decide how to format
+      return price;
     } catch (error) {
       console.error("Error converting tick to price:", error);
       throw new Error(`Failed to convert tick to price: ${error.message}`);
     }
   }
-
 
   /**
    * Calculate uncollected fees for a Uniswap V3 position
@@ -966,41 +1029,115 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * - The position's liquidity and tick range
    *
    * @param {Object} position - Position data
-   * @param {string|number|bigint} position.liquidity - Position liquidity
-   * @param {string|number|bigint} position.feeGrowthInside0LastX128 - Fee growth inside for token0 at last action
-   * @param {string|number|bigint} position.feeGrowthInside1LastX128 - Fee growth inside for token1 at last action
+   * @param {string} position.liquidity - Position liquidity (large value, must be string)
+   * @param {string} position.feeGrowthInside0LastX128 - Fee growth inside for token0 at last action (large value, must be string)
+   * @param {string} position.feeGrowthInside1LastX128 - Fee growth inside for token1 at last action (large value, must be string)
    * @param {number} position.tickLower - Lower tick of the position
    * @param {number} position.tickUpper - Upper tick of the position
-   * @param {string|number|bigint} position.tokensOwed0 - Already accumulated fees for token0
-   * @param {string|number|bigint} position.tokensOwed1 - Already accumulated fees for token1
+   * @param {string} position.tokensOwed0 - Already accumulated fees for token0 (large value, must be string)
+   * @param {string} position.tokensOwed1 - Already accumulated fees for token1 (large value, must be string)
    * @param {Object} poolData - Current pool state data
    * @param {number} poolData.tick - Current pool tick
-   * @param {string} poolData.feeGrowthGlobal0X128 - Current global fee growth for token0
-   * @param {string} poolData.feeGrowthGlobal1X128 - Current global fee growth for token1
+   * @param {string} poolData.feeGrowthGlobal0X128 - Current global fee growth for token0 (large value, must be string)
+   * @param {string} poolData.feeGrowthGlobal1X128 - Current global fee growth for token1 (large value, must be string)
    * @param {Object} poolData.ticks - Object containing tick data for the position's ticks
    * @param {Object} poolData.ticks[tickLower] - Lower tick data with feeGrowthOutside values
    * @param {Object} poolData.ticks[tickUpper] - Upper tick data with feeGrowthOutside values
-   * @param {number} token0Decimals - Token0 decimals for formatting
-   * @param {number} token1Decimals - Token1 decimals for formatting
-   * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
+   * @returns {[bigint, bigint]} Array with [token0Fees, token1Fees] as raw bigint values
    * @throws {Error} If required pool or token data is missing
    */
-  calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals) {
-    // Validate inputs
-    if (!poolData || !poolData.feeGrowthGlobal0X128 || !poolData.feeGrowthGlobal1X128) {
-      throw new Error("Missing required pool data for fee calculation");
+  calculateUncollectedFees(position, poolData) {
+    // Validate position exists
+    if (!position) {
+      throw new Error("Position parameter is required");
     }
 
-    if (!poolData.ticks || !poolData.ticks[position.tickLower] || !poolData.ticks[position.tickUpper]) {
-      throw new Error("Missing required tick data for fee calculation");
+    // Validate position required properties exist
+    if (!position.liquidity) {
+      throw new Error("position.liquidity is required");
+    }
+    if (!position.feeGrowthInside0LastX128) {
+      throw new Error("position.feeGrowthInside0LastX128 is required");
+    }
+    if (!position.feeGrowthInside1LastX128) {
+      throw new Error("position.feeGrowthInside1LastX128 is required");
+    }
+    if (!position.tokensOwed0) {
+      throw new Error("position.tokensOwed0 is required");
+    }
+    if (!position.tokensOwed1) {
+      throw new Error("position.tokensOwed1 is required");
+    }
+    if (position.tickLower === undefined || position.tickLower === null) {
+      throw new Error("position.tickLower is required");
+    }
+    if (position.tickUpper === undefined || position.tickUpper === null) {
+      throw new Error("position.tickUpper is required");
     }
 
-    if (typeof token0Decimals !== 'number' || typeof token1Decimals !== 'number') {
-      throw new Error("Missing token decimal information for fee calculation");
+    // Validate position property types
+    if (typeof position.liquidity !== 'string') {
+      throw new Error("position.liquidity must be a string");
+    }
+    if (typeof position.feeGrowthInside0LastX128 !== 'string') {
+      throw new Error("position.feeGrowthInside0LastX128 must be a string");
+    }
+    if (typeof position.feeGrowthInside1LastX128 !== 'string') {
+      throw new Error("position.feeGrowthInside1LastX128 must be a string");
+    }
+    if (typeof position.tokensOwed0 !== 'string') {
+      throw new Error("position.tokensOwed0 must be a string");
+    }
+    if (typeof position.tokensOwed1 !== 'string') {
+      throw new Error("position.tokensOwed1 must be a string");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("position.tickLower must be a finite number");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("position.tickUpper must be a finite number");
     }
 
-    const tickLower = poolData.ticks[position.tickLower];
-    const tickUpper = poolData.ticks[position.tickUpper];
+    // Validate poolData exists
+    if (!poolData) {
+      throw new Error("poolData parameter is required");
+    }
+
+    // Validate poolData required properties exist
+    if (poolData.tick === undefined || poolData.tick === null) {
+      throw new Error("poolData.tick is required");
+    }
+    if (!poolData.feeGrowthGlobal0X128) {
+      throw new Error("poolData.feeGrowthGlobal0X128 is required");
+    }
+    if (!poolData.feeGrowthGlobal1X128) {
+      throw new Error("poolData.feeGrowthGlobal1X128 is required");
+    }
+    if (!poolData.ticks) {
+      throw new Error("poolData.ticks is required");
+    }
+
+    // Validate poolData property types
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("poolData.tick must be a finite number");
+    }
+    if (typeof poolData.feeGrowthGlobal0X128 !== 'string') {
+      throw new Error("poolData.feeGrowthGlobal0X128 must be a string");
+    }
+    if (typeof poolData.feeGrowthGlobal1X128 !== 'string') {
+      throw new Error("poolData.feeGrowthGlobal1X128 must be a string");
+    }
+
+    // Validate tick data exists
+    if (!poolData.ticks[position.tickLower]) {
+      throw new Error(`Missing tick data for tickLower ${position.tickLower}`);
+    }
+    if (!poolData.ticks[position.tickUpper]) {
+      throw new Error(`Missing tick data for tickUpper ${position.tickUpper}`);
+    }
+
+    const tickLowerData = poolData.ticks[position.tickLower];
+    const tickUpperData = poolData.ticks[position.tickUpper];
 
     // Internal calculation with all parameters
     return this._calculateUncollectedFeesInternal({
@@ -1008,10 +1145,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       currentTick: poolData.tick,
       feeGrowthGlobal0X128: poolData.feeGrowthGlobal0X128,
       feeGrowthGlobal1X128: poolData.feeGrowthGlobal1X128,
-      tickLower,
-      tickUpper,
-      token0Decimals,
-      token1Decimals
+      tickLowerData,
+      tickUpperData
     });
   }
 
@@ -1024,49 +1159,88 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     currentTick,
     feeGrowthGlobal0X128,
     feeGrowthGlobal1X128,
-    tickLower,
-    tickUpper,
-    token0Decimals,
-    token1Decimals,
+    tickLowerData,
+    tickUpperData,
   }) {
-    // Position data extraction
-    const tickLowerValue = Number(position.tickLower);
-    const tickUpperValue = Number(position.tickUpper);
-    const liquidity = BigInt(position.liquidity);
-    const feeGrowthInside0LastX128 = BigInt(position.feeGrowthInside0LastX128);
-    const feeGrowthInside1LastX128 = BigInt(position.feeGrowthInside1LastX128);
-    const tokensOwed0 = BigInt(position.tokensOwed0);
-    const tokensOwed1 = BigInt(position.tokensOwed1);
-
-    // Ensure we have tick data
-    if (!tickLower || !tickUpper) {
-      throw new Error("Required tick data is missing for fee calculation");
+    // Position data extraction with validation
+    let liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1;
+    
+    try {
+      liquidity = BigInt(position.liquidity);
+    } catch (error) {
+      throw new Error('Invalid position.liquidity: must be a valid numeric string');
+    }
+    
+    try {
+      feeGrowthInside0LastX128 = BigInt(position.feeGrowthInside0LastX128);
+    } catch (error) {
+      throw new Error('Invalid position.feeGrowthInside0LastX128: must be a valid numeric string');
+    }
+    
+    try {
+      feeGrowthInside1LastX128 = BigInt(position.feeGrowthInside1LastX128);
+    } catch (error) {
+      throw new Error('Invalid position.feeGrowthInside1LastX128: must be a valid numeric string');
+    }
+    
+    try {
+      tokensOwed0 = BigInt(position.tokensOwed0);
+    } catch (error) {
+      throw new Error('Invalid position.tokensOwed0: must be a valid numeric string');
+    }
+    
+    try {
+      tokensOwed1 = BigInt(position.tokensOwed1);
+    } catch (error) {
+      throw new Error('Invalid position.tokensOwed1: must be a valid numeric string');
     }
 
-    const lowerTickData = {
-      feeGrowthOutside0X128: tickLower ? BigInt(tickLower.feeGrowthOutside0X128) : 0n,
-      feeGrowthOutside1X128: tickLower ? BigInt(tickLower.feeGrowthOutside1X128) : 0n,
-      initialized: tickLower ? Boolean(tickLower.initialized) : false
-    };
+    // Tick data extraction with validation
+    let lowerTickData, upperTickData;
+    
+    try {
+      lowerTickData = {
+        feeGrowthOutside0X128: BigInt(tickLowerData.feeGrowthOutside0X128),
+        feeGrowthOutside1X128: BigInt(tickLowerData.feeGrowthOutside1X128),
+        initialized: Boolean(tickLowerData.initialized)
+      };
+    } catch (error) {
+      throw new Error('Invalid tickLowerData fee growth values: must be valid numeric strings');
+    }
 
-    const upperTickData = {
-      feeGrowthOutside0X128: tickUpper ? BigInt(tickUpper.feeGrowthOutside0X128) : 0n,
-      feeGrowthOutside1X128: tickUpper ? BigInt(tickUpper.feeGrowthOutside1X128) : 0n,
-      initialized: tickUpper ? Boolean(tickUpper.initialized) : false
-    };
+    try {
+      upperTickData = {
+        feeGrowthOutside0X128: BigInt(tickUpperData.feeGrowthOutside0X128),
+        feeGrowthOutside1X128: BigInt(tickUpperData.feeGrowthOutside1X128),
+        initialized: Boolean(tickUpperData.initialized)
+      };
+    } catch (error) {
+      throw new Error('Invalid tickUpperData fee growth values: must be valid numeric strings');
+    }
 
-    // Convert global fee growth to BigInt
-    const feeGrowthGlobal0X128BigInt = BigInt(feeGrowthGlobal0X128);
-    const feeGrowthGlobal1X128BigInt = BigInt(feeGrowthGlobal1X128);
+    // Convert global fee growth with validation
+    let feeGrowthGlobal0X128BigInt, feeGrowthGlobal1X128BigInt;
+    
+    try {
+      feeGrowthGlobal0X128BigInt = BigInt(feeGrowthGlobal0X128);
+    } catch (error) {
+      throw new Error('Invalid feeGrowthGlobal0X128: must be a valid numeric string');
+    }
+    
+    try {
+      feeGrowthGlobal1X128BigInt = BigInt(feeGrowthGlobal1X128);
+    } catch (error) {
+      throw new Error('Invalid feeGrowthGlobal1X128: must be a valid numeric string');
+    }
 
     // Calculate current fee growth inside the position's range
     let feeGrowthInside0X128, feeGrowthInside1X128;
 
-    if (currentTick < tickLowerValue) {
+    if (currentTick < position.tickLower) {
       // Current tick is below the position's range
       feeGrowthInside0X128 = lowerTickData.feeGrowthOutside0X128 - upperTickData.feeGrowthOutside0X128;
       feeGrowthInside1X128 = lowerTickData.feeGrowthOutside1X128 - upperTickData.feeGrowthOutside1X128;
-    } else if (currentTick >= tickUpperValue) {
+    } else if (currentTick >= position.tickUpper) {
       // Current tick is at or above the position's range
       feeGrowthInside0X128 = upperTickData.feeGrowthOutside0X128 - lowerTickData.feeGrowthOutside0X128;
       feeGrowthInside1X128 = upperTickData.feeGrowthOutside1X128 - lowerTickData.feeGrowthOutside1X128;
@@ -1078,12 +1252,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Handle negative values by adding 2^256
     const MAX_UINT256 = 2n ** 256n;
-    if (feeGrowthInside0X128 < 0n) {
-      feeGrowthInside0X128 += MAX_UINT256;
+    const ZERO = 0n;
+    
+    if (feeGrowthInside0X128 < ZERO) {
+      feeGrowthInside0X128 = feeGrowthInside0X128 + MAX_UINT256;
     }
 
-    if (feeGrowthInside1X128 < 0n) {
-      feeGrowthInside1X128 += MAX_UINT256;
+    if (feeGrowthInside1X128 < ZERO) {
+      feeGrowthInside1X128 = feeGrowthInside1X128 + MAX_UINT256;
     }
 
     // Calculate fee growth since last position update
@@ -1091,12 +1267,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     let feeGrowthDelta1 = feeGrowthInside1X128 - feeGrowthInside1LastX128;
 
     // Handle underflow
-    if (feeGrowthDelta0 < 0n) {
-      feeGrowthDelta0 += MAX_UINT256;
+    if (feeGrowthDelta0 < ZERO) {
+      feeGrowthDelta0 = feeGrowthDelta0 + MAX_UINT256;
     }
 
-    if (feeGrowthDelta1 < 0n) {
-      feeGrowthDelta1 += MAX_UINT256;
+    if (feeGrowthDelta1 < ZERO) {
+      feeGrowthDelta1 = feeGrowthDelta1 + MAX_UINT256;
     }
 
     // Calculate uncollected fees
@@ -1106,20 +1282,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const uncollectedFees0Raw = tokensOwed0 + (liquidity * feeGrowthDelta0) / DENOMINATOR;
     const uncollectedFees1Raw = tokensOwed1 + (liquidity * feeGrowthDelta1) / DENOMINATOR;
 
-    // Format with proper decimals
-
-    // Return both raw and formatted values for flexibility
-    return {
-      token0: {
-        raw: uncollectedFees0Raw,
-        // Convert to string for safer handling in UI
-        formatted: formatUnits(uncollectedFees0Raw, token0Decimals)
-      },
-      token1: {
-        raw: uncollectedFees1Raw,
-        formatted: formatUnits(uncollectedFees1Raw, token1Decimals)
-      }
-    };
+    // Return raw bigint values
+    return [uncollectedFees0Raw, uncollectedFees1Raw];
   }
 
   /**

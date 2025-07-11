@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
-import { getTokenBySymbol } from '../../../src/helpers/tokenHelpers.js';
+import { getTokenBySymbol, getTokenAddress } from '../../../src/helpers/tokenHelpers.js';
 
 describe('UniswapV3Adapter - Unit Tests', () => {
   let env;
@@ -30,6 +30,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       console.log('Ganache test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
       console.log('Chain ID:', await env.provider.getNetwork().then(n => n.chainId));
+      console.log('Running tests...');
 
     } catch (error) {
       console.error('Failed to setup test environment:', error);
@@ -166,6 +167,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for NaN chainId', () => {
         expect(() => new UniswapV3Adapter(NaN)).toThrow('chainId must be a valid number');
       });
+
+      it('should throw error for Infinity chainId', () => {
+        expect(() => new UniswapV3Adapter(Infinity)).toThrow('Uniswap V3 not available on chain Infinity');
+      });
+
+      it('should throw error for -Infinity chainId', () => {
+        expect(() => new UniswapV3Adapter(-Infinity)).toThrow('Uniswap V3 not available on chain -Infinity');
+      });
     });
 
     describe('Error Cases', () => {
@@ -299,6 +308,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should throw error for NaN', () => {
         expect(() => adapter._createDeadline(NaN)).toThrow('Invalid deadline minutes: NaN. Must be a non-negative number.');
+      });
+
+      it('should throw error for Infinity', () => {
+        expect(() => adapter._createDeadline(Infinity)).toThrow('Invalid deadline minutes: Infinity. Must be a non-negative number.');
+      });
+
+      it('should throw error for -Infinity', () => {
+        expect(() => adapter._createDeadline(-Infinity)).toThrow('Invalid deadline minutes: -Infinity. Must be a non-negative number.');
       });
 
       it('should return Unix timestamp in seconds with correct offset', () => {
@@ -905,6 +922,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should throw error for NaN', () => {
         expect(() => adapter._createSlippagePercent(NaN)).toThrow('Invalid slippage tolerance: NaN. Must be between 0 and 100.');
+      });
+
+      it('should throw error for Infinity', () => {
+        expect(() => adapter._createSlippagePercent(Infinity)).toThrow('Invalid slippage tolerance: Infinity. Must be between 0 and 100.');
+      });
+
+      it('should throw error for -Infinity', () => {
+        expect(() => adapter._createSlippagePercent(-Infinity)).toThrow('Invalid slippage tolerance: -Infinity. Must be between 0 and 100.');
       });
 
       it('should throw error for string input', () => {
@@ -2795,45 +2820,43 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Create a second real position from owner's wallet (assets were kept there during setup)
         const owner = env.signers[0];
         const vaultAddress = await env.testVault.getAddress();
-        
+
         // Get contracts
         const weth = new ethers.Contract(env.wethAddress, ['function balanceOf(address) view returns (uint256)', 'function approve(address, uint256) returns (bool)', 'function transfer(address, uint256) returns (bool)'], owner);
         const usdc = new ethers.Contract(env.usdcAddress, ['function balanceOf(address) view returns (uint256)', 'function approve(address, uint256) returns (bool)', 'function transfer(address, uint256) returns (bool)'], owner);
-        
+
         // Check available balances in owner's wallet (40% was kept during setup)
         const ownerWethBalance = await weth.balanceOf(owner.address);
         const ownerUsdcBalance = await usdc.balanceOf(owner.address);
-        
-        console.log('Owner WETH balance:', ownerWethBalance.toString());
-        console.log('Owner USDC balance:', ownerUsdcBalance.toString());
-        
+
+
         // Use most of owner's remaining assets to create second position
         const wethAmount = ownerWethBalance / 2n; // 50% of owner's WETH
         const usdcAmount = ownerUsdcBalance / 2n; // 50% of owner's USDC
-        
+
         // Approve position manager
         await (await weth.approve(env.uniswapV3.positionManagerAddress, wethAmount)).wait();
         await (await usdc.approve(env.uniswapV3.positionManagerAddress, usdcAmount)).wait();
-        
+
         // Get current pool data and create position with different ticks
         const poolData = await adapter.fetchPoolData(env.wethAddress, env.usdcAddress, 500, env.provider);
         const tickSpacing = 10;
         const tickLower = Math.floor(poolData.tick / tickSpacing) * tickSpacing - tickSpacing * 5; // Different from first position
         const tickUpper = Math.floor(poolData.tick / tickSpacing) * tickSpacing + tickSpacing * 5;
-        
+
         // Create position manager contract
         const POSITION_MANAGER_ABI = [
           'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline)) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
           'function safeTransferFrom(address from, address to, uint256 tokenId) external'
         ];
         const positionManager = new ethers.Contract(env.uniswapV3.positionManagerAddress, POSITION_MANAGER_ABI, owner);
-        
+
         // Sort tokens to match pool order
-        const [token0, token1, amount0Desired, amount1Desired] = 
-          env.wethAddress.toLowerCase() < env.usdcAddress.toLowerCase() 
+        const [token0, token1, amount0Desired, amount1Desired] =
+          env.wethAddress.toLowerCase() < env.usdcAddress.toLowerCase()
             ? [env.wethAddress, env.usdcAddress, wethAmount, usdcAmount]
             : [env.usdcAddress, env.wethAddress, usdcAmount, wethAmount];
-        
+
         const mintParams = {
           token0,
           token1,
@@ -2847,19 +2870,17 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           recipient: owner.address,
           deadline: Math.floor(Date.now() / 1000) + 3600,
         };
-        
+
         // Create the second position
         const mintResult = await positionManager.mint.staticCall(mintParams);
         const secondPositionId = mintResult[0];
         await (await positionManager.mint(mintParams)).wait();
-        
+
         // Transfer second position to vault using standard ERC721 function
         await (await positionManager.safeTransferFrom(owner.address, vaultAddress, secondPositionId)).wait();
-        
-        console.log('Created second position with ID:', secondPositionId.toString());
-        
+
+
         try {
-          console.log('About to call getPositions with testAddress:', testAddress);
           const result = await adapter.getPositions(testAddress, env.provider);
 
           // Should have 2 positions
@@ -2881,7 +2902,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           try {
             // Transfer position back to owner first
             await (await positionManager.safeTransferFrom(vaultAddress, owner.address, secondPositionId)).wait();
-            
+
             // Then burn it from owner's wallet
             const burnABI = ['function burn(uint256 tokenId) external payable'];
             const burnContract = new ethers.Contract(env.uniswapV3.positionManagerAddress, burnABI, owner);
@@ -2912,6 +2933,1259 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           // Restore original function
           adapter.fetchPoolData = originalFetchPoolData;
         }
+      });
+    });
+  });
+
+  describe('isPositionInRange', () => {
+    describe('Success Cases', () => {
+      it('should return true when current tick is within range', () => {
+        const currentTick = 100;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+
+      it('should return true when current tick equals lower tick', () => {
+        const currentTick = 50;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+
+      it('should return true when current tick equals upper tick', () => {
+        const currentTick = 150;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+
+      it('should return false when current tick is below range', () => {
+        const currentTick = 40;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(false);
+      });
+
+      it('should return false when current tick is above range', () => {
+        const currentTick = 160;
+        const tickLower = 50;
+        const tickUpper = 150;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(false);
+      });
+
+      it('should work with negative ticks', () => {
+        const currentTick = -100;
+        const tickLower = -200;
+        const tickUpper = -50;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+
+      it('should work with large tick values', () => {
+        const currentTick = 887272;
+        const tickLower = 887270;
+        const tickUpper = 887280;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error when currentTick is not a number', () => {
+        expect(() => adapter.isPositionInRange('100', 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(null, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(undefined, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange({}, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange([], 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(true, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(NaN, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(Infinity, 50, 150)).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(-Infinity, 50, 150)).toThrow('Invalid currentTick: must be a number');
+      });
+
+      it('should throw error when tickLower is not a number', () => {
+        expect(() => adapter.isPositionInRange(100, '50', 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, null, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, undefined, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, {}, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, [], 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, true, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, NaN, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, Infinity, 150)).toThrow('Invalid tickLower: must be a number');
+        expect(() => adapter.isPositionInRange(100, -Infinity, 150)).toThrow('Invalid tickLower: must be a number');
+      });
+
+      it('should throw error when tickUpper is not a number', () => {
+        expect(() => adapter.isPositionInRange(100, 50, '150')).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, null)).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, undefined)).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, {})).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, [])).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, true)).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, NaN)).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, Infinity)).toThrow('Invalid tickUpper: must be a number');
+        expect(() => adapter.isPositionInRange(100, 50, -Infinity)).toThrow('Invalid tickUpper: must be a number');
+      });
+
+      it('should throw error for first invalid parameter when multiple are invalid', () => {
+        expect(() => adapter.isPositionInRange('100', '50', '150')).toThrow('Invalid currentTick: must be a number');
+        expect(() => adapter.isPositionInRange(100, null, undefined)).toThrow('Invalid tickLower: must be a number');
+      });
+
+      it('should throw error when tickLower > tickUpper', () => {
+        const currentTick = 100;
+        const tickLower = 150;  // Higher than upper
+        const tickUpper = 50;   // Lower than lower
+
+        expect(() => adapter.isPositionInRange(currentTick, tickLower, tickUpper))
+          .toThrow('Invalid tick range: tickLower must be less than tickUpper');
+      });
+
+      it('should throw error when tickLower equals tickUpper', () => {
+        expect(() => adapter.isPositionInRange(100, 100, 100))
+          .toThrow('Invalid tick range: tickLower must be less than tickUpper');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle zero values correctly', () => {
+        expect(adapter.isPositionInRange(0, -10, 10)).toBe(true);
+        expect(adapter.isPositionInRange(0, 10, 20)).toBe(false);
+        expect(adapter.isPositionInRange(0, -20, -10)).toBe(false);
+      });
+
+      it('should handle minimum safe tick spacing', () => {
+        // Minimum tick spacing in Uniswap V3 is 1
+        const currentTick = 100;
+        const tickLower = 99;
+        const tickUpper = 100;
+
+        const result = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
+        expect(result).toBe(true);
+      });
+
+      it('should handle extreme tick values near limits', () => {
+        // Uniswap V3 tick range is -887272 to 887272
+        const minTick = -887272;
+        const maxTick = 887272;
+
+        expect(adapter.isPositionInRange(0, minTick, maxTick)).toBe(true);
+        expect(adapter.isPositionInRange(minTick, minTick, maxTick)).toBe(true);
+        expect(adapter.isPositionInRange(maxTick, minTick, maxTick)).toBe(true);
+      });
+    });
+  });
+
+  describe('calculatePriceFromSqrtPrice', () => {
+    describe('Success Cases', () => {
+      it('should calculate price for ETH/USDC pair', () => {
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337), // Ganache fork WETH
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337), // Ganache fork USDC
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // ETH price exactly $4000 (calculated sqrtPriceX96)
+        const sqrtPriceX96 = '5007918240960887653173817'; // Exactly 4000 USDC per ETH
+
+        const price = adapter.calculatePriceFromSqrtPrice(sqrtPriceX96, ethToken, usdcToken);
+
+        // Should return a Price object
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        // Convert to number and check ETH price is reasonable
+        const priceNum = parseFloat(price.toFixed(2));
+        expect(priceNum).toBeGreaterThan(3900); // ETH > $3900
+        expect(priceNum).toBeLessThan(4100);   // ETH < $4100
+      });
+
+      it('should calculate price for stablecoin pair close to 1', () => {
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+        const usdtToken = {
+          address: getTokenAddress('USD₮0', 1337),
+          decimals: 6,
+          symbol: 'USD₮0'
+        };
+
+        // Price close to 1:1 (sqrtPriceX96 for price ~1)
+        const sqrtPriceX96 = '79228162514264337593543950336'; // sqrt(1) * 2^96
+
+        const price = adapter.calculatePriceFromSqrtPrice(sqrtPriceX96, usdcToken, usdtToken);
+
+        const priceNum = parseFloat(price.toFixed(6));
+        expect(priceNum).toBeGreaterThan(0.9);
+        expect(priceNum).toBeLessThan(1.1);
+      });
+
+      it('should handle inverted token pairs consistently', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const sqrtPriceX96 = '1584563250285286751754897';
+
+        const priceAB = adapter.calculatePriceFromSqrtPrice(sqrtPriceX96, tokenA, tokenB);
+        const priceBA = adapter.calculatePriceFromSqrtPrice(sqrtPriceX96, tokenB, tokenA);
+
+        const priceABNum = parseFloat(priceAB.toFixed(8));
+        const priceBANum = parseFloat(priceBA.toFixed(8));
+
+        // Prices should be reciprocals (within small tolerance for floating point)
+        const product = priceABNum * priceBANum;
+        expect(product).toBeGreaterThan(0.99);
+        expect(product).toBeLessThan(1.01);
+      });
+
+
+      it('should work with minimal token metadata', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18
+          // No symbol or name
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6
+          // No symbol or name
+        };
+
+        const sqrtPriceX96 = '79228162514264337593543950336';
+
+        const price = adapter.calculatePriceFromSqrtPrice(sqrtPriceX96, tokenA, tokenB);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+        expect(parseFloat(price.toFixed(6))).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      const validTokenA = {
+        address: getTokenAddress('WETH', 1337),
+        decimals: 18,
+        symbol: 'WETH'
+      };
+      const validTokenB = {
+        address: getTokenAddress('USDC', 1337),
+        decimals: 6,
+        symbol: 'USDC'
+      };
+
+      it('should throw error for non-string sqrtPriceX96 values', () => {
+        expect(() => adapter.calculatePriceFromSqrtPrice(null, validTokenA, validTokenB))
+          .toThrow('sqrtPriceX96 must be a string');
+        expect(() => adapter.calculatePriceFromSqrtPrice(undefined, validTokenA, validTokenB))
+          .toThrow('sqrtPriceX96 must be a string');
+        expect(() => adapter.calculatePriceFromSqrtPrice(123456, validTokenA, validTokenB))
+          .toThrow('sqrtPriceX96 must be a string');
+        expect(() => adapter.calculatePriceFromSqrtPrice({}, validTokenA, validTokenB))
+          .toThrow('sqrtPriceX96 must be a string');
+        expect(() => adapter.calculatePriceFromSqrtPrice([], validTokenA, validTokenB))
+          .toThrow('sqrtPriceX96 must be a string');
+      });
+
+      it('should throw error for invalid sqrtPriceX96 string values', () => {
+        expect(() => adapter.calculatePriceFromSqrtPrice('', validTokenA, validTokenB))
+          .toThrow('Invalid sqrtPriceX96 value');
+        expect(() => adapter.calculatePriceFromSqrtPrice('0', validTokenA, validTokenB))
+          .toThrow('Invalid sqrtPriceX96 value');
+        expect(() => adapter.calculatePriceFromSqrtPrice('Claude is an awesome AI coder', validTokenA, validTokenB))
+          .toThrow('Invalid sqrtPriceX96: must be a valid numeric string');
+        expect(() => adapter.calculatePriceFromSqrtPrice('123abc', validTokenA, validTokenB))
+          .toThrow('Invalid sqrtPriceX96: must be a valid numeric string');
+        expect(() => adapter.calculatePriceFromSqrtPrice('-123', validTokenA, validTokenB))
+          .toThrow('Invalid sqrtPriceX96: must be a valid numeric string');
+      });
+
+      it('should throw error for missing token information', () => {
+        const validSqrtPrice = '79228162514264337593543950336';
+
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, null, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, undefined, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, validTokenA, null))
+          .toThrow('Missing required token information');
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, validTokenA, undefined))
+          .toThrow('Missing required token information');
+      });
+
+      it('should throw error for missing token addresses', () => {
+        const validSqrtPrice = '79228162514264337593543950336';
+        const tokenMissingAddress = { decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, tokenMissingAddress, validTokenB))
+          .toThrow('baseToken.address is required');
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, validTokenA, tokenMissingAddress))
+          .toThrow('quoteToken.address is required');
+      });
+
+      it('should throw error for invalid token addresses', () => {
+        const validSqrtPrice = '79228162514264337593543950336';
+        const invalidAddressToken = { address: 'invalid-address', decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, invalidAddressToken, validTokenB))
+          .toThrow('Invalid baseToken.address: invalid-address');
+        expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, validTokenA, invalidAddressToken))
+          .toThrow('Invalid quoteToken.address: invalid-address');
+      });
+
+      it('should throw error for invalid baseToken decimals', () => {
+        const validSqrtPrice = '79228162514264337593543950336';
+
+        const invalidTokens = [
+          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, invalidToken, validTokenB))
+            .toThrow('baseToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+
+      it('should throw error for invalid quoteToken decimals', () => {
+        const validSqrtPrice = '79228162514264337593543950336';
+
+        const invalidTokens = [
+          { address: getTokenAddress('USDC', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.calculatePriceFromSqrtPrice(validSqrtPrice, validTokenA, invalidToken))
+            .toThrow('quoteToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+    });
+  });
+
+  describe('tickToPrice', () => {
+    describe('Success Cases', () => {
+      it('should calculate price for tick 0 (1:1 ratio)', () => {
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+
+        // Tick 0 = 1:1 price ratio - use USDC/WETH to get a readable price around 1e12
+        const tick = 0;
+
+        const price = adapter.tickToPrice(tick, usdcToken, ethToken);
+
+        // Should return a Price object
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        // Tick 0 with USDC(6 decimals)/WETH(18 decimals) gives 1e-12 (1 USDC = 1e-12 WETH)
+        const priceNum = parseFloat(price.toSignificant(18));
+        expect(priceNum).toBeCloseTo(1e-12, 15); // 1e-12 with high precision
+      });
+
+      it('should calculate price for positive tick', () => {
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Positive tick = higher price
+        const tick = 200000; // Arbitrary positive tick
+
+        const price = adapter.tickToPrice(tick, ethToken, usdcToken);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        const priceNum = parseFloat(price.toSignificant(6));
+        expect(priceNum).toBeGreaterThan(0);
+        expect(Number.isFinite(priceNum)).toBe(true);
+      });
+
+      it('should calculate price for negative tick', () => {
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Negative tick = lower price
+        const tick = -200000; // Arbitrary negative tick
+
+        const price = adapter.tickToPrice(tick, ethToken, usdcToken);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        const priceNum = parseFloat(price.toSignificant(18));
+        expect(priceNum).toBeGreaterThan(0);
+        expect(Number.isFinite(priceNum)).toBe(true);
+      });
+
+      it('should handle inverted token pairs consistently', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const tick = 100000;
+
+        const priceAB = adapter.tickToPrice(tick, tokenA, tokenB);
+        const priceBA = adapter.tickToPrice(tick, tokenB, tokenA);
+
+        const priceABNum = parseFloat(priceAB.toSignificant(18));
+        const priceBANum = parseFloat(priceBA.toSignificant(18));
+
+        // Prices should be reciprocals (within small tolerance)
+        const product = priceABNum * priceBANum;
+        expect(product).toBeGreaterThan(0.99);
+        expect(product).toBeLessThan(1.01);
+      });
+
+      it('should work with minimal token metadata', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18
+          // No symbol or name
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6
+          // No symbol or name
+        };
+
+        const tick = 0;
+
+        const price = adapter.tickToPrice(tick, tokenA, tokenB);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+        expect(parseFloat(price.toSignificant(18))).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      const validTokenA = {
+        address: getTokenAddress('WETH', 1337),
+        decimals: 18,
+        symbol: 'WETH'
+      };
+      const validTokenB = {
+        address: getTokenAddress('USDC', 1337),
+        decimals: 6,
+        symbol: 'USDC'
+      };
+
+      it('should throw error for invalid tick values', () => {
+        expect(() => adapter.tickToPrice('not-a-number', validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter.tickToPrice(null, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter.tickToPrice(undefined, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter.tickToPrice(NaN, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter.tickToPrice(Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter.tickToPrice(-Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+      });
+
+      it('should throw error for missing token information', () => {
+        const validTick = 0;
+
+        expect(() => adapter.tickToPrice(validTick, null, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.tickToPrice(validTick, undefined, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.tickToPrice(validTick, validTokenA, null))
+          .toThrow('Missing required token information');
+        expect(() => adapter.tickToPrice(validTick, validTokenA, undefined))
+          .toThrow('Missing required token information');
+      });
+
+      it('should throw error for missing token addresses', () => {
+        const validTick = 0;
+        const tokenMissingAddress = { decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.tickToPrice(validTick, tokenMissingAddress, validTokenB))
+          .toThrow('baseToken.address is required');
+        expect(() => adapter.tickToPrice(validTick, validTokenA, tokenMissingAddress))
+          .toThrow('quoteToken.address is required');
+      });
+
+      it('should throw error for invalid token addresses', () => {
+        const validTick = 0;
+        const invalidAddressToken = { address: 'invalid-address', decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.tickToPrice(validTick, invalidAddressToken, validTokenB))
+          .toThrow('Invalid baseToken.address: invalid-address');
+        expect(() => adapter.tickToPrice(validTick, validTokenA, invalidAddressToken))
+          .toThrow('Invalid quoteToken.address: invalid-address');
+      });
+
+      it('should throw error for invalid baseToken decimals', () => {
+        const validTick = 0;
+
+        const invalidTokens = [
+          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.tickToPrice(validTick, invalidToken, validTokenB))
+            .toThrow('baseToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+
+      it('should throw error for invalid quoteToken decimals', () => {
+        const validTick = 0;
+
+        const invalidTokens = [
+          { address: getTokenAddress('USDC', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.tickToPrice(validTick, validTokenA, invalidToken))
+            .toThrow('quoteToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle extreme tick values near limits', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Uniswap V3 tick range is approximately -887272 to 887272
+        const maxTick = 887272;
+        const minTick = -887272;
+
+        expect(() => adapter.tickToPrice(maxTick, tokenA, tokenB)).not.toThrow();
+        expect(() => adapter.tickToPrice(minTick, tokenA, tokenB)).not.toThrow();
+
+        const maxPrice = adapter.tickToPrice(maxTick, tokenA, tokenB);
+        const minPrice = adapter.tickToPrice(minTick, tokenA, tokenB);
+
+        expect(parseFloat(maxPrice.toSignificant(6))).toBeGreaterThan(0);
+        // Min tick (-887272) results in extremely small price that may be 0 when parsed
+        const minPriceNum = parseFloat(minPrice.toSignificant(18));
+        expect(minPriceNum).toBeGreaterThanOrEqual(0); // Allow 0 for extreme minimum
+      });
+
+      it('should handle zero tick consistently', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const price1 = adapter.tickToPrice(0, tokenA, tokenB);
+        const price2 = adapter.tickToPrice(0, tokenA, tokenB);
+
+        // Should be deterministic
+        expect(price1.toSignificant(18)).toBe(price2.toSignificant(18));
+      });
+    });
+  });
+
+  describe('calculateUncollectedFees', () => {
+    describe('Success Cases', () => {
+      it('should return zero fees for fresh position with no swaps', async () => {
+        // Get real position data from our test environment
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        
+        expect(positions.positions).toBeDefined();
+        expect(positions.positions.length).toBeGreaterThan(0);
+        
+        const position = positions.positions[0];
+        const poolAddress = position.pool;
+        const poolData = positions.poolData[poolAddress];
+        
+        expect(poolData).toBeDefined();
+        expect(poolData.token0).toBeDefined();
+        expect(poolData.token1).toBeDefined();
+        
+        // Calculate fees with real data - should be 0 for fresh position
+        const result = adapter.calculateUncollectedFees(position, poolData);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBe(0n);
+        expect(result[1]).toBe(0n);
+        
+      });
+
+      it('should calculate fees after swaps generate fee growth', async () => {
+        // Get initial position and pool data
+        const vaultAddress = await env.testVault.getAddress();
+        const initialPositions = await adapter.getPositions(vaultAddress, env.provider);
+        const position = initialPositions.positions[0];
+        const poolAddress = position.pool;
+        const initialPoolData = initialPositions.poolData[poolAddress];
+        
+        // Verify we start with zero fees
+        const initialFees = adapter.calculateUncollectedFees(
+          position,
+          initialPoolData
+        );
+        expect(initialFees[0]).toBe(0n);
+        expect(initialFees[1]).toBe(0n);
+
+        // Set up for swaps - use a different account each time to avoid nonce issues  
+        // We'll use account[2] since account[0] is the owner and account[1] might be used elsewhere
+        const swapperWallet = new ethers.Wallet(env.accounts[2].privateKey, env.provider);
+        
+        // Get WETH and USDC addresses from our environment
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        
+        // Simple WETH ABI with deposit function
+        const wethABI = [
+          'function deposit() external payable',
+          'function balanceOf(address owner) external view returns (uint256)',
+          'function transfer(address to, uint256 value) external returns (bool)',
+          'function approve(address spender, uint256 value) external returns (bool)'
+        ];
+        
+        // Create contract instances
+        const wethContract = new ethers.Contract(wethAddress, wethABI, swapperWallet);
+        const usdcContract = new ethers.Contract(usdcAddress, adapter.erc20ABI, swapperWallet);
+        const swapRouter = new ethers.Contract(adapter.addresses.routerAddress, adapter.swapRouterABI, swapperWallet);
+        
+        // Wrap some ETH to WETH (1 ETH)
+        const wrapAmount = ethers.parseEther('1');
+        const wrapTx = await wethContract.deposit({ value: wrapAmount });
+        await wrapTx.wait();
+        
+        // Get the current nonce before approve transaction
+        let currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
+        
+        // Approve router to spend WETH - wait for confirmation like generate_fees.js
+        const approveTx = await wethContract.approve(adapter.addresses.routerAddress, wrapAmount, {
+          nonce: currentNonce
+        });
+        await approveTx.wait();
+        
+        // Execute swap: WETH -> USDC using pattern from generate_fees.js
+        const swapParams = {
+          tokenIn: wethAddress,
+          tokenOut: usdcAddress,
+          fee: position.fee, // Use the same fee tier as our position
+          recipient: swapperWallet.address,
+          deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes from now
+          amountIn: wrapAmount,
+          amountOutMinimum: 0, // Accept any amount of USDC
+          sqrtPriceLimitX96: 0 // No price limit
+        };
+        
+        // Get fresh nonce for swap transaction
+        currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
+        
+        // Use high gas price to avoid underpriced transaction errors
+        const currentGasPrice = await env.provider.getFeeData();
+        const safeGasPrice = (currentGasPrice.gasPrice || ethers.parseUnits('100', 'gwei')) * 3n;
+        
+        const gasOptions = {
+          nonce: currentNonce,
+          gasPrice: safeGasPrice,
+          gasLimit: 500000
+        };
+        
+        const swapTx = await swapRouter.exactInputSingle(swapParams, gasOptions);
+        await swapTx.wait();
+        
+        // Get USDC balance and swap some back to generate more fees
+        const usdcBalance = await usdcContract.balanceOf(swapperWallet.address);
+        const swapBackAmount = usdcBalance / 2n; // Swap back half
+        
+        if (swapBackAmount > 0) {
+          // Get fresh nonce for approve-back transaction
+          currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
+          
+          const approveBackTx = await usdcContract.approve(adapter.addresses.routerAddress, swapBackAmount, {
+            nonce: currentNonce
+          });
+          await approveBackTx.wait();
+          
+          const swapBackParams = {
+            tokenIn: usdcAddress,
+            tokenOut: wethAddress,
+            fee: position.fee,
+            recipient: swapperWallet.address,
+            deadline: Math.floor(Date.now() / 1000) + 1200,
+            amountIn: swapBackAmount,
+            amountOutMinimum: 0,
+            sqrtPriceLimitX96: 0
+          };
+          
+          // Get fresh nonce for swap-back transaction
+          currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
+          
+          const gasOptions2 = {
+            nonce: currentNonce,
+            gasPrice: safeGasPrice, // Reuse same gas price
+            gasLimit: 500000
+          };
+          
+          const swapBackTx = await swapRouter.exactInputSingle(swapBackParams, gasOptions2);
+          await swapBackTx.wait();
+        }
+        
+        // Get updated pool data after swaps
+        const updatedPoolData = await adapter.fetchPoolData(
+          initialPoolData.token0.address,
+          initialPoolData.token1.address,
+          position.fee,
+          env.provider
+        );
+        
+        // Also fetch the tick data for the position's ticks
+        const tickData = await adapter.fetchTickData(
+          updatedPoolData.poolAddress,
+          position.tickLower,
+          position.tickUpper,
+          env.provider
+        );
+        
+        // Add tick data to pool data in the correct format (indexed by tick number)
+        updatedPoolData.ticks = {
+          [position.tickLower]: tickData.tickLower,
+          [position.tickUpper]: tickData.tickUpper
+        };
+        
+        // Verify fee growth has occurred
+        expect(BigInt(updatedPoolData.feeGrowthGlobal0X128)).toBeGreaterThan(
+          BigInt(initialPoolData.feeGrowthGlobal0X128)
+        );
+        
+        // Calculate fees with updated pool data
+        const updatedFees = adapter.calculateUncollectedFees(
+          position,
+          updatedPoolData
+        );
+        
+        // Should now have non-zero fees (at least for one token)
+        const hasFees = updatedFees[0] > 0n || updatedFees[1] > 0n;
+        expect(hasFees).toBe(true);
+        
+        // Verify return structure
+        expect(Array.isArray(updatedFees)).toBe(true);
+        expect(updatedFees).toHaveLength(2);
+        expect(typeof updatedFees[0]).toBe('bigint');
+        expect(typeof updatedFees[1]).toBe('bigint');
+        
+        // Fees should be non-negative
+        expect(updatedFees[0]).toBeGreaterThanOrEqual(0n);
+        expect(updatedFees[1]).toBeGreaterThanOrEqual(0n);
+        
+      }, 60000); // Longer timeout for swap transactions
+
+      it('should handle positions with existing tokensOwed (claimed but not collected fees)', async () => {
+        // Get position data
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        const position = positions.positions[0];
+        const poolData = positions.poolData[position.pool];
+        
+        // Create a modified position with some pre-existing tokensOwed
+        // This simulates someone calling collect() to claim fees but not transferring them yet
+        const positionWithOwed = {
+          ...position,
+          tokensOwed0: '1000000000000000000', // 1e18 (1.0 WETH)
+          tokensOwed1: '500000000000' // 500 billion (with 6 decimals = 500k USDC)
+        };
+        
+        const result = adapter.calculateUncollectedFees(
+          positionWithOwed,
+          poolData
+        );
+        
+        // Should include the pre-existing owed amounts
+        expect(result[0]).toBeGreaterThanOrEqual(1000000000000000000n);
+        expect(result[1]).toBeGreaterThanOrEqual(500000000000n);
+        
+        // Verify structure
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        
+      });
+
+    });
+
+    describe('Error Cases', () => {
+      // Get valid test data for error tests
+      let validPosition, validPoolData;
+
+      beforeEach(async () => {
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        validPosition = positions.positions[0];
+        validPoolData = positions.poolData[validPosition.pool];
+      });
+
+      it('should throw error when position parameter is missing or invalid type', () => {
+        expect(() => adapter.calculateUncollectedFees(null, validPoolData))
+          .toThrow('Position parameter is required');
+        expect(() => adapter.calculateUncollectedFees(undefined, validPoolData))
+          .toThrow('Position parameter is required');
+      });
+
+      it('should throw error when poolData parameter is missing or invalid type', () => {
+        expect(() => adapter.calculateUncollectedFees(validPosition, null))
+          .toThrow('poolData parameter is required');
+        expect(() => adapter.calculateUncollectedFees(validPosition, undefined))
+          .toThrow('poolData parameter is required');
+      });
+
+
+      it('should throw error when position.liquidity is missing or invalid', () => {
+        const missingLiquidity = { ...validPosition };
+        delete missingLiquidity.liquidity;
+        expect(() => adapter.calculateUncollectedFees(missingLiquidity, validPoolData))
+          .toThrow('position.liquidity is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: null }, validPoolData))
+          .toThrow('position.liquidity is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: 123 }, validPoolData))
+          .toThrow('position.liquidity must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: {} }, validPoolData))
+          .toThrow('position.liquidity must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: [] }, validPoolData))
+          .toThrow('position.liquidity must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: true }, validPoolData))
+          .toThrow('position.liquidity must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, liquidity: 'not-a-number' }, validPoolData))
+          .toThrow('Invalid position.liquidity: must be a valid numeric string');
+      });
+
+      it('should throw error when position.feeGrowthInside0LastX128 is missing or invalid', () => {
+        const missingFeeGrowth = { ...validPosition };
+        delete missingFeeGrowth.feeGrowthInside0LastX128;
+        expect(() => adapter.calculateUncollectedFees(missingFeeGrowth, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: null }, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: 123 }, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: {} }, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: [] }, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: true }, validPoolData))
+          .toThrow('position.feeGrowthInside0LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside0LastX128: 'invalid' }, validPoolData))
+          .toThrow('Invalid position.feeGrowthInside0LastX128: must be a valid numeric string');
+      });
+
+      it('should throw error when position.feeGrowthInside1LastX128 is missing or invalid', () => {
+        const missingFeeGrowth = { ...validPosition };
+        delete missingFeeGrowth.feeGrowthInside1LastX128;
+        expect(() => adapter.calculateUncollectedFees(missingFeeGrowth, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: null }, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: 123 }, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: {} }, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: [] }, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: true }, validPoolData))
+          .toThrow('position.feeGrowthInside1LastX128 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, feeGrowthInside1LastX128: 'invalid' }, validPoolData))
+          .toThrow('Invalid position.feeGrowthInside1LastX128: must be a valid numeric string');
+      });
+
+      it('should throw error when position.tokensOwed0 is missing or invalid', () => {
+        const missingTokensOwed = { ...validPosition };
+        delete missingTokensOwed.tokensOwed0;
+        expect(() => adapter.calculateUncollectedFees(missingTokensOwed, validPoolData))
+          .toThrow('position.tokensOwed0 is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: null }, validPoolData))
+          .toThrow('position.tokensOwed0 is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: 123 }, validPoolData))
+          .toThrow('position.tokensOwed0 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: {} }, validPoolData))
+          .toThrow('position.tokensOwed0 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: [] }, validPoolData))
+          .toThrow('position.tokensOwed0 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: true }, validPoolData))
+          .toThrow('position.tokensOwed0 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed0: 'invalid' }, validPoolData))
+          .toThrow('Invalid position.tokensOwed0: must be a valid numeric string');
+      });
+
+      it('should throw error when position.tokensOwed1 is missing or invalid', () => {
+        const missingTokensOwed = { ...validPosition };
+        delete missingTokensOwed.tokensOwed1;
+        expect(() => adapter.calculateUncollectedFees(missingTokensOwed, validPoolData))
+          .toThrow('position.tokensOwed1 is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: null }, validPoolData))
+          .toThrow('position.tokensOwed1 is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: 123 }, validPoolData))
+          .toThrow('position.tokensOwed1 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: {} }, validPoolData))
+          .toThrow('position.tokensOwed1 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: [] }, validPoolData))
+          .toThrow('position.tokensOwed1 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: true }, validPoolData))
+          .toThrow('position.tokensOwed1 must be a string');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tokensOwed1: 'invalid' }, validPoolData))
+          .toThrow('Invalid position.tokensOwed1: must be a valid numeric string');
+      });
+
+      it('should throw error when position.tickLower is missing or invalid', () => {
+        const missingTickLower = { ...validPosition };
+        delete missingTickLower.tickLower;
+        expect(() => adapter.calculateUncollectedFees(missingTickLower, validPoolData))
+          .toThrow('position.tickLower is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: null }, validPoolData))
+          .toThrow('position.tickLower is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: undefined }, validPoolData))
+          .toThrow('position.tickLower is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: 'invalid' }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: {} }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: [] }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: true }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: NaN }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: Infinity }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickLower: -Infinity }, validPoolData))
+          .toThrow('position.tickLower must be a finite number');
+      });
+
+      it('should throw error when position.tickUpper is missing or invalid', () => {
+        const missingTickUpper = { ...validPosition };
+        delete missingTickUpper.tickUpper;
+        expect(() => adapter.calculateUncollectedFees(missingTickUpper, validPoolData))
+          .toThrow('position.tickUpper is required');
+
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: null }, validPoolData))
+          .toThrow('position.tickUpper is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: undefined }, validPoolData))
+          .toThrow('position.tickUpper is required');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: 'invalid' }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: {} }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: [] }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: true }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: NaN }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: Infinity }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+        expect(() => adapter.calculateUncollectedFees({ ...validPosition, tickUpper: -Infinity }, validPoolData))
+          .toThrow('position.tickUpper must be a finite number');
+      });
+
+      it('should throw error when poolData.tick is missing or invalid', () => {
+        const missingTick = { ...validPoolData };
+        delete missingTick.tick;
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingTick))
+          .toThrow('poolData.tick is required');
+
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: null }))
+          .toThrow('poolData.tick is required');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: undefined }))
+          .toThrow('poolData.tick is required');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: 'invalid' }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: {} }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: [] }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: true }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: NaN }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: Infinity }))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, tick: -Infinity }))
+          .toThrow('poolData.tick must be a finite number');
+      });
+
+      it('should throw error when poolData.feeGrowthGlobal0X128 is missing or invalid', () => {
+        const missingFeeGrowth = { ...validPoolData };
+        delete missingFeeGrowth.feeGrowthGlobal0X128;
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingFeeGrowth))
+          .toThrow('poolData.feeGrowthGlobal0X128 is required');
+
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal0X128: null }))
+          .toThrow('poolData.feeGrowthGlobal0X128 is required');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal0X128: 123 }))
+          .toThrow('poolData.feeGrowthGlobal0X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal0X128: {} }))
+          .toThrow('poolData.feeGrowthGlobal0X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal0X128: [] }))
+          .toThrow('poolData.feeGrowthGlobal0X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal0X128: true }))
+          .toThrow('poolData.feeGrowthGlobal0X128 must be a string');
+      });
+
+      it('should throw error when poolData.feeGrowthGlobal1X128 is missing or invalid', () => {
+        const missingFeeGrowth = { ...validPoolData };
+        delete missingFeeGrowth.feeGrowthGlobal1X128;
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingFeeGrowth))
+          .toThrow('poolData.feeGrowthGlobal1X128 is required');
+
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal1X128: null }))
+          .toThrow('poolData.feeGrowthGlobal1X128 is required');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal1X128: 123 }))
+          .toThrow('poolData.feeGrowthGlobal1X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal1X128: {} }))
+          .toThrow('poolData.feeGrowthGlobal1X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal1X128: [] }))
+          .toThrow('poolData.feeGrowthGlobal1X128 must be a string');
+        expect(() => adapter.calculateUncollectedFees(validPosition, { ...validPoolData, feeGrowthGlobal1X128: true }))
+          .toThrow('poolData.feeGrowthGlobal1X128 must be a string');
+      });
+
+      it('should throw error when poolData.ticks is missing or tick data is missing', () => {
+        const missingTicks = { ...validPoolData };
+        delete missingTicks.ticks;
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingTicks))
+          .toThrow('poolData.ticks is required');
+
+        // Missing tickLower data
+        const missingTickLower = { ...validPoolData, ticks: {} };
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingTickLower))
+          .toThrow(`Missing tick data for tickLower ${validPosition.tickLower}`);
+
+        // Missing tickUpper data
+        const missingTickUpper = { 
+          ...validPoolData, 
+          ticks: { [validPosition.tickLower]: validPoolData.ticks[validPosition.tickLower] }
+        };
+        expect(() => adapter.calculateUncollectedFees(validPosition, missingTickUpper))
+          .toThrow(`Missing tick data for tickUpper ${validPosition.tickUpper}`);
+      });
+
+      it('should throw error when tick data contains invalid fee growth values', () => {
+        // Invalid tickLowerData fee growth values
+        const invalidTickLowerData = { 
+          ...validPoolData, 
+          ticks: { 
+            [validPosition.tickLower]: {
+              ...validPoolData.ticks[validPosition.tickLower],
+              feeGrowthOutside0X128: 'invalid'
+            },
+            [validPosition.tickUpper]: validPoolData.ticks[validPosition.tickUpper]
+          }
+        };
+        expect(() => adapter.calculateUncollectedFees(validPosition, invalidTickLowerData))
+          .toThrow('Invalid tickLowerData fee growth values: must be valid numeric strings');
+
+        // Invalid tickUpperData fee growth values
+        const invalidTickUpperData = { 
+          ...validPoolData, 
+          ticks: { 
+            [validPosition.tickLower]: validPoolData.ticks[validPosition.tickLower],
+            [validPosition.tickUpper]: {
+              ...validPoolData.ticks[validPosition.tickUpper],
+              feeGrowthOutside1X128: 'invalid'
+            }
+          }
+        };
+        expect(() => adapter.calculateUncollectedFees(validPosition, invalidTickUpperData))
+          .toThrow('Invalid tickUpperData fee growth values: must be valid numeric strings');
+      });
+    });
+
+    describe('Special Cases', () => {
+      let validPosition, validPoolData;
+
+      beforeEach(async () => {
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        validPosition = positions.positions[0];
+        validPoolData = positions.poolData[validPosition.pool];
+      });
+
+      it('should calculate fees when position is out of range (below)', () => {
+        // Create pool data where current tick is below position range
+        const outOfRangePoolData = {
+          ...validPoolData,
+          tick: validPosition.tickLower - 100 // Current tick below position
+        };
+
+        const result = adapter.calculateUncollectedFees(validPosition, outOfRangePoolData);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+      });
+
+      it('should calculate fees when position is out of range (above)', () => {
+        // Create pool data where current tick is above position range
+        const outOfRangePoolData = {
+          ...validPoolData,
+          tick: validPosition.tickUpper + 100 // Current tick above position
+        };
+
+        const result = adapter.calculateUncollectedFees(validPosition, outOfRangePoolData);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+      });
+
+      it('should handle fee growth inside underflow correctly', () => {
+        // Create scenario where fee growth inside calculation goes negative
+        const underflowPoolData = {
+          ...validPoolData,
+          ticks: {
+            [validPosition.tickLower]: {
+              ...validPoolData.ticks[validPosition.tickLower],
+              feeGrowthOutside0X128: '999999999999999999999999999999999999999',
+              feeGrowthOutside1X128: '999999999999999999999999999999999999999'
+            },
+            [validPosition.tickUpper]: {
+              ...validPoolData.ticks[validPosition.tickUpper],
+              feeGrowthOutside0X128: '1000000000000000000000000000000000000000',
+              feeGrowthOutside1X128: '1000000000000000000000000000000000000000'
+            }
+          }
+        };
+
+        const result = adapter.calculateUncollectedFees(validPosition, underflowPoolData);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+      });
+
+      it('should handle fee growth delta underflow correctly', () => {
+        // Create scenario where fee growth delta calculation goes negative
+        // This happens when current fee growth is less than last recorded fee growth
+        const deltaUnderflowPosition = {
+          ...validPosition,
+          feeGrowthInside0LastX128: '999999999999999999999999999999999999999',
+          feeGrowthInside1LastX128: '999999999999999999999999999999999999999'
+        };
+
+        const deltaUnderflowPoolData = {
+          ...validPoolData,
+          feeGrowthGlobal0X128: '100000000000000000000000000000000000000',
+          feeGrowthGlobal1X128: '100000000000000000000000000000000000000'
+        };
+
+        const result = adapter.calculateUncollectedFees(deltaUnderflowPosition, deltaUnderflowPoolData);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
       });
     });
   });

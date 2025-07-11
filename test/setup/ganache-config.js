@@ -103,6 +103,7 @@ export async function startGanache(options = {}) {
     },
     miner: {
       blockTime: config.blockTime,
+      defaultGasPrice: '0x2540be400', // 10 gwei in hex - Goldilocks gas price
     },
     fork: {
       url: config.forkUrl,

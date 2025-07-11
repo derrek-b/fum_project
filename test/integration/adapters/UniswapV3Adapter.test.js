@@ -115,12 +115,16 @@ describe('UniswapV3Adapter - Integration Tests', () => {
       const price = adapter.calculatePriceFromSqrtPrice(
         poolData.sqrtPriceX96,
         weth, // WETH token object
-        usdc, // USDC token object
-        1337 // chainId
+        usdc  // USDC token object
       );
       
-      // Price should be a reasonable ETH/USDC price (just check it's a number)
-      const priceNum = parseFloat(price);
+      // Price should be a Uniswap SDK Price object
+      expect(price).toBeDefined();
+      expect(typeof price.toFixed).toBe('function');
+      expect(typeof price.toSignificant).toBe('function');
+      
+      // Check that we can get a reasonable ETH/USDC price
+      const priceNum = parseFloat(price.toFixed(6));
       expect(priceNum).toBeGreaterThan(0);
       expect(isNaN(priceNum)).toBe(false);
     });
@@ -177,7 +181,7 @@ describe('UniswapV3Adapter - Integration Tests', () => {
         tickUpper: currentTick + 1000,
       };
       
-      const inRange = adapter.isPositionInRange(testPosition, poolData);
+      const inRange = adapter.isPositionInRange(poolData.tick, testPosition.tickLower, testPosition.tickUpper);
       expect(inRange).toBe(true);
       
       // Test out of range position
@@ -186,7 +190,7 @@ describe('UniswapV3Adapter - Integration Tests', () => {
         tickUpper: currentTick - 5000,
       };
       
-      const outOfRange = adapter.isPositionInRange(outOfRangePosition, poolData);
+      const outOfRange = adapter.isPositionInRange(poolData.tick, outOfRangePosition.tickLower, outOfRangePosition.tickUpper);
       expect(outOfRange).toBe(false);
     });
   });
