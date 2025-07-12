@@ -48,8 +48,8 @@ const ERC20ABI = ERC20ARTIFACT.abi;
  * // Create adapter for Arbitrum
  * const adapter = new UniswapV3Adapter(42161);
  *
- * // Get pool address (no blockchain calls)
- * const poolAddress = await adapter.getPoolAddress(token0, token1, 500, provider);
+ * // Get pool address (from factory contract)
+ * const poolAddress = await adapter.getPoolAddress(token0Address, token1Address, 500, provider);
  *
  * // Get live pool data (makes blockchain calls)
  * const poolData = await adapter.fetchPoolData(token0Address, token1Address, 500, provider);
@@ -280,54 +280,32 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Calculate pool address for the given tokens and fee tier
-   * @param {Object} token0 - First token object
-   * @param {string} token0.address - Token contract address
-   * @param {number} token0.decimals - Token decimals
-   * @param {Object} token1 - Second token object
-   * @param {string} token1.address - Token contract address
-   * @param {number} token1.decimals - Token decimals
+   * Get pool address from factory contract
+   * @param {string} token0Address - Address of first token
+   * @param {string} token1Address - Address of second token
    * @param {number} fee - Fee tier (e.g., 500, 3000, 10000)
    * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<string>} Pool contract address
+   * @returns {Promise<string>} Pool address
    */
-  async getPoolAddress(token0, token1, fee, provider) {
-    // Validate token0
-    if (!token0) {
-      throw new Error("Token0 parameter is required");
-    }
-    if (!token0.address) {
-      throw new Error("Token0 address is required");
+  async getPoolAddress(token0Address, token1Address, fee, provider) {
+    // Validate token0 address
+    if (!token0Address) {
+      throw new Error("Token0 address parameter is required");
     }
     try {
-      ethers.getAddress(token0.address);
+      ethers.getAddress(token0Address);
     } catch (error) {
-      throw new Error(`Invalid token0 address: ${token0.address}`);
-    }
-    if (token0.decimals === null || token0.decimals === undefined) {
-      throw new Error("Token0 decimals is required");
-    }
-    if (typeof token0.decimals !== 'number' || !Number.isFinite(token0.decimals)) {
-      throw new Error("Token0 decimals must be a valid number");
+      throw new Error(`Invalid token0 address: ${token0Address}`);
     }
 
-    // Validate token1
-    if (!token1) {
-      throw new Error("Token1 parameter is required");
-    }
-    if (!token1.address) {
-      throw new Error("Token1 address is required");
+    // Validate token1 address
+    if (!token1Address) {
+      throw new Error("Token1 address parameter is required");
     }
     try {
-      ethers.getAddress(token1.address);
+      ethers.getAddress(token1Address);
     } catch (error) {
-      throw new Error(`Invalid token1 address: ${token1.address}`);
-    }
-    if (token1.decimals === null || token1.decimals === undefined) {
-      throw new Error("Token1 decimals is required");
-    }
-    if (typeof token1.decimals !== 'number' || !Number.isFinite(token1.decimals)) {
-      throw new Error("Token1 decimals must be a valid number");
+      throw new Error(`Invalid token1 address: ${token1Address}`);
     }
 
     // Validate fee
@@ -338,32 +316,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Fee must be a valid number");
     }
 
-    // Validate provider is on correct chain
+    // Validate provider
     await this._validateProviderChain(provider);
 
-    // Sort tokens according to Uniswap V3 rules
-    const { sortedToken0, sortedToken1, tokensSwapped } = this.sortTokens(token0, token1);
-
-    try {      // Use the Uniswap SDK to calculate pool address
-
-      const sdkToken0 = new Token(
-        this.chainId,
-        sortedToken0.address,
-        sortedToken0.decimals
-      );
-
-      const sdkToken1 = new Token(
-        this.chainId,
-        sortedToken1.address,
-        sortedToken1.decimals
-      );
-
-      const poolAddress = Pool.getAddress(sdkToken0, sdkToken1, fee);
-
-      return poolAddress;
-    } catch (error) {
-      throw new Error(`Failed to calculate pool address: ${error.message}`);
+    if (!this.addresses?.factoryAddress) {
+      throw new Error(`No Uniswap V3 factory address found for chainId: ${this.chainId}`);
     }
+
+    const factoryABI = [
+      "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)"
+    ];
+
+    const factoryContract = new ethers.Contract(this.addresses.factoryAddress, factoryABI, provider);
+    return await factoryContract.getPool(token0Address, token1Address, fee);
   }
 
   /**
@@ -429,7 +394,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     await this._validateProviderChain(provider);
 
     try {
-      const poolAddress = await this.getPoolAddress(token0, token1, fee, provider);
+      const poolAddress = await this.getPoolAddress(token0.address, token1.address, fee, provider);
 
       // Use the full pool ABI that we already have at the class level
       const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
@@ -579,7 +544,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     };
 
     // Calculate pool address
-    const poolAddress = await this.getPoolAddress(token0Data, token1Data, fee, provider);
+    const poolAddress = await this.getPoolAddress(token0Data.address, token1Data.address, fee, provider);
 
     // Create pool contract
     const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
@@ -1164,31 +1129,51 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }) {
     // Position data extraction with validation
     let liquidity, feeGrowthInside0LastX128, feeGrowthInside1LastX128, tokensOwed0, tokensOwed1;
-    
+
+    // Validate liquidity is decimal-only string
+    if (!/^\d+$/.test(position.liquidity)) {
+      throw new Error('Invalid position.liquidity: must be a valid numeric string');
+    }
     try {
       liquidity = BigInt(position.liquidity);
     } catch (error) {
       throw new Error('Invalid position.liquidity: must be a valid numeric string');
     }
-    
+
+    // Validate feeGrowthInside0LastX128 is decimal-only string
+    if (!/^\d+$/.test(position.feeGrowthInside0LastX128)) {
+      throw new Error('Invalid position.feeGrowthInside0LastX128: must be a valid numeric string');
+    }
     try {
       feeGrowthInside0LastX128 = BigInt(position.feeGrowthInside0LastX128);
     } catch (error) {
       throw new Error('Invalid position.feeGrowthInside0LastX128: must be a valid numeric string');
     }
-    
+
+    // Validate feeGrowthInside1LastX128 is decimal-only string
+    if (!/^\d+$/.test(position.feeGrowthInside1LastX128)) {
+      throw new Error('Invalid position.feeGrowthInside1LastX128: must be a valid numeric string');
+    }
     try {
       feeGrowthInside1LastX128 = BigInt(position.feeGrowthInside1LastX128);
     } catch (error) {
       throw new Error('Invalid position.feeGrowthInside1LastX128: must be a valid numeric string');
     }
-    
+
+    // Validate tokensOwed0 is decimal-only string
+    if (!/^\d+$/.test(position.tokensOwed0)) {
+      throw new Error('Invalid position.tokensOwed0: must be a valid numeric string');
+    }
     try {
       tokensOwed0 = BigInt(position.tokensOwed0);
     } catch (error) {
       throw new Error('Invalid position.tokensOwed0: must be a valid numeric string');
     }
-    
+
+    // Validate tokensOwed1 is decimal-only string
+    if (!/^\d+$/.test(position.tokensOwed1)) {
+      throw new Error('Invalid position.tokensOwed1: must be a valid numeric string');
+    }
     try {
       tokensOwed1 = BigInt(position.tokensOwed1);
     } catch (error) {
@@ -1197,7 +1182,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Tick data extraction with validation
     let lowerTickData, upperTickData;
-    
+
+    // Validate tick lower data fee growth values are decimal-only strings
+    if (!/^\d+$/.test(tickLowerData.feeGrowthOutside0X128) || !/^\d+$/.test(tickLowerData.feeGrowthOutside1X128)) {
+      throw new Error('Invalid tickLowerData fee growth values: must be valid numeric strings');
+    }
     try {
       lowerTickData = {
         feeGrowthOutside0X128: BigInt(tickLowerData.feeGrowthOutside0X128),
@@ -1208,6 +1197,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Invalid tickLowerData fee growth values: must be valid numeric strings');
     }
 
+    // Validate tick upper data fee growth values are decimal-only strings
+    if (!/^\d+$/.test(tickUpperData.feeGrowthOutside0X128) || !/^\d+$/.test(tickUpperData.feeGrowthOutside1X128)) {
+      throw new Error('Invalid tickUpperData fee growth values: must be valid numeric strings');
+    }
     try {
       upperTickData = {
         feeGrowthOutside0X128: BigInt(tickUpperData.feeGrowthOutside0X128),
@@ -1220,13 +1213,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Convert global fee growth with validation
     let feeGrowthGlobal0X128BigInt, feeGrowthGlobal1X128BigInt;
-    
+
+    // Validate feeGrowthGlobal0X128 is decimal-only string
+    if (!/^\d+$/.test(feeGrowthGlobal0X128)) {
+      throw new Error('Invalid feeGrowthGlobal0X128: must be a valid numeric string');
+    }
     try {
       feeGrowthGlobal0X128BigInt = BigInt(feeGrowthGlobal0X128);
     } catch (error) {
       throw new Error('Invalid feeGrowthGlobal0X128: must be a valid numeric string');
     }
-    
+
+    // Validate feeGrowthGlobal1X128 is decimal-only string
+    if (!/^\d+$/.test(feeGrowthGlobal1X128)) {
+      throw new Error('Invalid feeGrowthGlobal1X128: must be a valid numeric string');
+    }
     try {
       feeGrowthGlobal1X128BigInt = BigInt(feeGrowthGlobal1X128);
     } catch (error) {
@@ -1253,7 +1254,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     // Handle negative values by adding 2^256
     const MAX_UINT256 = 2n ** 256n;
     const ZERO = 0n;
-    
+
     if (feeGrowthInside0X128 < ZERO) {
       feeGrowthInside0X128 = feeGrowthInside0X128 + MAX_UINT256;
     }
@@ -1289,7 +1290,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Calculate token amounts for a position (if it were to be closed)
    * @param {Object} position - Position object
-   * @param {number} position.liquidity - Position liquidity
+   * @param {string} position.liquidity - Position liquidity (large value, must be string)
    * @param {number} position.tickLower - Lower tick of the position
    * @param {number} position.tickUpper - Upper tick of the position
    * @param {Object} poolData - Pool data
@@ -1300,44 +1301,141 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} token0Data - Token0 data
    * @param {string} token0Data.address - Token contract address
    * @param {number} token0Data.decimals - Token decimals
-   * @param {string} token0Data.symbol - Token symbol
-   * @param {string} token0Data.name - Token name
    * @param {Object} token1Data - Token1 data
    * @param {string} token1Data.address - Token contract address
    * @param {number} token1Data.decimals - Token decimals
-   * @param {string} token1Data.symbol - Token symbol
-   * @param {string} token1Data.name - Token name
-   * @param {number} chainId - Chain ID from the wallet
-   * @returns {Promise<{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}>} Token amounts
+   * @returns {Promise<Array<bigint>>} Array of [token0Raw, token1Raw] amounts
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
+    // Validate position parameter
+    if (!position) {
+      throw new Error("position parameter is required");
+    }
+
+    // Validate position properties
+    if (position.liquidity === null || position.liquidity === undefined) {
+      throw new Error("position.liquidity is required");
+    }
+    if (typeof position.liquidity !== 'string') {
+      throw new Error("position.liquidity must be a string");
+    }
+
+    // Validate liquidity is a valid positive decimal numeric string
+    // Only allow positive decimal strings (no hex, octal, negative, etc.)
+    if (!/^\d+$/.test(position.liquidity)) {
+      throw new Error('Invalid position.liquidity: must be a valid positive numeric string');
+    }
+
+    let liquidityBigInt;
     try {
-      if (!position || !poolData || !token0Data || !token1Data || !chainId) {
-        throw new Error("Missing data for token amount calculation");
-      }
+      liquidityBigInt = BigInt(position.liquidity);
+    } catch (error) {
+      throw new Error('Invalid position.liquidity: must be a valid positive numeric string');
+    }
 
-      if (position.liquidity <= 0) {
-        return {
-          token0: { raw: 0n, formatted: "0" },
-          token1: { raw: 0n, formatted: "0" }
-        };
-      }
+    if (liquidityBigInt === 0n) {
+      return [0n, 0n];
+    }
 
-      // Create Token objects - use chainId from params
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("position.tickLower is required");
+    }
+    if (typeof position.tickLower !== 'number' || !Number.isFinite(position.tickLower)) {
+      throw new Error("position.tickLower must be a valid number");
+    }
+
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("position.tickUpper is required");
+    }
+    if (typeof position.tickUpper !== 'number' || !Number.isFinite(position.tickUpper)) {
+      throw new Error("position.tickUpper must be a valid number");
+    }
+
+    // Validate poolData parameter
+    if (!poolData) {
+      throw new Error("poolData parameter is required");
+    }
+
+    // Validate poolData properties
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("poolData.fee is required");
+    }
+    if (typeof poolData.fee !== 'number' || !Number.isFinite(poolData.fee)) {
+      throw new Error("poolData.fee must be a valid number");
+    }
+
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("poolData.sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("poolData.sqrtPriceX96 must be a string");
+    }
+
+    if (!poolData.liquidity) {
+      throw new Error("poolData.liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("poolData.liquidity must be a string");
+    }
+
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("poolData.tick is required");
+    }
+    if (typeof poolData.tick !== 'number' || !Number.isFinite(poolData.tick)) {
+      throw new Error("poolData.tick must be a valid number");
+    }
+
+    // Validate token0Data
+    if (!token0Data) {
+      throw new Error("token0Data parameter is required");
+    }
+    if (!token0Data.address) {
+      throw new Error("token0Data.address is required");
+    }
+    try {
+      ethers.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0Data.address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("token0Data.decimals is required");
+    }
+    if (typeof token0Data.decimals !== 'number' || !Number.isFinite(token0Data.decimals)) {
+      throw new Error("token0Data.decimals must be a valid number");
+    }
+
+    // Validate token1Data
+    if (!token1Data) {
+      throw new Error("token1Data parameter is required");
+    }
+    if (!token1Data.address) {
+      throw new Error("token1Data.address is required");
+    }
+    try {
+      ethers.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1Data.address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("token1Data.decimals is required");
+    }
+    if (typeof token1Data.decimals !== 'number' || !Number.isFinite(token1Data.decimals)) {
+      throw new Error("token1Data.decimals must be a valid number");
+    }
+
+    try {
+
+      // Create Token objects - use chainId from instance
       const token0 = new Token(
-        chainId,
+        this.chainId,
         token0Data.address,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
+        token0Data.decimals
       );
 
       const token1 = new Token(
-        chainId,
+        this.chainId,
         token1Data.address,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
+        token1Data.decimals
       );
 
       // Create Pool instance
@@ -1353,7 +1451,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Create Position instance
       const positionInstance = new Position({
         pool,
-        liquidity: position.liquidity.toString(),
+        liquidity: position.liquidity,
         tickLower: position.tickLower,
         tickUpper: position.tickUpper
       });
@@ -1362,21 +1460,94 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount0 = positionInstance.amount0;
       const amount1 = positionInstance.amount1;
 
-      return {
-        token0: {
-          raw: BigInt(amount0.quotient.toString()),
-          formatted: amount0.toSignificant(6)
-        },
-        token1: {
-          raw: BigInt(amount1.quotient.toString()),
-          formatted: amount1.toSignificant(6)
-        }
-      };
+      return [
+        BigInt(amount0.quotient.toString()),
+        BigInt(amount1.quotient.toString())
+      ];
     } catch (error) {
       console.error("Error calculating token amounts:", error);
       throw error;
     }
   }
+
+  /**
+   * Discover available pools for a token pair across all fee tiers
+   * @param {string} token0Address - Address of first token
+   * @param {string} token1Address - Address of second token
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Array>} Array of pool information objects
+   */
+  async discoverAvailablePools(token0Address, token1Address, provider) {
+    // Validate token0 address
+    if (!token0Address) {
+      throw new Error("Token0 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token0Address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Address}`);
+    }
+
+    // Validate token1 address
+    if (!token1Address) {
+      throw new Error("Token1 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token1Address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Address}`);
+    }
+
+    // Validate provider
+    await this._validateProviderChain(provider);
+
+    const feeTiers = getPlatformFeeTiers('uniswapV3');
+    const pools = [];
+
+    for (const fee of feeTiers) {
+      const poolAddress = await this.getPoolAddress(token0Address, token1Address, fee, provider);
+
+      if (poolAddress === ethers.ZeroAddress) {
+        continue; // Expected - no pool for this fee tier
+      }
+
+      const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
+
+      let poolData;
+      try {
+        poolData = await Promise.all([
+          poolContract.slot0(),
+          poolContract.liquidity()
+        ]);
+      } catch (firstError) {
+        // Retry once after delay for transient errors
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+        try {
+          poolData = await Promise.all([
+            poolContract.slot0(),
+            poolContract.liquidity()
+          ]);
+        } catch (secondError) {
+          throw new Error(`Pool ${poolAddress} (fee: ${fee}) failed after retry: ${secondError.message}`);
+        }
+      }
+
+      const [slot0, liquidity] = poolData;
+
+      if (liquidity > 0) {
+        pools.push({
+          address: poolAddress,
+          fee,
+          liquidity: liquidity.toString(),
+          sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+          tick: slot0.tick
+        });
+      }
+    }
+
+    return pools;
+  }
+
 
   /**
    * Generate transaction data for claiming fees from a position
@@ -3101,73 +3272,5 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       throw new Error(`Failed to generate swap data: ${error.message}`);
     }
-  }
-
-  /**
-   * Discover available pools for a token pair across all fee tiers
-   * @param {string} token0Address - Address of first token
-   * @param {string} token1Address - Address of second token
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<Array>} Array of pool information objects
-   */
-  async discoverAvailablePools(token0Address, token1Address, chainId) {
-    const feeTiers = getPlatformFeeTiers('uniswapV3');
-    const pools = [];
-
-    for (const fee of feeTiers) {
-      try {
-        const poolAddress = await this.getPoolAddressFromFactory(token0Address, token1Address, fee, chainId);
-
-        if (poolAddress && poolAddress !== ethers.ZeroAddress) {
-          const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, this.provider);
-
-          try {
-            const [slot0, liquidity] = await Promise.all([
-              poolContract.slot0(),
-              poolContract.liquidity()
-            ]);
-
-            if (liquidity > 0) {
-              pools.push({
-                address: poolAddress,
-                fee,
-                liquidity: liquidity.toString(),
-                sqrtPriceX96: slot0.sqrtPriceX96.toString(),
-                tick: slot0.tick
-              });
-            }
-          } catch (poolError) {
-            // Pool exists but is not active, skip it
-          }
-        }
-      } catch (error) {
-        // No pool found for this fee tier, skip it
-      }
-    }
-
-    return pools;
-  }
-
-  /**
-   * Get pool address from factory contract
-   * @param {string} token0Address - Address of first token
-   * @param {string} token1Address - Address of second token
-   * @param {number} fee - Fee tier
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<string>} Pool address
-   */
-  async getPoolAddressFromFactory(token0Address, token1Address, fee, chainId) {
-    const chainConfig = this.config[chainId];
-    if (!chainConfig?.platformAddresses?.uniswapV3?.factoryAddress) {
-      throw new Error(`No Uniswap V3 factory configuration found for chainId: ${chainId}`);
-    }
-
-    const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
-    const factoryABI = [
-      "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)"
-    ];
-
-    const factoryContract = new ethers.Contract(factoryAddress, factoryABI, this.provider);
-    return await factoryContract.getPool(token0Address, token1Address, fee);
   }
 }

@@ -353,8 +353,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         // Create real contract instances using addresses from adapter config
         const poolAddress = await adapter.getPoolAddress(
-          { address: usdcToken.addresses[1337], decimals: 6 },
-          { address: wethToken.addresses[1337], decimals: 18 },
+          usdcToken.addresses[1337],
+          wethToken.addresses[1337],
           500,
           env.provider
         );
@@ -1290,79 +1290,56 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getPoolAddress', () => {
     describe('Success Cases', () => {
-      it('should return pool address as string for valid tokens and fee', async () => {
-        const token0 = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
-        const token1 = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
-
-        const poolAddress = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+      it('should return pool address as string for existing pool', async () => {
+        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
 
         expect(typeof poolAddress).toBe('string');
         expect(poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
         expect(poolAddress.length).toBe(42);
+        expect(poolAddress).not.toBe(ethers.ZeroAddress);
+      });
+
+      it('should return zero address for non-existent pool', async () => {
+        // Use fee tier that doesn't exist (600 basis points)
+        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 600, env.provider);
+
+        expect(poolAddress).toBe(ethers.ZeroAddress);
       });
 
       it('should return same address regardless of token input order', async () => {
-        const weth = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
-        const usdc = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
-
-        const address1 = await adapter.getPoolAddress(weth, usdc, 500, env.provider);
-        const address2 = await adapter.getPoolAddress(usdc, weth, 500, env.provider);
+        const address1 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address2 = await adapter.getPoolAddress(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         expect(address1).toBe(address2);
+        expect(address1).not.toBe(ethers.ZeroAddress);
       });
 
       it('should return different addresses for different fee tiers', async () => {
-        const token0 = {
-          address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          decimals: 18
-        };
-        const token1 = {
-          address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-          decimals: 6
-        };
-
-        const address500 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
-        const address3000 = await adapter.getPoolAddress(token0, token1, 3000, env.provider);
+        const address500 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address3000 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 3000, env.provider);
 
         expect(address500).not.toBe(address3000);
         expect(typeof address500).toBe('string');
         expect(typeof address3000).toBe('string');
+        // Both should be valid pools (not zero address)
+        expect(address500).not.toBe(ethers.ZeroAddress);
+        expect(address3000).not.toBe(ethers.ZeroAddress);
       });
-
     });
 
     describe('Error Cases', () => {
-      it('should throw error for missing token0', async () => {
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
-        await expect(
-          adapter.getPoolAddress(null, token1, 500, env.provider)
-        ).rejects.toThrow('Token0 parameter is required');
-
-        await expect(
-          adapter.getPoolAddress(undefined, token1, 500, env.provider)
-        ).rejects.toThrow('Token0 parameter is required');
-      });
-
       it('should throw error for missing token0 address', async () => {
-        const token0 = { decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+        await expect(
+          adapter.getPoolAddress(null, env.usdcAddress, 500, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Token0 address is required');
+          adapter.getPoolAddress(undefined, env.usdcAddress, 500, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
+
+        await expect(
+          adapter.getPoolAddress('', env.usdcAddress, 500, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
       });
 
       it('should throw error for invalid token0 address', async () => {
@@ -1372,65 +1349,25 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           '0xGHIJKL', // invalid hex characters
         ];
 
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
         for (const invalidAddress of invalidAddresses) {
-          const token0 = { address: invalidAddress, decimals: 18 };
           await expect(
-            adapter.getPoolAddress(token0, token1, 500, env.provider)
-          ).rejects.toThrow(); // Be permissive due to potential ENS resolution
+            adapter.getPoolAddress(invalidAddress, env.usdcAddress, 500, env.provider)
+          ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
         }
-      });
-
-      it('should throw error for missing token0 decimals', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1' };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
-        await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Token0 decimals is required');
-      });
-
-      it('should throw error for invalid token0 decimals', async () => {
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
-        const invalidDecimals = [
-          'not-a-number',
-          NaN,
-          Infinity,
-          -Infinity,
-          {},
-          [],
-          true
-        ];
-
-        for (const invalidDecimal of invalidDecimals) {
-          const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: invalidDecimal };
-          await expect(
-            adapter.getPoolAddress(token0, token1, 500, env.provider)
-          ).rejects.toThrow('Token0 decimals must be a valid number');
-        }
-      });
-
-      it('should throw error for missing token1', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-
-        await expect(
-          adapter.getPoolAddress(token0, null, 500, env.provider)
-        ).rejects.toThrow('Token1 parameter is required');
-
-        await expect(
-          adapter.getPoolAddress(token0, undefined, 500, env.provider)
-        ).rejects.toThrow('Token1 parameter is required');
       });
 
       it('should throw error for missing token1 address', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { decimals: 6 };
+        await expect(
+          adapter.getPoolAddress(env.wethAddress, null, 500, env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Token1 address is required');
+          adapter.getPoolAddress(env.wethAddress, undefined, 500, env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
+
+        await expect(
+          adapter.getPoolAddress(env.wethAddress, '', 500, env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
       });
 
       it('should throw error for invalid token1 address', async () => {
@@ -1440,63 +1377,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           '0xGHIJKL', // invalid hex characters
         ];
 
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-
         for (const invalidAddress of invalidAddresses) {
-          const token1 = { address: invalidAddress, decimals: 6 };
           await expect(
-            adapter.getPoolAddress(token0, token1, 500, env.provider)
-          ).rejects.toThrow(); // Be permissive due to potential ENS resolution
-        }
-      });
-
-      it('should throw error for missing token1 decimals', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' };
-
-        await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow('Token1 decimals is required');
-      });
-
-      it('should throw error for invalid token1 decimals', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-
-        const invalidDecimals = [
-          'not-a-number',
-          NaN,
-          Infinity,
-          -Infinity,
-          {},
-          [],
-          true
-        ];
-
-        for (const invalidDecimal of invalidDecimals) {
-          const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: invalidDecimal };
-          await expect(
-            adapter.getPoolAddress(token0, token1, 500, env.provider)
-          ).rejects.toThrow('Token1 decimals must be a valid number');
+            adapter.getPoolAddress(env.wethAddress, invalidAddress, 500, env.provider)
+          ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
         }
       });
 
       it('should throw error for missing fee', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
         await expect(
-          adapter.getPoolAddress(token0, token1, null, env.provider)
+          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, null, env.provider)
         ).rejects.toThrow('Fee parameter is required');
 
         await expect(
-          adapter.getPoolAddress(token0, token1, undefined, env.provider)
+          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, undefined, env.provider)
         ).rejects.toThrow('Fee parameter is required');
       });
 
       it('should throw error for invalid fee type', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
         const invalidFees = [
           'not-a-number',
           NaN,
@@ -1509,44 +1407,34 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidFee of invalidFees) {
           await expect(
-            adapter.getPoolAddress(token0, token1, invalidFee, env.provider)
+            adapter.getPoolAddress(env.wethAddress, env.usdcAddress, invalidFee, env.provider)
           ).rejects.toThrow('Fee must be a valid number');
         }
       });
 
       it('should throw error for invalid provider', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
         await expect(
-          adapter.getPoolAddress(token0, token1, 500, null)
+          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, null)
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
 
         await expect(
-          adapter.getPoolAddress(token0, token1, 500, {})
+          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, {})
         ).rejects.toThrow('Invalid provider - must have getNetwork method');
       });
     });
 
     describe('Special Cases', () => {
       it('should be deterministic for same inputs', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
-
-        const address1 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
-        const address2 = await adapter.getPoolAddress(token0, token1, 500, env.provider);
+        const address1 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address2 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
 
         expect(address1).toBe(address2);
       });
 
-      it('should handle tokens with same address (should still work)', async () => {
-        const token0 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-        const token1 = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
-
-        // This might throw from Uniswap SDK, but should handle gracefully
-        await expect(
-          adapter.getPoolAddress(token0, token1, 500, env.provider)
-        ).rejects.toThrow();
+      it('should return zero address for identical token addresses', async () => {
+        // No pool can exist between a token and itself
+        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.wethAddress, 500, env.provider);
+        expect(poolAddress).toBe(ethers.ZeroAddress);
       });
     });
   });
@@ -3577,18 +3465,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get real position data from our test environment
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        
+
         expect(positions.positions).toBeDefined();
         expect(positions.positions.length).toBeGreaterThan(0);
-        
+
         const position = positions.positions[0];
         const poolAddress = position.pool;
         const poolData = positions.poolData[poolAddress];
-        
+
         expect(poolData).toBeDefined();
         expect(poolData.token0).toBeDefined();
         expect(poolData.token1).toBeDefined();
-        
+
         // Calculate fees with real data - should be 0 for fresh position
         const result = adapter.calculateUncollectedFees(position, poolData);
 
@@ -3598,7 +3486,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof result[1]).toBe('bigint');
         expect(result[0]).toBe(0n);
         expect(result[1]).toBe(0n);
-        
+
       });
 
       it('should calculate fees after swaps generate fee growth', async () => {
@@ -3608,7 +3496,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const position = initialPositions.positions[0];
         const poolAddress = position.pool;
         const initialPoolData = initialPositions.poolData[poolAddress];
-        
+
         // Verify we start with zero fees
         const initialFees = adapter.calculateUncollectedFees(
           position,
@@ -3617,14 +3505,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(initialFees[0]).toBe(0n);
         expect(initialFees[1]).toBe(0n);
 
-        // Set up for swaps - use a different account each time to avoid nonce issues  
+        // Set up for swaps - use a different account each time to avoid nonce issues
         // We'll use account[2] since account[0] is the owner and account[1] might be used elsewhere
         const swapperWallet = new ethers.Wallet(env.accounts[2].privateKey, env.provider);
-        
+
         // Get WETH and USDC addresses from our environment
         const wethAddress = getTokenAddress('WETH', 1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
-        
+
         // Simple WETH ABI with deposit function
         const wethABI = [
           'function deposit() external payable',
@@ -3632,26 +3520,26 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           'function transfer(address to, uint256 value) external returns (bool)',
           'function approve(address spender, uint256 value) external returns (bool)'
         ];
-        
+
         // Create contract instances
         const wethContract = new ethers.Contract(wethAddress, wethABI, swapperWallet);
         const usdcContract = new ethers.Contract(usdcAddress, adapter.erc20ABI, swapperWallet);
         const swapRouter = new ethers.Contract(adapter.addresses.routerAddress, adapter.swapRouterABI, swapperWallet);
-        
+
         // Wrap some ETH to WETH (1 ETH)
         const wrapAmount = ethers.parseEther('1');
         const wrapTx = await wethContract.deposit({ value: wrapAmount });
         await wrapTx.wait();
-        
+
         // Get the current nonce before approve transaction
         let currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
-        
+
         // Approve router to spend WETH - wait for confirmation like generate_fees.js
         const approveTx = await wethContract.approve(adapter.addresses.routerAddress, wrapAmount, {
           nonce: currentNonce
         });
         await approveTx.wait();
-        
+
         // Execute swap: WETH -> USDC using pattern from generate_fees.js
         const swapParams = {
           tokenIn: wethAddress,
@@ -3663,36 +3551,36 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           amountOutMinimum: 0, // Accept any amount of USDC
           sqrtPriceLimitX96: 0 // No price limit
         };
-        
+
         // Get fresh nonce for swap transaction
         currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
-        
+
         // Use high gas price to avoid underpriced transaction errors
         const currentGasPrice = await env.provider.getFeeData();
         const safeGasPrice = (currentGasPrice.gasPrice || ethers.parseUnits('100', 'gwei')) * 3n;
-        
+
         const gasOptions = {
           nonce: currentNonce,
           gasPrice: safeGasPrice,
           gasLimit: 500000
         };
-        
+
         const swapTx = await swapRouter.exactInputSingle(swapParams, gasOptions);
         await swapTx.wait();
-        
+
         // Get USDC balance and swap some back to generate more fees
         const usdcBalance = await usdcContract.balanceOf(swapperWallet.address);
         const swapBackAmount = usdcBalance / 2n; // Swap back half
-        
+
         if (swapBackAmount > 0) {
           // Get fresh nonce for approve-back transaction
           currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
-          
+
           const approveBackTx = await usdcContract.approve(adapter.addresses.routerAddress, swapBackAmount, {
             nonce: currentNonce
           });
           await approveBackTx.wait();
-          
+
           const swapBackParams = {
             tokenIn: usdcAddress,
             tokenOut: wethAddress,
@@ -3703,20 +3591,20 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             amountOutMinimum: 0,
             sqrtPriceLimitX96: 0
           };
-          
+
           // Get fresh nonce for swap-back transaction
           currentNonce = await env.provider.getTransactionCount(swapperWallet.address);
-          
+
           const gasOptions2 = {
             nonce: currentNonce,
             gasPrice: safeGasPrice, // Reuse same gas price
             gasLimit: 500000
           };
-          
+
           const swapBackTx = await swapRouter.exactInputSingle(swapBackParams, gasOptions2);
           await swapBackTx.wait();
         }
-        
+
         // Get updated pool data after swaps
         const updatedPoolData = await adapter.fetchPoolData(
           initialPoolData.token0.address,
@@ -3724,7 +3612,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           position.fee,
           env.provider
         );
-        
+
         // Also fetch the tick data for the position's ticks
         const tickData = await adapter.fetchTickData(
           updatedPoolData.poolAddress,
@@ -3732,38 +3620,38 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           position.tickUpper,
           env.provider
         );
-        
+
         // Add tick data to pool data in the correct format (indexed by tick number)
         updatedPoolData.ticks = {
           [position.tickLower]: tickData.tickLower,
           [position.tickUpper]: tickData.tickUpper
         };
-        
+
         // Verify fee growth has occurred
         expect(BigInt(updatedPoolData.feeGrowthGlobal0X128)).toBeGreaterThan(
           BigInt(initialPoolData.feeGrowthGlobal0X128)
         );
-        
+
         // Calculate fees with updated pool data
         const updatedFees = adapter.calculateUncollectedFees(
           position,
           updatedPoolData
         );
-        
+
         // Should now have non-zero fees (at least for one token)
         const hasFees = updatedFees[0] > 0n || updatedFees[1] > 0n;
         expect(hasFees).toBe(true);
-        
+
         // Verify return structure
         expect(Array.isArray(updatedFees)).toBe(true);
         expect(updatedFees).toHaveLength(2);
         expect(typeof updatedFees[0]).toBe('bigint');
         expect(typeof updatedFees[1]).toBe('bigint');
-        
+
         // Fees should be non-negative
         expect(updatedFees[0]).toBeGreaterThanOrEqual(0n);
         expect(updatedFees[1]).toBeGreaterThanOrEqual(0n);
-        
+
       }, 60000); // Longer timeout for swap transactions
 
       it('should handle positions with existing tokensOwed (claimed but not collected fees)', async () => {
@@ -3772,7 +3660,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const positions = await adapter.getPositions(vaultAddress, env.provider);
         const position = positions.positions[0];
         const poolData = positions.poolData[position.pool];
-        
+
         // Create a modified position with some pre-existing tokensOwed
         // This simulates someone calling collect() to claim fees but not transferring them yet
         const positionWithOwed = {
@@ -3780,22 +3668,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           tokensOwed0: '1000000000000000000', // 1e18 (1.0 WETH)
           tokensOwed1: '500000000000' // 500 billion (with 6 decimals = 500k USDC)
         };
-        
+
         const result = adapter.calculateUncollectedFees(
           positionWithOwed,
           poolData
         );
-        
+
         // Should include the pre-existing owed amounts
         expect(result[0]).toBeGreaterThanOrEqual(1000000000000000000n);
         expect(result[1]).toBeGreaterThanOrEqual(500000000000n);
-        
+
         // Verify structure
         expect(Array.isArray(result)).toBe(true);
         expect(result).toHaveLength(2);
         expect(typeof result[0]).toBe('bigint');
         expect(typeof result[1]).toBe('bigint');
-        
+
       });
 
     });
@@ -4052,8 +3940,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow(`Missing tick data for tickLower ${validPosition.tickLower}`);
 
         // Missing tickUpper data
-        const missingTickUpper = { 
-          ...validPoolData, 
+        const missingTickUpper = {
+          ...validPoolData,
           ticks: { [validPosition.tickLower]: validPoolData.ticks[validPosition.tickLower] }
         };
         expect(() => adapter.calculateUncollectedFees(validPosition, missingTickUpper))
@@ -4062,9 +3950,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should throw error when tick data contains invalid fee growth values', () => {
         // Invalid tickLowerData fee growth values
-        const invalidTickLowerData = { 
-          ...validPoolData, 
-          ticks: { 
+        const invalidTickLowerData = {
+          ...validPoolData,
+          ticks: {
             [validPosition.tickLower]: {
               ...validPoolData.ticks[validPosition.tickLower],
               feeGrowthOutside0X128: 'invalid'
@@ -4076,9 +3964,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow('Invalid tickLowerData fee growth values: must be valid numeric strings');
 
         // Invalid tickUpperData fee growth values
-        const invalidTickUpperData = { 
-          ...validPoolData, 
-          ticks: { 
+        const invalidTickUpperData = {
+          ...validPoolData,
+          ticks: {
             [validPosition.tickLower]: validPoolData.ticks[validPosition.tickLower],
             [validPosition.tickUpper]: {
               ...validPoolData.ticks[validPosition.tickUpper],
@@ -4186,6 +4074,697 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof result[1]).toBe('bigint');
         expect(result[0]).toBeGreaterThanOrEqual(0n);
         expect(result[1]).toBeGreaterThanOrEqual(0n);
+      });
+    });
+  });
+
+  describe('calculateTokenAmounts', () => {
+    describe('Success Cases', () => {
+      it('should calculate token amounts for a valid position', async () => {
+        // Get real position data from test environment
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+
+        expect(positions.positions).toBeDefined();
+        expect(positions.positions.length).toBeGreaterThan(0);
+
+        const position = positions.positions[0];
+        const poolAddress = position.pool;
+        const poolData = positions.poolData[poolAddress];
+
+        // Get token data
+        const token0Data = {
+          address: poolData.token0.address,
+          decimals: poolData.token0.decimals
+        };
+        const token1Data = {
+          address: poolData.token1.address,
+          decimals: poolData.token1.decimals
+        };
+
+        // Calculate token amounts
+        const result = await adapter.calculateTokenAmounts(
+          position,
+          poolData,
+          token0Data,
+          token1Data
+        );
+
+        // Verify structure
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+
+        // Verify non-negative
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+
+        // Verify against the known amounts from test position setup
+        // The position was created with specific amount0 and amount1
+        const expectedAmount0 = BigInt(env.testPosition.amount0);
+        const expectedAmount1 = BigInt(env.testPosition.amount1);
+        
+        // The calculated amounts should match what was deposited within rounding tolerance
+        // The SDK may have rounding differences of 1 unit due to integer math
+        const tolerance = 1n;
+        
+        expect(result[0]).toBeGreaterThanOrEqual(expectedAmount0 - tolerance);
+        expect(result[0]).toBeLessThanOrEqual(expectedAmount0 + tolerance);
+        
+        expect(result[1]).toBeGreaterThanOrEqual(expectedAmount1 - tolerance);
+        expect(result[1]).toBeLessThanOrEqual(expectedAmount1 + tolerance);
+      });
+
+      it('should return [0n, 0n] for zero liquidity position', async () => {
+        // Get valid pool data from environment for realistic test
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        const poolData = positions.poolData[positions.positions[0].pool];
+
+        // Create mock position with zero liquidity
+        const zeroLiquidityPosition = {
+          liquidity: '0',
+          tickLower: -887220,
+          tickUpper: 887220
+        };
+
+        const token0Data = {
+          address: poolData.token0.address,
+          decimals: poolData.token0.decimals
+        };
+        const token1Data = {
+          address: poolData.token1.address,
+          decimals: poolData.token1.decimals
+        };
+
+        const result = await adapter.calculateTokenAmounts(
+          zeroLiquidityPosition,
+          poolData,
+          token0Data,
+          token1Data
+        );
+
+        expect(result).toEqual([0n, 0n]);
+      });
+
+      it('should calculate amounts for position entirely below current tick', async () => {
+        // Get pool data
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        const poolData = positions.poolData[positions.positions[0].pool];
+
+        // Create position with ticks below current tick
+        // Fee tier 500 (0.05%) has tick spacing of 10
+        const tickSpacing = 10;
+        const currentTick = poolData.tick;
+        
+        // Round ticks to nearest valid tick spacing
+        const tickLower = Math.floor((currentTick - 10000) / tickSpacing) * tickSpacing;
+        const tickUpper = Math.floor((currentTick - 5000) / tickSpacing) * tickSpacing;
+        
+        const belowTickPosition = {
+          liquidity: '1000000000000000000', // 1e18
+          tickLower: tickLower,
+          tickUpper: tickUpper
+        };
+
+        const token0Data = {
+          address: poolData.token0.address,
+          decimals: poolData.token0.decimals
+        };
+        const token1Data = {
+          address: poolData.token1.address,
+          decimals: poolData.token1.decimals
+        };
+
+        const result = await adapter.calculateTokenAmounts(
+          belowTickPosition,
+          poolData,
+          token0Data,
+          token1Data
+        );
+
+        // When position is entirely below current tick, it should contain only token1
+        expect(result[0]).toBe(0n); // No token0
+        expect(result[1]).toBeGreaterThan(0n); // All liquidity in token1
+      });
+
+      it('should calculate amounts for position entirely above current tick', async () => {
+        // Get pool data
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        const poolData = positions.poolData[positions.positions[0].pool];
+
+        // Create position with ticks above current tick
+        // Fee tier 500 (0.05%) has tick spacing of 10
+        const tickSpacing = 10;
+        const currentTick = poolData.tick;
+        
+        // Round ticks to nearest valid tick spacing
+        const tickLower = Math.floor((currentTick + 5000) / tickSpacing) * tickSpacing;
+        const tickUpper = Math.floor((currentTick + 10000) / tickSpacing) * tickSpacing;
+        
+        const aboveTickPosition = {
+          liquidity: '1000000000000000000', // 1e18
+          tickLower: tickLower,
+          tickUpper: tickUpper
+        };
+
+        const token0Data = {
+          address: poolData.token0.address,
+          decimals: poolData.token0.decimals
+        };
+        const token1Data = {
+          address: poolData.token1.address,
+          decimals: poolData.token1.decimals
+        };
+
+        const result = await adapter.calculateTokenAmounts(
+          aboveTickPosition,
+          poolData,
+          token0Data,
+          token1Data
+        );
+
+        // When position is entirely above current tick, it should contain only token0
+        expect(result[0]).toBeGreaterThan(0n); // All liquidity in token0
+        expect(result[1]).toBe(0n); // No token1
+      });
+    });
+
+    describe('Error Cases', () => {
+      // Get valid test data for error tests
+      let validPosition, validPoolData, validToken0Data, validToken1Data;
+
+      beforeEach(async () => {
+        const vaultAddress = await env.testVault.getAddress();
+        const positions = await adapter.getPositions(vaultAddress, env.provider);
+        validPosition = positions.positions[0];
+        validPoolData = positions.poolData[validPosition.pool];
+        validToken0Data = {
+          address: validPoolData.token0.address,
+          decimals: validPoolData.token0.decimals
+        };
+        validToken1Data = {
+          address: validPoolData.token1.address,
+          decimals: validPoolData.token1.decimals
+        };
+      });
+
+      describe('Position parameter validation', () => {
+        it('should throw error when position parameter is missing', async () => {
+          await expect(
+            adapter.calculateTokenAmounts(null, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position parameter is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(undefined, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position parameter is required');
+        });
+
+        it('should throw error when position.liquidity is missing', async () => {
+          const missingLiquidity = { ...validPosition };
+          delete missingLiquidity.liquidity;
+          
+          await expect(
+            adapter.calculateTokenAmounts(missingLiquidity, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.liquidity is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: null }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.liquidity is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: undefined }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.liquidity is required');
+        });
+
+        it('should throw error when position.liquidity is not a string', async () => {
+          const invalidTypes = [123, true, {}, [], NaN, Infinity];
+          
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts({ ...validPosition, liquidity: invalidType }, validPoolData, validToken0Data, validToken1Data)
+            ).rejects.toThrow('position.liquidity must be a string');
+          }
+        });
+
+        it('should throw error when position.liquidity is not a valid numeric string', async () => {
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: 'not-a-number' }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('Invalid position.liquidity: must be a valid positive numeric string');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: '123.456' }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('Invalid position.liquidity: must be a valid positive numeric string');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: '0x123' }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('Invalid position.liquidity: must be a valid positive numeric string');
+        });
+
+        it('should throw error when position.liquidity is negative', async () => {
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, liquidity: '-100' }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('Invalid position.liquidity: must be a valid positive numeric string');
+        });
+
+        it('should throw error when position.tickLower is missing or invalid', async () => {
+          const missingTickLower = { ...validPosition };
+          delete missingTickLower.tickLower;
+          
+          await expect(
+            adapter.calculateTokenAmounts(missingTickLower, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickLower is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, tickLower: null }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickLower is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, tickLower: undefined }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickLower is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts({ ...validPosition, tickLower: invalidType }, validPoolData, validToken0Data, validToken1Data)
+            ).rejects.toThrow('position.tickLower must be a valid number');
+          }
+        });
+
+        it('should throw error when position.tickUpper is missing or invalid', async () => {
+          const missingTickUpper = { ...validPosition };
+          delete missingTickUpper.tickUpper;
+          
+          await expect(
+            adapter.calculateTokenAmounts(missingTickUpper, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickUpper is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, tickUpper: null }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickUpper is required');
+
+          await expect(
+            adapter.calculateTokenAmounts({ ...validPosition, tickUpper: undefined }, validPoolData, validToken0Data, validToken1Data)
+          ).rejects.toThrow('position.tickUpper is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts({ ...validPosition, tickUpper: invalidType }, validPoolData, validToken0Data, validToken1Data)
+            ).rejects.toThrow('position.tickUpper must be a valid number');
+          }
+        });
+      });
+
+      describe('PoolData parameter validation', () => {
+        it('should throw error when poolData parameter is missing', async () => {
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, null, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData parameter is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, undefined, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData parameter is required');
+        });
+
+        it('should throw error when poolData.fee is missing or invalid', async () => {
+          const missingFee = { ...validPoolData };
+          delete missingFee.fee;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, missingFee, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.fee is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, fee: null }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.fee is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, fee: undefined }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.fee is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, { ...validPoolData, fee: invalidType }, validToken0Data, validToken1Data)
+            ).rejects.toThrow('poolData.fee must be a valid number');
+          }
+        });
+
+        it('should throw error when poolData.sqrtPriceX96 is missing or invalid', async () => {
+          const missingSqrtPrice = { ...validPoolData };
+          delete missingSqrtPrice.sqrtPriceX96;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, missingSqrtPrice, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.sqrtPriceX96 is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, sqrtPriceX96: null }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.sqrtPriceX96 is required');
+
+          const invalidTypes = [123, true, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, { ...validPoolData, sqrtPriceX96: invalidType }, validToken0Data, validToken1Data)
+            ).rejects.toThrow('poolData.sqrtPriceX96 must be a string');
+          }
+        });
+
+        it('should throw error when poolData.liquidity is missing or invalid', async () => {
+          const missingLiquidity = { ...validPoolData };
+          delete missingLiquidity.liquidity;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, missingLiquidity, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.liquidity is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, liquidity: null }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.liquidity is required');
+
+          const invalidTypes = [123, true, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, { ...validPoolData, liquidity: invalidType }, validToken0Data, validToken1Data)
+            ).rejects.toThrow('poolData.liquidity must be a string');
+          }
+        });
+
+        it('should throw error when poolData.tick is missing or invalid', async () => {
+          const missingTick = { ...validPoolData };
+          delete missingTick.tick;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, missingTick, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.tick is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, tick: null }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.tick is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, { ...validPoolData, tick: undefined }, validToken0Data, validToken1Data)
+          ).rejects.toThrow('poolData.tick is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, { ...validPoolData, tick: invalidType }, validToken0Data, validToken1Data)
+            ).rejects.toThrow('poolData.tick must be a valid number');
+          }
+        });
+      });
+
+      describe('Token data validation', () => {
+        it('should throw error when token0Data parameter is missing', async () => {
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, null, validToken1Data)
+          ).rejects.toThrow('token0Data parameter is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, undefined, validToken1Data)
+          ).rejects.toThrow('token0Data parameter is required');
+        });
+
+        it('should throw error when token0Data.address is missing or invalid', async () => {
+          const missingAddress = { ...validToken0Data };
+          delete missingAddress.address;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, missingAddress, validToken1Data)
+          ).rejects.toThrow('token0Data.address is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, { ...validToken0Data, address: null }, validToken1Data)
+          ).rejects.toThrow('token0Data.address is required');
+
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, validPoolData, { ...validToken0Data, address: invalidAddress }, validToken1Data)
+            ).rejects.toThrow();
+          }
+        });
+
+        it('should throw error when token0Data.decimals is missing or invalid', async () => {
+          const missingDecimals = { ...validToken0Data };
+          delete missingDecimals.decimals;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, missingDecimals, validToken1Data)
+          ).rejects.toThrow('token0Data.decimals is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, { ...validToken0Data, decimals: null }, validToken1Data)
+          ).rejects.toThrow('token0Data.decimals is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, { ...validToken0Data, decimals: undefined }, validToken1Data)
+          ).rejects.toThrow('token0Data.decimals is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, validPoolData, { ...validToken0Data, decimals: invalidType }, validToken1Data)
+            ).rejects.toThrow('token0Data.decimals must be a valid number');
+          }
+        });
+
+        it('should throw error when token1Data parameter is missing', async () => {
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, null)
+          ).rejects.toThrow('token1Data parameter is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, undefined)
+          ).rejects.toThrow('token1Data parameter is required');
+        });
+
+        it('should throw error when token1Data.address is missing or invalid', async () => {
+          const missingAddress = { ...validToken1Data };
+          delete missingAddress.address;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, missingAddress)
+          ).rejects.toThrow('token1Data.address is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, { ...validToken1Data, address: null })
+          ).rejects.toThrow('token1Data.address is required');
+
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, { ...validToken1Data, address: invalidAddress })
+            ).rejects.toThrow();
+          }
+        });
+
+        it('should throw error when token1Data.decimals is missing or invalid', async () => {
+          const missingDecimals = { ...validToken1Data };
+          delete missingDecimals.decimals;
+          
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, missingDecimals)
+          ).rejects.toThrow('token1Data.decimals is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, { ...validToken1Data, decimals: null })
+          ).rejects.toThrow('token1Data.decimals is required');
+
+          await expect(
+            adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, { ...validToken1Data, decimals: undefined })
+          ).rejects.toThrow('token1Data.decimals is required');
+
+          const invalidTypes = ['string', true, {}, [], NaN, Infinity];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, { ...validToken1Data, decimals: invalidType })
+            ).rejects.toThrow('token1Data.decimals must be a valid number');
+          }
+        });
+      });
+    });
+  });
+
+  describe('discoverAvailablePools', () => {
+    describe('Success Cases', () => {
+      it('should discover all available USDC/WETH pools', async () => {
+        const pools = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        
+        expect(Array.isArray(pools)).toBe(true);
+        expect(pools.length).toBe(4); // 0.01%, 0.05%, 0.3%, 1% pools
+        
+        const feeTiers = pools.map(p => p.fee).sort((a, b) => a - b);
+        expect(feeTiers).toEqual([100, 500, 3000, 10000]);
+      });
+
+      it('should return pools with correct structure and data types', async () => {
+        const pools = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        
+        expect(pools.length).toBeGreaterThan(0);
+        
+        pools.forEach(pool => {
+          expect(pool).toHaveProperty('address');
+          expect(pool).toHaveProperty('fee');
+          expect(pool).toHaveProperty('liquidity');
+          expect(pool).toHaveProperty('sqrtPriceX96');
+          expect(pool).toHaveProperty('tick');
+          
+          expect(typeof pool.address).toBe('string');
+          expect(pool.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+          expect(typeof pool.fee).toBe('number');
+          expect(typeof pool.liquidity).toBe('string');
+          expect(typeof pool.sqrtPriceX96).toBe('string');
+          expect(typeof pool.tick).toBe('bigint');
+          
+          expect(BigInt(pool.liquidity)).toBeGreaterThan(0n);
+          expect(BigInt(pool.sqrtPriceX96)).toBeGreaterThan(0n);
+        });
+      });
+
+      it('should return same pools regardless of token input order', async () => {
+        const pools1 = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        const pools2 = await adapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, env.provider);
+        
+        expect(pools1.length).toBe(pools2.length);
+        expect(pools1.length).toBe(4);
+        
+        // Sort both arrays by fee for comparison
+        const sortedPools1 = pools1.sort((a, b) => a.fee - b.fee);
+        const sortedPools2 = pools2.sort((a, b) => a.fee - b.fee);
+        
+        sortedPools1.forEach((pool, index) => {
+          expect(pool.address).toBe(sortedPools2[index].address);
+          expect(pool.fee).toBe(sortedPools2[index].fee);
+          expect(pool.liquidity).toBe(sortedPools2[index].liquidity);
+        });
+      });
+
+      it('should return empty array for token pair with no pools', async () => {
+        // Use two fake addresses that won't have any pools
+        const fakeToken1 = '0x0000000000000000000000000000000000000001';
+        const fakeToken2 = '0x0000000000000000000000000000000000000002';
+        
+        const pools = await adapter.discoverAvailablePools(fakeToken1, fakeToken2, env.provider);
+        
+        expect(Array.isArray(pools)).toBe(true);
+        expect(pools.length).toBe(0);
+      });
+
+      it('should return consistent pool addresses matching getPoolAddress', async () => {
+        const pools = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        
+        expect(pools.length).toBeGreaterThan(0);
+        
+        for (const pool of pools) {
+          const directAddress = await adapter.getPoolAddress(env.usdcAddress, env.wethAddress, pool.fee, env.provider);
+          expect(pool.address).toBe(directAddress);
+        }
+      });
+
+      it('should be deterministic and return same results on multiple calls', async () => {
+        const pools1 = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        const pools2 = await adapter.discoverAvailablePools(env.usdcAddress, env.wethAddress, env.provider);
+        
+        expect(pools1.length).toBe(pools2.length);
+        
+        // Sort both for comparison
+        const sortedPools1 = pools1.sort((a, b) => a.fee - b.fee);
+        const sortedPools2 = pools2.sort((a, b) => a.fee - b.fee);
+        
+        sortedPools1.forEach((pool, index) => {
+          expect(pool.address).toBe(sortedPools2[index].address);
+          expect(pool.liquidity).toBe(sortedPools2[index].liquidity);
+          expect(pool.sqrtPriceX96).toBe(sortedPools2[index].sqrtPriceX96);
+          expect(pool.tick).toBe(sortedPools2[index].tick);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing token0 address', async () => {
+        await expect(
+          adapter.discoverAvailablePools(null, env.usdcAddress, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
+
+        await expect(
+          adapter.discoverAvailablePools(undefined, env.usdcAddress, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
+
+        await expect(
+          adapter.discoverAvailablePools('', env.usdcAddress, env.provider)
+        ).rejects.toThrow('Token0 address parameter is required');
+      });
+
+      it('should throw error for invalid token0 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
+
+        for (const invalidAddress of invalidAddresses) {
+          await expect(
+            adapter.discoverAvailablePools(invalidAddress, env.usdcAddress, env.provider)
+          ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
+        }
+      });
+
+      it('should throw error for missing token1 address', async () => {
+        await expect(
+          adapter.discoverAvailablePools(env.wethAddress, null, env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
+
+        await expect(
+          adapter.discoverAvailablePools(env.wethAddress, undefined, env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
+
+        await expect(
+          adapter.discoverAvailablePools(env.wethAddress, '', env.provider)
+        ).rejects.toThrow('Token1 address parameter is required');
+      });
+
+      it('should throw error for invalid token1 address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123', // too short
+          '0xGHIJKL', // invalid hex characters
+        ];
+
+        for (const invalidAddress of invalidAddresses) {
+          await expect(
+            adapter.discoverAvailablePools(env.wethAddress, invalidAddress, env.provider)
+          ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
+        }
+      });
+
+      it('should throw error for invalid provider', async () => {
+        await expect(
+          adapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, null)
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+
+        await expect(
+          adapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, {})
+        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+      });
+
+      it('should throw error when factory address is missing', async () => {
+        // Create adapter with broken config to test factory error handling
+        const brokenAdapter = new (class extends adapter.constructor {
+          constructor() {
+            super(1337);
+            this.addresses = { factoryAddress: null }; // Break factory address
+          }
+        })();
+
+        await expect(
+          brokenAdapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, env.provider)
+        ).rejects.toThrow('No Uniswap V3 factory address found for chainId: 1337');
       });
     });
   });
