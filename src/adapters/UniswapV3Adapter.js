@@ -31,6 +31,9 @@ const IUniswapV3PoolABI = IUniswapV3PoolARTIFACT.abi;
 const SwapRouterABI = SwapRouterARTIFACT.abi;
 const ERC20ABI = ERC20ARTIFACT.abi;
 
+// Define MaxUint128 constant (2^128 - 1) as JSBI for Uniswap SDK compatibility
+const MaxUint128 = JSBI.subtract(JSBI.exponentiate(JSBI.BigInt(2), JSBI.BigInt(128)), JSBI.BigInt(1));
+
 /**
  * Adapter for Uniswap V3 platform
  *
@@ -1520,6 +1523,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           poolContract.liquidity()
         ]);
       } catch (firstError) {
+        // Log transient error for monitoring (retry will follow)
+        console.warn(`Pool ${poolAddress} (fee: ${fee}) initial fetch failed, retrying:`, firstError.message);
+
         // Retry once after delay for transient errors
         await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
         try {
@@ -1548,99 +1554,116 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     return pools;
   }
 
-
   /**
    * Generate transaction data for claiming fees from a position
    * @param {Object} params - Parameters for generating claim fees data
-   * @param {Object} params.position - Position object with ID and other properties
+   * @param {string|number} params.positionId - Position NFT token ID
    * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
+   * @param {string} params.walletAddress - User's wallet address
+   * @param {string} params.token0Address - Token0 address
+   * @param {string} params.token1Address - Token1 address
+   * @param {number} params.token0Decimals - Token0 decimals
+   * @param {number} params.token1Decimals - Token1 decimals
    * @returns {Object} Transaction data object with `to`, `data`, `value` properties
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateClaimFeesData(params) {
-    const { position, provider, address, chainId, poolData, token0Data, token1Data } = params;
+    const { positionId, provider, walletAddress, token0Address, token1Address, token0Decimals, token1Decimals } = params;
 
     // Input validation
-    if (!position || !position.id) {
-      throw new Error("Invalid position data");
+    if (positionId === null || positionId === undefined) {
+      throw new Error("Position ID is required");
+    }
+    
+    // Validate positionId is a numeric string
+    if (typeof positionId !== 'string') {
+      throw new Error('positionId must be a string');
+    }
+    if (!/^\d+$/.test(positionId)) {
+      throw new Error('positionId must be a numeric string');
     }
 
-    if (!provider) {
-      throw new Error("Provider is required");
+    // Validate token0 address
+    if (!token0Address) {
+      throw new Error("Token0 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token0Address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Address}`);
     }
 
-    if (!address) {
-      throw new Error("Wallet address is required");
+    // Validate token1 address
+    if (!token1Address) {
+      throw new Error("Token1 address parameter is required");
+    }
+    try {
+      ethers.getAddress(token1Address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Address}`);
     }
 
-    if (!chainId) {
-      throw new Error("Chain ID is required");
+    // Validate wallet address
+    if (!walletAddress) {
+      throw new Error("Wallet address parameter is required");
+    }
+    try {
+      ethers.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
-    if (!poolData || !poolData.token0 || !poolData.token1) {
-      throw new Error("Invalid pool data");
+    // Validate token decimals
+    if (token0Decimals === null || token0Decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (typeof token0Decimals !== 'number' || !Number.isFinite(token0Decimals)) {
+      throw new Error("Token0 decimals must be a valid number");
     }
 
-    if (!token0Data || !token0Data.decimals || !token0Data.symbol) {
-      throw new Error("Invalid token0 data");
+    if (token1Decimals === null || token1Decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (typeof token1Decimals !== 'number' || !Number.isFinite(token1Decimals)) {
+      throw new Error("Token1 decimals must be a valid number");
     }
 
-    if (!token1Data || !token1Data.decimals || !token1Data.symbol) {
-      throw new Error("Invalid token1 data");
-    }
+    // Validate provider
+    await this._validateProviderChain(provider);
 
     try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
+      // Get position manager address from cached addresses
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address found for chainId: ${this.chainId}`);
       }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = this.addresses.positionManagerAddress;
 
-      // Create contract instance to get position data
-      const nftManager = new ethers.Contract(
-        positionManagerAddress,
-        this.nonfungiblePositionManagerABI,
-        provider
-      );
-
-      // Get current position data directly from contract
-      const positionData = await nftManager.positions(position.id);
 
       // Create Token instances for the SDK
       const token0 = new Token(
-        chainId,
-        poolData.token0,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
+        this.chainId,
+        token0Address,
+        token0Decimals
       );
 
       const token1 = new Token(
-        chainId,
-        poolData.token1,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
+        this.chainId,
+        token1Address,
+        token1Decimals
       );
 
-      // Create collectOptions object as per Uniswap docs
+      // Create collectOptions object to collect ALL available fees
       const collectOptions = {
-        tokenId: position.id,
+        tokenId: positionId,
         expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
           token0,
-          positionData.tokensOwed0.toString()
+          MaxUint128
         ),
         expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
           token1,
-          positionData.tokensOwed1.toString()
+          MaxUint128
         ),
-        recipient: address
+        recipient: walletAddress
       };
 
       // Use SDK to generate calldata and value
@@ -1653,7 +1676,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         value: value
       };
     } catch (error) {
-      console.error("Error generating claim fees data:", error);
       throw new Error(`Failed to generate claim fees data: ${error.message}`);
     }
   }

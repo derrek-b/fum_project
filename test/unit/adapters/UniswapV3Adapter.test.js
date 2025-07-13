@@ -4768,4 +4768,256 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
   });
+
+  describe('generateClaimFeesData', () => {
+    describe('Success Cases', () => {
+      it('should generate valid transaction data for position fee collection', async () => {
+        const params = {
+          positionId: env.positionTokenId.toString(),
+          provider: env.provider,
+          walletAddress: await env.testVault.getAddress(),
+          token0Address: env.usdcAddress,
+          token1Address: env.wethAddress,
+          token0Decimals: 6,
+          token1Decimals: 18
+        };
+
+        const result = await adapter.generateClaimFeesData(params);
+
+        expect(result).toBeDefined();
+        expect(result).toBeTypeOf('object');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.data).toBeDefined();
+        expect(result.value).toBeDefined();
+        expect(typeof result.to).toBe('string');
+        expect(typeof result.data).toBe('string');
+        expect(typeof result.value).toBe('string');
+        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+        
+        // Verify specific values
+        expect(result.value).toBe('0x00'); // No ETH sent for fee collection
+        expect(result.data).toMatch(/^0xfc6f7865/); // Function selector for collect
+        expect(result.data.length).toBeGreaterThan(10); // Should have substantial calldata
+        
+        // Verify the calldata contains our positionId and wallet address
+        const expectedPositionId = env.positionTokenId.toString(16).padStart(64, '0');
+        const expectedRecipient = (await env.testVault.getAddress()).slice(2).toLowerCase().padStart(64, '0');
+        expect(result.data.toLowerCase()).toContain(expectedPositionId);
+        expect(result.data.toLowerCase()).toContain(expectedRecipient);
+      });
+
+      it('should be deterministic for same inputs', async () => {
+        const params = {
+          positionId: env.positionTokenId.toString(),
+          provider: env.provider,
+          walletAddress: await env.testVault.getAddress(),
+          token0Address: env.usdcAddress,
+          token1Address: env.wethAddress,
+          token0Decimals: 6,
+          token1Decimals: 18
+        };
+
+        const result1 = await adapter.generateClaimFeesData(params);
+        const result2 = await adapter.generateClaimFeesData(params);
+
+        expect(result1.to).toBe(result2.to);
+        expect(result1.data).toBe(result2.data);
+        expect(result1.value).toBe(result2.value);
+      });
+    });
+
+    describe('Error Cases', () => {
+      let baseParams;
+
+      beforeEach(() => {
+        baseParams = {
+          positionId: '123',
+          provider: env.provider,
+          walletAddress: env.signers[0].address,
+          token0Address: env.usdcAddress,
+          token1Address: env.wethAddress,
+          token0Decimals: 6,
+          token1Decimals: 18
+        };
+      });
+
+      describe('Position ID validation', () => {
+
+        it('should throw error for null/undefined positionId', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, positionId: null })
+          ).rejects.toThrow('Position ID is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, positionId: undefined })
+          ).rejects.toThrow('Position ID is required');
+        });
+
+        it('should throw error for non-string positionId', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, positionId: invalidType })
+            ).rejects.toThrow('positionId must be a string');
+          }
+        });
+
+        it('should throw error for non-numeric string positionId', async () => {
+          const invalidIds = ['', 'abc', '12abc', '12.5', '-12', '12-34', ' 123', '123 '];
+
+          for (const invalidId of invalidIds) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, positionId: invalidId })
+            ).rejects.toThrow('positionId must be a numeric string');
+          }
+        });
+
+        it('should accept leading zeros in positionId', async () => {
+          const result = await adapter.generateClaimFeesData({ ...baseParams, positionId: '00123' });
+          expect(result).toBeDefined();
+          expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        });
+      });
+
+      describe('Provider validation', () => {
+        it('should throw error for null/undefined provider', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, provider: null })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, provider: undefined })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        });
+
+        it('should throw error for provider without getNetwork method', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, provider: {} })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        });
+
+        it('should throw error for provider returning wrong chainId', async () => {
+          const wrongChainProvider = {
+            getNetwork: async () => ({
+              chainId: 999999n // Wrong chain
+            })
+          };
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, provider: wrongChainProvider })
+          ).rejects.toThrow('Provider chain 999999 doesn\'t match adapter chain 1337');
+        });
+
+        it('should throw error when provider getNetwork throws', async () => {
+          const throwingProvider = {
+            getNetwork: async () => {
+              throw new Error('Network connection failed');
+            }
+          };
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, provider: throwingProvider })
+          ).rejects.toThrow('Network connection failed');
+        });
+      });
+
+      describe('Wallet address validation', () => {
+        it('should throw error for missing wallet address', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, walletAddress: null })
+          ).rejects.toThrow('Wallet address parameter is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, walletAddress: undefined })
+          ).rejects.toThrow('Wallet address parameter is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, walletAddress: '' })
+          ).rejects.toThrow('Wallet address parameter is required');
+        });
+
+        it('should throw error for invalid wallet address format', async () => {
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, walletAddress: invalidAddress })
+            ).rejects.toThrow(`Invalid wallet address: ${invalidAddress}`);
+          }
+        });
+      });
+
+      describe('Token address validation', () => {
+        it('should throw error for missing token addresses', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, token0Address: null, token1Address: env.wethAddress })
+          ).rejects.toThrow('Token0 address parameter is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, token0Address: env.usdcAddress, token1Address: null })
+          ).rejects.toThrow('Token1 address parameter is required');
+        });
+
+        it('should throw error for invalid token address format', async () => {
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, token0Address: invalidAddress, token1Address: env.wethAddress })
+            ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
+
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, token0Address: env.usdcAddress, token1Address: invalidAddress })
+            ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
+          }
+        });
+      });
+
+      describe('Token decimals validation', () => {
+        it('should throw error for missing token decimals', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, token0Decimals: null, token1Decimals: 18 })
+          ).rejects.toThrow('Token0 decimals is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, token0Decimals: 6, token1Decimals: null })
+          ).rejects.toThrow('Token1 decimals is required');
+        });
+
+        it('should throw error for invalid token decimals type', async () => {
+          const invalidTypes = ['18', true, {}, [], NaN, Infinity, -Infinity];
+
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, token0Decimals: invalidType, token1Decimals: 18 })
+            ).rejects.toThrow('Token0 decimals must be a valid number');
+
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, token0Decimals: 6, token1Decimals: invalidType })
+            ).rejects.toThrow('Token1 decimals must be a valid number');
+          }
+        });
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle position ID "0"', async () => {
+        const params = {
+          positionId: '0',
+          provider: env.provider,
+          walletAddress: env.signers[0].address,
+          token0Address: env.usdcAddress,
+          token1Address: env.wethAddress,
+          token0Decimals: 6,
+          token1Decimals: 18
+        };
+
+        const result = await adapter.generateClaimFeesData(params);
+        expect(result).toBeDefined();
+        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      });
+    });
+  });
 });
