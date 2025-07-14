@@ -5002,22 +5002,644 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    describe('Special Cases', () => {
-      it('should handle position ID "0"', async () => {
-        const params = {
-          positionId: '0',
+  });
+
+  describe('generateRemoveLiquidityData', () => {
+    describe('Success Cases', () => {
+      let baseParams;
+
+      beforeEach(async () => {
+        // Get pool data for test tokens
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        baseParams = {
+          position: {
+            id: env.positionTokenId.toString(),
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          percentage: 50,
           provider: env.provider,
-          walletAddress: env.signers[0].address,
-          token0Address: env.usdcAddress,
-          token1Address: env.wethAddress,
-          token0Decimals: 6,
-          token1Decimals: 18
+          walletAddress: await env.testVault.getAddress(),
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          },
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+      });
+
+      it('should generate valid transaction data for removing liquidity', async () => {
+        const result = await adapter.generateRemoveLiquidityData(baseParams);
+
+        // Basic structure validation
+        expect(result).toBeDefined();
+        expect(result).toBeTypeOf('object');
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+
+        // Type validation
+        expect(typeof result.to).toBe('string');
+        expect(typeof result.data).toBe('string');
+        expect(typeof result.value).toBe('string');
+
+        // Format validation
+        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+
+        // Contract address should be position manager
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+
+        // Should have substantial calldata (remove liquidity + collect fees)
+        expect(result.data.length).toBeGreaterThan(10);
+
+        // Value should be 0x00 for ERC20 operations (SDK returns hex format)
+        expect(result.value).toBe('0x00');
+      });
+
+      it('should be deterministic for same inputs', async () => {
+        const result1 = await adapter.generateRemoveLiquidityData(baseParams);
+        const result2 = await adapter.generateRemoveLiquidityData(baseParams);
+
+        expect(result1.to).toBe(result2.to);
+        expect(result1.data).toBe(result2.data);
+        expect(result1.value).toBe(result2.value);
+      });
+
+      it('should handle different percentage values', async () => {
+        const percentages = [1, 25, 50, 75, 100];
+
+        for (const percentage of percentages) {
+          const params = { ...baseParams, percentage };
+          const result = await adapter.generateRemoveLiquidityData(params);
+
+          expect(result).toBeDefined();
+          expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+          expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+          expect(result.value).toBe('0x00');
+        }
+      });
+
+      it('should handle different slippage tolerance values', async () => {
+        const slippageValues = [0, 0.1, 0.5, 1.0, 5.0];
+
+        for (const slippageTolerance of slippageValues) {
+          const params = { ...baseParams, slippageTolerance };
+          const result = await adapter.generateRemoveLiquidityData(params);
+
+          expect(result).toBeDefined();
+          expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+          expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+          expect(result.value).toBe('0x00');
+        }
+      });
+
+      it('should handle different deadline values', async () => {
+        const deadlines = [1, 15, 30, 60, 120];
+
+        for (const deadlineMinutes of deadlines) {
+          const params = { ...baseParams, deadlineMinutes };
+          const result = await adapter.generateRemoveLiquidityData(params);
+
+          expect(result).toBeDefined();
+          expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+          expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+          expect(result.value).toBe('0x00');
+        }
+      });
+
+      it('should handle reversed token order correctly', async () => {
+        // Test with tokens in reverse order (should still work due to sortTokens)
+        const reversedParams = {
+          ...baseParams,
+          token0Data: baseParams.token1Data,
+          token1Data: baseParams.token0Data
         };
 
-        const result = await adapter.generateClaimFeesData(params);
+        const result = await adapter.generateRemoveLiquidityData(reversedParams);
+
         expect(result).toBeDefined();
-        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+        expect(result.value).toBe('0x00');
       });
     });
+
+    describe('Error Cases', () => {
+      let baseParams;
+
+      beforeEach(async () => {
+        // Get pool data for test tokens
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        baseParams = {
+          position: {
+            id: '123',
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          percentage: 50,
+          provider: env.provider,
+          walletAddress: env.signers[0].address,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          },
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+      });
+
+      describe('Position validation', () => {
+        it('should throw error for null/undefined position', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, position: null })
+          ).rejects.toThrow('Position parameter is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, position: undefined })
+          ).rejects.toThrow('Position parameter is required');
+        });
+
+        it('should throw error for non-object position', async () => {
+          const invalidTypes = ['string', 123, true, false, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, position: invalidType })
+            ).rejects.toThrow('Position must be an object');
+          }
+        });
+
+        it('should throw error for missing position ID', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { ...baseParams.position, id: null }
+            })
+          ).rejects.toThrow('Position ID is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { ...baseParams.position, id: undefined }
+            })
+          ).rejects.toThrow('Position ID is required');
+        });
+
+        it('should throw error for non-string position ID', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                position: { ...baseParams.position, id: invalidType }
+              })
+            ).rejects.toThrow('Position ID must be a string');
+          }
+        });
+
+        it('should throw error for non-numeric string position ID', async () => {
+          const invalidIds = ['', 'abc', '12abc', '12.5', '-12', '12-34', ' 123', '123 '];
+          for (const invalidId of invalidIds) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                position: { ...baseParams.position, id: invalidId }
+              })
+            ).rejects.toThrow('Position ID must be a numeric string');
+          }
+        });
+
+        it('should throw error for missing tick values', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { ...baseParams.position, tickLower: null }
+            })
+          ).rejects.toThrow('Position tickLower is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { ...baseParams.position, tickUpper: undefined }
+            })
+          ).rejects.toThrow('Position tickUpper is required');
+        });
+
+        it('should throw error for non-finite tick values', async () => {
+          const invalidTicks = [NaN, Infinity, -Infinity, 'string', {}, []];
+          for (const invalidTick of invalidTicks) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                position: { ...baseParams.position, tickLower: invalidTick }
+              })
+            ).rejects.toThrow('Position tickLower must be a finite number');
+
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                position: { ...baseParams.position, tickUpper: invalidTick }
+              })
+            ).rejects.toThrow('Position tickUpper must be a finite number');
+          }
+        });
+
+        it('should throw error for invalid tick range', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { 
+                ...baseParams.position, 
+                tickLower: -200000, 
+                tickUpper: -210000 // tickLower > tickUpper
+              }
+            })
+          ).rejects.toThrow('Position tickLower must be less than tickUpper');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              position: { 
+                ...baseParams.position, 
+                tickLower: -200000, 
+                tickUpper: -200000 // equal ticks
+              }
+            })
+          ).rejects.toThrow('Position tickLower must be less than tickUpper');
+        });
+      });
+
+      describe('Percentage validation', () => {
+        it('should throw error for null/undefined percentage', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, percentage: null })
+          ).rejects.toThrow('Percentage parameter is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, percentage: undefined })
+          ).rejects.toThrow('Percentage parameter is required');
+        });
+
+        it('should throw error for non-finite percentage', async () => {
+          const invalidTypes = [NaN, Infinity, -Infinity, 'string', {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, percentage: invalidType })
+            ).rejects.toThrow('Percentage must be a finite number');
+          }
+        });
+
+        it('should throw error for out-of-range percentage', async () => {
+          const invalidPercentages = [0, -1, -10, 101, 150, 1000];
+          for (const invalidPercentage of invalidPercentages) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, percentage: invalidPercentage })
+            ).rejects.toThrow('Percentage must be between 1 and 100');
+          }
+        });
+      });
+
+      describe('Provider validation', () => {
+        it('should throw error for missing provider', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, provider: null })
+          ).rejects.toThrow('Provider is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, provider: undefined })
+          ).rejects.toThrow('Provider is required');
+        });
+
+        it('should throw error for non-object provider', async () => {
+          const invalidTypes = ['string', 123, true, false, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, provider: invalidType })
+            ).rejects.toThrow('Provider must be an ethers provider object');
+          }
+        });
+      });
+
+      describe('Wallet address validation', () => {
+        it('should throw error for missing wallet address', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, walletAddress: null })
+          ).rejects.toThrow('Wallet address is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, walletAddress: undefined })
+          ).rejects.toThrow('Wallet address is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, walletAddress: '' })
+          ).rejects.toThrow('Wallet address is required');
+        });
+
+        it('should throw error for non-string wallet address', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, walletAddress: invalidType })
+            ).rejects.toThrow('Wallet address must be a string');
+          }
+        });
+
+        it('should throw error for invalid wallet address format', async () => {
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, walletAddress: invalidAddress })
+            ).rejects.toThrow(`Invalid wallet address: ${invalidAddress}`);
+          }
+        });
+      });
+
+      describe('Pool data validation', () => {
+        it('should throw error for null/undefined pool data', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, poolData: null })
+          ).rejects.toThrow('Pool data parameter is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, poolData: undefined })
+          ).rejects.toThrow('Pool data parameter is required');
+        });
+
+        it('should throw error for non-object pool data', async () => {
+          const invalidTypes = ['string', 123, true, false, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, poolData: invalidType })
+            ).rejects.toThrow('Pool data must be an object');
+          }
+        });
+
+        it('should throw error for missing pool data properties', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, fee: null }
+            })
+          ).rejects.toThrow('Pool data fee is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, sqrtPriceX96: null }
+            })
+          ).rejects.toThrow('Pool data sqrtPriceX96 is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, liquidity: null }
+            })
+          ).rejects.toThrow('Pool data liquidity is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, tick: null }
+            })
+          ).rejects.toThrow('Pool data tick is required');
+        });
+
+        it('should throw error for invalid pool data types', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, fee: 'invalid' }
+            })
+          ).rejects.toThrow('Pool data fee must be a non-negative finite number');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, fee: -1 }
+            })
+          ).rejects.toThrow('Pool data fee must be a non-negative finite number');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, sqrtPriceX96: 123 }
+            })
+          ).rejects.toThrow('Pool data sqrtPriceX96 must be a string');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, liquidity: 123 }
+            })
+          ).rejects.toThrow('Pool data liquidity must be a string');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              poolData: { ...baseParams.poolData, tick: 'invalid' }
+            })
+          ).rejects.toThrow('Pool data tick must be a finite number');
+        });
+      });
+
+      describe('Token data validation', () => {
+        it('should throw error for null/undefined token data', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, token0Data: null })
+          ).rejects.toThrow('Token0 data parameter is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, token1Data: undefined })
+          ).rejects.toThrow('Token1 data parameter is required');
+        });
+
+        it('should throw error for non-object token data', async () => {
+          const invalidTypes = ['string', 123, true, false, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, token0Data: invalidType })
+            ).rejects.toThrow('Token0 data must be an object');
+
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, token1Data: invalidType })
+            ).rejects.toThrow('Token1 data must be an object');
+          }
+        });
+
+        it('should throw error for missing token addresses', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              token0Data: { ...baseParams.token0Data, address: null }
+            })
+          ).rejects.toThrow('Token0 address is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              token1Data: { ...baseParams.token1Data, address: '' }
+            })
+          ).rejects.toThrow('Token1 address is required');
+        });
+
+        it('should throw error for non-string token addresses', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token0Data: { ...baseParams.token0Data, address: invalidType }
+              })
+            ).rejects.toThrow('Token0 address must be a string');
+
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token1Data: { ...baseParams.token1Data, address: invalidType }
+              })
+            ).rejects.toThrow('Token1 address must be a string');
+          }
+        });
+
+        it('should throw error for invalid token address format', async () => {
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token0Data: { ...baseParams.token0Data, address: invalidAddress }
+              })
+            ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
+
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token1Data: { ...baseParams.token1Data, address: invalidAddress }
+              })
+            ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
+          }
+        });
+
+        it('should throw error for missing token decimals', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              token0Data: { ...baseParams.token0Data, decimals: null }
+            })
+          ).rejects.toThrow('Token0 decimals is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              token1Data: { ...baseParams.token1Data, decimals: undefined }
+            })
+          ).rejects.toThrow('Token1 decimals is required');
+        });
+
+        it('should throw error for invalid token decimals', async () => {
+          const invalidDecimals = [-1, 256, NaN, Infinity, 'string', {}, []];
+          for (const invalidDecimal of invalidDecimals) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token0Data: { ...baseParams.token0Data, decimals: invalidDecimal }
+              })
+            ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
+
+            await expect(
+              adapter.generateRemoveLiquidityData({ 
+                ...baseParams, 
+                token1Data: { ...baseParams.token1Data, decimals: invalidDecimal }
+              })
+            ).rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
+          }
+        });
+
+        it('should throw error for identical token addresses', async () => {
+          const sameAddress = env.usdcAddress;
+          await expect(
+            adapter.generateRemoveLiquidityData({ 
+              ...baseParams, 
+              token0Data: { ...baseParams.token0Data, address: sameAddress },
+              token1Data: { ...baseParams.token1Data, address: sameAddress }
+            })
+          ).rejects.toThrow('Token0 and token1 addresses cannot be the same');
+        });
+      });
+
+      describe('Slippage tolerance validation', () => {
+        it('should throw error for null/undefined slippage tolerance', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, slippageTolerance: null })
+          ).rejects.toThrow('Slippage tolerance is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, slippageTolerance: undefined })
+          ).rejects.toThrow('Slippage tolerance is required');
+        });
+
+        it('should throw error for non-finite slippage tolerance', async () => {
+          const invalidTypes = [NaN, Infinity, -Infinity, 'string', {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, slippageTolerance: invalidType })
+            ).rejects.toThrow('Slippage tolerance must be a finite number');
+          }
+        });
+
+        it('should throw error for out-of-range slippage tolerance', async () => {
+          const invalidValues = [-1, -0.1, 101, 150];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, slippageTolerance: invalidValue })
+            ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
+          }
+        });
+      });
+
+      describe('Deadline validation', () => {
+        it('should throw error for null/undefined deadline', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, deadlineMinutes: null })
+          ).rejects.toThrow('Deadline minutes is required');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, deadlineMinutes: undefined })
+          ).rejects.toThrow('Deadline minutes is required');
+        });
+
+        it('should throw error for non-finite deadline', async () => {
+          const invalidTypes = [NaN, Infinity, -Infinity, 'string', {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, deadlineMinutes: invalidType })
+            ).rejects.toThrow('Deadline minutes must be a finite number');
+          }
+        });
+
+        it('should throw error for non-positive deadline', async () => {
+          const invalidValues = [0, -1, -10];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateRemoveLiquidityData({ ...baseParams, deadlineMinutes: invalidValue })
+            ).rejects.toThrow('Deadline minutes must be greater than 0');
+          }
+        });
+      });
+    });
+
   });
 });

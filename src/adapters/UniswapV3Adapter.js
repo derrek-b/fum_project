@@ -1574,7 +1574,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     if (positionId === null || positionId === undefined) {
       throw new Error("Position ID is required");
     }
-    
+
     // Validate positionId is a numeric string
     if (typeof positionId !== 'string') {
       throw new Error('positionId must be a string');
@@ -1677,6 +1677,722 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       };
     } catch (error) {
       throw new Error(`Failed to generate claim fees data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate transaction data for removing liquidity from a position
+   * @param {Object} params - Parameters for generating remove liquidity data
+   * @param {Object} params.position - Position object with required properties
+   * @param {string} params.position.id - Position NFT token ID
+   * @param {number} params.position.tickLower - Lower tick boundary of the position
+   * @param {number} params.position.tickUpper - Upper tick boundary of the position
+   * @param {number} params.percentage - Percentage of liquidity to remove (1-100)
+   * @param {Object} params.provider - Ethers provider instance
+   * @param {string} params.walletAddress - User's wallet address (recipient of tokens and fees)
+   * @param {Object} params.poolData - Current pool state data
+   * @param {number} params.poolData.fee - Pool fee tier (e.g., 500, 3000, 10000)
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool price as sqrt(price) * 2^96
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
+   * @param {Object} params.token0Data - First token data (will be sorted by address)
+   * @param {string} params.token0Data.address - Token contract address
+   * @param {number} params.token0Data.decimals - Token decimal places
+   * @param {Object} params.token1Data - Second token data (will be sorted by address)
+   * @param {string} params.token1Data.address - Token contract address
+   * @param {number} params.token1Data.decimals - Token decimal places
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
+   * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
+   */
+  async generateRemoveLiquidityData(params) {
+    const {
+      position,
+      percentage,
+      provider,
+      walletAddress,
+      poolData,
+      token0Data,
+      token1Data,
+      slippageTolerance,
+      deadlineMinutes
+    } = params;
+
+    // Input validation
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position ID is required");
+    }
+    if (typeof position.id !== 'string') {
+      throw new Error('Position ID must be a string');
+    }
+    if (!/^\d+$/.test(position.id)) {
+      throw new Error('Position ID must be a numeric string');
+    }
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("Position tickLower is required");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("Position tickLower must be a finite number");
+    }
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("Position tickUpper is required");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("Position tickUpper must be a finite number");
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("Position tickLower must be less than tickUpper");
+    }
+
+    if (percentage === null || percentage === undefined) {
+      throw new Error("Percentage parameter is required");
+    }
+    if (!Number.isFinite(percentage)) {
+      throw new Error("Percentage must be a finite number");
+    }
+    if (percentage <= 0 || percentage > 100) {
+      throw new Error("Percentage must be between 1 and 100");
+    }
+
+    if (provider === null || provider === undefined) {
+      throw new Error("Provider is required");
+    }
+    if (typeof provider !== 'object' || Array.isArray(provider)) {
+      throw new Error("Provider must be an ethers provider object");
+    }
+
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
+      throw new Error("Wallet address is required");
+    }
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
+      throw new Error("Token0 data must be an object");
+    }
+    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
+      throw new Error("Token0 address is required");
+    }
+    if (typeof token0Data.address !== 'string') {
+      throw new Error("Token0 address must be a string");
+    }
+    try {
+      ethers.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
+      throw new Error("Token0 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
+      throw new Error("Token1 data must be an object");
+    }
+    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
+      throw new Error("Token1 address is required");
+    }
+    if (typeof token1Data.address !== 'string') {
+      throw new Error("Token1 address must be a string");
+    }
+    try {
+      ethers.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
+      throw new Error("Token1 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
+
+    try {
+      // Get position manager address from cached addresses
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+      }
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+
+      // Get current position data from contract FIRST to ensure correct token order
+      const nftManager = new ethers.Contract(
+        positionManagerAddress,
+        this.nonfungiblePositionManagerABI,
+        provider
+      );
+
+      const positionData = await nftManager.positions(position.id);
+
+      // Use sortTokens to get correct Uniswap token ordering
+      const { sortedToken0, sortedToken1 } = this.sortTokens(token0Data, token1Data);
+
+      // Verify the sorted tokens match the position's token order
+      if (positionData.token0.toLowerCase() !== sortedToken0.address.toLowerCase() ||
+          positionData.token1.toLowerCase() !== sortedToken1.address.toLowerCase()) {
+        throw new Error(`Token mismatch: position tokens (${positionData.token0}, ${positionData.token1}) don't match provided tokens (${token0Data.address}, ${token1Data.address})`);
+      }
+
+      // Create Token instances for the SDK with correct order
+      const token0 = new Token(
+        this.chainId,
+        sortedToken0.address,
+        sortedToken0.decimals
+      );
+
+      const token1 = new Token(
+        this.chainId,
+        sortedToken1.address,
+        sortedToken1.decimals
+      );
+
+
+      // Create Pool instance
+      const pool = new Pool(
+        token0,
+        token1,
+        poolData.fee,
+        poolData.sqrtPriceX96,
+        poolData.liquidity,
+        poolData.tick
+      );
+
+      // Create a Position instance using the current position data
+
+      const currentPosition = new Position({
+        pool,
+        liquidity: positionData.liquidity.toString(),
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper
+      });
+
+      // Always collect all available fees when removing liquidity
+      const expectedCurrencyOwed0 = CurrencyAmount.fromRawAmount(token0, MaxUint128);
+      const expectedCurrencyOwed1 = CurrencyAmount.fromRawAmount(token1, MaxUint128);
+
+      // Create CollectOptions to collect fees in the same transaction
+      const collectOptions = {
+        expectedCurrencyOwed0,
+        expectedCurrencyOwed1,
+        recipient: walletAddress
+      };
+
+      // Create slippage tolerance using standardized method
+      const slippageTolerancePercent = this._createSlippagePercent(slippageTolerance);
+
+      // Create liquidity percentage Percent
+      const liquidityPercentage = new Percent(percentage, 100);
+
+      // Create RemoveLiquidityOptions
+      const removeLiquidityOptions = {
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        slippageTolerance: slippageTolerancePercent,
+        tokenId: position.id,
+        // Percentage of liquidity to remove
+        liquidityPercentage: liquidityPercentage,
+        collectOptions,
+      };
+
+      // Generate the calldata using the SDK
+
+      const { calldata, value } = NonfungiblePositionManager.removeCallParameters(
+        currentPosition,
+        removeLiquidityOptions
+      );
+
+      // Return transaction data
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value
+      };
+    } catch (error) {
+      console.error("Error generating remove liquidity data:", error);
+      throw new Error(`Failed to generate remove liquidity data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate transaction data for adding liquidity to an existing position
+   * @param {Object} params - Parameters for generating add liquidity data
+   * @param {Object} params.position - Position object with ID and other properties
+   * @param {string} params.token0Amount - Amount of token0 to add
+   * @param {string} params.token1Amount - Amount of token1 to add
+   * @param {Object} params.provider - Ethers provider
+   * @param {string} params.address - User's wallet address
+   * @param {number} params.chainId - Chain ID
+   * @param {Object} params.poolData - Pool data for the position
+   * @param {Object} params.token0Data - Token0 data
+   * @param {Object} params.token1Data - Token1 data
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
+   */
+  async generateAddLiquidityData(params) {
+    const {
+      position,
+      token0Amount,
+      token1Amount,
+      provider,
+      address,
+      chainId,
+      poolData,
+      token0Data,
+      token1Data,
+      slippageTolerance = 0.5
+    } = params;
+
+    // Input validation
+    if (!position || !position.id) {
+      throw new Error("Invalid position data");
+    }
+
+    if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
+        (!token1Amount || parseFloat(token1Amount) <= 0)) {
+      throw new Error("At least one token amount must be provided");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (!address) {
+      throw new Error("Wallet address is required");
+    }
+
+    if (!chainId) {
+      throw new Error("Chain ID is required");
+    }
+
+    if (!poolData || !token0Data || !token1Data) {
+      throw new Error("Pool and token data are required");
+    }
+
+    try {
+      // Get position manager address from chain config
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
+        throw new Error(`No configuration found for chainId: ${chainId}`);
+      }
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+
+      // Create Token instances for the SDK
+      const token0 = new Token(
+        chainId,
+        token0Data.address,
+        token0Data.decimals,
+        token0Data.symbol,
+        token0Data.name || token0Data.symbol
+      );
+
+      const token1 = new Token(
+        chainId,
+        token1Data.address,
+        token1Data.decimals,
+        token1Data.symbol,
+        token1Data.name || token1Data.symbol
+      );
+
+      // Create Pool instance
+      const pool = new Pool(
+        token0,
+        token1,
+        poolData.fee,
+        poolData.sqrtPriceX96,
+        poolData.liquidity,
+        poolData.tick
+      );
+
+      // Convert token amounts to JSBI for the SDK
+      const amount0 = token0Amount
+        ? JSBI.BigInt(ethers.parseUnits(token0Amount, token0Data.decimals).toString())
+        : JSBI.BigInt(0);
+
+      const amount1 = token1Amount
+        ? JSBI.BigInt(ethers.parseUnits(token1Amount, token1Data.decimals).toString())
+        : JSBI.BigInt(0);
+
+      // Create a Position instance to represent the amount we want to add
+      const positionToIncreaseBy = Position.fromAmounts({
+        pool,
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper,
+        amount0,
+        amount1,
+        useFullPrecision: true,
+      });
+
+      // Create AddLiquidityOptions
+      const addLiquidityOptions = {
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
+        tokenId: position.id,
+      };
+
+      // Generate the calldata using the SDK
+      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
+        positionToIncreaseBy,
+        addLiquidityOptions
+      );
+
+      // Return transaction data
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value
+      };
+    } catch (error) {
+      console.error("Error generating add liquidity data:", error);
+      throw new Error(`Failed to generate add liquidity data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate swap transaction data for Uniswap V3
+   * @param {Object} params - Parameters for swap
+   * @param {string} params.tokenIn - Address of input token
+   * @param {string} params.tokenOut - Address of output token
+   * @param {number} params.fee - Fee tier (500, 3000, 10000)
+   * @param {string} params.recipient - Address to receive output tokens
+   * @param {string} params.amountIn - Amount of input tokens (in wei)
+   * @param {string} params.amountOutMinimum - Minimum amount of output tokens (in wei)
+   * @param {number} params.sqrtPriceLimitX96 - Price limit (0 for no limit)
+   * @param {Object} params.provider - Ethers provider
+   * @param {number} params.chainId - Chain ID
+   * @returns {Promise<Object>} Transaction data with to, data, and value
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
+   */
+  async generateSwapData(params) {
+    const {
+      tokenIn,
+      tokenOut,
+      fee,
+      recipient,
+      amountIn,
+      amountOutMinimum,
+      sqrtPriceLimitX96,
+      deadlineMinutes,
+      provider,
+      chainId
+    } = params;
+
+    try {
+      // Validate required parameters
+      if (!tokenIn || !tokenOut || !fee || !recipient || !amountIn || !provider || !chainId || !deadlineMinutes) {
+        throw new Error("Missing required parameters for swap");
+      }
+
+      // Validate chainId matches our adapter's chainId
+      if (chainId !== this.chainId) {
+        throw new Error(`ChainId ${chainId} does not match adapter chainId ${this.chainId}`);
+      }
+
+      // Use cached router address
+      if (!this.addresses?.routerAddress) {
+        throw new Error(`No Uniswap V3 router address found for chainId: ${chainId}`);
+      }
+
+      const routerAddress = this.addresses.routerAddress;
+
+      // Create swap router interface
+      const swapRouterInterface = new ethers.Interface(this.swapRouterABI);
+
+      // Create swap parameters for exactInputSingle
+      const swapParams = {
+        tokenIn,
+        tokenOut,
+        fee,
+        recipient,
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        amountIn,
+        amountOutMinimum: amountOutMinimum || 0,
+        sqrtPriceLimitX96: sqrtPriceLimitX96 || 0
+      };
+
+      // Encode the function call
+      const data = swapRouterInterface.encodeFunctionData("exactInputSingle", [swapParams]);
+
+      return {
+        to: routerAddress,
+        data,
+        value: tokenIn.toLowerCase() === "0x0000000000000000000000000000000000000000" ? amountIn : 0
+      };
+
+    } catch (error) {
+      throw new Error(`Failed to generate swap data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate transaction data for creating a new position
+   * @param {Object} params - Parameters for generating create position data
+   * @param {string} params.token0Address - Address of token0
+   * @param {string} params.token1Address - Address of token1
+   * @param {number} params.feeTier - Fee tier (e.g., 500, 3000, 10000)
+   * @param {number} params.tickLower - Lower tick of the position
+   * @param {number} params.tickUpper - Upper tick of the position
+   * @param {string} params.token0Amount - Amount of token0 to add
+   * @param {string} params.token1Amount - Amount of token1 to add
+   * @param {Object} params.provider - Ethers provider
+   * @param {string} params.address - User's wallet address
+   * @param {number} params.chainId - Chain ID
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage
+   * @param {boolean} params.tokensSwapped - Whether tokens need to be swapped for Uniswap ordering
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @throws {Error} If parameters are invalid or transaction data cannot be generated
+   */
+  async generateCreatePositionData(params) {
+    const {
+      token0Address,
+      token1Address,
+      feeTier,
+      tickLower,
+      tickUpper,
+      token0Amount,
+      token1Amount,
+      provider,
+      address,
+      chainId,
+      slippageTolerance,
+      tokensSwapped = false,
+      deadlineMinutes
+    } = params;
+
+    // Input validation
+    if (!token0Address || !token1Address) {
+      throw new Error("Token addresses are required");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (!address) {
+      throw new Error("Wallet address is required");
+    }
+
+    if (!deadlineMinutes) {
+      throw new Error("Deadline minutes is required");
+    }
+
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("Slippage tolerance is required");
+    }
+
+    try {
+      // Get configuration for current chain
+      const chainConfig = this.config[chainId];
+      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3) {
+        throw new Error(`No configuration found for chainId: ${chainId}`);
+      }
+
+      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+      const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
+
+      if (!positionManagerAddress || !factoryAddress) {
+        throw new Error(`Missing contract addresses for chainId: ${chainId}`);
+      }
+
+      // Step 1: Get token details
+      const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, provider);
+      const token1Contract = new ethers.Contract(token1Address, this.erc20ABI, provider);
+
+      const [decimals0, symbol0, name0, decimals1, symbol1, name1] = await Promise.all([
+        token0Contract.decimals().then(d => Number(d)),
+        token0Contract.symbol(),
+        token0Contract.name(),
+        token1Contract.decimals().then(d => Number(d)),
+        token1Contract.symbol(),
+        token1Contract.name()
+      ]);
+
+      // Step 2: Create Token instances for the SDK
+      // Token constructor requires (chainId, address, decimals, symbol, name)
+      const tokenA = new Token(
+        chainId,
+        token0Address,
+        decimals0,
+        symbol0,
+        name0
+      );
+
+      const tokenB = new Token(
+        chainId,
+        token1Address,
+        decimals1,
+        symbol1,
+        name1
+      );
+
+      // Step 3: Compute the Pool address to get Pool data
+      const currentPoolAddress = Pool.getAddress(tokenA, tokenB, Number(feeTier));
+
+      // Step 4: Create Pool contract and get pool data
+      const poolContract = new ethers.Contract(
+        currentPoolAddress,
+        this.uniswapV3PoolABI,
+        provider
+      );
+
+      let liquidity, slot0, tickSpacing;
+      try {
+        [liquidity, slot0, tickSpacing] = await Promise.all([
+          poolContract.liquidity(),
+          poolContract.slot0(),
+          poolContract.tickSpacing()
+        ]);
+      } catch (error) {
+        throw new Error(`Cannot create position: pool does not exist for ${symbol0}/${symbol1} with ${feeTier} fee tier. Pool must be created first.`);
+      }
+
+      // Step 5: Create the Pool instance
+      const configuredPool = new Pool(
+        tokenA,
+        tokenB,
+        Number(feeTier),
+        slot0.sqrtPriceX96.toString(),
+        liquidity.toString(),
+        Number(slot0.tick)
+      );
+
+      // Step 6: Normalize ticks based on tickSpacing
+      const normalizedTickLower = Math.floor(Number(tickLower) / Number(tickSpacing)) * Number(tickSpacing);
+      const normalizedTickUpper = Math.floor(Number(tickUpper) / Number(tickSpacing)) * Number(tickSpacing);
+
+      // Step 7: Convert token amounts to JSBI
+      const amount0 = token0Amount && parseFloat(token0Amount) > 0
+        ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
+        : JSBI.BigInt(0);
+
+      const amount1 = token1Amount && parseFloat(token1Amount) > 0
+        ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
+        : JSBI.BigInt(0);
+
+      // Step 8: Create the Position instance
+      const position = Position.fromAmounts({
+        pool: configuredPool,
+        tickLower: normalizedTickLower,
+        tickUpper: normalizedTickUpper,
+        amount0: tokensSwapped ? amount1 : amount0,
+        amount1: tokensSwapped ? amount0 : amount1,
+        useFullPrecision: true
+      });
+
+      // Step 9: Create mint options
+      const mintOptions = {
+        recipient: address,
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
+      };
+
+      // Step 10: Get calldata for minting
+      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
+        position,
+        mintOptions
+      );
+
+      // Return the transaction data
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value,
+        position: {
+          token0: {
+            address: tokenA.address,
+            symbol: tokenA.symbol,
+            decimals: tokenA.decimals
+          },
+          token1: {
+            address: tokenB.address,
+            symbol: tokenB.symbol,
+            decimals: tokenB.decimals
+          },
+          fee: Number(feeTier),
+          tickLower: normalizedTickLower,
+          tickUpper: normalizedTickUpper,
+          amount0: position.amount0.quotient.toString(),
+          amount1: position.amount1.quotient.toString(),
+          liquidity: position.liquidity.toString()
+        }
+      };
+    } catch (error) {
+      console.error("Error generating create position data:", error);
+      throw new Error(`Failed to generate create position data: ${error.message}`);
     }
   }
 
@@ -1831,207 +2547,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       onError && onError(errorMessage);
     } finally {
       onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Generate transaction data for removing liquidity from a position
-   * @param {Object} params - Parameters for generating remove liquidity data
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {number} params.percentage - Percentage of liquidity to remove (1-100)
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
-   * @param {boolean} params.collectFees - Whether to collect fees during removal
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
-   * @throws {Error} If parameters are invalid or transaction data cannot be generated
-   */
-  async generateRemoveLiquidityData(params) {
-    const {
-      position,
-      percentage,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      slippageTolerance,
-      collectFees = true, // Whether to collect fees during removal
-      deadlineMinutes
-    } = params;
-
-    // Input validation
-    if (!position || !position.id) {
-      throw new Error("Invalid position data");
-    }
-
-    if (!percentage || percentage <= 0 || percentage > 100) {
-      throw new Error("Percentage must be between 1 and 100");
-    }
-
-    if (!provider) {
-      throw new Error("Provider is required");
-    }
-
-    if (!address) {
-      throw new Error("Wallet address is required");
-    }
-
-    if (!chainId) {
-      throw new Error("Chain ID is required");
-    }
-
-    if (!poolData || !token0Data || !token1Data) {
-      throw new Error("Pool and token data are required");
-    }
-
-    if (!deadlineMinutes) {
-      throw new Error("Deadline minutes is required");
-    }
-
-    if (slippageTolerance === undefined || slippageTolerance === null) {
-      throw new Error("Slippage tolerance is required");
-    }
-
-    try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-      // Get current position data from contract FIRST to ensure correct token order
-      const nftManager = new ethers.Contract(
-        positionManagerAddress,
-        this.nonfungiblePositionManagerABI,
-        provider
-      );
-
-      const positionData = await nftManager.positions(position.id);
-
-      // CRITICAL: Ensure token order matches the position's actual token order
-
-      // The tokens MUST be in the same order as the position expects
-      let orderedToken0Data, orderedToken1Data;
-      if (positionData.token0.toLowerCase() === token0Data.address.toLowerCase() &&
-          positionData.token1.toLowerCase() === token1Data.address.toLowerCase()) {
-        // Order matches
-        orderedToken0Data = token0Data;
-        orderedToken1Data = token1Data;
-      } else if (positionData.token0.toLowerCase() === token1Data.address.toLowerCase() &&
-                 positionData.token1.toLowerCase() === token0Data.address.toLowerCase()) {
-        // Order is reversed
-
-        orderedToken0Data = token1Data;
-        orderedToken1Data = token0Data;
-      } else {
-        throw new Error(`Token mismatch: position tokens (${positionData.token0}, ${positionData.token1}) don't match provided tokens (${token0Data.address}, ${token1Data.address})`);
-      }
-
-      // Create Token instances for the SDK with correct order
-      const token0 = new Token(
-        chainId,
-        orderedToken0Data.address,
-        orderedToken0Data.decimals,
-        orderedToken0Data.symbol,
-        orderedToken0Data.name || orderedToken0Data.symbol
-      );
-
-      const token1 = new Token(
-        chainId,
-        orderedToken1Data.address,
-        orderedToken1Data.decimals,
-        orderedToken1Data.symbol,
-        orderedToken1Data.name || orderedToken1Data.symbol
-      );
-
-
-      // Create Pool instance
-      const pool = new Pool(
-        token0,
-        token1,
-        poolData.fee,
-        poolData.sqrtPriceX96,
-        poolData.liquidity,
-        poolData.tick
-      );
-
-      // Create a Position instance using the current position data
-
-      const currentPosition = new Position({
-        pool,
-        liquidity: positionData.liquidity.toString(),
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper
-      });
-
-      // Calculate uncollected fees if we're collecting them
-      let expectedCurrencyOwed0 = CurrencyAmount.fromRawAmount(token0, 0);
-      let expectedCurrencyOwed1 = CurrencyAmount.fromRawAmount(token1, 0);
-
-      if (collectFees) {
-        try {
-          const fees = await this.calculateFees(position, poolData, token0Data, token1Data);
-          if (fees && fees.token0 && fees.token1) {
-            expectedCurrencyOwed0 = CurrencyAmount.fromRawAmount(
-              token0,
-              fees.token0.raw.toString()
-            );
-            expectedCurrencyOwed1 = CurrencyAmount.fromRawAmount(
-              token1,
-              fees.token1.raw.toString()
-            );
-          }
-        } catch (feeError) {
-          console.warn("Error calculating fees, will use zero minimums:", feeError);
-        }
-      }
-
-      // Create CollectOptions to collect fees in the same transaction
-      const collectOptions = {
-        expectedCurrencyOwed0,
-        expectedCurrencyOwed1,
-        recipient: address
-      };
-
-      // Create slippage tolerance using standardized method
-      const slippageTolerancePercent = this._createSlippagePercent(slippageTolerance);
-
-      // Create liquidity percentage Percent
-      const liquidityPercentage = new Percent(percentage, 100);
-
-      // Create RemoveLiquidityOptions
-      const removeLiquidityOptions = {
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: slippageTolerancePercent,
-        tokenId: position.id,
-        // Percentage of liquidity to remove
-        liquidityPercentage: liquidityPercentage,
-        collectOptions,
-      };
-
-      // Generate the calldata using the SDK
-
-      const { calldata, value } = NonfungiblePositionManager.removeCallParameters(
-        currentPosition,
-        removeLiquidityOptions
-      );
-
-      // Return transaction data
-      return {
-        to: positionManagerAddress,
-        data: calldata,
-        value: value
-      };
-    } catch (error) {
-      console.error("Error generating remove liquidity data:", error);
-      throw new Error(`Failed to generate remove liquidity data: ${error.message}`);
     }
   }
 
@@ -2320,141 +2835,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Generate transaction data for adding liquidity to an existing position
-   * @param {Object} params - Parameters for generating add liquidity data
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
-   * @throws {Error} If parameters are invalid or transaction data cannot be generated
-   */
-  async generateAddLiquidityData(params) {
-    const {
-      position,
-      token0Amount,
-      token1Amount,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      slippageTolerance = 0.5
-    } = params;
-
-    // Input validation
-    if (!position || !position.id) {
-      throw new Error("Invalid position data");
-    }
-
-    if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
-        (!token1Amount || parseFloat(token1Amount) <= 0)) {
-      throw new Error("At least one token amount must be provided");
-    }
-
-    if (!provider) {
-      throw new Error("Provider is required");
-    }
-
-    if (!address) {
-      throw new Error("Wallet address is required");
-    }
-
-    if (!chainId) {
-      throw new Error("Chain ID is required");
-    }
-
-    if (!poolData || !token0Data || !token1Data) {
-      throw new Error("Pool and token data are required");
-    }
-
-    try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-      // Create Token instances for the SDK
-      const token0 = new Token(
-        chainId,
-        token0Data.address,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
-      );
-
-      const token1 = new Token(
-        chainId,
-        token1Data.address,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
-      );
-
-      // Create Pool instance
-      const pool = new Pool(
-        token0,
-        token1,
-        poolData.fee,
-        poolData.sqrtPriceX96,
-        poolData.liquidity,
-        poolData.tick
-      );
-
-      // Convert token amounts to JSBI for the SDK
-      const amount0 = token0Amount
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, token0Data.decimals).toString())
-        : JSBI.BigInt(0);
-
-      const amount1 = token1Amount
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, token1Data.decimals).toString())
-        : JSBI.BigInt(0);
-
-      // Create a Position instance to represent the amount we want to add
-      const positionToIncreaseBy = Position.fromAmounts({
-        pool,
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper,
-        amount0,
-        amount1,
-        useFullPrecision: true,
-      });
-
-      // Create AddLiquidityOptions
-      const addLiquidityOptions = {
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
-        tokenId: position.id,
-      };
-
-      // Generate the calldata using the SDK
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        positionToIncreaseBy,
-        addLiquidityOptions
-      );
-
-      // Return transaction data
-      return {
-        to: positionManagerAddress,
-        data: calldata,
-        value: value
-      };
-    } catch (error) {
-      console.error("Error generating add liquidity data:", error);
-      throw new Error(`Failed to generate add liquidity data: ${error.message}`);
-    }
-  }
-
-  /**
    * Add liquidity to an existing position
    * @param {Object} params - Parameters for adding liquidity
    * @param {Object} params.position - Position object with ID and other properties
@@ -2728,204 +3108,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       onError && onError(errorMessage);
     } finally {
       onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Generate transaction data for creating a new position
-   * @param {Object} params - Parameters for generating create position data
-   * @param {string} params.token0Address - Address of token0
-   * @param {string} params.token1Address - Address of token1
-   * @param {number} params.feeTier - Fee tier (e.g., 500, 3000, 10000)
-   * @param {number} params.tickLower - Lower tick of the position
-   * @param {number} params.tickUpper - Upper tick of the position
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage
-   * @param {boolean} params.tokensSwapped - Whether tokens need to be swapped for Uniswap ordering
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
-   * @throws {Error} If parameters are invalid or transaction data cannot be generated
-   */
-  async generateCreatePositionData(params) {
-    const {
-      token0Address,
-      token1Address,
-      feeTier,
-      tickLower,
-      tickUpper,
-      token0Amount,
-      token1Amount,
-      provider,
-      address,
-      chainId,
-      slippageTolerance,
-      tokensSwapped = false,
-      deadlineMinutes
-    } = params;
-
-    // Input validation
-    if (!token0Address || !token1Address) {
-      throw new Error("Token addresses are required");
-    }
-
-    if (!provider) {
-      throw new Error("Provider is required");
-    }
-
-    if (!address) {
-      throw new Error("Wallet address is required");
-    }
-
-    if (!deadlineMinutes) {
-      throw new Error("Deadline minutes is required");
-    }
-
-    if (slippageTolerance === undefined || slippageTolerance === null) {
-      throw new Error("Slippage tolerance is required");
-    }
-
-    try {
-      // Get configuration for current chain
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-      const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
-
-      if (!positionManagerAddress || !factoryAddress) {
-        throw new Error(`Missing contract addresses for chainId: ${chainId}`);
-      }
-
-      // Step 1: Get token details
-      const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, provider);
-      const token1Contract = new ethers.Contract(token1Address, this.erc20ABI, provider);
-
-      const [decimals0, symbol0, name0, decimals1, symbol1, name1] = await Promise.all([
-        token0Contract.decimals().then(d => Number(d)),
-        token0Contract.symbol(),
-        token0Contract.name(),
-        token1Contract.decimals().then(d => Number(d)),
-        token1Contract.symbol(),
-        token1Contract.name()
-      ]);
-
-      // Step 2: Create Token instances for the SDK
-      // Token constructor requires (chainId, address, decimals, symbol, name)
-      const tokenA = new Token(
-        chainId,
-        token0Address,
-        decimals0,
-        symbol0,
-        name0
-      );
-
-      const tokenB = new Token(
-        chainId,
-        token1Address,
-        decimals1,
-        symbol1,
-        name1
-      );
-
-      // Step 3: Compute the Pool address to get Pool data
-      const currentPoolAddress = Pool.getAddress(tokenA, tokenB, Number(feeTier));
-
-      // Step 4: Create Pool contract and get pool data
-      const poolContract = new ethers.Contract(
-        currentPoolAddress,
-        this.uniswapV3PoolABI,
-        provider
-      );
-
-      let liquidity, slot0, tickSpacing;
-      try {
-        [liquidity, slot0, tickSpacing] = await Promise.all([
-          poolContract.liquidity(),
-          poolContract.slot0(),
-          poolContract.tickSpacing()
-        ]);
-      } catch (error) {
-        throw new Error(`Cannot create position: pool does not exist for ${symbol0}/${symbol1} with ${feeTier} fee tier. Pool must be created first.`);
-      }
-
-      // Step 5: Create the Pool instance
-      const configuredPool = new Pool(
-        tokenA,
-        tokenB,
-        Number(feeTier),
-        slot0.sqrtPriceX96.toString(),
-        liquidity.toString(),
-        Number(slot0.tick)
-      );
-
-      // Step 6: Normalize ticks based on tickSpacing
-      const normalizedTickLower = Math.floor(Number(tickLower) / Number(tickSpacing)) * Number(tickSpacing);
-      const normalizedTickUpper = Math.floor(Number(tickUpper) / Number(tickSpacing)) * Number(tickSpacing);
-
-      // Step 7: Convert token amounts to JSBI
-      const amount0 = token0Amount && parseFloat(token0Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
-        : JSBI.BigInt(0);
-
-      const amount1 = token1Amount && parseFloat(token1Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
-        : JSBI.BigInt(0);
-
-      // Step 8: Create the Position instance
-      const position = Position.fromAmounts({
-        pool: configuredPool,
-        tickLower: normalizedTickLower,
-        tickUpper: normalizedTickUpper,
-        amount0: tokensSwapped ? amount1 : amount0,
-        amount1: tokensSwapped ? amount0 : amount1,
-        useFullPrecision: true
-      });
-
-      // Step 9: Create mint options
-      const mintOptions = {
-        recipient: address,
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
-      };
-
-      // Step 10: Get calldata for minting
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        position,
-        mintOptions
-      );
-
-      // Return the transaction data
-      return {
-        to: positionManagerAddress,
-        data: calldata,
-        value: value,
-        position: {
-          token0: {
-            address: tokenA.address,
-            symbol: tokenA.symbol,
-            decimals: tokenA.decimals
-          },
-          token1: {
-            address: tokenB.address,
-            symbol: tokenB.symbol,
-            decimals: tokenB.decimals
-          },
-          fee: Number(feeTier),
-          tickLower: normalizedTickLower,
-          tickUpper: normalizedTickUpper,
-          amount0: position.amount0.quotient.toString(),
-          amount1: position.amount1.quotient.toString(),
-          liquidity: position.liquidity.toString()
-        }
-      };
-    } catch (error) {
-      console.error("Error generating create position data:", error);
-      throw new Error(`Failed to generate create position data: ${error.message}`);
     }
   }
 
@@ -3217,82 +3399,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       onError && onError(errorMessage);
     } finally {
       onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Generate swap transaction data for Uniswap V3
-   * @param {Object} params - Parameters for swap
-   * @param {string} params.tokenIn - Address of input token
-   * @param {string} params.tokenOut - Address of output token
-   * @param {number} params.fee - Fee tier (500, 3000, 10000)
-   * @param {string} params.recipient - Address to receive output tokens
-   * @param {string} params.amountIn - Amount of input tokens (in wei)
-   * @param {string} params.amountOutMinimum - Minimum amount of output tokens (in wei)
-   * @param {number} params.sqrtPriceLimitX96 - Price limit (0 for no limit)
-   * @param {Object} params.provider - Ethers provider
-   * @param {number} params.chainId - Chain ID
-   * @returns {Promise<Object>} Transaction data with to, data, and value
-   * @throws {Error} If parameters are invalid or transaction data cannot be generated
-   */
-  async generateSwapData(params) {
-    const {
-      tokenIn,
-      tokenOut,
-      fee,
-      recipient,
-      amountIn,
-      amountOutMinimum,
-      sqrtPriceLimitX96,
-      deadlineMinutes,
-      provider,
-      chainId
-    } = params;
-
-    try {
-      // Validate required parameters
-      if (!tokenIn || !tokenOut || !fee || !recipient || !amountIn || !provider || !chainId || !deadlineMinutes) {
-        throw new Error("Missing required parameters for swap");
-      }
-
-      // Validate chainId matches our adapter's chainId
-      if (chainId !== this.chainId) {
-        throw new Error(`ChainId ${chainId} does not match adapter chainId ${this.chainId}`);
-      }
-
-      // Use cached router address
-      if (!this.addresses?.routerAddress) {
-        throw new Error(`No Uniswap V3 router address found for chainId: ${chainId}`);
-      }
-
-      const routerAddress = this.addresses.routerAddress;
-
-      // Create swap router interface
-      const swapRouterInterface = new ethers.Interface(this.swapRouterABI);
-
-      // Create swap parameters for exactInputSingle
-      const swapParams = {
-        tokenIn,
-        tokenOut,
-        fee,
-        recipient,
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        amountIn,
-        amountOutMinimum: amountOutMinimum || 0,
-        sqrtPriceLimitX96: sqrtPriceLimitX96 || 0
-      };
-
-      // Encode the function call
-      const data = swapRouterInterface.encodeFunctionData("exactInputSingle", [swapParams]);
-
-      return {
-        to: routerAddress,
-        data,
-        value: tokenIn.toLowerCase() === "0x0000000000000000000000000000000000000000" ? amountIn : 0
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to generate swap data: ${error.message}`);
     }
   }
 }
