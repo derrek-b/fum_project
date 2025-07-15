@@ -65,7 +65,9 @@ export async function setupTestEnvironment(options = {}) {
   let testVault = null;
   let testPosition = null;
   let positionTokenId = null;
+  let usdcPerEth = "0"; // Default value if swap doesn't happen
   let wethAddress, usdcAddress, uniswapV3;
+  let poolData = null;
 
   if (deployContracts) {
     console.log('💰 Setting up test vault with assets...');
@@ -139,11 +141,10 @@ export async function setupTestEnvironment(options = {}) {
       tokenOut: usdcAddress,
       fee: 500, // 0.05% fee pool
       recipient: owner.address,
-      amountIn: ethers.parseEther('2'),
-      amountOutMinimum: 0,
-      sqrtPriceLimitX96: 0,
+      amountIn: ethers.parseEther('2').toString(),
+      slippageTolerance: 1, // 1% slippage
+      sqrtPriceLimitX96: "0",
       provider: ganache.provider,
-      chainId: 1337,
       deadlineMinutes: 2  // 2 minutes for L2
     };
 
@@ -164,6 +165,10 @@ export async function setupTestEnvironment(options = {}) {
     console.log(`  - WETH balance: ${ethers.formatEther(wethBalance)} WETH`);
     console.log(`  - USDC balance: ${ethers.formatUnits(usdcBalance, 6)} USDC`);
 
+    // Calculate USDC per ETH price from our 2 ETH swap
+    usdcPerEth = (parseFloat(ethers.formatUnits(usdcBalance, 6)) / 2).toString();
+    console.log(`  - Current price: 1 ETH = ${usdcPerEth} USDC`);
+
     // 4. Create a position using 20% of assets
     console.log('  - Creating Uniswap V3 position...');
 
@@ -175,7 +180,7 @@ export async function setupTestEnvironment(options = {}) {
     await (await usdc.approve(uniswapV3.positionManagerAddress, usdcAmount)).wait();
 
     // Get current pool data to center position around current tick
-    const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, ganache.provider);
+    poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, ganache.provider);
     console.log('Tick:', poolData.tick)
 
     // Create position centered around current tick
@@ -284,6 +289,12 @@ export async function setupTestEnvironment(options = {}) {
 
     // Uniswap V3 addresses
     uniswapV3,
+
+    // Pool data for tick calculations
+    poolData,
+
+    // Price data from setup swap
+    usdcPerEth, // USDC per ETH price as string
 
 
     // Helper functions

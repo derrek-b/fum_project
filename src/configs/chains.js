@@ -16,6 +16,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
         enabled: true,
       },
     },
@@ -32,6 +33,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88", // Same as Arbitrum since it's a fork
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Same as Arbitrum since it's a fork
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // Same as Arbitrum since it's a fork
         enabled: true,
       },
     },
@@ -48,6 +50,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
         enabled: true,
       },
     },

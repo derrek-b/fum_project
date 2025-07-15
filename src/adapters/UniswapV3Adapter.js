@@ -24,11 +24,13 @@ import JSBI from "jsbi";
 import NonfungiblePositionManagerARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
 import IUniswapV3PoolARTIFACT from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
 import SwapRouterARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json';
+import QuoterARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
 
 const NonfungiblePositionManagerABI = NonfungiblePositionManagerARTIFACT.abi;
 const IUniswapV3PoolABI = IUniswapV3PoolARTIFACT.abi;
 const SwapRouterABI = SwapRouterARTIFACT.abi;
+const QuoterABI = QuoterARTIFACT.abi;
 const ERC20ABI = ERC20ARTIFACT.abi;
 
 // Define MaxUint128 constant (2^128 - 1) as JSBI for Uniswap SDK compatibility
@@ -79,12 +81,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.nonfungiblePositionManagerABI = NonfungiblePositionManagerABI;
     this.uniswapV3PoolABI = IUniswapV3PoolABI;
     this.swapRouterABI = SwapRouterABI;
+    this.quoterABI = QuoterABI;
     this.erc20ABI = ERC20ABI;
 
     // Pre-create contract interfaces for better performance
     this.swapRouterInterface = new ethers.Interface(this.swapRouterABI);
     this.positionManagerInterface = new ethers.Interface(this.nonfungiblePositionManagerABI);
     this.poolInterface = new ethers.Interface(this.uniswapV3PoolABI);
+    this.quoterInterface = new ethers.Interface(this.quoterABI);
     this.erc20Interface = new ethers.Interface(this.erc20ABI);
 
   }
@@ -219,7 +223,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       );
     }
   }
-
 
   /**
    * Create standardized slippage tolerance Percent object
@@ -1798,11 +1801,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     if (typeof poolData.sqrtPriceX96 !== 'string') {
       throw new Error("Pool data sqrtPriceX96 must be a string");
     }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
     if (!poolData.liquidity) {
       throw new Error("Pool data liquidity is required");
     }
     if (typeof poolData.liquidity !== 'string') {
       throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
     }
     if (poolData.tick === null || poolData.tick === undefined) {
       throw new Error("Pool data tick is required");
@@ -1990,16 +1999,27 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Generate transaction data for adding liquidity to an existing position
    * @param {Object} params - Parameters for generating add liquidity data
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
+   * @param {Object} params.position - Position object with ID and tick range
+   * @param {string} params.position.id - Position NFT token ID
+   * @param {number} params.position.tickLower - Lower tick of the position range
+   * @param {number} params.position.tickUpper - Upper tick of the position range
+   * @param {string} params.token0Amount - Amount of token0 to add (in human readable format)
+   * @param {string} params.token1Amount - Amount of token1 to add (in human readable format)
    * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
+   * @param {string} params.walletAddress - User's wallet address
    * @param {Object} params.poolData - Pool data for the position
+   * @param {number} params.poolData.fee - Pool fee tier (100, 500, 3000, 10000)
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool price in sqrt format
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
    * @param {Object} params.token0Data - Token0 data
+   * @param {string} params.token0Data.address - Token0 contract address
+   * @param {number} params.token0Data.decimals - Token0 decimal places
    * @param {Object} params.token1Data - Token1 data
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
+   * @param {string} params.token1Data.address - Token1 contract address
+   * @param {number} params.token1Data.decimals - Token1 decimal places
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
+   * @param {number} [params.deadlineMinutes=20] - Transaction deadline in minutes
    * @returns {Object} Transaction data object with `to`, `data`, `value` properties
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
@@ -2009,63 +2029,215 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       token0Amount,
       token1Amount,
       provider,
-      address,
-      chainId,
+      walletAddress,
       poolData,
       token0Data,
       token1Data,
-      slippageTolerance = 0.5
+      slippageTolerance,
+      deadlineMinutes
     } = params;
 
     // Input validation
-    if (!position || !position.id) {
-      throw new Error("Invalid position data");
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position ID is required");
+    }
+    if (typeof position.id !== 'string') {
+      throw new Error('Position ID must be a string');
+    }
+    if (!/^\d+$/.test(position.id)) {
+      throw new Error('Position ID must be a numeric string');
+    }
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("Position tickLower is required");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("Position tickLower must be a finite number");
+    }
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("Position tickUpper is required");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("Position tickUpper must be a finite number");
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("Position tickLower must be less than tickUpper");
     }
 
-    if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
-        (!token1Amount || parseFloat(token1Amount) <= 0)) {
-      throw new Error("At least one token amount must be provided");
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
     }
 
-    if (!provider) {
-      throw new Error("Provider is required");
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
     }
 
-    if (!address) {
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    // Validate provider using existing method
+    await this._validateProviderChain(provider);
+
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
       throw new Error("Wallet address is required");
     }
-
-    if (!chainId) {
-      throw new Error("Chain ID is required");
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
-    if (!poolData || !token0Data || !token1Data) {
-      throw new Error("Pool and token data are required");
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
+      throw new Error("Token0 data must be an object");
+    }
+    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
+      throw new Error("Token0 address is required");
+    }
+    if (typeof token0Data.address !== 'string') {
+      throw new Error("Token0 address must be a string");
+    }
+    try {
+      ethers.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
+      throw new Error("Token0 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
+      throw new Error("Token1 data must be an object");
+    }
+    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
+      throw new Error("Token1 address is required");
+    }
+    if (typeof token1Data.address !== 'string') {
+      throw new Error("Token1 address must be a string");
+    }
+    try {
+      ethers.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
+      throw new Error("Token1 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
     }
 
     try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
+      // Get position manager address from platform addresses
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address found for chainId: ${this.chainId}`);
       }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+      const positionManagerAddress = this.addresses.positionManagerAddress;
 
-      // Create Token instances for the SDK
+      // Use sortTokens to get correct Uniswap token ordering
+      const { sortedToken0, sortedToken1, tokensSwapped } = this.sortTokens(token0Data, token1Data);
+
+      // Create Token instances for the SDK with correct order
       const token0 = new Token(
-        chainId,
-        token0Data.address,
-        token0Data.decimals,
-        token0Data.symbol,
-        token0Data.name || token0Data.symbol
+        this.chainId,
+        sortedToken0.address,
+        sortedToken0.decimals
       );
 
       const token1 = new Token(
-        chainId,
-        token1Data.address,
-        token1Data.decimals,
-        token1Data.symbol,
-        token1Data.name || token1Data.symbol
+        this.chainId,
+        sortedToken1.address,
+        sortedToken1.decimals
       );
 
       // Create Pool instance
@@ -2078,24 +2250,50 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         poolData.tick
       );
 
-      // Convert token amounts to JSBI for the SDK
-      const amount0 = token0Amount
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, token0Data.decimals).toString())
-        : JSBI.BigInt(0);
+      // Convert token amounts to JSBI for the SDK, accounting for token sorting
+      // For missing amounts, use 0 (Uniswap SDK will calculate optimal amounts)
+      let amount0, amount1;
 
-      const amount1 = token1Amount
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, token1Data.decimals).toString())
-        : JSBI.BigInt(0);
+      if (tokensSwapped) {
+        amount0 = JSBI.BigInt(token1Amount);
+        amount1 = JSBI.BigInt(token0Amount);
+      } else {
+        amount0 = JSBI.BigInt(token0Amount);
+        amount1 = JSBI.BigInt(token1Amount);
+      }
 
       // Create a Position instance to represent the amount we want to add
-      const positionToIncreaseBy = Position.fromAmounts({
-        pool,
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper,
-        amount0,
-        amount1,
-        useFullPrecision: true,
-      });
+      let positionToIncreaseBy;
+
+      if (JSBI.equal(amount1, JSBI.BigInt(0))) {
+        // Only token0 - use fromAmount0
+        positionToIncreaseBy = Position.fromAmount0({
+          pool,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+          amount0,
+          useFullPrecision: true,
+        });
+      } else if (JSBI.equal(amount0, JSBI.BigInt(0))) {
+        // Only token1 - use fromAmount1
+        positionToIncreaseBy = Position.fromAmount1({
+          pool,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+          amount1,
+          useFullPrecision: true,
+        });
+      } else {
+        // Both tokens - use fromAmounts
+        positionToIncreaseBy = Position.fromAmounts({
+          pool,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+          amount0,
+          amount1,
+          useFullPrecision: true,
+        });
+      }
 
       // Create AddLiquidityOptions
       const addLiquidityOptions = {
@@ -2110,15 +2308,109 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         addLiquidityOptions
       );
 
-      // Return transaction data
+      // Return transaction data with calculated amounts
       return {
         to: positionManagerAddress,
         data: calldata,
-        value: value
+        value: value,
+        calculatedAmounts: {
+          token0Amount: positionToIncreaseBy.amount0.quotient.toString(),
+          token1Amount: positionToIncreaseBy.amount1.quotient.toString(),
+          token0Address: sortedToken0.address,
+          token1Address: sortedToken1.address
+        }
       };
     } catch (error) {
       console.error("Error generating add liquidity data:", error);
       throw new Error(`Failed to generate add liquidity data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get expected output amount for a swap using Quoter contract
+   * @param {Object} params - Parameters for getting swap quote
+   * @param {string} params.tokenInAddress - Address of input token
+   * @param {string} params.tokenOutAddress - Address of output token
+   * @param {number} params.fee - Fee tier (e.g., 500, 3000, 10000)
+   * @param {string} params.amountIn - Amount of input tokens (in wei string)
+   * @param {Object} params.provider - Ethers provider instance
+   * @returns {Promise<string>} Expected output amount in wei string
+   * @throws {Error} If quote cannot be calculated
+   */
+  async getSwapQuote(params) {
+    const { tokenInAddress, tokenOutAddress, fee, amountIn, provider } = params;
+
+    // Validate tokenIn address
+    if (!tokenInAddress) {
+      throw new Error("TokenIn address parameter is required");
+    }
+    try {
+      ethers.getAddress(tokenInAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    }
+
+    // Validate tokenOut address
+    if (!tokenOutAddress) {
+      throw new Error("TokenOut address parameter is required");
+    }
+    try {
+      ethers.getAddress(tokenOutAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+    }
+
+    // Validate fee
+    if (fee === null || fee === undefined) {
+      throw new Error("Fee parameter is required");
+    }
+    if (typeof fee !== 'number' || !Number.isFinite(fee)) {
+      throw new Error("Fee must be a valid number");
+    }
+    if (!this.feeTiers.includes(fee)) {
+      throw new Error(`Invalid fee tier: ${fee}. Must be one of: ${this.feeTiers.join(', ')}`);
+    }
+
+    // Validate amountIn
+    if (!amountIn) {
+      throw new Error("AmountIn parameter is required");
+    }
+    if (typeof amountIn !== 'string') {
+      throw new Error("AmountIn must be a string");
+    }
+    if (!/^\d+$/.test(amountIn)) {
+      throw new Error("AmountIn must be a positive numeric string");
+    }
+    if (amountIn === '0') {
+      throw new Error("AmountIn cannot be zero");
+    }
+
+    // Validate provider
+    await this._validateProviderChain(provider);
+
+    // Use quoter address from config
+    if (!this.addresses?.quoterAddress) {
+      throw new Error(`No Uniswap V3 quoter address found for chainId: ${this.chainId}`);
+    }
+
+    try {
+      const quoterContract = new ethers.Contract(this.addresses.quoterAddress, this.quoterABI, provider);
+
+      // QuoterV2 takes a struct parameter
+      const params = {
+        tokenIn: tokenInAddress,
+        tokenOut: tokenOutAddress,
+        fee: fee,
+        amountIn: amountIn,
+        sqrtPriceLimitX96: 0 // No price limit
+      };
+
+      const result = await quoterContract.quoteExactInputSingle.staticCall(params);
+
+      // QuoterV2 returns [amountOut, sqrtPriceX96After]
+      return result[0].toString();
+    } catch (error) {
+      throw new Error(`Failed to get swap quote: ${error.message}`);
     }
   }
 
@@ -2130,10 +2422,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.fee - Fee tier (500, 3000, 10000)
    * @param {string} params.recipient - Address to receive output tokens
    * @param {string} params.amountIn - Amount of input tokens (in wei)
-   * @param {string} params.amountOutMinimum - Minimum amount of output tokens (in wei)
-   * @param {number} params.sqrtPriceLimitX96 - Price limit (0 for no limit)
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
+   * @param {string} params.sqrtPriceLimitX96 - Price limit (0 for no limit)
+   * @param {number} params.deadlineMinutes - Transaction deadline in minutes
    * @param {Object} params.provider - Ethers provider
-   * @param {number} params.chainId - Chain ID
    * @returns {Promise<Object>} Transaction data with to, data, and value
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
@@ -2144,33 +2436,121 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       fee,
       recipient,
       amountIn,
-      amountOutMinimum,
+      slippageTolerance,
       sqrtPriceLimitX96,
       deadlineMinutes,
-      provider,
-      chainId
+      provider
     } = params;
 
+    // Validate tokenIn address
+    if (!tokenIn) {
+      throw new Error("TokenIn address parameter is required");
+    }
     try {
-      // Validate required parameters
-      if (!tokenIn || !tokenOut || !fee || !recipient || !amountIn || !provider || !chainId || !deadlineMinutes) {
-        throw new Error("Missing required parameters for swap");
-      }
+      ethers.getAddress(tokenIn);
+    } catch (error) {
+      throw new Error(`Invalid tokenIn address: ${tokenIn}`);
+    }
 
-      // Validate chainId matches our adapter's chainId
-      if (chainId !== this.chainId) {
-        throw new Error(`ChainId ${chainId} does not match adapter chainId ${this.chainId}`);
-      }
+    // Validate tokenOut address
+    if (!tokenOut) {
+      throw new Error("TokenOut address parameter is required");
+    }
+    try {
+      ethers.getAddress(tokenOut);
+    } catch (error) {
+      throw new Error(`Invalid tokenOut address: ${tokenOut}`);
+    }
 
-      // Use cached router address
-      if (!this.addresses?.routerAddress) {
-        throw new Error(`No Uniswap V3 router address found for chainId: ${chainId}`);
-      }
+    // Validate fee
+    if (fee === null || fee === undefined) {
+      throw new Error("Fee parameter is required");
+    }
+    if (typeof fee !== 'number' || !Number.isFinite(fee)) {
+      throw new Error("Fee must be a valid number");
+    }
+    if (!this.feeTiers.includes(fee)) {
+      throw new Error(`Invalid fee tier: ${fee}. Must be one of: ${this.feeTiers.join(', ')}`);
+    }
 
-      const routerAddress = this.addresses.routerAddress;
+    // Validate recipient address
+    if (!recipient) {
+      throw new Error("Recipient address parameter is required");
+    }
+    try {
+      ethers.getAddress(recipient);
+    } catch (error) {
+      throw new Error(`Invalid recipient address: ${recipient}`);
+    }
 
-      // Create swap router interface
-      const swapRouterInterface = new ethers.Interface(this.swapRouterABI);
+    // Validate amountIn
+    if (!amountIn) {
+      throw new Error("AmountIn parameter is required");
+    }
+    if (typeof amountIn !== 'string') {
+      throw new Error("AmountIn must be a string");
+    }
+    if (!/^\d+$/.test(amountIn)) {
+      throw new Error("AmountIn must be a positive numeric string");
+    }
+    if (amountIn === '0') {
+      throw new Error("AmountIn cannot be zero");
+    }
+
+    // Validate slippage tolerance
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    // Validate sqrtPriceLimitX96
+    if (sqrtPriceLimitX96 === null || sqrtPriceLimitX96 === undefined) {
+      throw new Error("sqrtPriceLimitX96 parameter is required");
+    }
+    if (typeof sqrtPriceLimitX96 !== 'string') {
+      throw new Error("sqrtPriceLimitX96 must be a string");
+    }
+    if (!/^\d+$/.test(sqrtPriceLimitX96)) {
+      throw new Error("sqrtPriceLimitX96 must be a positive numeric string");
+    }
+
+    // Validate deadlineMinutes
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes) || deadlineMinutes < 0) {
+      throw new Error("Deadline minutes must be a non-negative number");
+    }
+
+    // Validate provider
+    await this._validateProviderChain(provider);
+
+    // Use cached router address
+    if (!this.addresses?.routerAddress) {
+      throw new Error(`No Uniswap V3 router address found for chainId: ${this.chainId}`);
+    }
+
+    const routerAddress = this.addresses.routerAddress;
+
+    try {
+      // Get quote for the swap
+      const expectedAmountOut = await this.getSwapQuote({
+        tokenInAddress: tokenIn,
+        tokenOutAddress: tokenOut,
+        fee,
+        amountIn,
+        provider
+      });
+
+      // Calculate minimum amount out with slippage
+      const expectedAmountOutBigInt = BigInt(expectedAmountOut);
+      const slippageMultiplier = BigInt(Math.floor((100 - slippageTolerance) * 100));
+      const amountOutMinimum = (expectedAmountOutBigInt * slippageMultiplier / 10000n).toString();
 
       // Create swap parameters for exactInputSingle
       const swapParams = {
@@ -2178,19 +2558,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tokenOut,
         fee,
         recipient,
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        deadline: this._createDeadline(deadlineMinutes),
         amountIn,
-        amountOutMinimum: amountOutMinimum || 0,
-        sqrtPriceLimitX96: sqrtPriceLimitX96 || 0
+        amountOutMinimum,
+        sqrtPriceLimitX96
       };
 
       // Encode the function call
-      const data = swapRouterInterface.encodeFunctionData("exactInputSingle", [swapParams]);
+      const data = this.swapRouterInterface.encodeFunctionData("exactInputSingle", [swapParams]);
 
       return {
         to: routerAddress,
         data,
-        value: tokenIn.toLowerCase() === "0x0000000000000000000000000000000000000000" ? amountIn : 0
+        value: "0x00"
       };
 
     } catch (error) {
