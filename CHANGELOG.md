@@ -5,6 +5,77 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-01-16
+
+### Major UniswapV3Adapter Refactor & Architectural Improvements
+
+#### **BREAKING CHANGES**
+- **Removed transaction execution functions**: `claimFees()`, `addLiquidity()`, `createPosition()`, `decreaseLiquidity()`, and `closePosition()` have been removed from UniswapV3Adapter
+  - These functions mixed platform-specific logic with generic transaction execution
+  - Calling code now handles transaction execution, UI callbacks, and state management
+  - Adapter focuses solely on generating platform-specific transaction data
+
+#### **New Features**
+- **Added `getAddLiquidityQuote()` function**: Centralized V3 liquidity calculations
+  - Extracts position calculation logic from `generateAddLiquidityData()`
+  - Uses Uniswap SDK's `Position.fromAmounts()`, `Position.fromAmount0()`, `Position.fromAmount1()` methods
+  - Handles token sorting, tick validation, and SDK optimization
+  - Returns comprehensive quote object with position data and metadata
+
+#### **Enhanced Functions**
+- **`generateAddLiquidityData()` improvements**:
+  - Refactored to use `getAddLiquidityQuote()` for calculations
+  - Removed `walletAddress` parameter (not needed for data generation)
+  - Now returns full quote object in addition to transaction data
+  - Simplified parameter validation and error handling
+
+- **`generateCreatePositionData()` complete rewrite**:
+  - Now uses same logic as `generateAddLiquidityData()` via `getAddLiquidityQuote()`
+  - Added `walletAddress` parameter for recipient address
+  - Unified architecture between creating and adding to positions
+  - Improved parameter validation and error handling
+
+#### **Test Suite Enhancements**
+- **Comprehensive test coverage**: Added 40+ new tests across all functions
+- **Real position data**: Tests now use `env.testPosition` instead of hardcoded values
+- **Token sorting fixes**: Properly handle WETH/USDC token order in tests
+- **SDK rounding tolerance**: Account for Uniswap SDK optimization differences
+- **Edge case testing**: Out-of-range positions, single token inputs, scaling scenarios
+- **Error validation**: Comprehensive parameter validation testing
+
+#### **Architecture Improvements**
+- **Better separation of concerns**: Adapter generates data, calling code handles execution
+- **Improved testability**: Data generation functions are pure and easier to test
+- **Cleaner abstraction**: Removed UI-specific callbacks and state management
+- **Enhanced flexibility**: Calling code can customize transaction flow and error handling
+
+#### **Migration Guide**
+```javascript
+// Before (0.6.x) - Adapter handled everything
+await adapter.addLiquidity({
+  position, token0Amount, token1Amount, provider, address, chainId,
+  poolData, token0Data, token1Data, slippageTolerance, deadlineMinutes,
+  onStart, onSuccess, onError, onFinish
+});
+
+// After (0.7.x) - Adapter generates data, you handle execution
+const txData = await adapter.generateAddLiquidityData({
+  position, token0Amount, token1Amount, provider,
+  poolData, token0Data, token1Data, slippageTolerance, deadlineMinutes
+});
+
+// Your code handles transaction execution and UI callbacks
+const signer = await provider.getSigner();
+const tx = await signer.sendTransaction(txData);
+const receipt = await tx.wait();
+```
+
+#### **Benefits**
+- **Cleaner code**: Platform-specific logic separated from generic blockchain operations
+- **Better testing**: Pure functions without side effects are easier to test
+- **More flexible**: Applications can customize transaction flow and error handling
+- **Future-proof**: Architecture supports additional platforms and transaction types
+
 ## [0.3.0] - 2025-06-17
 
 ### Security & Reliability Improvements
