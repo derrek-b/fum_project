@@ -113,14 +113,6 @@ export default class PlatformAdapter {
     throw new Error("generateClaimFeesData must be implemented by subclasses");
   }
 
-  /**
-   * Claim fees for a position
-   * @param {Object} params - Parameters for claiming fees
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async claimFees(params) {
-    throw new Error("claimFees must be implemented by subclasses");
-  }
 
   /**
    * Check if a position is in range (active)
@@ -179,23 +171,7 @@ export default class PlatformAdapter {
     throw new Error("generateRemoveLiquidityData must be implemented by subclasses");
   }
 
-  /**
-   * Remove liquidity from a position and collect fees
-   * @param {Object} params - Parameters for removing liquidity
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async decreaseLiquidity(params) {
-    throw new Error("decreaseLiquidity must be implemented by subclasses");
-  }
 
-  /**
-   * Close a position completely by removing all liquidity and optionally burning the NFT
-   * @param {Object} params - Parameters for closing position
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async closePosition(params) {
-    throw new Error("closePosition must be implemented by subclasses");
-  }
 
   /**
    * Generate transaction data for adding liquidity to an existing position
@@ -207,14 +183,6 @@ export default class PlatformAdapter {
     throw new Error("generateAddLiquidityData must be implemented by subclasses");
   }
 
-  /**
-   * Add liquidity to an existing position
-   * @param {Object} params - Parameters for adding liquidity
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async addLiquidity(params) {
-    throw new Error("addLiquidity must be implemented by subclasses");
-  }
 
   /**
    * Generate transaction data for creating a new position
@@ -226,14 +194,6 @@ export default class PlatformAdapter {
     throw new Error("generateCreatePositionData must be implemented by subclasses");
   }
 
-  /**
-   * Create a new liquidity position
-   * @param {Object} params - Parameters for creating a new position
-   * @returns {Promise<Object>} Transaction receipt and position data
-   */
-  async createPosition(params) {
-    throw new Error("createPosition must be implemented by subclasses");
-  }
 
   /**
    * Generate swap transaction data

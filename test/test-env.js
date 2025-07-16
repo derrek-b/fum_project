@@ -181,7 +181,6 @@ export async function setupTestEnvironment(options = {}) {
 
     // Get current pool data to center position around current tick
     poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, ganache.provider);
-    console.log('Tick:', poolData.tick)
 
     // Create position centered around current tick
     const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
@@ -221,8 +220,8 @@ export async function setupTestEnvironment(options = {}) {
     positionTokenId = tokenId;
     console.log(`  - Position will have ID: ${positionTokenId}`);
     console.log(`  - Position liquidity: ${liquidity}`);
-    console.log(`  - Amount0 deposited: ${amount0}`);
-    console.log(`  - Amount1 deposited: ${amount1}`);
+    console.log(`  - Amount0 deposited: ${amount0} WETH`);
+    console.log(`  - Amount1 deposited: ${amount1} USDC`);
 
     // Now execute the actual mint transaction
     const mintTx = await positionManager.mint(mintParams);

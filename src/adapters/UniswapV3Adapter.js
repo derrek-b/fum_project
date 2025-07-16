@@ -2006,7 +2006,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} params.token0Amount - Amount of token0 to add (in human readable format)
    * @param {string} params.token1Amount - Amount of token1 to add (in human readable format)
    * @param {Object} params.provider - Ethers provider
-   * @param {string} params.walletAddress - User's wallet address
    * @param {Object} params.poolData - Pool data for the position
    * @param {number} params.poolData.fee - Pool fee tier (100, 500, 3000, 10000)
    * @param {string} params.poolData.sqrtPriceX96 - Current pool price in sqrt format
@@ -2020,7 +2019,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.token1Data.decimals - Token1 decimal places
    * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
    * @param {number} [params.deadlineMinutes=20] - Transaction deadline in minutes
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full getAddLiquidityQuote result
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateAddLiquidityData(params) {
@@ -2029,7 +2028,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       token0Amount,
       token1Amount,
       provider,
-      walletAddress,
       poolData,
       token0Data,
       token1Data,
@@ -2095,18 +2093,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Validate provider using existing method
     await this._validateProviderChain(provider);
-
-    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
-      throw new Error("Wallet address is required");
-    }
-    if (typeof walletAddress !== 'string') {
-      throw new Error("Wallet address must be a string");
-    }
-    try {
-      ethers.getAddress(walletAddress);
-    } catch (error) {
-      throw new Error(`Invalid wallet address: ${walletAddress}`);
-    }
 
     if (poolData === null || poolData === undefined) {
       throw new Error("Pool data parameter is required");
@@ -2224,6 +2210,216 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
       const positionManagerAddress = this.addresses.positionManagerAddress;
 
+      // Use getAddLiquidityQuote to calculate the position
+      const quote = await this.getAddLiquidityQuote({
+        position,
+        token0Amount,
+        token1Amount,
+        provider,
+        poolData,
+        token0Data,
+        token1Data
+      });
+
+      // Extract the calculated position and metadata
+      const { position: positionToIncreaseBy, tokensSwapped, sortedToken0, sortedToken1 } = quote;
+
+      // Create AddLiquidityOptions
+      const addLiquidityOptions = {
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
+        tokenId: position.id,
+      };
+
+      // Generate the calldata using the SDK
+      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
+        positionToIncreaseBy,
+        addLiquidityOptions
+      );
+
+      // Return transaction data with calculated amounts
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value,
+        quote: quote
+      };
+    } catch (error) {
+      console.error("Error generating add liquidity data:", error);
+      throw new Error(`Failed to generate add liquidity data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get liquidity quote for adding liquidity to a position
+   * @param {Object} params - Parameters for getting add liquidity quote
+   * @param {Object} params.position - Position object with tick range
+   * @param {number} params.position.tickLower - Lower tick of the position range
+   * @param {number} params.position.tickUpper - Upper tick of the position range
+   * @param {string} params.token0Amount - Amount of token0 to add (in wei string)
+   * @param {string} params.token1Amount - Amount of token1 to add (in wei string)
+   * @param {Object} params.provider - Ethers provider
+   * @param {Object} params.poolData - Pool data for the position
+   * @param {number} params.poolData.fee - Pool fee tier (100, 500, 3000, 10000)
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool price in sqrt format
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
+   * @param {Object} params.token0Data - Token0 data
+   * @param {string} params.token0Data.address - Token0 contract address
+   * @param {number} params.token0Data.decimals - Token0 decimal places
+   * @param {Object} params.token1Data - Token1 data
+   * @param {string} params.token1Data.address - Token1 contract address
+   * @param {number} params.token1Data.decimals - Token1 decimal places
+   * @returns {Promise<Object>} Position object with calculated amounts
+   * @throws {Error} If parameters are invalid or quote cannot be calculated
+   */
+  async getAddLiquidityQuote(params) {
+    const {
+      position,
+      token0Amount,
+      token1Amount,
+      provider,
+      poolData,
+      token0Data,
+      token1Data
+    } = params;
+
+    // Input validation (same as generateAddLiquidityData except for slippage and deadline)
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("Position tickLower is required");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("Position tickLower must be a finite number");
+    }
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("Position tickUpper is required");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("Position tickUpper must be a finite number");
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("Position tickLower must be less than tickUpper");
+    }
+
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    // Validate provider using existing method
+    await this._validateProviderChain(provider);
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
+      throw new Error("Token0 data must be an object");
+    }
+    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
+      throw new Error("Token0 address is required");
+    }
+    if (typeof token0Data.address !== 'string') {
+      throw new Error("Token0 address must be a string");
+    }
+    try {
+      ethers.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
+      throw new Error("Token0 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
+      throw new Error("Token1 data must be an object");
+    }
+    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
+      throw new Error("Token1 address is required");
+    }
+    if (typeof token1Data.address !== 'string') {
+      throw new Error("Token1 address must be a string");
+    }
+    try {
+      ethers.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
+      throw new Error("Token1 decimals must be a finite number between 0 and 255");
+    }
+
+    try {
       // Use sortTokens to get correct Uniswap token ordering
       const { sortedToken0, sortedToken1, tokensSwapped } = this.sortTokens(token0Data, token1Data);
 
@@ -2263,11 +2459,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
 
       // Create a Position instance to represent the amount we want to add
-      let positionToIncreaseBy;
+      let quotePosition;
 
       if (JSBI.equal(amount1, JSBI.BigInt(0))) {
         // Only token0 - use fromAmount0
-        positionToIncreaseBy = Position.fromAmount0({
+        quotePosition = Position.fromAmount0({
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
@@ -2276,7 +2472,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         });
       } else if (JSBI.equal(amount0, JSBI.BigInt(0))) {
         // Only token1 - use fromAmount1
-        positionToIncreaseBy = Position.fromAmount1({
+        quotePosition = Position.fromAmount1({
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
@@ -2285,7 +2481,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         });
       } else {
         // Both tokens - use fromAmounts
-        positionToIncreaseBy = Position.fromAmounts({
+        quotePosition = Position.fromAmounts({
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
@@ -2295,34 +2491,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         });
       }
 
-      // Create AddLiquidityOptions
-      const addLiquidityOptions = {
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
-        tokenId: position.id,
-      };
-
-      // Generate the calldata using the SDK
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        positionToIncreaseBy,
-        addLiquidityOptions
-      );
-
-      // Return transaction data with calculated amounts
+      // Return the Position object with additional metadata
       return {
-        to: positionManagerAddress,
-        data: calldata,
-        value: value,
-        calculatedAmounts: {
-          token0Amount: positionToIncreaseBy.amount0.quotient.toString(),
-          token1Amount: positionToIncreaseBy.amount1.quotient.toString(),
-          token0Address: sortedToken0.address,
-          token1Address: sortedToken1.address
-        }
+        position: quotePosition,
+        tokensSwapped,
+        sortedToken0,
+        sortedToken1,
+        pool
       };
     } catch (error) {
-      console.error("Error generating add liquidity data:", error);
-      throw new Error(`Failed to generate add liquidity data: ${error.message}`);
+      console.error("Error calculating add liquidity quote:", error);
+      throw new Error(`Failed to calculate add liquidity quote: ${error.message}`);
     }
   }
 
@@ -2581,1204 +2760,258 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Generate transaction data for creating a new position
    * @param {Object} params - Parameters for generating create position data
-   * @param {string} params.token0Address - Address of token0
-   * @param {string} params.token1Address - Address of token1
-   * @param {number} params.feeTier - Fee tier (e.g., 500, 3000, 10000)
-   * @param {number} params.tickLower - Lower tick of the position
-   * @param {number} params.tickUpper - Upper tick of the position
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
+   * @param {Object} params.position - Position object with tick range
+   * @param {number} params.position.tickLower - Lower tick of the position range
+   * @param {number} params.position.tickUpper - Upper tick of the position range
+   * @param {string} params.token0Amount - Amount of token0 to add (in human readable format)
+   * @param {string} params.token1Amount - Amount of token1 to add (in human readable format)
    * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage
-   * @param {boolean} params.tokensSwapped - Whether tokens need to be swapped for Uniswap ordering
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties
+   * @param {string} params.walletAddress - User's wallet address
+   * @param {Object} params.poolData - Pool data for the position
+   * @param {number} params.poolData.fee - Pool fee tier (100, 500, 3000, 10000)
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool price in sqrt format
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
+   * @param {Object} params.token0Data - Token0 data
+   * @param {string} params.token0Data.address - Token0 contract address
+   * @param {number} params.token0Data.decimals - Token0 decimal places
+   * @param {Object} params.token1Data - Token1 data
+   * @param {string} params.token1Data.address - Token1 contract address
+   * @param {number} params.token1Data.decimals - Token1 decimal places
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
+   * @param {number} [params.deadlineMinutes=20] - Transaction deadline in minutes
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full getAddLiquidityQuote result
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateCreatePositionData(params) {
     const {
-      token0Address,
-      token1Address,
-      feeTier,
-      tickLower,
-      tickUpper,
+      position,
       token0Amount,
       token1Amount,
       provider,
-      address,
-      chainId,
+      walletAddress,
+      poolData,
+      token0Data,
+      token1Data,
       slippageTolerance,
-      tokensSwapped = false,
       deadlineMinutes
     } = params;
 
     // Input validation
-    if (!token0Address || !token1Address) {
-      throw new Error("Token addresses are required");
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("Position tickLower is required");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("Position tickLower must be a finite number");
+    }
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("Position tickUpper is required");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("Position tickUpper must be a finite number");
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("Position tickLower must be less than tickUpper");
     }
 
-    if (!provider) {
-      throw new Error("Provider is required");
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
     }
 
-    if (!address) {
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    // Validate provider using existing method
+    await this._validateProviderChain(provider);
+
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
       throw new Error("Wallet address is required");
     }
-
-    if (!deadlineMinutes) {
-      throw new Error("Deadline minutes is required");
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
-    if (slippageTolerance === undefined || slippageTolerance === null) {
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
+      throw new Error("Token0 data must be an object");
+    }
+    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
+      throw new Error("Token0 address is required");
+    }
+    if (typeof token0Data.address !== 'string') {
+      throw new Error("Token0 address must be a string");
+    }
+    try {
+      ethers.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
+      throw new Error("Token0 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
+      throw new Error("Token1 data must be an object");
+    }
+    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
+      throw new Error("Token1 address is required");
+    }
+    if (typeof token1Data.address !== 'string') {
+      throw new Error("Token1 address must be a string");
+    }
+    try {
+      ethers.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
+      throw new Error("Token1 decimals must be a finite number between 0 and 255");
+    }
+
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    if (slippageTolerance === null || slippageTolerance === undefined) {
       throw new Error("Slippage tolerance is required");
     }
-
-    try {
-      // Get configuration for current chain
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-      const factoryAddress = chainConfig.platformAddresses.uniswapV3.factoryAddress;
-
-      if (!positionManagerAddress || !factoryAddress) {
-        throw new Error(`Missing contract addresses for chainId: ${chainId}`);
-      }
-
-      // Step 1: Get token details
-      const token0Contract = new ethers.Contract(token0Address, this.erc20ABI, provider);
-      const token1Contract = new ethers.Contract(token1Address, this.erc20ABI, provider);
-
-      const [decimals0, symbol0, name0, decimals1, symbol1, name1] = await Promise.all([
-        token0Contract.decimals().then(d => Number(d)),
-        token0Contract.symbol(),
-        token0Contract.name(),
-        token1Contract.decimals().then(d => Number(d)),
-        token1Contract.symbol(),
-        token1Contract.name()
-      ]);
-
-      // Step 2: Create Token instances for the SDK
-      // Token constructor requires (chainId, address, decimals, symbol, name)
-      const tokenA = new Token(
-        chainId,
-        token0Address,
-        decimals0,
-        symbol0,
-        name0
-      );
-
-      const tokenB = new Token(
-        chainId,
-        token1Address,
-        decimals1,
-        symbol1,
-        name1
-      );
-
-      // Step 3: Compute the Pool address to get Pool data
-      const currentPoolAddress = Pool.getAddress(tokenA, tokenB, Number(feeTier));
-
-      // Step 4: Create Pool contract and get pool data
-      const poolContract = new ethers.Contract(
-        currentPoolAddress,
-        this.uniswapV3PoolABI,
-        provider
-      );
-
-      let liquidity, slot0, tickSpacing;
-      try {
-        [liquidity, slot0, tickSpacing] = await Promise.all([
-          poolContract.liquidity(),
-          poolContract.slot0(),
-          poolContract.tickSpacing()
-        ]);
-      } catch (error) {
-        throw new Error(`Cannot create position: pool does not exist for ${symbol0}/${symbol1} with ${feeTier} fee tier. Pool must be created first.`);
-      }
-
-      // Step 5: Create the Pool instance
-      const configuredPool = new Pool(
-        tokenA,
-        tokenB,
-        Number(feeTier),
-        slot0.sqrtPriceX96.toString(),
-        liquidity.toString(),
-        Number(slot0.tick)
-      );
-
-      // Step 6: Normalize ticks based on tickSpacing
-      const normalizedTickLower = Math.floor(Number(tickLower) / Number(tickSpacing)) * Number(tickSpacing);
-      const normalizedTickUpper = Math.floor(Number(tickUpper) / Number(tickSpacing)) * Number(tickSpacing);
-
-      // Step 7: Convert token amounts to JSBI
-      const amount0 = token0Amount && parseFloat(token0Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token0Amount, decimals0).toString())
-        : JSBI.BigInt(0);
-
-      const amount1 = token1Amount && parseFloat(token1Amount) > 0
-        ? JSBI.BigInt(ethers.parseUnits(token1Amount, decimals1).toString())
-        : JSBI.BigInt(0);
-
-      // Step 8: Create the Position instance
-      const position = Position.fromAmounts({
-        pool: configuredPool,
-        tickLower: normalizedTickLower,
-        tickUpper: normalizedTickUpper,
-        amount0: tokensSwapped ? amount1 : amount0,
-        amount1: tokensSwapped ? amount0 : amount1,
-        useFullPrecision: true
-      });
-
-      // Step 9: Create mint options
-      const mintOptions = {
-        recipient: address,
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
-      };
-
-      // Step 10: Get calldata for minting
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        position,
-        mintOptions
-      );
-
-      // Return the transaction data
-      return {
-        to: positionManagerAddress,
-        data: calldata,
-        value: value,
-        position: {
-          token0: {
-            address: tokenA.address,
-            symbol: tokenA.symbol,
-            decimals: tokenA.decimals
-          },
-          token1: {
-            address: tokenB.address,
-            symbol: tokenB.symbol,
-            decimals: tokenB.decimals
-          },
-          fee: Number(feeTier),
-          tickLower: normalizedTickLower,
-          tickUpper: normalizedTickUpper,
-          amount0: position.amount0.quotient.toString(),
-          amount1: position.amount1.quotient.toString(),
-          liquidity: position.liquidity.toString()
-        }
-      };
-    } catch (error) {
-      console.error("Error generating create position data:", error);
-      throw new Error(`Failed to generate create position data: ${error.message}`);
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
     }
-  }
-
-  /**
-   * Claim fees for a position
-   * @param {Object} params - Parameters for claiming fees
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {Function} params.onStart - Callback function called when transaction starts
-   * @param {Function} params.onSuccess - Callback function called on successful transaction
-   * @param {Function} params.onError - Callback function called on error
-   * @param {Function} params.onFinish - Callback function called when process finishes
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async claimFees(params) {
-    const { position, provider, address, chainId, poolData, token0Data, token1Data, gasMultiplier = 1.1, onStart, onSuccess, onError, onFinish } = params;
-
-    // Input validation
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
     }
 
-    // Notify start of operation
-    onStart && onStart();
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
 
     try {
-      // Generate transaction data
-      const txData = await this.generateClaimFeesData({
+      // Get position manager address from platform addresses
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+      }
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+
+      // Use getAddLiquidityQuote to calculate the position
+      const quote = await this.getAddLiquidityQuote({
         position,
+        token0Amount,
+        token1Amount,
         provider,
-        address,
-        chainId,
         poolData,
         token0Data,
         token1Data
       });
 
-      // Get signer
-      const signer = await provider.getSigner();
+      // Extract the calculated position and metadata
+      const { position: newPosition, tokensSwapped, sortedToken0, sortedToken1 } = quote;
 
-      // Estimate gas using the transaction data
-      const gasEstimate = await this._estimateGasFromTxData(
-        signer,
-        {
-          to: txData.to,
-          data: txData.data,
-          value: txData.value,
-          from: address
-        }
-      );
-      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
-
-      // Construct transaction
-      const transaction = {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address,
-        gasLimit
+      // Create MintOptions (for new position)
+      const mintOptions = {
+        recipient: walletAddress,
+        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
+        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
       };
 
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      const receipt = await tx.wait();
-
-      // IMPORTANT: Fetch updated position data after claiming fees
-      try {
-        // Get position manager address from chain config
-        const chainConfig = this.config[chainId];
-        const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-        // Create contract instances for fetching updated data
-        const nftManager = new ethers.Contract(
-          positionManagerAddress,
-          this.nonfungiblePositionManagerABI,
-          provider
-        );
-
-        const poolContract = new ethers.Contract(
-          position.poolAddress,
-          this.uniswapV3PoolABI,
-          provider
-        );
-
-        // Get the updated position directly from the contract
-        const updatedPositionData = await nftManager.positions(position.id);
-
-        // Create an updated position object that reflects the fee claim
-        const updatedPosition = {
-          ...position,
-          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
-          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
-          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
-        };
-
-        // Get fresh pool data for fee calculation
-        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
-        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
-
-        // Update the pool data with fresh fee growth values
-        const updatedPoolData = {
-          ...poolData,
-          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
-          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
-        };
-
-        // Call success callback with updated data
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          updatedPosition,
-          updatedPoolData
-        });
-      } catch (updateError) {
-        console.error("Error fetching updated position data:", updateError);
-        // Still consider the claim successful even if the update fails
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          warning: "Position was updated but failed to fetch new data"
-        });
-      }
-    } catch (error) {
-      console.error("Error claiming fees:", error);
-
-      // Provide more detailed error information based on error code
-      let errorMessage = "Unknown error";
-
-      if (error.code) {
-        // Handle ethers/provider specific error codes
-        switch(error.code) {
-          case 4001:
-            errorMessage = "Transaction rejected by user";
-            break;
-          case -32603:
-            errorMessage = "Internal JSON-RPC error";
-            break;
-          default:
-            errorMessage = error.message || `Error code: ${error.code}`;
-        }
-      } else {
-        errorMessage = error.message || "Unknown error";
-      }
-
-      onError && onError(errorMessage);
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Remove liquidity from a position and collect fees
-   * @param {Object} params - Parameters for removing liquidity
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {number} params.percentage - Percentage of liquidity to remove (1-100)
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage
-   * @param {Function} params.onStart - Callback function called when transaction starts
-   * @param {Function} params.onSuccess - Callback function called on successful transaction
-   * @param {Function} params.onError - Callback function called on error
-   * @param {Function} params.onFinish - Callback function called when process finishes
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async decreaseLiquidity(params) {
-    const {
-      position,
-      percentage,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      slippageTolerance,
-      deadlineMinutes,
-      gasMultiplier = 1.1,
-      onStart,
-      onSuccess,
-      onError,
-      onFinish
-    } = params;
-
-    // Input validation
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    if (!percentage || percentage <= 0 || percentage > 100) {
-      onError && onError("Percentage must be between 1 and 100");
-      return;
-    }
-
-    if (slippageTolerance === undefined || slippageTolerance === null) {
-      onError && onError("Slippage tolerance is required");
-      return;
-    }
-
-    if (!deadlineMinutes) {
-      onError && onError("Deadline minutes is required");
-      return;
-    }
-
-    // Notify start of operation
-    onStart && onStart();
-
-    try {
-      // Generate transaction data for removing liquidity and collecting fees in one transaction
-      const txData = await this.generateRemoveLiquidityData({
-        position,
-        percentage,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        slippageTolerance,
-        deadlineMinutes,
-        collectFees: true
-      });
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Estimate gas using the transaction data
-      const gasEstimate = await this._estimateGasFromTxData(
-        signer,
-        {
-          to: txData.to,
-          data: txData.data,
-          value: txData.value,
-          from: address
-        }
+      // Generate the calldata using the SDK
+      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
+        newPosition,
+        mintOptions
       );
-      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
 
-      // Construct transaction
-      const transaction = {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address,
-        gasLimit
+      // Return transaction data with calculated amounts
+      return {
+        to: positionManagerAddress,
+        data: calldata,
+        value: value,
+        quote: quote
       };
-
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      const receipt = await tx.wait();
-
-      // IMPORTANT: Fetch updated position data after decreasing liquidity
-      try {
-        // Get position manager address from chain config
-        const chainConfig = this.config[chainId];
-        const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-        // Create contract instances for fetching updated data
-        const nftManager = new ethers.Contract(
-          positionManagerAddress,
-          this.nonfungiblePositionManagerABI,
-          provider
-        );
-
-        const poolContract = new ethers.Contract(
-          position.poolAddress,
-          this.uniswapV3PoolABI,
-          provider
-        );
-
-        // Get the updated position directly from the contract
-        const updatedPositionData = await nftManager.positions(position.id);
-
-        // Create an updated position object that reflects the liquidity decrease
-        const updatedPosition = {
-          ...position,
-          liquidity: updatedPositionData.liquidity.toString(),
-          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
-          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
-          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
-        };
-
-        // Get fresh pool data for fee calculation
-        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
-        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
-
-        // Update the pool data with fresh fee growth values
-        const updatedPoolData = {
-          ...poolData,
-          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
-          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
-        };
-
-        // Call success callback with updated data
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          updatedPosition,
-          updatedPoolData,
-          decreaseReceipt: receipt,
-          collectReceipt: receipt
-        });
-      } catch (updateError) {
-        console.error("Error fetching updated position data:", updateError);
-        // Still consider the transaction successful even if the update fails
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          decreaseReceipt: receipt,
-          collectReceipt: receipt,
-          warning: "Position was updated but failed to fetch new data"
-        });
-      }
     } catch (error) {
-      console.error("Error removing liquidity:", error);
-
-      // Provide more detailed error information based on error code
-      let errorMessage = "Unknown error";
-
-      if (error.code) {
-        // Handle ethers/provider specific error codes
-        switch(error.code) {
-          case 4001:
-            errorMessage = "Transaction rejected by user";
-            break;
-          case -32603:
-            errorMessage = "Internal JSON-RPC error";
-            break;
-          default:
-            errorMessage = error.message || `Error code: ${error.code}`;
-        }
-      } else {
-        errorMessage = error.message || "Unknown error";
-      }
-
-      onError && onError(errorMessage);
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Close a position completely by removing all liquidity and optionally burning the NFT
-   * @param {Object} params - Parameters for closing position
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {boolean} params.collectFees - Whether to collect fees
-   * @param {boolean} params.burnPosition - Whether to burn the position NFT
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage (default: 0.5)
-   * @param {Function} params.onStart - Callback function called when transaction starts
-   * @param {Function} params.onSuccess - Callback function called on successful transaction
-   * @param {Function} params.onError - Callback function called on error
-   * @param {Function} params.onFinish - Callback function called when process finishes
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async closePosition(params) {
-    const {
-      position,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      collectFees = true,
-      burnPosition = false,
-      slippageTolerance,
-      deadlineMinutes,
-      gasMultiplier = 1.1,
-      onStart,
-      onSuccess,
-      onError,
-      onFinish
-    } = params;
-
-    // Call onStart callback
-    onStart && onStart();
-
-    try {
-      // Step 1: Remove all liquidity and collect fees using our improved decreaseLiquidity function
-      const liquidityResult = await this.decreaseLiquidity({
-        position,
-        percentage: 100, // Remove 100% of liquidity
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        slippageTolerance, // Use the provided slippage tolerance
-        deadlineMinutes, // Pass through deadline
-        gasMultiplier, // Pass through gas multiplier
-        onStart: () => {}, // We already called onStart
-        onFinish: () => {}, // Don't call onFinish yet
-        onError, // Pass through the error callback
-        onSuccess: () => {} // Don't call onSuccess yet, we'll handle it after burning if needed
-      });
-
-      // Step 2: Burn the position NFT if requested
-      let burnReceipt = null;
-      if (burnPosition) {
-        try {
-          // Burn implementation here
-          // This would be implemented if needed
-        } catch (burnError) {
-          console.error("Error burning position NFT:", burnError);
-        }
-      }
-
-      // Call success callback with combined results
-      onSuccess && onSuccess({
-        success: true,
-        liquidityResult,
-        burnReceipt,
-        tx: liquidityResult,
-      });
-    } catch (error) {
-      console.error("Error closing position:", error);
-      onError && onError(error.message || "Unknown error closing position");
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Add liquidity to an existing position
-   * @param {Object} params - Parameters for adding liquidity
-   * @param {Object} params.position - Position object with ID and other properties
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {Object} params.poolData - Pool data for the position
-   * @param {Object} params.token0Data - Token0 data
-   * @param {Object} params.token1Data - Token1 data
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage
-   * @param {Function} params.onStart - Callback function called when transaction starts
-   * @param {Function} params.onSuccess - Callback function called on successful transaction
-   * @param {Function} params.onError - Callback function called on error
-   * @param {Function} params.onFinish - Callback function called when process finishes
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async addLiquidity(params) {
-    const {
-      position,
-      token0Amount,
-      token1Amount,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      slippageTolerance,
-      deadlineMinutes,
-      gasMultiplier = 1.1,
-      onStart,
-      onSuccess,
-      onError,
-      onFinish
-    } = params;
-
-    // Input validation
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
-        (!token1Amount || parseFloat(token1Amount) <= 0)) {
-      onError && onError("At least one token amount must be provided");
-      return;
-    }
-
-    if (!deadlineMinutes) {
-      onError && onError("Deadline minutes is required");
-      return;
-    }
-
-    if (slippageTolerance === undefined || slippageTolerance === null) {
-      onError && onError("Slippage tolerance is required");
-      return;
-    }
-
-    // Notify start of operation
-    onStart && onStart();
-
-    try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Create ERC20 contract instances
-      const erc20Abi = [
-        'function approve(address spender, uint256 amount) external returns (bool)',
-        'function allowance(address owner, address spender) external view returns (uint256)'
-      ];
-
-      // Convert token amounts to wei/smallest units
-      let amount0InWei = '0';
-      let amount1InWei = '0';
-
-      if (token0Amount && parseFloat(token0Amount) > 0) {
-        amount0InWei = ethers.parseUnits(token0Amount, token0Data.decimals).toString();
-      }
-
-      if (token1Amount && parseFloat(token1Amount) > 0) {
-        amount1InWei = ethers.parseUnits(token1Amount, token1Data.decimals).toString();
-      }
-
-      // STEP 1: Check and approve tokens
-      const tokenApprovals = [];
-
-      if (parseFloat(token0Amount) > 0) {
-        const token0Contract = new ethers.Contract(token0Data.address, erc20Abi, provider);
-
-        // Check current allowance
-        const allowance0 = await token0Contract.allowance(address, positionManagerAddress);
-
-        if (BigInt(allowance0) < BigInt(amount0InWei)) {
-          // Estimate gas for approval
-          const approvalGasEstimate = await this._estimateGas(
-            token0Contract,
-            'approve',
-            [positionManagerAddress, ethers.MaxUint256]
-          );
-          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
-
-          // Create approval transaction
-          const approveTx = await token0Contract.connect(signer).approve(
-            positionManagerAddress,
-            ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: approvalGasLimit }
-          );
-
-          tokenApprovals.push(approveTx.wait());
-        }
-      }
-
-      if (parseFloat(token1Amount) > 0) {
-        const token1Contract = new ethers.Contract(token1Data.address, erc20Abi, provider);
-
-        // Check current allowance
-        const allowance1 = await token1Contract.allowance(address, positionManagerAddress);
-
-        if (BigInt(allowance1) < BigInt(amount1InWei)) {
-          // Estimate gas for approval
-          const approvalGasEstimate = await this._estimateGas(
-            token1Contract,
-            'approve',
-            [positionManagerAddress, ethers.MaxUint256]
-          );
-          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
-
-          // Create approval transaction
-          const approveTx = await token1Contract.connect(signer).approve(
-            positionManagerAddress,
-            ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: approvalGasLimit }
-          );
-
-          tokenApprovals.push(approveTx.wait());
-        } else {
-        }
-      }
-
-      // Wait for all approvals to complete
-      if (tokenApprovals.length > 0) {
-        await Promise.all(tokenApprovals);
-      }
-
-      // STEP 2: Generate transaction data for adding liquidity
-      const txData = await this.generateAddLiquidityData({
-        position,
-        token0Amount,
-        token1Amount,
-        provider,
-        address,
-        chainId,
-        poolData,
-        token0Data,
-        token1Data,
-        slippageTolerance,
-        deadlineMinutes
-      });
-
-      // Estimate gas using the transaction data
-      const gasEstimate = await this._estimateGasFromTxData(
-        signer,
-        {
-          to: txData.to,
-          data: txData.data,
-          value: txData.value,
-          from: address
-        }
-      );
-      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
-
-      // Construct transaction
-      const transaction = {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address,
-        gasLimit
-      };
-
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      const receipt = await tx.wait();
-
-      // IMPORTANT: Fetch updated position data after adding liquidity
-      try {
-        // Get the updated position directly from the contract
-        const nftManager = new ethers.Contract(
-          positionManagerAddress,
-          this.nonfungiblePositionManagerABI,
-          provider
-        );
-
-        const poolContract = new ethers.Contract(
-          position.poolAddress,
-          this.uniswapV3PoolABI,
-          provider
-        );
-
-        // Get the updated position directly from the contract
-        const updatedPositionData = await nftManager.positions(position.id);
-
-        // Create an updated position object that reflects the liquidity increase
-        const updatedPosition = {
-          ...position,
-          liquidity: updatedPositionData.liquidity.toString(),
-          tokensOwed0: updatedPositionData.tokensOwed0.toString(),
-          tokensOwed1: updatedPositionData.tokensOwed1.toString(),
-          feeGrowthInside0LastX128: updatedPositionData.feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: updatedPositionData.feeGrowthInside1LastX128.toString()
-        };
-
-        // Get fresh pool data for fee calculation
-        const feeGrowthGlobal0X128 = await poolContract.feeGrowthGlobal0X128();
-        const feeGrowthGlobal1X128 = await poolContract.feeGrowthGlobal1X128();
-
-        // Update the pool data with fresh fee growth values
-        const updatedPoolData = {
-          ...poolData,
-          feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
-          feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString()
-        };
-
-        // Call success callback with updated data
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          updatedPosition,
-          updatedPoolData
-        });
-      } catch (updateError) {
-        console.error("Error fetching updated position data:", updateError);
-        // Still consider the transaction successful even if the update fails
-        onSuccess && onSuccess({
-          success: true,
-          tx: receipt,
-          warning: "Position was updated but failed to fetch new data"
-        });
-      }
-    } catch (error) {
-      console.error("Error adding liquidity:", error);
-
-      // Provide more detailed error information based on error code
-      let errorMessage = "Unknown error";
-
-      if (error.code) {
-        // Handle ethers/provider specific error codes
-        switch(error.code) {
-          case 4001:
-            errorMessage = "Transaction rejected by user";
-            break;
-          case -32603:
-            errorMessage = "Internal JSON-RPC error";
-            break;
-          default:
-            errorMessage = error.message || `Error code: ${error.code}`;
-        }
-      } else {
-        errorMessage = error.message || "Unknown error";
-      }
-
-      onError && onError(errorMessage);
-    } finally {
-      onFinish && onFinish();
-    }
-  }
-
-  /**
-   * Create a new liquidity position
-   * @param {Object} params - Parameters for creating a new position
-   * @param {string} params.token0Address - Address of token0
-   * @param {string} params.token1Address - Address of token1
-   * @param {number} params.feeTier - Fee tier (e.g., 500, 3000, 10000)
-   * @param {number} params.tickLower - Lower tick of the position
-   * @param {number} params.tickUpper - Upper tick of the position
-   * @param {string} params.token0Amount - Amount of token0 to add
-   * @param {string} params.token1Amount - Amount of token1 to add
-   * @param {Object} params.provider - Ethers provider
-   * @param {string} params.address - User's wallet address
-   * @param {number} params.chainId - Chain ID
-   * @param {number} params.slippageTolerance - Slippage tolerance percentage
-   * @param {boolean} params.tokensSwapped - Whether tokens were swapped for correct ordering
-   * @param {Function} params.onStart - Callback function called when transaction starts
-   * @param {Function} params.onSuccess - Callback function called on successful transaction
-   * @param {Function} params.onError - Callback function called on error
-   * @param {Function} params.onFinish - Callback function called when process finishes
-   * @returns {Promise<Object>} Transaction receipt and position data
-   */
-  async createPosition(params) {
-    const {
-      token0Address,
-      token1Address,
-      feeTier,
-      tickLower,
-      tickUpper,
-      token0Amount,
-      token1Amount,
-      provider,
-      address,
-      chainId,
-      slippageTolerance,
-      tokensSwapped = false,
-      deadlineMinutes,
-      gasMultiplier = 1.1,
-      onStart,
-      onSuccess,
-      onError,
-      onFinish
-    } = params;
-
-    // Input validation
-    if (!provider || !address || !chainId) {
-      onError && onError("Wallet not connected");
-      return;
-    }
-
-    if (!token0Address || !token1Address) {
-      onError && onError("Token addresses are required");
-      return;
-    }
-
-    if ((!token0Amount || parseFloat(token0Amount) <= 0) &&
-        (!token1Amount || parseFloat(token1Amount) <= 0)) {
-      onError && onError("At least one token amount must be provided");
-      return;
-    }
-
-    if (!deadlineMinutes) {
-      onError && onError("Deadline minutes is required");
-      return;
-    }
-
-    if (slippageTolerance === undefined || slippageTolerance === null) {
-      onError && onError("Slippage tolerance is required");
-      return;
-    }
-
-    // Notify start of operation
-    onStart && onStart();
-
-    try {
-      // Get position manager address from chain config
-      const chainConfig = this.config[chainId];
-      if (!chainConfig || !chainConfig.platformAddresses?.uniswapV3?.positionManagerAddress) {
-        throw new Error(`No configuration found for chainId: ${chainId}`);
-      }
-      const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Create ERC20 contract instances
-      const erc20Abi = [
-        'function decimals() view returns (uint8)',
-        'function symbol() view returns (string)',
-        'function name() view returns (string)',
-        'function approve(address spender, uint256 amount) external returns (bool)',
-        'function allowance(address owner, address spender) external view returns (uint256)'
-      ];
-
-      // Determine which tokens we need to approve based on input amounts
-      const needsToken0Approval = token0Amount && parseFloat(token0Amount) > 0;
-      const needsToken1Approval = token1Amount && parseFloat(token1Amount) > 0;
-
-      // Create token contracts
-      const token0Contract = new ethers.Contract(token0Address, erc20Abi, provider);
-      const token1Contract = new ethers.Contract(token1Address, erc20Abi, provider);
-
-      // Get token details
-      const [token0Decimals, token0Symbol, token1Decimals, token1Symbol] = await Promise.all([
-        token0Contract.decimals(),
-        token0Contract.symbol(),
-        token1Contract.decimals(),
-        token1Contract.symbol()
-      ]);
-
-      // Convert token amounts to wei/smallest units
-      const amount0InWei = needsToken0Approval
-        ? ethers.parseUnits(token0Amount, token0Decimals).toString()
-        : '0';
-
-      const amount1InWei = needsToken1Approval
-        ? ethers.parseUnits(token1Amount, token1Decimals).toString()
-        : '0';
-
-      // STEP 1: Check and approve tokens
-      const tokenApprovals = [];
-
-      if (needsToken0Approval) {
-        // Check current allowance
-        const allowance0 = await token0Contract.allowance(address, positionManagerAddress);
-
-        if (BigInt(allowance0) < BigInt(amount0InWei)) {
-
-          // Estimate gas for approval
-          const approvalGasEstimate = await this._estimateGas(
-            token0Contract,
-            'approve',
-            [positionManagerAddress, ethers.MaxUint256]
-          );
-          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
-
-          // Create approval transaction
-          const approveTx = await token0Contract.connect(signer).approve(
-            positionManagerAddress,
-            ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: approvalGasLimit }
-          );
-
-          tokenApprovals.push(approveTx.wait());
-        }
-      }
-
-      if (needsToken1Approval) {
-        // Check current allowance
-        const allowance1 = await token1Contract.allowance(address, positionManagerAddress);
-
-        if (BigInt(allowance1) < BigInt(amount1InWei)) {
-
-          // Estimate gas for approval
-          const approvalGasEstimate = await this._estimateGas(
-            token1Contract,
-            'approve',
-            [positionManagerAddress, ethers.MaxUint256]
-          );
-          const approvalGasLimit = Math.ceil(approvalGasEstimate * gasMultiplier);
-
-          // Create approval transaction
-          const approveTx = await token1Contract.connect(signer).approve(
-            positionManagerAddress,
-            ethers.MaxUint256, // ethers v6 syntax for max uint256
-            { gasLimit: approvalGasLimit }
-          );
-
-          tokenApprovals.push(approveTx.wait());
-        }
-      }
-
-      // Wait for all approvals to complete
-      if (tokenApprovals.length > 0) {
-        await Promise.all(tokenApprovals);
-      }
-
-      // STEP 2: Generate transaction data for creating the position
-      const txData = await this.generateCreatePositionData({
-        token0Address,
-        token1Address,
-        feeTier,
-        tickLower,
-        tickUpper,
-        token0Amount,
-        token1Amount,
-        provider,
-        address,
-        chainId,
-        slippageTolerance,
-        tokensSwapped,
-        deadlineMinutes
-      });
-
-      // Estimate gas using the transaction data
-      const gasEstimate = await this._estimateGasFromTxData(
-        signer,
-        {
-          to: txData.to,
-          data: txData.data,
-          value: txData.value,
-          from: address
-        }
-      );
-      const gasLimit = Math.ceil(gasEstimate * gasMultiplier);
-
-      // Construct transaction
-      const transaction = {
-        to: txData.to,
-        data: txData.data,
-        value: txData.value,
-        from: address,
-        gasLimit
-      };
-
-      // Send transaction
-      const tx = await signer.sendTransaction(transaction);
-      const receipt = await tx.wait();
-
-      // Extract the position ID from the transaction receipt
-      let positionId = null;
-      try {
-        // Find the Transfer event (NFT minted)
-        const transferEvent = receipt.logs.find(log => {
-          try {
-            // A Transfer event has 3 topics: event signature + from + to
-            return log.topics.length === 4 &&
-                  log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-                  log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
-                  log.topics[2] === ethers.zeroPadValue(address.toLowerCase(), 32);
-          } catch (e) {
-            return false;
-          }
-        });
-
-        if (transferEvent) {
-          positionId = ethers.getBigInt(transferEvent.topics[3]).toString();
-        } else {
-          console.warn("Could not find Transfer event in receipt");
-        }
-      } catch (parseError) {
-        console.error("Error parsing position ID from receipt:", parseError);
-      }
-
-      // Call success callback with result
-      onSuccess && onSuccess({
-        success: true,
-        positionId,
-        tx: receipt,
-        txHash: receipt.hash,
-        token0: {
-          address: token0Address,
-          symbol: token0Symbol,
-          decimals: token0Decimals
-        },
-        token1: {
-          address: token1Address,
-          symbol: token1Symbol,
-          decimals: token1Decimals
-        },
-        fee: feeTier,
-        tickLower,
-        tickUpper
-      });
-    } catch (error) {
-      console.error("Error creating position:", error);
-
-      // Provide more detailed error information based on error code
-      let errorMessage = "Unknown error";
-
-      if (error.code) {
-        // Handle ethers/provider specific error codes
-        switch(error.code) {
-          case 4001:
-            errorMessage = "Transaction rejected by user";
-            break;
-          case -32603:
-            errorMessage = "Internal JSON-RPC error";
-            break;
-          default:
-            errorMessage = error.message || `Error code: ${error.code}`;
-        }
-      } else {
-        errorMessage = error.message || "Unknown error";
-      }
-
-      onError && onError(errorMessage);
-    } finally {
-      onFinish && onFinish();
+      console.error("Error generating create position data:", error);
+      throw new Error(`Failed to generate create position data: ${error.message}`);
     }
   }
 }

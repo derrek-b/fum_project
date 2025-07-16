@@ -5648,6 +5648,593 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   });
 
+  describe('getAddLiquidityQuote', () => {
+
+    describe('Success Cases', () => {
+      it('should return position object with metadata', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        expect(result).toBeDefined();
+        expect(result.position).toBeDefined();
+        expect(result.tokensSwapped).toBeDefined();
+        expect(result.sortedToken0).toBeDefined();
+        expect(result.sortedToken1).toBeDefined();
+        expect(result.pool).toBeDefined();
+
+        // Check position has required properties
+        expect(result.position.amount0).toBeDefined();
+        expect(result.position.amount1).toBeDefined();
+        expect(result.position.liquidity).toBeDefined();
+        expect(result.position.tickLower).toBe(-202410);
+        expect(result.position.tickUpper).toBe(-201090);
+      });
+
+      it('should calculate both token amounts when providing only token0', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper
+          },
+          token0Amount: '1000000000000000000',
+          token1Amount: '0',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Account for token sorting - WETH < USDC, so tokens are swapped
+        if (result.tokensSwapped) {
+          // Our "token0Amount" input (USDC) became amount1 after sorting
+          // SDK may use slightly less due to rounding, so check it's very close to our input
+          const amount1 = BigInt(result.position.amount1.quotient.toString());
+          const inputAmount = BigInt('1000000000000000000');
+          const difference = inputAmount - amount1;
+          expect(difference).toBeGreaterThanOrEqual(0n); // Should not exceed input
+          expect(difference).toBeLessThanOrEqual(BigInt('1000')); // Allow tiny rounding difference
+          // Should calculate a non-zero amount for token0 (WETH)
+          expect(result.position.amount0.quotient.toString()).not.toBe('0');
+          expect(BigInt(result.position.amount0.quotient.toString())).toBeGreaterThan(0n);
+        } else {
+          // Our "token0Amount" input stayed as amount0
+          const amount0 = BigInt(result.position.amount0.quotient.toString());
+          const inputAmount = BigInt('1000000000000000000');
+          const difference = inputAmount - amount0;
+          expect(difference).toBeGreaterThanOrEqual(0n); // Should not exceed input
+          expect(difference).toBeLessThanOrEqual(BigInt('1000')); // Allow tiny rounding difference
+          // Should calculate a non-zero amount for token1
+          expect(result.position.amount1.quotient.toString()).not.toBe('0');
+          expect(BigInt(result.position.amount1.quotient.toString())).toBeGreaterThan(0n);
+        }
+      });
+
+      it('should calculate both token amounts when providing only token1', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper
+          },
+          token0Amount: '0',
+          token1Amount: '1000000000000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Account for token sorting - WETH < USDC, so tokens are swapped
+        if (result.tokensSwapped) {
+          // Our "token1Amount" input (WETH) became amount0 after sorting
+          // SDK may use slightly less due to rounding, so check it's very close to our input
+          const amount0 = BigInt(result.position.amount0.quotient.toString());
+          const inputAmount = BigInt('1000000000000000000');
+          const difference = inputAmount - amount0;
+          expect(difference).toBeGreaterThanOrEqual(0n); // Should not exceed input
+          expect(difference).toBeLessThanOrEqual(BigInt('1000')); // Allow tiny rounding difference
+          // Should calculate a non-zero amount for token1 (USDC)
+          expect(result.position.amount1.quotient.toString()).not.toBe('0');
+          expect(BigInt(result.position.amount1.quotient.toString())).toBeGreaterThan(0n);
+        } else {
+          // Our "token1Amount" input stayed as amount1
+          const amount1 = BigInt(result.position.amount1.quotient.toString());
+          const inputAmount = BigInt('1000000000000000000');
+          const difference = inputAmount - amount1;
+          expect(difference).toBeGreaterThanOrEqual(0n); // Should not exceed input
+          expect(difference).toBeLessThanOrEqual(BigInt('1000')); // Allow tiny rounding difference
+          // Should calculate a non-zero amount for token0
+          expect(result.position.amount0.quotient.toString()).not.toBe('0');
+          expect(BigInt(result.position.amount0.quotient.toString())).toBeGreaterThan(0n);
+        }
+      });
+
+      it('should handle out-of-range positions correctly (above current tick)', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        // Position above current tick should contain only token0
+        const currentTick = poolData.tick;
+        const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
+
+        // Create properly spaced ticks above current tick
+        const tickLower = Math.floor((currentTick + 1000) / tickSpacing) * tickSpacing;
+        const tickUpper = Math.floor((currentTick + 2000) / tickSpacing) * tickSpacing;
+
+        const params = {
+          position: {
+            tickLower: tickLower,
+            tickUpper: tickUpper
+          },
+          token0Amount: '0',
+          token1Amount: '1000000000000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Above current tick position should hold 100% sorted token0 (WETH)
+        // Result amounts are always in sorted order
+        const amount0 = BigInt(result.position.amount0.quotient.toString());
+        const amount1 = BigInt(result.position.amount1.quotient.toString());
+        const inputAmount = BigInt('1000000000000000000');
+
+        // Should have close to input amount of token0 (WETH), allowing for rounding
+        expect(amount0 - inputAmount).toBeLessThan(1000n);
+        expect(amount0 - inputAmount).toBeGreaterThan(-1000n);
+        // Should have zero token1 (USDC)
+        expect(amount1).toBe(0n);
+      });
+
+      it('should handle out-of-range positions correctly (below current tick)', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        // Position below current tick should contain only token1
+        const currentTick = poolData.tick;
+        const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
+
+        // Create properly spaced ticks below current tick
+        const tickLower = Math.floor((currentTick - 2000) / tickSpacing) * tickSpacing;
+        const tickUpper = Math.floor((currentTick - 1000) / tickSpacing) * tickSpacing;
+
+        const params = {
+          position: {
+            tickLower: tickLower,
+            tickUpper: tickUpper
+          },
+          token0Amount: '1000000',
+          token1Amount: '0',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Below current tick position should hold 100% sorted token1 (USDC)
+        // Result amounts are always in sorted order
+        const amount0 = BigInt(result.position.amount0.quotient.toString());
+        const amount1 = BigInt(result.position.amount1.quotient.toString());
+        const inputAmount = BigInt('1000000');
+
+        // Should have zero token0 (WETH)
+        expect(amount0).toBe(0n);
+        // Should have close to input amount of token1 (USDC), allowing for rounding
+        expect(amount1 - inputAmount).toBeLessThan(1000n);
+        expect(amount1 - inputAmount).toBeGreaterThan(-1000n);
+      });
+
+      it('should scale proportionally when doubling inputs', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const baseParams = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        // Get quote for base amounts
+        const quote1 = await adapter.getAddLiquidityQuote({
+          ...baseParams,
+          token0Amount: '1000000000',
+          token1Amount: '2000000000000000000'
+        });
+
+        // Get quote for doubled amounts
+        const quote2 = await adapter.getAddLiquidityQuote({
+          ...baseParams,
+          token0Amount: '2000000000',
+          token1Amount: '4000000000000000000'
+        });
+
+        // Liquidity should scale proportionally (approximately double)
+        const liquidity1 = BigInt(quote1.position.liquidity.toString());
+        const liquidity2 = BigInt(quote2.position.liquidity.toString());
+
+        expect(liquidity2).toBeGreaterThan(liquidity1);
+        // Should be approximately double (within 1% tolerance for rounding)
+        const ratio = Number(liquidity2 * 100n / liquidity1);
+        expect(ratio).toBeGreaterThan(195); // 2.0 * 100 - 5% tolerance
+        expect(ratio).toBeLessThan(205);    // 2.0 * 100 + 5% tolerance
+      });
+
+      it('should handle token sorting correctly', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          token0Amount: '1000000000',
+          token1Amount: '1000000000000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Check that tokens are sorted correctly (lexicographically by address)
+        const expectedTokensSwapped = env.usdcAddress.toLowerCase() > env.wethAddress.toLowerCase();
+        expect(result.tokensSwapped).toBe(expectedTokensSwapped);
+
+        // Check that sorted tokens have correct addresses
+        if (expectedTokensSwapped) {
+          expect(result.sortedToken0.address).toBe(env.wethAddress);
+          expect(result.sortedToken1.address).toBe(env.usdcAddress);
+        } else {
+          expect(result.sortedToken0.address).toBe(env.usdcAddress);
+          expect(result.sortedToken1.address).toBe(env.wethAddress);
+        }
+      });
+
+      it('should return valid liquidity amount', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          token0Amount: '1000000000',
+          token1Amount: '1000000000000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Liquidity should be a positive number
+        expect(result.position.liquidity).toBeDefined();
+        expect(BigInt(result.position.liquidity.toString())).toBeGreaterThan(0n);
+
+        // Should be a valid JSBI/BigInt value
+        expect(result.position.liquidity.toString()).toMatch(/^\d+$/);
+      });
+
+      it('should maintain consistent tick range', async () => {
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        const params = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          token0Amount: '1000000000',
+          token1Amount: '1000000000000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+
+        const result = await adapter.getAddLiquidityQuote(params);
+
+        // Position should maintain the same tick range we provided
+        expect(result.position.tickLower).toBe(-202410);
+        expect(result.position.tickUpper).toBe(-201090);
+      });
+    });
+    describe('Error Cases', () => {
+      // Get valid test data for error tests
+      let baseParams;
+
+      beforeEach(async () => {
+        // Get pool data for test tokens
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        baseParams = {
+          position: {
+            tickLower: -202410,
+            tickUpper: -201090
+          },
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000000',
+          provider: env.provider,
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          }
+        };
+      });
+
+      describe('Position validation', () => {
+        it('should throw error for missing position', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: null })
+          ).rejects.toThrow('Position parameter is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: undefined })
+          ).rejects.toThrow('Position parameter is required');
+        });
+
+        it('should throw error for non-object position', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, position: invalidType })
+            ).rejects.toThrow('Position must be an object');
+          }
+        });
+
+        it('should throw error for invalid tick values', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: { ...baseParams.position, tickLower: null } })
+          ).rejects.toThrow('Position tickLower is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: { ...baseParams.position, tickUpper: null } })
+          ).rejects.toThrow('Position tickUpper is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: { ...baseParams.position, tickLower: NaN } })
+          ).rejects.toThrow('Position tickLower must be a finite number');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: { ...baseParams.position, tickUpper: Infinity } })
+          ).rejects.toThrow('Position tickUpper must be a finite number');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, position: { ...baseParams.position, tickLower: baseParams.position.tickUpper, tickUpper: baseParams.position.tickLower } })
+          ).rejects.toThrow('Position tickLower must be less than tickUpper');
+        });
+      });
+
+      describe('Token0 amount validation', () => {
+        it('should throw error for missing token0Amount', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token0Amount: null })
+          ).rejects.toThrow('Token0 amount is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token0Amount: undefined })
+          ).rejects.toThrow('Token0 amount is required');
+        });
+
+        it('should throw error for non-string token0Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token0Amount: invalidType })
+            ).rejects.toThrow('Token0 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token0Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token0Amount: invalidAmount })
+            ).rejects.toThrow('Token0 amount must be a positive numeric string');
+          }
+        });
+
+        it('should throw error when both token amounts are zero', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token0Amount: '0', token1Amount: '0' })
+          ).rejects.toThrow('At least one token amount must be greater than 0');
+        });
+      });
+
+      describe('Token1 amount validation', () => {
+        it('should throw error for missing token1Amount', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token1Amount: null })
+          ).rejects.toThrow('Token1 amount is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token1Amount: undefined })
+          ).rejects.toThrow('Token1 amount is required');
+        });
+
+        it('should throw error for non-string token1Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token1Amount: invalidType })
+            ).rejects.toThrow('Token1 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token1Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token1Amount: invalidAmount })
+            ).rejects.toThrow('Token1 amount must be a positive numeric string');
+          }
+        });
+      });
+
+      describe('Provider validation', () => {
+        it('should throw error for missing provider', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, provider: null })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, provider: undefined })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        });
+
+        it('should throw error for invalid provider', async () => {
+          const invalidProviders = [{}, [], 'provider', 123, true];
+          for (const invalidProvider of invalidProviders) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, provider: invalidProvider })
+            ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          }
+        });
+      });
+
+      describe('Pool data validation', () => {
+        it('should throw error for missing pool data', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, poolData: null })
+          ).rejects.toThrow('Pool data parameter is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, poolData: undefined })
+          ).rejects.toThrow('Pool data parameter is required');
+        });
+
+        it('should throw error for non-object pool data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, poolData: invalidType })
+            ).rejects.toThrow('Pool data must be an object');
+          }
+        });
+      });
+
+      describe('Token data validation', () => {
+        it('should throw error for missing token data', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token0Data: null })
+          ).rejects.toThrow('Token0 data parameter is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token1Data: null })
+          ).rejects.toThrow('Token1 data parameter is required');
+        });
+
+        it('should throw error for non-object token data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token0Data: invalidType })
+            ).rejects.toThrow('Token0 data must be an object');
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token1Data: invalidType })
+            ).rejects.toThrow('Token1 data must be an object');
+          }
+        });
+
+        it('should throw error for missing token decimals', async () => {
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token0Data: { address: env.usdcAddress } })
+          ).rejects.toThrow('Token0 decimals is required');
+          await expect(
+            adapter.getAddLiquidityQuote({ ...baseParams, token1Data: { address: env.wethAddress } })
+          ).rejects.toThrow('Token1 decimals is required');
+        });
+
+        it('should throw error for invalid token decimals', async () => {
+          const invalidDecimals = ['6', true, false, {}, [], -1, 256, NaN, Infinity];
+          for (const invalidDecimal of invalidDecimals) {
+            await expect(
+              adapter.getAddLiquidityQuote({ ...baseParams, token0Data: { ...baseParams.token0Data, decimals: invalidDecimal } })
+            ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
+          }
+        });
+      });
+    });
+  });
+
   describe('getSwapQuote', () => {
     describe('Success Cases', () => {
       it('should return correct quote for 0.5 ETH → USDC swap', async () => {
@@ -6613,7 +7200,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           token0Amount: ethers.parseUnits("100", 6).toString(), // USDC: 100 tokens
           token1Amount: ethers.parseUnits("0.1", 18).toString(), // WETH: 0.1 tokens
           provider: env.provider,
-          walletAddress: await env.testVault.getAddress(),
           poolData: poolData,
           token0Data: {
             address: env.usdcAddress,
@@ -6637,13 +7223,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('calculatedAmounts');
+        expect(result).toHaveProperty('quote');
 
         // Type validation
         expect(typeof result.to).toBe('string');
         expect(typeof result.data).toBe('string');
         expect(typeof result.value).toBe('string');
-        expect(typeof result.calculatedAmounts).toBe('object');
+        expect(typeof result.quote).toBe('object');
 
         // Format validation
         expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
@@ -6667,7 +7253,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('calculatedAmounts');
+        expect(result).toHaveProperty('quote');
 
         // Contract address should be position manager
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
@@ -6703,7 +7289,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('calculatedAmounts');
+        expect(result).toHaveProperty('quote');
 
         // Contract address should be position manager
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
@@ -6739,7 +7325,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('calculatedAmounts');
+        expect(result).toHaveProperty('quote');
 
         // Contract address should be position manager
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
@@ -6760,27 +7346,31 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should return calculated amounts with proper token data', async () => {
         const result = await adapter.generateAddLiquidityData(baseParams);
 
-        // Verify calculatedAmounts structure
-        expect(result.calculatedAmounts).toBeDefined();
-        expect(result.calculatedAmounts).toHaveProperty('token0Amount');
-        expect(result.calculatedAmounts).toHaveProperty('token1Amount');
-        expect(result.calculatedAmounts).toHaveProperty('token0Address');
-        expect(result.calculatedAmounts).toHaveProperty('token1Address');
+        // Verify quote structure
+        expect(result.quote).toBeDefined();
+        expect(result.quote).toHaveProperty('position');
+        expect(result.quote).toHaveProperty('tokensSwapped');
+        expect(result.quote).toHaveProperty('sortedToken0');
+        expect(result.quote).toHaveProperty('sortedToken1');
+        expect(result.quote).toHaveProperty('pool');
 
-        // Verify types
-        expect(typeof result.calculatedAmounts.token0Amount).toBe('string');
-        expect(typeof result.calculatedAmounts.token1Amount).toBe('string');
-        expect(typeof result.calculatedAmounts.token0Address).toBe('string');
-        expect(typeof result.calculatedAmounts.token1Address).toBe('string');
+        // Verify position has amounts
+        expect(result.quote.position).toHaveProperty('amount0');
+        expect(result.quote.position).toHaveProperty('amount1');
+        expect(result.quote.position.amount0).toHaveProperty('quotient');
+        expect(result.quote.position.amount1).toHaveProperty('quotient');
 
-        // Verify addresses are valid
-        expect(result.calculatedAmounts.token0Address).toMatch(/^0x[a-fA-F0-9]{40}$/);
-        expect(result.calculatedAmounts.token1Address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        // Verify sorted tokens have addresses
+        expect(result.quote.sortedToken0).toHaveProperty('address');
+        expect(result.quote.sortedToken1).toHaveProperty('address');
+        expect(result.quote.sortedToken0.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.quote.sortedToken1.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
 
         // Verify amounts are positive numeric strings
-        expect(result.calculatedAmounts.token0Amount).toMatch(/^\d+$/);
-        expect(result.calculatedAmounts.token1Amount).toMatch(/^\d+$/);
+        expect(result.quote.position.amount0.quotient.toString()).toMatch(/^\d+$/);
+        expect(result.quote.position.amount1.quotient.toString()).toMatch(/^\d+$/);
       });
+
     });
 
     describe('Error Cases', () => {
@@ -6970,37 +7560,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
 
-    describe('Wallet address validation', () => {
-      it('should throw error for missing wallet address', async () => {
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, walletAddress: null })
-        ).rejects.toThrow('Wallet address is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, walletAddress: undefined })
-        ).rejects.toThrow('Wallet address is required');
-        await expect(
-          adapter.generateAddLiquidityData({ ...baseParams, walletAddress: '' })
-        ).rejects.toThrow('Wallet address is required');
-      });
-
-      it('should throw error for invalid wallet address format', async () => {
-        const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
-        for (const invalidAddress of invalidAddresses) {
-          await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, walletAddress: invalidAddress })
-          ).rejects.toThrow(`Invalid wallet address: ${invalidAddress}`);
-        }
-      });
-
-      it('should throw error for non-string wallet address', async () => {
-        const invalidTypes = [123, true, false, {}, []];
-        for (const invalidType of invalidTypes) {
-          await expect(
-            adapter.generateAddLiquidityData({ ...baseParams, walletAddress: invalidType })
-          ).rejects.toThrow('Wallet address must be a string');
-        }
-      });
-    });
 
     describe('Pool data validation', () => {
       it('should throw error for missing pool data', async () => {
@@ -7120,6 +7679,434 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         }
       });
     });
+    });
+  });
+
+  describe('generateCreatePositionData', () => {
+    describe('Success Cases', () => {
+      let baseParams;
+      beforeEach(async () => {
+        // Get pool data for test tokens
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        // Use real position tick values from test environment
+        const { tickLower, tickUpper } = env.testPosition;
+
+        baseParams = {
+          position: {
+            tickLower: tickLower,
+            tickUpper: tickUpper
+          },
+          token0Amount: ethers.parseUnits("100", 6).toString(), // USDC: 100 tokens
+          token1Amount: ethers.parseUnits("0.1", 18).toString(), // WETH: 0.1 tokens
+          provider: env.provider,
+          walletAddress: await env.testVault.getAddress(),
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          },
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+      });
+
+      it('should generate valid transaction data for creating position', async () => {
+        const result = await adapter.generateCreatePositionData(baseParams);
+
+        // Basic structure validation
+        expect(result).toBeDefined();
+        expect(result).toBeTypeOf('object');
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+
+        // Type validation
+        expect(typeof result.to).toBe('string');
+        expect(typeof result.data).toBe('string');
+        expect(typeof result.value).toBe('string');
+        expect(typeof result.quote).toBe('object');
+
+        // Format validation
+        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.data).toMatch(/^0x[a-fA-F0-9]+$/);
+
+        // Contract address should be position manager
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+
+        // Value should be 0x00 for ERC20 operations (SDK returns hex format)
+        expect(result.value).toBe('0x00');
+
+        // Data should contain mint function and have substantial calldata
+        expect(result.data.length).toBeGreaterThan(10);
+      });
+
+      it('should generate valid transaction data for creating position with both token amounts', async () => {
+        const result = await adapter.generateCreatePositionData(baseParams);
+
+        // Basic structure validation
+        expect(result).toBeDefined();
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+
+        // Contract address should be position manager
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+
+        // Value should be 0x00 for ERC20 operations
+        expect(result.value).toBe('0x00');
+      });
+
+      it('should be deterministic for same inputs', async () => {
+        const result1 = await adapter.generateCreatePositionData(baseParams);
+        const result2 = await adapter.generateCreatePositionData(baseParams);
+
+        expect(result1.to).toBe(result2.to);
+        expect(result1.data).toBe(result2.data);
+        expect(result1.value).toBe(result2.value);
+      });
+
+      it('should return quote with proper token data', async () => {
+        const result = await adapter.generateCreatePositionData(baseParams);
+
+        // Verify quote structure
+        expect(result.quote).toBeDefined();
+        expect(result.quote).toHaveProperty('position');
+        expect(result.quote).toHaveProperty('tokensSwapped');
+        expect(result.quote).toHaveProperty('sortedToken0');
+        expect(result.quote).toHaveProperty('sortedToken1');
+        expect(result.quote).toHaveProperty('pool');
+
+        // Verify position has amounts
+        expect(result.quote.position).toHaveProperty('amount0');
+        expect(result.quote.position).toHaveProperty('amount1');
+        expect(result.quote.position.amount0).toHaveProperty('quotient');
+        expect(result.quote.position.amount1).toHaveProperty('quotient');
+
+        // Verify sorted tokens have addresses
+        expect(result.quote.sortedToken0).toHaveProperty('address');
+        expect(result.quote.sortedToken1).toHaveProperty('address');
+        expect(result.quote.sortedToken0.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.quote.sortedToken1.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+
+        // Verify amounts are positive numeric strings
+        expect(result.quote.position.amount0.quotient.toString()).toMatch(/^\d+$/);
+        expect(result.quote.position.amount1.quotient.toString()).toMatch(/^\d+$/);
+      });
+
+    });
+
+    describe('Error Cases', () => {
+      let baseParams;
+
+      beforeEach(async () => {
+        // Get pool data for test tokens
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        // Use real position tick values from test environment
+        const { tickLower, tickUpper } = env.testPosition;
+
+        baseParams = {
+          position: {
+            tickLower: tickLower,
+            tickUpper: tickUpper
+          },
+          token0Amount: ethers.parseUnits("100", 6).toString(),
+          token1Amount: ethers.parseUnits("0.1", 18).toString(),
+          provider: env.provider,
+          walletAddress: await env.testVault.getAddress(),
+          poolData: poolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          },
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+      });
+
+      describe('Position validation', () => {
+        it('should throw error for missing position', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: null })
+          ).rejects.toThrow('Position parameter is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: undefined })
+          ).rejects.toThrow('Position parameter is required');
+        });
+
+        it('should throw error for non-object position', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, position: invalidType })
+            ).rejects.toThrow('Position must be an object');
+          }
+        });
+
+        it('should throw error for invalid tick values', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: { ...baseParams.position, tickLower: null } })
+          ).rejects.toThrow('Position tickLower is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: { ...baseParams.position, tickUpper: null } })
+          ).rejects.toThrow('Position tickUpper is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: { ...baseParams.position, tickLower: NaN } })
+          ).rejects.toThrow('Position tickLower must be a finite number');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: { ...baseParams.position, tickUpper: Infinity } })
+          ).rejects.toThrow('Position tickUpper must be a finite number');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, position: { ...baseParams.position, tickLower: baseParams.position.tickUpper, tickUpper: baseParams.position.tickLower } })
+          ).rejects.toThrow('Position tickLower must be less than tickUpper');
+        });
+      });
+
+      describe('Token0 amount validation', () => {
+        it('should throw error for missing token0Amount', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token0Amount: null })
+          ).rejects.toThrow('Token0 amount is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token0Amount: undefined })
+          ).rejects.toThrow('Token0 amount is required');
+        });
+
+        it('should throw error for non-string token0Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token0Amount: invalidType })
+            ).rejects.toThrow('Token0 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token0Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token0Amount: invalidAmount })
+            ).rejects.toThrow('Token0 amount must be a positive numeric string');
+          }
+        });
+
+        it('should throw error when both token amounts are zero', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token0Amount: '0', token1Amount: '0' })
+          ).rejects.toThrow('At least one token amount must be greater than 0');
+        });
+      });
+
+      describe('Token1 amount validation', () => {
+        it('should throw error for missing token1Amount', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token1Amount: null })
+          ).rejects.toThrow('Token1 amount is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token1Amount: undefined })
+          ).rejects.toThrow('Token1 amount is required');
+        });
+
+        it('should throw error for non-string token1Amount', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token1Amount: invalidType })
+            ).rejects.toThrow('Token1 amount must be a string');
+          }
+        });
+
+        it('should throw error for invalid token1Amount format', async () => {
+          const invalidAmounts = ['', 'abc', '12.5', '-100', '12abc', ' 123', '123 '];
+          for (const invalidAmount of invalidAmounts) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token1Amount: invalidAmount })
+            ).rejects.toThrow('Token1 amount must be a positive numeric string');
+          }
+        });
+      });
+
+      describe('Provider validation', () => {
+        it('should throw error for missing provider', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, provider: null })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, provider: undefined })
+          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        });
+
+        it('should throw error for invalid provider', async () => {
+          const invalidProviders = [{}, [], 'provider', 123, true];
+          for (const invalidProvider of invalidProviders) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, provider: invalidProvider })
+            ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          }
+        });
+      });
+
+      describe('Wallet address validation', () => {
+        it('should throw error for missing wallet address', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, walletAddress: null })
+          ).rejects.toThrow('Wallet address is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, walletAddress: undefined })
+          ).rejects.toThrow('Wallet address is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, walletAddress: '' })
+          ).rejects.toThrow('Wallet address is required');
+        });
+
+        it('should throw error for invalid wallet address format', async () => {
+          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
+          for (const invalidAddress of invalidAddresses) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, walletAddress: invalidAddress })
+            ).rejects.toThrow(`Invalid wallet address: ${invalidAddress}`);
+          }
+        });
+
+        it('should throw error for non-string wallet address', async () => {
+          const invalidTypes = [123, true, false, {}, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, walletAddress: invalidType })
+            ).rejects.toThrow('Wallet address must be a string');
+          }
+        });
+      });
+
+      describe('Pool data validation', () => {
+        it('should throw error for missing pool data', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, poolData: null })
+          ).rejects.toThrow('Pool data parameter is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, poolData: undefined })
+          ).rejects.toThrow('Pool data parameter is required');
+        });
+
+        it('should throw error for non-object pool data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, poolData: invalidType })
+            ).rejects.toThrow('Pool data must be an object');
+          }
+        });
+      });
+
+      describe('Token data validation', () => {
+        it('should throw error for missing token data', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token0Data: null })
+          ).rejects.toThrow('Token0 data parameter is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token1Data: null })
+          ).rejects.toThrow('Token1 data parameter is required');
+        });
+
+        it('should throw error for non-object token data', async () => {
+          const invalidTypes = ['string', 123, true, []];
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token0Data: invalidType })
+            ).rejects.toThrow('Token0 data must be an object');
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token1Data: invalidType })
+            ).rejects.toThrow('Token1 data must be an object');
+          }
+        });
+
+        it('should throw error for missing token decimals', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token0Data: { address: env.usdcAddress } })
+          ).rejects.toThrow('Token0 decimals is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, token1Data: { address: env.wethAddress } })
+          ).rejects.toThrow('Token1 decimals is required');
+        });
+
+        it('should throw error for invalid token decimals', async () => {
+          const invalidDecimals = ['6', true, false, {}, [], -1, 256, NaN, Infinity];
+          for (const invalidDecimal of invalidDecimals) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, token0Data: { ...baseParams.token0Data, decimals: invalidDecimal } })
+            ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
+          }
+        });
+      });
+
+      describe('Slippage tolerance validation', () => {
+        it('should throw error for missing slippage tolerance', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, slippageTolerance: null })
+          ).rejects.toThrow('Slippage tolerance is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, slippageTolerance: undefined })
+          ).rejects.toThrow('Slippage tolerance is required');
+        });
+
+        it('should throw error for non-finite slippage tolerance', async () => {
+          const invalidValues = ['0.5', true, false, {}, [], NaN, Infinity, -Infinity];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, slippageTolerance: invalidValue })
+            ).rejects.toThrow('Slippage tolerance must be a finite number');
+          }
+        });
+
+        it('should throw error for out-of-range slippage tolerance', async () => {
+          const invalidValues = [-1, -0.1, 101, 150];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, slippageTolerance: invalidValue })
+            ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
+          }
+        });
+      });
+
+      describe('Deadline validation', () => {
+        it('should throw error for missing deadline', async () => {
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, deadlineMinutes: null })
+          ).rejects.toThrow('Deadline minutes is required');
+          await expect(
+            adapter.generateCreatePositionData({ ...baseParams, deadlineMinutes: undefined })
+          ).rejects.toThrow('Deadline minutes is required');
+        });
+
+        it('should throw error for non-finite deadline', async () => {
+          const invalidValues = ['30', true, false, {}, [], NaN, Infinity, -Infinity];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, deadlineMinutes: invalidValue })
+            ).rejects.toThrow('Deadline minutes must be a finite number');
+          }
+        });
+
+        it('should throw error for negative deadline', async () => {
+          const invalidValues = [-1, -0.1];
+          for (const invalidValue of invalidValues) {
+            await expect(
+              adapter.generateCreatePositionData({ ...baseParams, deadlineMinutes: invalidValue })
+            ).rejects.toThrow('Deadline minutes must be greater than 0');
+          }
+        });
+      });
     });
   });
 });
