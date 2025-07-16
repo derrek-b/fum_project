@@ -5,6 +5,71 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-01-16
+
+### Major AdapterFactory Refactor & Breaking Changes
+
+#### **BREAKING CHANGES**
+- **`getAdaptersForChain()` return type changed**: Now returns `{adapters: [], failures: []}` object instead of array
+  - Provides transparency about adapter creation failures
+  - Allows partial success scenarios where some adapters work and others fail
+  - Consumers can implement custom error handling and retry logic
+  
+- **`getAdapter()` error behavior changed**: Now throws errors instead of returning `null`
+  - Missing platform → throws `"No adapter available for platform: {platformId}"`
+  - Adapter creation failure → throws `"Failed to create {platformId} adapter for chain {chainId}: {error}"`
+  - Consistent fail-fast behavior throughout the API
+
+- **`registerAdapter()` renamed**: Now called `registerAdapterForTestingOnly()`
+  - Makes it explicit that this is for testing/plugin scenarios only
+  - Not intended for production adapter registration
+  - Registered adapters are not persistent across application restarts
+
+#### **Enhanced Error Handling**
+- **Consistent parameter validation**: Uses established patterns for chainId and platformId validation
+- **Descriptive error messages**: All errors include context about what operation failed and why
+- **Graceful failure tracking**: `getAdaptersForChain()` captures individual adapter failures without breaking the entire operation
+
+#### **API Improvements**
+- **Better separation of concerns**: Uses `chainHelpers` instead of direct config access
+- **Robust failure handling**: No silent failures - all errors are either thrown or tracked
+- **Clear documentation**: All methods have explicit error handling documentation
+
+#### **Test Coverage**
+- **Comprehensive test suite**: 40+ test cases covering all methods and edge cases
+- **Real-world testing**: Uses actual chain configurations and adapters
+- **Minimal mocking**: Only mocks what's absolutely necessary for specific test scenarios
+
+#### **Migration Guide**
+```javascript
+// Before (0.7.x)
+const adapters = AdapterFactory.getAdaptersForChain(42161);
+console.log(`Found ${adapters.length} adapters`);
+
+// After (0.8.x)
+const result = AdapterFactory.getAdaptersForChain(42161);
+console.log(`Found ${result.adapters.length} adapters`);
+if (result.failures.length > 0) {
+  console.warn('Some adapters failed:', result.failures);
+}
+
+// Before (0.7.x)
+const adapter = AdapterFactory.getAdapter('platform', 42161);
+if (adapter) {
+  // use adapter
+} else {
+  // handle null case
+}
+
+// After (0.8.x)
+try {
+  const adapter = AdapterFactory.getAdapter('platform', 42161);
+  // use adapter
+} catch (error) {
+  // handle error
+}
+```
+
 ## [0.7.0] - 2025-01-16
 
 ### Major UniswapV3Adapter Refactor & Architectural Improvements
