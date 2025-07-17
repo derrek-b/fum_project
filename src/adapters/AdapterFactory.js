@@ -130,6 +130,23 @@ export default class AdapterFactory {
   }
 
   /**
+   * Returns a list of all supported platform IDs
+   * @returns {Array<string>} - Array of platform IDs
+   */
+  static getSupportedPlatforms() {
+    return Object.keys(this.#PLATFORM_ADAPTERS);
+  }
+
+  /**
+   * Check if an adapter is available for a platform
+   * @param {string} platformId - Platform ID
+   * @returns {boolean} - Whether the adapter is available
+   */
+  static hasAdapter(platformId) {
+    return platformId in this.#PLATFORM_ADAPTERS;
+  }
+
+  /**
    * Register a new adapter class
    *
    * NOTE: This is intended ONLY for testing and plugin scenarios. Registered adapters
@@ -146,22 +163,5 @@ export default class AdapterFactory {
     }
 
     this.#PLATFORM_ADAPTERS[platformId] = AdapterClass;
-  }
-
-  /**
-   * Returns a list of all supported platform IDs
-   * @returns {Array<string>} - Array of platform IDs
-   */
-  static getSupportedPlatforms() {
-    return Object.keys(this.#PLATFORM_ADAPTERS);
-  }
-
-  /**
-   * Check if an adapter is available for a platform
-   * @param {string} platformId - Platform ID
-   * @returns {boolean} - Whether the adapter is available
-   */
-  static hasAdapter(platformId) {
-    return platformId in this.#PLATFORM_ADAPTERS;
   }
 }

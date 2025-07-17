@@ -21,6 +21,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       // Setup test environment with Ganache fork and full deployment for contract testing
       env = await setupTestEnvironment({
         deployContracts: true, // Need deployed contracts for gas estimation tests
+        syncBytecode: true, // Sync bytecode from FUM project
       });
 
       // Create adapter instance using chainId from provider
@@ -1152,6 +1153,58 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  // Mock Provider Classes for testing
+  class MockProvider extends ethers.AbstractProvider {
+    constructor(chainId, networkName = 'test', additionalProps = {}) {
+      super();
+      this.chainId = BigInt(chainId);
+      this.networkName = networkName;
+      this.additionalProps = additionalProps;
+    }
+
+    async getNetwork() {
+      return {
+        chainId: this.chainId,
+        name: this.networkName,
+        ...this.additionalProps
+      };
+    }
+  }
+
+  class MockFailingProvider extends ethers.AbstractProvider {
+    constructor(errorMessage = 'Network error') {
+      super();
+      this.errorMessage = errorMessage;
+    }
+
+    async getNetwork() {
+      throw new Error(this.errorMessage);
+    }
+  }
+
+  class MockNullNetworkProvider extends ethers.AbstractProvider {
+    constructor() {
+      super();
+    }
+
+    async getNetwork() {
+      return null;
+    }
+  }
+
+  class MockInvalidNetworkProvider extends ethers.AbstractProvider {
+    constructor() {
+      super();
+    }
+
+    async getNetwork() {
+      return {
+        name: 'test-network'
+        // missing chainId
+      };
+    }
+  }
+
   describe('_validateProviderChain', () => {
     describe('Success Cases', () => {
       it('should validate correct chain without throwing', async () => {
@@ -1161,12 +1214,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should work with provider returning correct chainId as bigint', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 1337n, // Correct chain as bigint
-            name: 'ganache'
-          })
-        };
+        const mockProvider = new MockProvider(1337, 'ganache');
 
         await expect(
           adapter._validateProviderChain(mockProvider)
@@ -1178,13 +1226,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for null provider', async () => {
         await expect(
           adapter._validateProviderChain(null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for undefined provider', async () => {
         await expect(
           adapter._validateProviderChain(undefined)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for provider without getNetwork method', async () => {
@@ -1192,16 +1240,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter._validateProviderChain(invalidProvider)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error when provider is on wrong chain', async () => {
-        const wrongChainProvider = {
-          getNetwork: async () => ({
-            chainId: 1n, // Wrong chain (mainnet instead of ganache)
-            name: 'mainnet'
-          })
-        };
+        const wrongChainProvider = new MockProvider(1, 'mainnet');
 
         await expect(
           adapter._validateProviderChain(wrongChainProvider)
@@ -1209,11 +1252,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error when getNetwork throws', async () => {
-        const failingProvider = {
-          getNetwork: async () => {
-            throw new Error('Network error');
-          }
-        };
+        const failingProvider = new MockFailingProvider('Network error');
 
         await expect(
           adapter._validateProviderChain(failingProvider)
@@ -1221,9 +1260,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error when network is null', async () => {
-        const mockProvider = {
-          getNetwork: async () => null
-        };
+        const mockProvider = new MockNullNetworkProvider();
 
         await expect(
           adapter._validateProviderChain(mockProvider)
@@ -1231,12 +1268,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error when chainId is undefined', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            name: 'test-network'
-            // missing chainId
-          })
-        };
+        const mockProvider = new MockInvalidNetworkProvider();
 
         await expect(
           adapter._validateProviderChain(mockProvider)
@@ -1246,14 +1278,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Special Cases', () => {
       it('should handle provider with additional network properties', async () => {
-        const mockProvider = {
-          getNetwork: async () => ({
-            chainId: 1337n, // Correct chain
-            name: 'ganache',
-            ensAddress: '0x123...',
-            customProperty: 'test'
-          })
-        };
+        const mockProvider = new MockProvider(1337, 'ganache', {
+          ensAddress: '0x123...',
+          customProperty: 'test'
+        });
 
         await expect(
           adapter._validateProviderChain(mockProvider)
@@ -1262,23 +1290,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should distinguish between network errors and chain mismatch', async () => {
         // Chain mismatch error should be thrown as-is
-        const wrongChainProvider = {
-          getNetwork: async () => ({
-            chainId: 42161n,
-            name: 'arbitrum'
-          })
-        };
+        const wrongChainProvider = new MockProvider(42161, 'arbitrum');
 
         await expect(
           adapter._validateProviderChain(wrongChainProvider)
         ).rejects.toThrow('Provider chain 42161 doesn\'t match adapter chain 1337');
 
         // Network error should be wrapped
-        const networkErrorProvider = {
-          getNetwork: async () => {
-            throw new Error('Connection failed');
-          }
-        };
+        const networkErrorProvider = new MockFailingProvider('Connection failed');
 
         await expect(
           adapter._validateProviderChain(networkErrorProvider)
@@ -1414,11 +1433,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for invalid provider', async () => {
         await expect(
           adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
           adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, {})
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
 
@@ -1672,11 +1691,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.checkPoolExists(token0, token1, 500, null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
           adapter.checkPoolExists(token0, token1, 500, {})
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should return exists: false for non-existent pool', async () => {
@@ -1736,11 +1755,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle provider network errors gracefully', async () => {
-        const failingProvider = {
-          getNetwork: async () => {
-            throw new Error('Network error');
-          }
-        };
+        const failingProvider = new MockFailingProvider('Network error');
 
         const token0 = {
           address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
@@ -1757,12 +1772,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw when provider is on wrong chain', async () => {
-        const wrongChainProvider = {
-          getNetwork: async () => ({
-            chainId: 1n, // Wrong chain
-            name: 'mainnet'
-          })
-        };
+        const wrongChainProvider = new MockProvider(1, 'mainnet');
 
         const token0 = {
           address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
@@ -2338,17 +2348,17 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for missing provider', async () => {
         await expect(
           adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider', async () => {
         await expect(
           adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper, null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
           adapter.fetchTickData(validPoolAddress, validTickLower, validTickUpper, {})
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw descriptive error for non-existent pool', async () => {
@@ -2571,7 +2581,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for missing provider', async () => {
         await expect(
           adapter.getPositions(env.signers[0].address, null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider (missing getNetwork)', async () => {
@@ -2579,14 +2589,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.getPositions(env.signers[0].address, invalidProvider)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for provider with wrong chain', async () => {
         // Create a mock provider that returns wrong chain ID
-        const wrongChainProvider = {
-          getNetwork: vi.fn().mockResolvedValue({ chainId: 9999n })
-        };
+        const wrongChainProvider = new MockProvider(9999);
 
         await expect(
           adapter.getPositions(env.signers[0].address, wrongChainProvider)
@@ -4745,11 +4753,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for invalid provider', async () => {
         await expect(
           adapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, null)
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
           adapter.discoverAvailablePools(env.wethAddress, env.usdcAddress, {})
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error when factory address is missing', async () => {
@@ -4884,25 +4892,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for null/undefined provider', async () => {
           await expect(
             adapter.generateClaimFeesData({ ...baseParams, provider: null })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
           await expect(
             adapter.generateClaimFeesData({ ...baseParams, provider: undefined })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         });
 
         it('should throw error for provider without getNetwork method', async () => {
           await expect(
             adapter.generateClaimFeesData({ ...baseParams, provider: {} })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         });
 
         it('should throw error for provider returning wrong chainId', async () => {
-          const wrongChainProvider = {
-            getNetwork: async () => ({
-              chainId: 999999n // Wrong chain
-            })
-          };
+          const wrongChainProvider = new MockProvider(999999);
 
           await expect(
             adapter.generateClaimFeesData({ ...baseParams, provider: wrongChainProvider })
@@ -4910,11 +4914,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         });
 
         it('should throw error when provider getNetwork throws', async () => {
-          const throwingProvider = {
-            getNetwork: async () => {
-              throw new Error('Network connection failed');
-            }
-          };
+          const throwingProvider = new MockFailingProvider('Network connection failed');
 
           await expect(
             adapter.generateClaimFeesData({ ...baseParams, provider: throwingProvider })
@@ -6156,10 +6156,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for missing provider', async () => {
           await expect(
             adapter.getAddLiquidityQuote({ ...baseParams, provider: null })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
           await expect(
             adapter.getAddLiquidityQuote({ ...baseParams, provider: undefined })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         });
 
         it('should throw error for invalid provider', async () => {
@@ -6167,7 +6167,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           for (const invalidProvider of invalidProviders) {
             await expect(
               adapter.getAddLiquidityQuote({ ...baseParams, provider: invalidProvider })
-            ).rejects.toThrow('Invalid provider - must have getNetwork method');
+            ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
           }
         });
       });
@@ -7544,10 +7544,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for missing provider', async () => {
         await expect(
           adapter.generateAddLiquidityData({ ...baseParams, provider: null })
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         await expect(
           adapter.generateAddLiquidityData({ ...baseParams, provider: undefined })
-        ).rejects.toThrow('Invalid provider - must have getNetwork method');
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider', async () => {
@@ -7555,7 +7555,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         for (const invalidProvider of invalidProviders) {
           await expect(
             adapter.generateAddLiquidityData({ ...baseParams, provider: invalidProvider })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         }
       });
     });
@@ -7941,10 +7941,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for missing provider', async () => {
           await expect(
             adapter.generateCreatePositionData({ ...baseParams, provider: null })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
           await expect(
             adapter.generateCreatePositionData({ ...baseParams, provider: undefined })
-          ).rejects.toThrow('Invalid provider - must have getNetwork method');
+          ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
         });
 
         it('should throw error for invalid provider', async () => {
@@ -7952,7 +7952,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           for (const invalidProvider of invalidProviders) {
             await expect(
               adapter.generateCreatePositionData({ ...baseParams, provider: invalidProvider })
-            ).rejects.toThrow('Invalid provider - must have getNetwork method');
+            ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
           }
         });
       });

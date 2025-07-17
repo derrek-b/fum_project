@@ -32,7 +32,7 @@ export async function setupTestEnvironment(options = {}) {
     updateContractsFile = false,
     quiet = true,
     syncBytecode = false,
-    fumProjectPath = path.join(__dirname, '../../fum'), // Adjust if needed
+    fumProjectPath = path.join(__dirname, '../../fum'), // Path to actual FUM project
   } = options;
 
   console.log('🚀 Starting test environment...');

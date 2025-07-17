@@ -251,10 +251,10 @@ export async function syncBytecodeFromFUM(fumProjectPath) {
     fs.mkdirSync(BYTECODE_DIR, { recursive: true });
   }
   
-  // Copy bytecode files
+  // Copy bytecode files (.bin files, not .json)
   const files = fs.readdirSync(sourceBytecodeDir);
   for (const file of files) {
-    if (file.endsWith('.json')) {
+    if (file.endsWith('.bin')) {
       const sourcePath = path.join(sourceBytecodeDir, file);
       const destPath = path.join(BYTECODE_DIR, file);
       fs.copyFileSync(sourcePath, destPath);
