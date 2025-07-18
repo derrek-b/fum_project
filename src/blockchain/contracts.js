@@ -196,17 +196,37 @@ export async function createVault(name, signer) {
  *
  * @since 1.0.0
  */
-export function getVaultContract(vaultAddress, provider, signer) {
-  const vaultAbi = contractData.PositionVault.abi;
+export function getVaultContract(vaultAddress, provider) {
+  // Validate vault address
+  if (!vaultAddress) {
+    throw new Error('Vault address parameter is required');
+  }
+  try {
+    ethers.getAddress(vaultAddress);
+  } catch (error) {
+    throw new Error(`Invalid vault address: ${vaultAddress}`);
+  }
 
-  // Use signer if provided, otherwise use provider
-  const connection = signer || provider;
+  // Validate provider
+  if (!(provider instanceof ethers.AbstractProvider)) {
+    throw new Error('Invalid provider. Must be an ethers provider instance.');
+  }
 
-  return new ethers.Contract(
-    vaultAddress,
-    vaultAbi,
-    connection
-  );
+  // Validate ABI exists
+  const vaultAbi = contractData.PositionVault?.abi;
+  if (!vaultAbi || !Array.isArray(vaultAbi) || vaultAbi.length === 0) {
+    throw new Error('PositionVault ABI not found or invalid');
+  }
+
+  try {
+    return new ethers.Contract(
+      vaultAddress,
+      vaultAbi,
+      provider
+    );
+  } catch (error) {
+    throw new Error(`Failed to create contract instance: ${error.message}`);
+  }
 }
 
 /**
@@ -216,8 +236,24 @@ export function getVaultContract(vaultAddress, provider, signer) {
  * @returns {Promise<string[]>} Array of vault addresses
  */
 export async function getUserVaults(userAddress, provider) {
+  // Validate user address
+  if (!userAddress) {
+    throw new Error('User address parameter is required');
+  }
+  try {
+    ethers.getAddress(userAddress);
+  } catch (error) {
+    throw new Error(`Invalid user address: ${userAddress}`);
+  }
+
+  // Provider validation happens in getVaultFactory
   const factory = await getVaultFactory(provider);
-  return await factory.getVaults(userAddress);
+
+  try {
+    return await factory.getVaults(userAddress);
+  } catch (error) {
+    throw new Error(`Failed to get user vaults: ${error.message}`);
+  }
 }
 
 /**
@@ -227,14 +263,30 @@ export async function getUserVaults(userAddress, provider) {
  * @returns {Promise<{owner: string, name: string, creationTime: number}>} Vault information
  */
 export async function getVaultInfo(vaultAddress, provider) {
-  const factory = await getVaultFactory(provider);
-  const [owner, name, creationTime] = await factory.getVaultInfo(vaultAddress);
+  // Validate vault address
+  if (!vaultAddress) {
+    throw new Error('Vault address parameter is required');
+  }
+  try {
+    ethers.getAddress(vaultAddress);
+  } catch (error) {
+    throw new Error(`Invalid vault address: ${vaultAddress}`);
+  }
 
-  return {
-    owner,
-    name,
-    creationTime: Number(creationTime)
-  };
+  // Provider validation happens in getVaultFactory
+  const factory = await getVaultFactory(provider);
+
+  try {
+    const [owner, name, creationTime] = await factory.getVaultInfo(vaultAddress);
+
+    return {
+      owner,
+      name,
+      creationTime: Number(creationTime)
+    };
+  } catch (error) {
+    throw new Error(`Failed to get vault info: ${error.message}`);
+  }
 }
 
 /**
@@ -247,7 +299,7 @@ export async function getVaultInfo(vaultAddress, provider) {
  * @param {Array<{target: string, data: string}>} transactions - Array of transactions to execute
  * @param {ethers.Signer} signer - Signer for the transaction
  *
- * @returns {Promise<boolean[]>} Array of success flags for each transaction
+ * @returns {Promise<boolean>} True if all transactions succeeded (execution is atomic)
  *
  * @example
  * const transactions = [{
@@ -259,31 +311,64 @@ export async function getVaultInfo(vaultAddress, provider) {
  * @since 1.0.0
  */
 export async function executeVaultTransactions(vaultAddress, transactions, signer) {
-  const vault = getVaultContract(vaultAddress, signer.provider, signer);
+  // Validate vault address
+  if (!vaultAddress) {
+    throw new Error('Vault address parameter is required');
+  }
+  try {
+    ethers.getAddress(vaultAddress);
+  } catch (error) {
+    throw new Error(`Invalid vault address: ${vaultAddress}`);
+  }
+
+  // Validate transactions array
+  if (!Array.isArray(transactions)) {
+    throw new Error('Transactions must be an array');
+  }
+  if (transactions.length === 0) {
+    throw new Error('Transactions array cannot be empty');
+  }
+  
+  // Validate each transaction
+  transactions.forEach((tx, index) => {
+    if (!tx || typeof tx !== 'object') {
+      throw new Error(`Transaction at index ${index} must be an object`);
+    }
+    if (!tx.target) {
+      throw new Error(`Transaction at index ${index} is missing target address`);
+    }
+    if (!tx.data) {
+      throw new Error(`Transaction at index ${index} is missing data`);
+    }
+    try {
+      ethers.getAddress(tx.target);
+    } catch (error) {
+      throw new Error(`Invalid target address at index ${index}: ${tx.target}`);
+    }
+    if (typeof tx.data !== 'string') {
+      throw new Error(`Transaction data at index ${index} must be a string`);
+    }
+    if (!tx.data.startsWith('0x')) {
+      throw new Error(`Transaction data at index ${index} must be hex encoded (start with 0x)`);
+    }
+  });
+
+  // Validate signer parameter
+  if (!(signer instanceof ethers.AbstractSigner)) {
+    throw new Error('Invalid signer. Must be an ethers signer instance.');
+  }
+
+  const vault = getVaultContract(vaultAddress, signer.provider);
+  const vaultWithSigner = vault.connect(signer);
 
   const targets = transactions.map(tx => tx.target);
   const data = transactions.map(tx => tx.data);
 
-  const tx = await vault.execute(targets, data);
-  const receipt = await tx.wait();
-
-  // Parse events to get execution results
-  const executionEvents = receipt.logs
-    .filter(log => {
-      try {
-        return vault.interface.parseLog(log)?.name === 'TransactionExecuted';
-      } catch (e) {
-        return false;
-      }
-    })
-    .map(log => {
-      const parsed = vault.interface.parseLog(log);
-      return {
-        target: parsed.args[0],
-        data: parsed.args[1],
-        success: parsed.args[2]
-      };
-    });
-
-  return executionEvents.map(event => event.success);
+  try {
+    const tx = await vaultWithSigner.execute(targets, data);
+    await tx.wait();
+    return true; // All transactions succeeded (atomic execution)
+  } catch (error) {
+    throw new Error(`Failed to execute vault transactions: ${error.message}`);
+  }
 }
