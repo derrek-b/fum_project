@@ -8,6 +8,13 @@ const chains = {
   // Arbitrum One
   42161: {
     name: "Arbitrum One",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["https://arb1.arbitrum.io/rpc"],
+    blockExplorerUrls: ["https://arbiscan.io"],
     envPK: process.env.ARBITRUM_DEPLOYER_PK,
     executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
     executorAddress: "0x0",
@@ -24,7 +31,14 @@ const chains = {
 
   // Local Hardhat Fork
   1337: {
-    name: "Forked Arbitrum", 
+    name: "Forked Arbitrum",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["http://localhost:8545"],
+    blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
     envPK: process.env.LOCAL_DEPLOYER_PK,
     executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
@@ -42,6 +56,13 @@ const chains = {
   // Ethereum Mainnet
   1: {
     name: "Ethereum",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["https://mainnet.infura.io/v3/YOUR_INFURA_KEY"],
+    blockExplorerUrls: ["https://etherscan.io"],
     envPK: process.env.ETHEREUM_DEPLOYER_PK,
     executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
