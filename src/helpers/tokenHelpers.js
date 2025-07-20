@@ -297,3 +297,41 @@ export function getTokensByType(isStablecoin) {
     token.isStablecoin === isStablecoin
   );
 }
+
+/**
+ * Get CoinGecko ID for a token symbol
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} symbol - Token symbol (case-sensitive)
+ * @returns {string} CoinGecko ID for the token
+ * @throws {Error} If token symbol is not found or doesn't have a CoinGecko ID
+ * @example
+ * // Get CoinGecko ID for USDC
+ * const geckoId = getCoingeckoId('USDC');
+ * // Returns: "usd-coin"
+ * 
+ * @example
+ * // Use in price fetching
+ * try {
+ *   const geckoId = getCoingeckoId('ETH');
+ *   const price = await fetchPriceFromCoingecko(geckoId);
+ * } catch (error) {
+ *   console.error('Token not supported for price fetching');
+ * }
+ * @since 1.0.0
+ */
+export function getCoingeckoId(symbol) {
+  if (!symbol || symbol === '') {
+    throw new Error('Token symbol is required and cannot be empty');
+  }
+
+  const token = tokens[symbol];
+  if (!token) {
+    throw new Error(`Unknown token symbol: ${symbol}. Token not found in configuration.`);
+  }
+
+  if (!token.coingeckoId) {
+    throw new Error(`Token ${symbol} does not have a CoinGecko ID configured.`);
+  }
+
+  return token.coingeckoId;
+}

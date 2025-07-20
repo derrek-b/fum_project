@@ -192,3 +192,41 @@ export function formatTimestamp(timestamp) {
     return "Error";
   }
 }
+
+/**
+ * Calculate the value of a token amount at a given price
+ * 
+ * @function calculateTokenValue
+ * @memberof module:helpers/formatHelpers
+ * 
+ * @param {string|number} amount - Token amount to calculate value for
+ * @param {number} pricePerToken - Price per token in the target currency
+ * 
+ * @returns {number|null} The calculated value, or null if inputs are invalid
+ * 
+ * @example
+ * // Calculate USD value of 10 ETH at $2000 per ETH
+ * const value = calculateTokenValue(10, 2000);
+ * // Returns: 20000
+ * 
+ * @example
+ * // Handle string amounts
+ * const value = calculateTokenValue("5.5", 100);
+ * // Returns: 550
+ * 
+ * @example
+ * // Handle invalid inputs
+ * const value = calculateTokenValue("invalid", 100);
+ * // Returns: null
+ * 
+ * @since 1.0.0
+ */
+export function calculateTokenValue(amount, pricePerToken) {
+  if (!amount || pricePerToken == null) return null;
+
+  // Convert amount to number if it's a string
+  const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(numAmount) || isNaN(pricePerToken)) return null;
+
+  return numAmount * pricePerToken;
+}

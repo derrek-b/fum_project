@@ -4,119 +4,89 @@
  */
 
 // src/services/coingecko.js
+import { getCoingeckoId } from '../helpers/tokenHelpers.js';
 
-// Default configuration (can be overridden)
-const DEFAULT_CONFIG = {
-  apiBaseUrl: 'https://api.coingecko.com/api/v3',
-  apiKey: null,              // No default API key
-  useFreeTier: true          // Default to free tier if no API key provided
+// API configuration constants
+const API_BASE_URL = 'https://api.coingecko.com/api/v3';
+
+// CoinGecko API endpoints
+export const ENDPOINTS = {
+  SIMPLE_PRICE: '/simple/price',           // Current token prices
+  COIN_DETAILS: '/coins/{id}',            // Detailed coin information
+  COIN_HISTORY: '/coins/{id}/history',    // Historical price data
+  EXCHANGES: '/exchanges',                // List of exchanges
+  EXCHANGE_RATES: '/exchange_rates',      // Fiat exchange rates
+  GLOBAL_DATA: '/global'                  // Global crypto market data
 };
 
-// Cache strategies - explicit timeout values in seconds for clarity
-const CACHE_STRATEGIES = {
+// Cache durations - how long data stays fresh for different use cases
+export const CACHE_DURATIONS = {
   '0-SECONDS': 0,                    // No cache - always fresh (critical transactions)
+  '1-SECOND': 1 * 1000,             // 1 second (high-frequency trading)
+  '2-SECONDS': 2 * 1000,            // 2 seconds (ultra-fast execution)
   '5-SECONDS': 5 * 1000,            // 5 seconds (active liquidity management)
+  '10-SECONDS': 10 * 1000,          // 10 seconds (rapid decision making)
+  '15-SECONDS': 15 * 1000,          // 15 seconds (quick updates)
   '30-SECONDS': 30 * 1000,          // 30 seconds (trading decisions)
-  '2-MINUTES': 2 * 60 * 1000,       // 2 minutes (dashboard/portfolio view)
   '1-MINUTE': 60 * 1000,            // 1 minute (background automation)
+  '2-MINUTES': 2 * 60 * 1000,       // 2 minutes (dashboard/portfolio view)
+  '5-MINUTES': 5 * 60 * 1000,       // 5 minutes (periodic monitoring)
   '10-MINUTES': 10 * 60 * 1000      // 10 minutes (error fallback only)
 };
 
-// In-memory cache for token prices
-const priceCache = {
-  data: {},
-  timestamp: 0
-};
+// In-memory cache for token prices with per-token TTL
+export const priceCache = {};
 
-// Service configuration
-let serviceConfig = { ...DEFAULT_CONFIG };
-
-/**
- * Map common token symbols to their CoinGecko IDs
- * Extended from common ERC20 tokens
- */
-const symbolToIdMap = {
-  'WETH': 'ethereum',  // Wrapped ETH uses same price as ETH
-  'ETH': 'ethereum',
-  'USDC': 'usd-coin',
-  'USDT': 'tether',
-  'DAI': 'dai',
-  'WBTC': 'wrapped-bitcoin',
-  'BTC': 'bitcoin',
-  'MATIC': 'matic-network',
-  'LINK': 'chainlink',
-  'UNI': 'uniswap',
-  'AAVE': 'aave',
-  'COMP': 'compound-governance-token',
-  'SNX': 'havven',
-  'MKR': 'maker',
-  'BAL': 'balancer',
-  'SUSHI': 'sushi',
-  'ARB': 'arbitrum',
-  'GRT': 'the-graph',
-  'CRV': 'curve-dao-token',
-  'LDO': 'lido-dao',
-  'RPL': 'rocket-pool',
-  'FXS': 'frax-share',
-};
-
-/**
- * Configures the CoinGecko service with custom settings
- * 
- * @function configureCoingecko
- * @memberof module:services/coingecko
- * 
- * @param {Object} [config={}] - Configuration options
- * @param {string} [config.apiBaseUrl='https://api.coingecko.com/api/v3'] - Base URL for CoinGecko API
- * @param {number} [config.cacheExpiryTime=300000] - Cache expiry time in milliseconds
- * @param {string} [config.apiKey] - Direct API key for CoinGecko
- * @param {boolean} [config.useFreeTier=true] - Whether to use free tier if no API key
- * 
- * @example
- * // Configure with API key
- * configureCoingecko({
- *   apiKey: 'your-api-key',
- *   cacheExpiryTime: 10 * 60 * 1000
- * });
- * 
- * @since 1.0.0
- */
-export function configureCoingecko(config = {}) {
-  serviceConfig = { ...DEFAULT_CONFIG, ...config };
-  priceCache.expiryTime = serviceConfig.cacheExpiryTime;
-}
-
-/**
- * Get the API key
- * @returns {string|null} - API key or null if not available
- */
-function getApiKey() {
-  return serviceConfig.apiKey;
-}
 
 /**
  * Build the CoinGecko API URL with authentication
- * @param {string} endpoint - API endpoint
+ * @param {string} endpoint - API endpoint (must be one of ENDPOINTS values)
  * @param {Object} params - Query parameters (key-value pairs)
  * @returns {string} - Full API URL
+ * @throws {Error} If endpoint is not in approved ENDPOINTS list
  */
-function buildApiUrl(endpoint, params = {}) {
-  const apiKey = getApiKey();
-  const url = new URL(`${serviceConfig.apiBaseUrl}${endpoint}`);
+export function buildApiUrl(endpoint, params = {}) {
+  if (!endpoint) {
+    throw new Error('Endpoint is required');
+  }
+
+  // Validate endpoint is in our approved list (including template substitutions)
+  const validEndpoints = Object.values(ENDPOINTS);
+  const isValidEndpoint = validEndpoints.some(validEndpoint => {
+    if (validEndpoint === endpoint) {
+      return true; // Exact match
+    }
+
+    // Check template endpoints with {id} substitution
+    if (validEndpoint.includes('{id}')) {
+      const pattern = validEndpoint.replace('{id}', '[^/]+'); // Replace {id} with regex for any non-slash characters
+      const regex = new RegExp(`^${pattern}$`);
+      return regex.test(endpoint);
+    }
+
+    return false;
+  });
+
+  if (!isValidEndpoint) {
+    throw new Error(`Invalid endpoint: ${endpoint}. Must match one of: ${validEndpoints.join(', ')}`);
+  }
+
+  const apiKey = process.env.COINGECKO_API_KEY;
+  const url = new URL(`${API_BASE_URL}${endpoint}`);
 
   // Add API key if available
   if (apiKey) {
-    url.searchParams.append('x_cg_api_key', apiKey);
-  } else if (!serviceConfig.useFreeTier) {
-    // If not configured for free tier and no API key, warn once
-    if (typeof window !== 'undefined' && !window._coinGeckoApiWarningShown) {
-      console.warn('CoinGecko API key not configured and useFreeTier is false. API calls will likely fail.');
-      window._coinGeckoApiWarningShown = true;
-    }
+    url.searchParams.append('x_cg_demo_api_key', apiKey);
   }
 
   // Add other query parameters
   Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
+      throw new Error(`Parameter '${key}' cannot be null or undefined`);
+    }
+    if (typeof value === 'object' && value !== null) {
+      throw new Error(`Parameter '${key}' cannot be an object. Use string or number.`);
+    }
     url.searchParams.append(key, value);
   });
 
@@ -124,113 +94,115 @@ function buildApiUrl(endpoint, params = {}) {
 }
 
 /**
- * Map a token symbol to its CoinGecko ID
- * @param {string} symbol - Token symbol (e.g., "USDC")
- * @returns {string} CoinGecko ID for the token
- * @throws {Error} If token symbol is not mapped - prevents wrong price data
- */
-export function getCoingeckoId(symbol) {
-  if (!symbol || symbol === '') {
-    throw new Error('Token symbol is required and cannot be empty');
-  }
-
-  // Check if we have a direct mapping
-  const normalizedSymbol = symbol.toUpperCase();
-  if (symbolToIdMap[normalizedSymbol]) {
-    return symbolToIdMap[normalizedSymbol];
-  }
-
-  // Fail fast - don't guess token IDs to prevent wrong price data
-  throw new Error(`Unknown token symbol: ${symbol}. Add mapping to symbolToIdMap or verify token symbol is correct.`);
-}
-
-/**
- * Register a custom token symbol to CoinGecko ID mapping
- * @param {string} symbol - Token symbol
- * @param {string} coingeckoId - CoinGecko ID
- */
-export function registerTokenMapping(symbol, coingeckoId) {
-  if (!symbol || !coingeckoId) return;
-  symbolToIdMap[symbol.toUpperCase()] = coingeckoId.toLowerCase();
-}
-
-/**
- * Fetches current token prices from CoinGecko with explicit cache strategy
- * 
+ * Fetches current token prices from CoinGecko with explicit cache duration
+ *
  * @function fetchTokenPrices
  * @memberof module:services/coingecko
- * 
- * @param {string[]} tokenSymbols - Array of token symbols
- * @param {string} cacheStrategy - Required cache strategy: '0-SECONDS', '5-SECONDS', '30-SECONDS', '2-MINUTES', '1-MINUTE', '10-MINUTES'
- * @param {string} [currency='usd'] - Currency to get prices in
- * 
- * @returns {Promise<Object>} Token prices keyed by uppercase symbol
- * 
- * @throws {Error} If cacheStrategy not provided or invalid
- * @throws {Error} If API key not configured and free tier disabled
- * 
+ *
+ * @param {string[]} tokenSymbols - Array of token symbols (must be strings)
+ * @param {number} cacheDurationMs - Cache duration in milliseconds (0 = no cache, always fresh)
+ *
+ * @returns {Promise<Object>} Token prices keyed by uppercase symbol in USD
+ *
+ * @throws {Error} If cacheDurationMs not provided or invalid
+ * @throws {Error} If tokenSymbols contains non-string values
+ *
  * @example
  * // For critical transactions - always fresh
- * const prices = await fetchTokenPrices(['ETH', 'USDC'], '0-SECONDS');
- * 
+ * const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']);
+ *
  * @example
  * // For liquidity management - 5 second tolerance
- * const prices = await fetchTokenPrices(['ETH', 'USDC'], '5-SECONDS');
- * 
+ * const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['5-SECONDS']);
+ *
  * @example
  * // For dashboard display - 2 minute tolerance
- * const prices = await fetchTokenPrices(['ETH', 'USDC'], '2-MINUTES');
- * 
+ * const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['2-MINUTES']);
+ *
+ * @example
+ * // Custom 1.5 second cache
+ * const prices = await fetchTokenPrices(['WETH', 'USDC'], 1500);
+ *
  * @since 1.0.0
  */
-export async function fetchTokenPrices(tokenSymbols, cacheStrategy, currency = 'usd') {
-  if (!tokenSymbols || tokenSymbols.length === 0) {
+export async function fetchTokenPrices(tokenSymbols, cacheDurationMs) {
+  // Validate tokenSymbols parameter
+  if (tokenSymbols === null || tokenSymbols === undefined) {
+    throw new Error('tokenSymbols parameter is required');
+  }
+
+  if (!Array.isArray(tokenSymbols)) {
+    throw new Error('tokenSymbols must be an array');
+  }
+
+  if (tokenSymbols.length === 0) {
     return {};
   }
 
-  // Validate required cacheStrategy parameter
-  if (!cacheStrategy) {
-    throw new Error('cacheStrategy is required. Must be one of: 0-SECONDS, 5-SECONDS, 30-SECONDS, 2-MINUTES, 1-MINUTE, 10-MINUTES');
+  // Validate each symbol in the array
+  for (const symbol of tokenSymbols) {
+    if (symbol === null || symbol === undefined) {
+      throw new Error('Token symbols cannot be null or undefined');
+    }
+    if (typeof symbol !== 'string') {
+      throw new Error(`All token symbols must be strings. Found: ${typeof symbol}`);
+    }
+    if (symbol === '') {
+      throw new Error('All token symbols must be non-empty strings');
+    }
   }
-  
-  // Validate it's a known strategy
-  if (!CACHE_STRATEGIES[cacheStrategy]) {
-    throw new Error(`Invalid cacheStrategy: ${cacheStrategy}. Must be one of: ${Object.keys(CACHE_STRATEGIES).join(', ')}`);
-  }
-  
-  const maxCacheAge = CACHE_STRATEGIES[cacheStrategy];
 
-  // Check if API access is possible
-  if (!getApiKey() && !serviceConfig.useFreeTier) {
-    throw new Error('CoinGecko API key not configured and free tier access is disabled');
+  // Validate cacheDurationMs parameter
+  if (cacheDurationMs === null || cacheDurationMs === undefined) {
+    throw new Error('cacheDurationMs parameter is required');
+  }
+
+  if (typeof cacheDurationMs !== 'number' || !Number.isFinite(cacheDurationMs)) {
+    throw new Error('cacheDurationMs must be a valid number');
+  }
+
+  if (cacheDurationMs < 0) {
+    throw new Error(`cacheDurationMs must be >= 0. Got: ${cacheDurationMs}`);
   }
 
   try {
     const now = Date.now();
 
-    // If cache is valid based on the requested strategy, use cached data
-    if (maxCacheAge > 0 && now - priceCache.timestamp < maxCacheAge) {
-      // Check if we have all requested tokens in cache
-      const allInCache = tokenSymbols.every(symbol =>
-        symbol && priceCache.data[symbol.toUpperCase()] !== undefined
-      );
+    // If cache is valid based on the requested duration, use cached data
+    if (cacheDurationMs > 0) {
+      // Check if we have all requested tokens in cache and they're fresh
+      const allInCache = tokenSymbols.every(symbol => {
+        const upperSymbol = symbol.toUpperCase();
+        const cachedToken = priceCache[upperSymbol];
+        return cachedToken && (now - cachedToken.timestamp) < cacheDurationMs;
+      });
 
       if (allInCache) {
-        return { ...priceCache.data };
+        const result = {};
+        tokenSymbols.forEach(symbol => {
+          const upperSymbol = symbol.toUpperCase();
+          result[upperSymbol] = priceCache[upperSymbol].price;
+        });
+        return result;
       }
     }
 
-    // Filter out empty symbols and create a unique set
-    const validSymbols = [...new Set(tokenSymbols.filter(s => s && s.trim() !== ''))];
-    if (validSymbols.length === 0) return {};
+    // Create unique set of symbols
+    const uniqueSymbols = [...new Set(tokenSymbols)];
 
     // Map symbols to CoinGecko IDs
-    const tokenIds = validSymbols.map(getCoingeckoId).join(',');
+    let tokenIds;
+    try {
+      tokenIds = uniqueSymbols.map(getCoingeckoId);
+    } catch (error) {
+      throw new Error(`Unsupported token in request. All tokens must be configured for price fetching.`);
+    }
+    const tokenIdsCSV = tokenIds.join(',');
 
-    // Build API URL
-    const apiUrl = buildApiUrl('/simple/price', {
-      ids: tokenIds,
-      vs_currencies: currency
+    // Build API URL (always USD)
+    const apiUrl = buildApiUrl(ENDPOINTS.SIMPLE_PRICE, {
+      ids: tokenIdsCSV,
+      vs_currencies: 'usd'
     });
 
     // Fetch data
@@ -244,23 +216,32 @@ export async function fetchTokenPrices(tokenSymbols, cacheStrategy, currency = '
 
     // Construct result object and update cache
     const result = {};
-    validSymbols.forEach(symbol => {
-      const id = getCoingeckoId(symbol);
-      const price = data[id]?.[currency] || null;
+    uniqueSymbols.forEach((symbol, index) => {
+      const id = tokenIds[index];
+      const price = data[id]?.usd;
+
+      if (price === undefined) {
+        throw new Error(`No price data returned for token ${symbol}`);
+      }
+      
+      if (typeof price !== 'number' || price < 0 || !Number.isFinite(price)) {
+        throw new Error(`Invalid price data for token ${symbol}: ${price}`);
+      }
+
       const upperSymbol = symbol.toUpperCase();
-
       result[upperSymbol] = price;
-      // Update cache
-      priceCache.data[upperSymbol] = price;
-    });
 
-    // Update cache timestamp
-    priceCache.timestamp = now;
+      // Update cache with per-token timestamp
+      priceCache[upperSymbol] = {
+        price: price,
+        timestamp: now
+      };
+    });
 
     return result;
   } catch (error) {
     console.error("Error fetching token prices:", error);
-    
+
     // In a financial application, if we can't get fresh data, we must fail fast
     // Returning stale cached data could lead to catastrophic trading decisions
     throw new Error(`Failed to fetch current token prices: ${error.message}. Cannot proceed with stale data.`);
@@ -268,117 +249,9 @@ export async function fetchTokenPrices(tokenSymbols, cacheStrategy, currency = '
 }
 
 /**
- * Calculate USD value of a token amount
- * @param {string|number} amount - Token amount
- * @param {string} symbol - Token symbol
- * @returns {Promise<number|null>} - USD value or null if price not available
- */
-export async function calculateUsdValue(amount, symbol) {
-  if (!amount || !symbol) return null;
-
-  // Convert amount to number if it's a string
-  const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-  if (isNaN(numAmount)) return null;
-
-  try {
-    // Normalize symbol
-    const normalizedSymbol = symbol.toUpperCase();
-
-    // Check if we already have the price in cache
-    if (priceCache.data[normalizedSymbol] !== undefined &&
-        Date.now() - priceCache.timestamp < priceCache.expiryTime) {
-      return numAmount * priceCache.data[normalizedSymbol];
-    }
-
-    // Fetch price if not in cache
-    const prices = await fetchTokenPrices([symbol]);
-    const price = prices[normalizedSymbol];
-
-    // Calculate and return USD value
-    return price && !isNaN(price) ? numAmount * price : null;
-  } catch (error) {
-    console.error(`Error calculating USD value for ${symbol}:`, error);
-    return null;
-  }
-}
-
-/**
- * Calculate USD value of a token amount synchronously using cached prices
- * @param {string|number} amount - Token amount
- * @param {string} symbol - Token symbol
- * @returns {number|null} - USD value or null if price not available
- */
-export function calculateUsdValueSync(amount, symbol) {
-  if (!amount || !symbol) return null;
-
-  // Convert amount to number if it's a string
-  const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-  if (isNaN(numAmount)) return null;
-
-  try {
-    // Normalize symbol
-    const normalizedSymbol = symbol.toUpperCase();
-
-    // Check if we have the price in cache
-    if (priceCache.data[normalizedSymbol] !== undefined) {
-      return numAmount * priceCache.data[normalizedSymbol];
-    }
-
-    // No cached price available
-    return null;
-  } catch (error) {
-    console.error(`Error calculating USD value for ${symbol}:`, error);
-    return null;
-  }
-}
-
-/**
- * Prefetch and cache prices for a list of tokens
- * @param {string[]} symbols - Array of token symbols to prefetch
- * @returns {Promise<void>}
- */
-export async function prefetchTokenPrices(symbols) {
-  if (!symbols || symbols.length === 0) return;
-
-  try {
-    await fetchTokenPrices(symbols);
-  } catch (error) {
-    console.error("Error prefetching token prices:", error);
-  }
-}
-
-/**
- * Get current price cache
- * @returns {Object} - The current price cache with cache age in seconds
- */
-export function getPriceCache() {
-  return {
-    ...priceCache.data,
-    _cacheAge: Math.round((Date.now() - priceCache.timestamp) / 1000)
-  };
-}
-
-/**
- * Clear the price cache
+ * Clear ALL cached prices
  */
 export function clearPriceCache() {
-  priceCache.data = {};
-  priceCache.timestamp = 0;
+  Object.keys(priceCache).forEach(key => delete priceCache[key]);
 }
 
-/**
- * Check if the CoinGecko service is properly configured
- * @returns {boolean} - Whether the service is ready to use
- */
-export function isConfigured() {
-  return !!getApiKey() || serviceConfig.useFreeTier;
-}
-
-/**
- * Set the API key directly
- * @param {string} apiKey - The CoinGecko API key
- */
-export function setApiKey(apiKey) {
-  if (!apiKey) return;
-  serviceConfig.apiKey = apiKey;
-}

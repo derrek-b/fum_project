@@ -8,6 +8,7 @@ const tokens = {
     name: "USD Coin",
     symbol: "USDC",
     decimals: 6,
+    coingeckoId: "usd-coin",
     addresses: {
       1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // Ethereum
       42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // Arbitrum
@@ -22,6 +23,7 @@ const tokens = {
     name: "Tether USD",
     symbol: "USDT",
     decimals: 6,
+    coingeckoId: "tether",
     addresses: {
       1: "0xdAC17F958D2ee523a2206206994597C13D831ec7", // Ethereum
       42161: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // Arbitrum
@@ -36,6 +38,7 @@ const tokens = {
     name: "Dai Stablecoin",
     symbol: "DAI",
     decimals: 18,
+    coingeckoId: "dai",
     addresses: {
       1: "0x6B175474E89094C44Da98b954EedeAC495271d0F", // Ethereum
       42161: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // Arbitrum
@@ -50,6 +53,7 @@ const tokens = {
     name: "Frax",
     symbol: "FRAX",
     decimals: 18,
+    coingeckoId: "frax",
     addresses: {
       1: "0x853d955aCEf822Db058eb8505911ED77F175b99e", // Ethereum
       42161: "0x17FC002b466eEc40DaE837Fc4bE5c67993ddBd6F", // Arbitrum
@@ -64,6 +68,7 @@ const tokens = {
     name: "Binance USD",
     symbol: "BUSD",
     decimals: 18,
+    coingeckoId: "binance-usd",
     addresses: {
       1: "0x4Fabb145d64652a948d72533023f6E7A623C7C53", // Ethereum
       42161: "0x31190254504622cEFdFA55a7d3d272e6462629a2", // Arbitrum
@@ -78,6 +83,7 @@ const tokens = {
     name: "Wrapped Ether",
     symbol: "WETH",
     decimals: 18,
+    coingeckoId: "ethereum",
     addresses: {
       1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // Ethereum
       42161: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // Arbitrum
