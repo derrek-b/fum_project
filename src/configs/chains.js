@@ -61,7 +61,7 @@ const chains = {
       symbol: "ETH",
       decimals: 18
     },
-    rpcUrls: ["https://mainnet.infura.io/v3/YOUR_INFURA_KEY"],
+    rpcUrls: ["https://cloudflare-eth.com"],
     blockExplorerUrls: ["https://etherscan.io"],
     envPK: process.env.ETHEREUM_DEPLOYER_PK,
     executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
