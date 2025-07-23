@@ -296,7 +296,7 @@ Token configuration with addresses on multiple chains
 - `getDefaultParams` (function)
 - `getStrategyParameters` (function)
 - `getStrategyParametersByGroup` (function)
-- `getParametersByContractGroup` (function)
+- `getStrategyParametersByContractGroup` (function)
 - `validateStrategyParams` (function)
 - `getParameterSetterMethod` (function)
 - `shouldShowParameter` (function)

@@ -370,13 +370,13 @@ None - Pure function
 
 ---
 
-## getParametersByContractGroup
+## getStrategyParametersByContractGroup
 
 Get parameters filtered by contract method group.
 
 ### Signature
 ```javascript
-getParametersByContractGroup(strategyId: string, contractGroup: string): Object
+getStrategyParametersByContractGroup(strategyId: string, contractGroup: string): Object
 ```
 
 ### Parameters
@@ -394,11 +394,11 @@ getParametersByContractGroup(strategyId: string, contractGroup: string): Object
 
 ```javascript
 // Get all range-related parameters
-const rangeParams = getParametersByContractGroup('bob', 'rangeParams');
+const rangeParams = getStrategyParametersByContractGroup('bob', 'rangeParams');
 // Returns parameters that map to the same contract method
 
 // Prepare parameters for contract call
-const feeParams = getParametersByContractGroup(strategyId, 'feeParams');
+const feeParams = getStrategyParametersByContractGroup(strategyId, 'feeParams');
 const values = Object.keys(feeParams).map(paramId => userValues[paramId]);
 ```
 
@@ -587,6 +587,66 @@ if (getAllStrategyIds().includes(userStrategy)) {
 
 ### Side Effects
 None - Pure function
+
+---
+
+## getStrategyTokens
+
+Get supported tokens for a strategy based on tokenSupport configuration.
+
+### Signature
+```javascript
+getStrategyTokens(strategyId: string): Object
+```
+
+### Parameters
+
+- `strategyId` (string): ID of the strategy (e.g., 'bob', 'parris', 'fed')
+
+### Returns
+
+`Object` - Object with supported token symbols as keys and token configuration objects as values
+
+### Throws
+
+- `Error` - If strategy not found
+- `Error` - If strategyId is invalid (null, undefined, non-string, or empty)
+- `Error` - If tokenSupport configuration is missing or invalid
+- `Error` - If tokenSupport is "custom" but supportedTokens is invalid or empty
+
+### Examples
+
+#### Get tokens for strategy that supports all tokens
+```javascript
+import { getStrategyTokens } from 'fum_library/helpers/strategyHelpers';
+
+const tokens = getStrategyTokens('bob');
+// Returns: { WETH: { name: "Wrapped Ether", ... }, USDC: { ... }, ... }
+```
+
+#### Get tokens for stablecoin-only strategy
+```javascript
+const stableTokens = getStrategyTokens('fed');
+// Returns: { USDC: { ... }, USDT: { ... }, DAI: { ... } }
+```
+
+#### Get tokens for custom strategy
+```javascript
+const customTokens = getStrategyTokens('customStrategy');
+// Returns strategy's specific supportedTokens object
+```
+
+### Token Support Types
+
+The function handles three types of token support based on the strategy's `tokenSupport` field:
+
+- **"all"**: Returns all available tokens from the token configuration
+- **"stablecoins"**: Returns only stablecoin tokens (USDC, USDT, DAI, etc.)
+- **"custom"**: Returns the strategy's specific `supportedTokens` object
+
+### Backward Compatibility
+
+The function maintains backward compatibility with older strategy configurations that use `supportedTokens` directly without `tokenSupport`.
 
 ---
 

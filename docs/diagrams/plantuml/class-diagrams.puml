@@ -142,7 +142,7 @@ package "Helpers" {
         + getDefaultParams(strategyId): Object
         + getStrategyParameters(strategyId): Object
         + getStrategyParametersByGroup(strategyId, groupKey): Object
-        + getParametersByContractGroup(strategyId, contractGroup): Object
+        + getStrategyParametersByContractGroup(strategyId, contractGroup): Object
         + validateStrategyParams(strategyId, params): Object
         + getParameterSetterMethod(strategyId, paramId): string
         + shouldShowParameter(paramConfig, currentParams): boolean

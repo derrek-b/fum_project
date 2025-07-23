@@ -1,0 +1,701 @@
+/**
+ * Token Helpers Test Suite
+ *
+ * Comprehensive tests for all tokenHelper functions following established patterns
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  getAllTokens,
+  getTokenBySymbol,
+  getTokenAddress,
+  getStablecoins,
+  areTokensSupportedOnChain,
+  getTokenByAddress,
+  getTokensForChain,
+  getAllTokenSymbols,
+  getTokensByType,
+  getCoingeckoId,
+  getTokenAddresses,
+  validateTokensExist,
+  getTokensMetadata
+} from '../../../src/helpers/tokenHelpers.js';
+import tokens from '../../../src/configs/tokens.js';
+
+describe('Token Helpers', () => {
+  describe('getAllTokens', () => {
+    describe('Success Cases', () => {
+      it('should return all tokens from configuration', () => {
+        const result = getAllTokens();
+        expect(result).toBe(tokens);
+        expect(typeof result).toBe('object');
+        expect(Array.isArray(result)).toBe(false);
+      });
+
+      it('should return tokens with expected structure', () => {
+        const result = getAllTokens();
+        const tokenKeys = Object.keys(result);
+        
+        expect(tokenKeys.length).toBeGreaterThan(0);
+        
+        // Test with known tokens
+        expect(result.USDC).toBeDefined();
+        expect(result.WETH).toBeDefined();
+        
+        // Verify token structure
+        const usdc = result.USDC;
+        expect(usdc).toHaveProperty('name');
+        expect(usdc).toHaveProperty('symbol');
+        expect(usdc).toHaveProperty('decimals');
+        expect(usdc).toHaveProperty('addresses');
+        expect(usdc).toHaveProperty('isStablecoin');
+      });
+
+      it('should include all expected token properties', () => {
+        const result = getAllTokens();
+        const firstToken = Object.values(result)[0];
+        
+        const expectedProperties = ['name', 'symbol', 'decimals', 'coingeckoId', 'addresses', 'logoURI', 'isStablecoin'];
+        expectedProperties.forEach(prop => {
+          expect(firstToken).toHaveProperty(prop);
+        });
+      });
+
+      it('should return the same reference on multiple calls', () => {
+        const result1 = getAllTokens();
+        const result2 = getAllTokens();
+        expect(result1).toBe(result2);
+      });
+    });
+  });
+
+  describe('getTokenBySymbol', () => {
+    describe('Success Cases', () => {
+      it('should return token for valid symbol', () => {
+        const result = getTokenBySymbol('USDC');
+        
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('USDC');
+        expect(result.name).toBe('USD Coin');
+        expect(result.decimals).toBe(6);
+        expect(result.isStablecoin).toBe(true);
+      });
+
+      it('should return WETH token correctly', () => {
+        const result = getTokenBySymbol('WETH');
+        
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('WETH');
+        expect(result.name).toBe('Wrapped Ether');
+        expect(result.decimals).toBe(18);
+        expect(result.isStablecoin).toBe(false);
+      });
+
+      it('should return null for unknown token', () => {
+        const result = getTokenBySymbol('UNKNOWN');
+        expect(result).toBeNull();
+      });
+
+      it('should handle case-sensitive symbols correctly', () => {
+        const result = getTokenBySymbol('usdc');
+        expect(result).toBeNull();
+      });
+
+      it('should handle unicode keys correctly', () => {
+        const result = getTokenBySymbol('USD₮0');
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('USDT');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null symbol', () => {
+        expect(() => getTokenBySymbol(null)).toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for undefined symbol', () => {
+        expect(() => getTokenBySymbol(undefined)).toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for non-string symbol', () => {
+        expect(() => getTokenBySymbol(123)).toThrow('Token symbol must be a string');
+        expect(() => getTokenBySymbol({})).toThrow('Token symbol must be a string');
+        expect(() => getTokenBySymbol([])).toThrow('Token symbol must be a string');
+      });
+
+      it('should throw error for empty string symbol', () => {
+        expect(() => getTokenBySymbol('')).toThrow('Token symbol cannot be empty');
+      });
+    });
+  });
+
+  describe('getTokenAddress', () => {
+    describe('Success Cases', () => {
+      it('should return address for valid symbol and chain', () => {
+        const result = getTokenAddress('USDC', 1);
+        expect(result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+      });
+
+      it('should return address for Arbitrum chain', () => {
+        const result = getTokenAddress('USDC', 42161);
+        expect(result).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+      });
+
+      it('should return address for local chain', () => {
+        const result = getTokenAddress('WETH', 1337);
+        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should return null for unknown token', () => {
+        const result = getTokenAddress('UNKNOWN', 1);
+        expect(result).toBeNull();
+      });
+
+      it('should return null for token not on chain', () => {
+        const result = getTokenAddress('USDC', 999999);
+        expect(result).toBeNull();
+      });
+
+      it('should work with all configured chains', () => {
+        const chainIds = [1, 42161, 1337];
+        chainIds.forEach(chainId => {
+          const result = getTokenAddress('USDC', chainId);
+          expect(result).toBeDefined();
+          expect(typeof result).toBe('string');
+          expect(result.startsWith('0x')).toBe(true);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbol', () => {
+        expect(() => getTokenAddress(null, 1)).toThrow('Token symbol parameter is required');
+        expect(() => getTokenAddress('', 1)).toThrow('Token symbol cannot be empty');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        expect(() => getTokenAddress('USDC', null)).toThrow('Chain ID parameter is required');
+        expect(() => getTokenAddress('USDC', 'invalid')).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokenAddress('USDC', -1)).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokenAddress('USDC', 0)).toThrow('Chain ID must be a positive integer');
+      });
+    });
+  });
+
+  describe('getStablecoins', () => {
+    describe('Success Cases', () => {
+      it('should return only stablecoin tokens', () => {
+        const result = getStablecoins();
+        
+        expect(typeof result).toBe('object');
+        expect(Array.isArray(result)).toBe(false);
+        
+        Object.values(result).forEach(token => {
+          expect(token.isStablecoin).toBe(true);
+        });
+      });
+
+      it('should include USDC in stablecoins', () => {
+        const result = getStablecoins();
+        expect(result.USDC).toBeDefined();
+        expect(result.USDC.isStablecoin).toBe(true);
+      });
+
+      it('should include USDT in stablecoins', () => {
+        const result = getStablecoins();
+        expect(result['USD₮0']).toBeDefined();
+        expect(result['USD₮0'].isStablecoin).toBe(true);
+      });
+
+      it('should not include WETH in stablecoins', () => {
+        const result = getStablecoins();
+        expect(result.WETH).toBeUndefined();
+      });
+
+      it('should have consistent structure with getAllTokens', () => {
+        const allTokens = getAllTokens();
+        const stablecoins = getStablecoins();
+        
+        Object.entries(stablecoins).forEach(([symbol, token]) => {
+          expect(allTokens[symbol]).toEqual(token);
+        });
+      });
+    });
+  });
+
+  describe('areTokensSupportedOnChain', () => {
+    describe('Success Cases', () => {
+      it('should return true when all tokens are supported', () => {
+        const result = areTokensSupportedOnChain(['USDC', 'WETH'], 1);
+        expect(result).toBe(true);
+      });
+
+      it('should return true for single token', () => {
+        const result = areTokensSupportedOnChain(['USDC'], 42161);
+        expect(result).toBe(true);
+      });
+
+      it('should return false when some tokens are not supported', () => {
+        const result = areTokensSupportedOnChain(['USDC', 'UNKNOWN'], 1);
+        expect(result).toBe(false);
+      });
+
+      it('should return false when tokens are not on chain', () => {
+        const result = areTokensSupportedOnChain(['USDC'], 999999);
+        expect(result).toBe(false);
+      });
+
+      it('should work with all valid tokens on Arbitrum', () => {
+        const result = areTokensSupportedOnChain(['USDC', 'WETH', 'WBTC'], 42161);
+        expect(result).toBe(true);
+      });
+
+      it('should work with mixed token support', () => {
+        const supportedResult = areTokensSupportedOnChain(['USDC', 'WETH'], 1);
+        expect(supportedResult).toBe(true);
+        
+        const unsupportedResult = areTokensSupportedOnChain(['USDC', 'NONEXISTENT'], 1);
+        expect(unsupportedResult).toBe(false);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbols array', () => {
+        expect(() => areTokensSupportedOnChain(null, 1)).toThrow('Token symbols parameter is required');
+        expect(() => areTokensSupportedOnChain('USDC', 1)).toThrow('Token symbols must be an array');
+        expect(() => areTokensSupportedOnChain([], 1)).toThrow('Token symbols array cannot be empty');
+      });
+
+      it('should throw error for invalid symbols in array', () => {
+        expect(() => areTokensSupportedOnChain([null], 1)).toThrow('Token symbols[0]: Token symbol parameter is required');
+        expect(() => areTokensSupportedOnChain(['USDC', ''], 1)).toThrow('Token symbols[1]: Token symbol cannot be empty');
+        expect(() => areTokensSupportedOnChain(['USDC', 123], 1)).toThrow('Token symbols[1]: Token symbol must be a string');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        expect(() => areTokensSupportedOnChain(['USDC'], null)).toThrow('Chain ID parameter is required');
+        expect(() => areTokensSupportedOnChain(['USDC'], 'invalid')).toThrow('Chain ID must be a positive integer');
+      });
+    });
+  });
+
+  describe('getTokenByAddress', () => {
+    describe('Success Cases', () => {
+      it('should return token for valid address and chain', () => {
+        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        const result = getTokenByAddress(address, 1);
+        
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('USDC');
+      });
+
+      it('should handle case-insensitive addresses', () => {
+        const address = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+        const result = getTokenByAddress(address, 1);
+        
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('USDC');
+      });
+
+      it('should work with WETH address', () => {
+        const address = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const result = getTokenByAddress(address, 42161);
+        
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('WETH');
+      });
+
+      it('should return null for unknown address', () => {
+        const address = '0x1234567890123456789012345678901234567890';
+        const result = getTokenByAddress(address, 1);
+        
+        expect(result).toBeNull();
+      });
+
+      it('should return null for address not on chain', () => {
+        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        const result = getTokenByAddress(address, 999999);
+        
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid address format', () => {
+        expect(() => getTokenByAddress('invalid', 1)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress('0x123', 1)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress('0x123456789012345678901234567890123456789G', 1)).toThrow('Address must be a valid Ethereum address');
+      });
+
+      it('should throw error for missing address', () => {
+        expect(() => getTokenByAddress(null, 1)).toThrow('Address parameter is required');
+        expect(() => getTokenByAddress(undefined, 1)).toThrow('Address parameter is required');
+        expect(() => getTokenByAddress('', 1)).toThrow('Address must be a valid Ethereum address');
+      });
+
+      it('should throw error for non-string address', () => {
+        expect(() => getTokenByAddress(123, 1)).toThrow('Address must be a string');
+        expect(() => getTokenByAddress({}, 1)).toThrow('Address must be a string');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        expect(() => getTokenByAddress(address, null)).toThrow('Chain ID parameter is required');
+        expect(() => getTokenByAddress(address, 'invalid')).toThrow('Chain ID must be a positive integer');
+      });
+    });
+  });
+
+  describe('getTokensForChain', () => {
+    describe('Success Cases', () => {
+      it('should return tokens available on Ethereum', () => {
+        const result = getTokensForChain(1);
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        
+        result.forEach(token => {
+          expect(token.addresses[1]).toBeDefined();
+          expect(typeof token.addresses[1]).toBe('string');
+        });
+      });
+
+      it('should return tokens available on Arbitrum', () => {
+        const result = getTokensForChain(42161);
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        
+        result.forEach(token => {
+          expect(token.addresses[42161]).toBeDefined();
+        });
+      });
+
+      it('should return tokens available on local chain', () => {
+        const result = getTokensForChain(1337);
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+      });
+
+      it('should return empty array for unsupported chain', () => {
+        const result = getTokensForChain(999999);
+        expect(result).toEqual([]);
+      });
+
+      it('should include USDC and WETH on all supported chains', () => {
+        const supportedChains = [1, 42161, 1337];
+        
+        supportedChains.forEach(chainId => {
+          const tokens = getTokensForChain(chainId);
+          const symbols = tokens.map(token => token.symbol);
+          
+          expect(symbols).toContain('USDC');
+          expect(symbols).toContain('WETH');
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid chainId', () => {
+        expect(() => getTokensForChain(null)).toThrow('Chain ID parameter is required');
+        expect(() => getTokensForChain('invalid')).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokensForChain(-1)).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokensForChain(0)).toThrow('Chain ID must be a positive integer');
+      });
+    });
+  });
+
+  describe('getAllTokenSymbols', () => {
+    describe('Success Cases', () => {
+      it('should return array of all token symbols', () => {
+        const result = getAllTokenSymbols();
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        
+        expect(result).toContain('USDC');
+        expect(result).toContain('WETH');
+        expect(result).toContain('WBTC');
+      });
+
+      it('should include unicode symbol keys', () => {
+        const result = getAllTokenSymbols();
+        expect(result).toContain('USD₮0');
+      });
+
+      it('should return same symbols as Object.keys(getAllTokens())', () => {
+        const result = getAllTokenSymbols();
+        const expected = Object.keys(getAllTokens());
+        
+        expect(result).toEqual(expected);
+      });
+
+      it('should contain only strings', () => {
+        const result = getAllTokenSymbols();
+        
+        result.forEach(symbol => {
+          expect(typeof symbol).toBe('string');
+          expect(symbol.length).toBeGreaterThan(0);
+        });
+      });
+    });
+  });
+
+  describe('getTokensByType', () => {
+    describe('Success Cases', () => {
+      it('should return stablecoins when isStablecoin is true', () => {
+        const result = getTokensByType(true);
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        
+        result.forEach(token => {
+          expect(token.isStablecoin).toBe(true);
+        });
+        
+        const symbols = result.map(token => token.symbol);
+        expect(symbols).toContain('USDC');
+        expect(symbols).toContain('USDT');
+      });
+
+      it('should return non-stablecoins when isStablecoin is false', () => {
+        const result = getTokensByType(false);
+        
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        
+        result.forEach(token => {
+          expect(token.isStablecoin).toBe(false);
+        });
+        
+        const symbols = result.map(token => token.symbol);
+        expect(symbols).toContain('WETH');
+        expect(symbols).toContain('WBTC');
+      });
+
+      it('should have consistent results with getStablecoins', () => {
+        const stablecoinsByType = getTokensByType(true);
+        const stablecoinsHelper = Object.values(getStablecoins());
+        
+        expect(stablecoinsByType.length).toBe(stablecoinsHelper.length);
+        
+        const symbolsByType = stablecoinsByType.map(token => token.symbol);
+        const symbolsHelper = stablecoinsHelper.map(token => token.symbol);
+        
+        expect(symbolsByType.sort()).toEqual(symbolsHelper.sort());
+      });
+
+      it('should cover all tokens when combining both types', () => {
+        const stablecoins = getTokensByType(true);
+        const nonStablecoins = getTokensByType(false);
+        const totalTokens = stablecoins.length + nonStablecoins.length;
+        
+        const allTokens = Object.values(getAllTokens());
+        expect(totalTokens).toBe(allTokens.length);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for non-boolean parameter', () => {
+        expect(() => getTokensByType('true')).toThrow('isStablecoin parameter must be a boolean');
+        expect(() => getTokensByType(1)).toThrow('isStablecoin parameter must be a boolean');
+        expect(() => getTokensByType(null)).toThrow('isStablecoin parameter must be a boolean');
+        expect(() => getTokensByType(undefined)).toThrow('isStablecoin parameter must be a boolean');
+        expect(() => getTokensByType({})).toThrow('isStablecoin parameter must be a boolean');
+      });
+    });
+  });
+
+  describe('getCoingeckoId', () => {
+    describe('Success Cases', () => {
+      it('should return CoinGecko ID for USDC', () => {
+        const result = getCoingeckoId('USDC');
+        expect(result).toBe('usd-coin');
+      });
+
+      it('should return CoinGecko ID for WETH', () => {
+        const result = getCoingeckoId('WETH');
+        expect(result).toBe('ethereum');
+      });
+
+      it('should return CoinGecko ID for WBTC', () => {
+        const result = getCoingeckoId('WBTC');
+        expect(result).toBe('wrapped-bitcoin');
+      });
+
+      it('should return CoinGecko ID for LINK', () => {
+        const result = getCoingeckoId('LINK');
+        expect(result).toBe('chainlink');
+      });
+
+      it('should work with all configured tokens', () => {
+        const allSymbols = getAllTokenSymbols();
+        
+        allSymbols.forEach(symbol => {
+          const result = getCoingeckoId(symbol);
+          expect(typeof result).toBe('string');
+          expect(result.length).toBeGreaterThan(0);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbol', () => {
+        expect(() => getCoingeckoId(null)).toThrow('Token symbol parameter is required');
+        expect(() => getCoingeckoId('')).toThrow('Token symbol cannot be empty');
+        expect(() => getCoingeckoId(123)).toThrow('Token symbol must be a string');
+      });
+
+      it('should throw error for unknown token', () => {
+        expect(() => getCoingeckoId('UNKNOWN')).toThrow('Unknown token symbol: UNKNOWN. Token not found in configuration.');
+      });
+    });
+  });
+
+  describe('getTokenAddresses', () => {
+    describe('Success Cases', () => {
+      it('should return addresses for multiple tokens', () => {
+        const result = getTokenAddresses(['USDC', 'WETH'], 1);
+        
+        expect(typeof result).toBe('object');
+        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(result.WETH).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+      });
+
+      it('should return addresses for Arbitrum chain', () => {
+        const result = getTokenAddresses(['USDC', 'WETH'], 42161);
+        
+        expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+        expect(result.WETH).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should only include tokens available on chain', () => {
+        const result = getTokenAddresses(['USDC', 'WETH'], 999999);
+        expect(result).toEqual({});
+      });
+
+      it('should handle mixed availability', () => {
+        // Test with real tokens that exist and make sure we get addresses
+        const result = getTokenAddresses(['USDC', 'WBTC'], 1);
+        
+        expect(Object.keys(result).length).toBeGreaterThan(0);
+        Object.values(result).forEach(address => {
+          expect(typeof address).toBe('string');
+          expect(address.startsWith('0x')).toBe(true);
+        });
+      });
+
+      it('should work with single token', () => {
+        const result = getTokenAddresses(['USDC'], 1);
+        expect(result.USDC).toBeDefined();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbols', () => {
+        expect(() => getTokenAddresses(null, 1)).toThrow('Token symbols parameter is required');
+        expect(() => getTokenAddresses([], 1)).toThrow('Token symbols array cannot be empty');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        expect(() => getTokenAddresses(['USDC'], null)).toThrow('Chain ID parameter is required');
+        expect(() => getTokenAddresses(['USDC'], 'invalid')).toThrow('Chain ID must be a positive integer');
+      });
+    });
+  });
+
+  describe('validateTokensExist', () => {
+    describe('Success Cases', () => {
+      it('should return true for existing tokens', () => {
+        const result = validateTokensExist(['USDC', 'WETH']);
+        expect(result).toBe(true);
+      });
+
+      it('should return true for single existing token', () => {
+        const result = validateTokensExist(['USDC']);
+        expect(result).toBe(true);
+      });
+
+      it('should return false for non-existing tokens', () => {
+        const result = validateTokensExist(['USDC', 'UNKNOWN']);
+        expect(result).toBe(false);
+      });
+
+      it('should return false for all non-existing tokens', () => {
+        const result = validateTokensExist(['UNKNOWN1', 'UNKNOWN2']);
+        expect(result).toBe(false);
+      });
+
+      it('should work with all valid token symbols', () => {
+        const allSymbols = getAllTokenSymbols();
+        const result = validateTokensExist(allSymbols);
+        expect(result).toBe(true);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbols parameter', () => {
+        expect(() => validateTokensExist(null)).toThrow('Token symbols parameter is required');
+        expect(() => validateTokensExist([])).toThrow('Token symbols array cannot be empty');
+        expect(() => validateTokensExist('USDC')).toThrow('Token symbols must be an array');
+      });
+    });
+  });
+
+  describe('getTokensMetadata', () => {
+    describe('Success Cases', () => {
+      it('should return metadata for multiple tokens', () => {
+        const result = getTokensMetadata(['USDC', 'WETH']);
+        
+        expect(typeof result).toBe('object');
+        expect(result.USDC).toBeDefined();
+        expect(result.WETH).toBeDefined();
+        
+        expect(result.USDC.name).toBe('USD Coin');
+        expect(result.WETH.name).toBe('Wrapped Ether');
+      });
+
+      it('should return metadata for single token', () => {
+        const result = getTokensMetadata(['USDC']);
+        
+        expect(result.USDC).toBeDefined();
+        expect(result.USDC.symbol).toBe('USDC');
+        expect(result.USDC.decimals).toBe(6);
+      });
+
+      it('should only include existing tokens', () => {
+        const result = getTokensMetadata(['USDC', 'UNKNOWN']);
+        
+        expect(result.USDC).toBeDefined();
+        expect(result.UNKNOWN).toBeUndefined();
+        expect(Object.keys(result)).toEqual(['USDC']);
+      });
+
+      it('should return empty object for all unknown tokens', () => {
+        const result = getTokensMetadata(['UNKNOWN1', 'UNKNOWN2']);
+        expect(result).toEqual({});
+      });
+
+      it('should return complete token objects', () => {
+        const result = getTokensMetadata(['USDC']);
+        const token = result.USDC;
+        
+        expect(token).toHaveProperty('name');
+        expect(token).toHaveProperty('symbol');
+        expect(token).toHaveProperty('decimals');
+        expect(token).toHaveProperty('addresses');
+        expect(token).toHaveProperty('isStablecoin');
+        expect(token).toHaveProperty('coingeckoId');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbols parameter', () => {
+        expect(() => getTokensMetadata(null)).toThrow('Token symbols parameter is required');
+        expect(() => getTokensMetadata([])).toThrow('Token symbols array cannot be empty');
+        expect(() => getTokensMetadata('USDC')).toThrow('Token symbols must be an array');
+      });
+    });
+  });
+});

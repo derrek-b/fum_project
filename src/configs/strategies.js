@@ -1,5 +1,4 @@
 // src/configs/strategies.js
-import { getAllTokens, getStablecoins } from "../helpers/tokenHelpers.js";
 
 /**
  * Strategy configuration with templates and parameters
@@ -16,7 +15,7 @@ const strategies = {
     color: "#6c757d",
     borderColor: "#6c757d",
     textColor: "#FFFFFF",
-    supportedTokens: getAllTokens(),
+    tokenSupport: "all",
     minTokens: 0,
     maxTokens: 0,
     minPlatforms: 0,
@@ -71,7 +70,7 @@ const strategies = {
     color: "gold",
     borderColor: "black",
     textColor: "black",
-    supportedTokens: getAllTokens(),
+    tokenSupport: "all",
     minTokens: 2,
     maxTokens: 2,
     minPlatforms: 1,
@@ -332,7 +331,7 @@ const strategies = {
     color: "#1565C0",
     borderColor: "#B22234",
     textColor: "#FFFFFF",
-    supportedTokens: getAllTokens(),
+    tokenSupport: "all",
     minTokens: 2,
     maxTokens: 3,
     minPlatforms: 1,
@@ -902,7 +901,7 @@ const strategies = {
     color: "#1B5E20",
     borderColor: "#1B5E20",
     textColor: "#F5F5F5",
-    supportedTokens: getStablecoins(),
+    tokenSupport: "stablecoins",
     minTokens: 2,
     maxTokens: 2,
     minPlatforms: 1,

@@ -1,11 +1,96 @@
 /**
  * @module helpers/tokenHelpers
  * @description Token management utilities for querying, filtering, and managing token configurations across multiple chains.
- * Provides functions to work with token metadata, addresses, and type classifications.
+ * Provides functions to work with token metadata, addresses, and type classifications with comprehensive input validation.
+ * 
+ * All functions now include fail-fast validation and throw descriptive errors for invalid inputs.
+ * The `registerToken` function has been removed to maintain config immutability.
+ * 
  * @since 1.0.0
  */
 
 import tokens from '../configs/tokens.js';
+
+/**
+ * Validate token symbol parameter using established validation pattern
+ * @param {any} symbol - The value to validate as a token symbol
+ * @throws {Error} If symbol is not a valid string
+ */
+function validateTokenSymbol(symbol) {
+  if (symbol === null || symbol === undefined) {
+    throw new Error('Token symbol parameter is required');
+  }
+
+  if (typeof symbol !== 'string') {
+    throw new Error('Token symbol must be a string');
+  }
+
+  if (symbol === '') {
+    throw new Error('Token symbol cannot be empty');
+  }
+}
+
+/**
+ * Validate chain ID parameter using established validation pattern
+ * @param {any} chainId - The value to validate as a chain ID
+ * @throws {Error} If chainId is not a valid positive integer
+ */
+function validateChainId(chainId) {
+  if (chainId === null || chainId === undefined) {
+    throw new Error('Chain ID parameter is required');
+  }
+
+  const numChainId = Number(chainId);
+  if (!Number.isInteger(numChainId) || numChainId <= 0) {
+    throw new Error('Chain ID must be a positive integer');
+  }
+}
+
+/**
+ * Validate Ethereum address format
+ * @param {any} address - The value to validate as an Ethereum address
+ * @throws {Error} If address is not a valid Ethereum address format
+ */
+function validateEthereumAddress(address) {
+  if (address === null || address === undefined) {
+    throw new Error('Address parameter is required');
+  }
+
+  if (typeof address !== 'string') {
+    throw new Error('Address must be a string');
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    throw new Error('Address must be a valid Ethereum address (0x followed by 40 hex characters)');
+  }
+}
+
+/**
+ * Validate token symbols array parameter
+ * @param {any} symbols - The value to validate as an array of token symbols
+ * @throws {Error} If symbols is not a valid array of strings
+ */
+function validateTokenSymbols(symbols) {
+  if (symbols === null || symbols === undefined) {
+    throw new Error('Token symbols parameter is required');
+  }
+
+  if (!Array.isArray(symbols)) {
+    throw new Error('Token symbols must be an array');
+  }
+
+  if (symbols.length === 0) {
+    throw new Error('Token symbols array cannot be empty');
+  }
+
+  symbols.forEach((symbol, index) => {
+    try {
+      validateTokenSymbol(symbol);
+    } catch (error) {
+      throw new Error(`Token symbols[${index}]: ${error.message}`);
+    }
+  });
+}
 
 /**
  * Get all tokens
@@ -36,6 +121,7 @@ export function getAllTokens() {
  * @memberof module:helpers/tokenHelpers
  * @param {string} symbol - Token symbol (case-sensitive)
  * @returns {Object|null} Token object containing all token metadata - null if not found
+ * @throws {Error} If symbol parameter is invalid
  * @example
  * // Get USDC token information
  * const usdc = getTokenBySymbol('USDC');
@@ -56,6 +142,7 @@ export function getAllTokens() {
  * @since 1.0.0
  */
 export function getTokenBySymbol(symbol) {
+  validateTokenSymbol(symbol);
   return tokens[symbol] || null;
 }
 
@@ -65,6 +152,7 @@ export function getTokenBySymbol(symbol) {
  * @param {string} symbol - Token symbol (case-sensitive)
  * @param {number} chainId - Chain ID where the token address is needed
  * @returns {string|null} Token contract address (0x-prefixed) - null if not available on the chain
+ * @throws {Error} If parameters are invalid
  * @example
  * // Get USDC address on Ethereum mainnet
  * const usdcAddress = getTokenAddress('USDC', 1);
@@ -72,13 +160,16 @@ export function getTokenBySymbol(symbol) {
  * 
  * @example
  * // Check if token exists on chain before using
- * const tokenAddress = getTokenAddress('DAI', chainId);
+ * const tokenAddress = getTokenAddress('USDC', chainId);
  * if (tokenAddress) {
  *   const contract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
  * }
  * @since 1.0.0
  */
 export function getTokenAddress(symbol, chainId) {
+  validateTokenSymbol(symbol);
+  validateChainId(chainId);
+  
   const token = tokens[symbol];
   if (!token || !token.addresses[chainId]) {
     return null;
@@ -123,22 +214,26 @@ export function getStablecoins() {
  * @param {string[]} symbols - Array of token symbols to check
  * @param {number} chainId - Chain ID to check against
  * @returns {boolean} True if ALL tokens are supported on the chain, false if any are missing
+ * @throws {Error} If parameters are invalid
  * @example
- * // Check if token pair is available on Polygon
- * const tokensAvailable = areTokensSupportedOnChain(['USDC', 'ETH'], 137);
+ * // Check if token pair is available on Arbitrum
+ * const tokensAvailable = areTokensSupportedOnChain(['USDC', 'WETH'], 42161);
  * if (!tokensAvailable) {
  *   console.error('Not all tokens available on this chain');
  * }
  * 
  * @example
  * // Validate token selection for a specific chain
- * const selectedTokens = ['DAI', 'USDC', 'WBTC'];
+ * const selectedTokens = ['USDC', 'WETH', 'WBTC'];
  * if (areTokensSupportedOnChain(selectedTokens, chainId)) {
  *   proceedWithStrategy(selectedTokens);
  * }
  * @since 1.0.0
  */
 export function areTokensSupportedOnChain(symbols, chainId) {
+  validateTokenSymbols(symbols);
+  validateChainId(chainId);
+  
   return symbols.every(symbol => {
     const token = tokens[symbol];
     return token && token.addresses[chainId];
@@ -151,7 +246,7 @@ export function areTokensSupportedOnChain(symbols, chainId) {
  * @param {string} address - Token contract address (0x-prefixed)
  * @param {number} chainId - Chain ID where the address exists
  * @returns {Object|null} Token object with all metadata - null if not found
- * @throws {TypeError} If address is not a valid Ethereum address format
+ * @throws {Error} If parameters are invalid
  * @example
  * // Look up token by its contract address
  * const token = getTokenByAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 1);
@@ -168,7 +263,8 @@ export function areTokensSupportedOnChain(symbols, chainId) {
  * @since 1.0.0
  */
 export function getTokenByAddress(address, chainId) {
-  if (!address || !chainId) return null;
+  validateEthereumAddress(address);
+  validateChainId(chainId);
 
   // Normalize the address for comparison
   const normalizedAddress = address.toLowerCase();
@@ -183,62 +279,17 @@ export function getTokenByAddress(address, chainId) {
   return null;
 }
 
-/**
- * Register a new token or update an existing one
- * @memberof module:helpers/tokenHelpers
- * @param {Object} token - Token configuration object
- * @param {string} token.symbol - Token symbol (required, will be used as key)
- * @param {string} token.name - Human-readable token name
- * @param {number} token.decimals - Number of decimals for the token
- * @param {Object} token.addresses - Chain ID to address mapping
- * @param {boolean} [token.isStablecoin=false] - Whether the token is a stablecoin
- * @param {string} [token.logoURI] - URL to token logo image
- * @returns {boolean} True if registration successful, false if invalid input
- * @example
- * // Register a new token
- * registerToken({
- *   symbol: 'NEWTOKEN',
- *   name: 'New Token',
- *   decimals: 18,
- *   addresses: {
- *     1: '0x1234...5678',
- *     137: '0x8765...4321'
- *   },
- *   isStablecoin: false,
- *   logoURI: 'https://example.com/logo.png'
- * });
- * 
- * @example
- * // Update existing token with new chain
- * const weth = getTokenBySymbol('WETH');
- * registerToken({
- *   ...weth,
- *   addresses: {
- *     ...weth.addresses,
- *     42161: '0xNewArbitrumAddress'
- *   }
- * });
- * @since 1.0.0
- */
-export function registerToken(token) {
-  if (!token || !token.symbol) return false;
-
-  tokens[token.symbol] = {
-    ...token
-  };
-
-  return true;
-}
 
 /**
  * Get all tokens available on a specific chain
  * @memberof module:helpers/tokenHelpers
  * @param {number} chainId - Chain ID to filter tokens by
  * @returns {Array<Object>} Array of token objects that have addresses on the specified chain
+ * @throws {Error} If chainId is invalid
  * @example
- * // Get all tokens on Polygon
- * const polygonTokens = getTokensForChain(137);
- * // Returns array of tokens with Polygon addresses
+ * // Get all tokens on Arbitrum
+ * const arbitrumTokens = getTokensForChain(42161);
+ * // Returns array of tokens with Arbitrum addresses
  * 
  * @example
  * // Build token selector for current chain
@@ -251,7 +302,7 @@ export function registerToken(token) {
  * @since 1.0.0
  */
 export function getTokensForChain(chainId) {
-  if (!chainId) return [];
+  validateChainId(chainId);
 
   return Object.values(tokens).filter(token =>
     token.addresses && token.addresses[chainId]
@@ -284,10 +335,11 @@ export function getAllTokenSymbols() {
  * @memberof module:helpers/tokenHelpers
  * @param {boolean} isStablecoin - True to get stablecoins, false to get non-stablecoins
  * @returns {Array<Object>} Array of token objects matching the type criteria
+ * @throws {Error} If isStablecoin parameter is invalid
  * @example
  * // Get all non-stablecoin tokens
  * const volatileTokens = getTokensByType(false);
- * // Returns tokens like ETH, WBTC, etc.
+ * // Returns tokens like WETH, WBTC, etc.
  * 
  * @example
  * // Separate tokens by type for different strategies
@@ -299,6 +351,10 @@ export function getAllTokenSymbols() {
  * @since 1.0.0
  */
 export function getTokensByType(isStablecoin) {
+  if (typeof isStablecoin !== 'boolean') {
+    throw new Error('isStablecoin parameter must be a boolean');
+  }
+  
   return Object.values(tokens).filter(token =>
     token.isStablecoin === isStablecoin
   );
@@ -318,7 +374,7 @@ export function getTokensByType(isStablecoin) {
  * @example
  * // Use in price fetching
  * try {
- *   const geckoId = getCoingeckoId('ETH');
+ *   const geckoId = getCoingeckoId('WETH');
  *   const price = await fetchPriceFromCoingecko(geckoId);
  * } catch (error) {
  *   console.error('Token not supported for price fetching');
@@ -326,9 +382,7 @@ export function getTokensByType(isStablecoin) {
  * @since 1.0.0
  */
 export function getCoingeckoId(symbol) {
-  if (!symbol || symbol === '') {
-    throw new Error('Token symbol is required and cannot be empty');
-  }
+  validateTokenSymbol(symbol);
 
   const token = tokens[symbol];
   if (!token) {
@@ -340,4 +394,81 @@ export function getCoingeckoId(symbol) {
   }
 
   return token.coingeckoId;
+}
+
+/**
+ * Get token addresses for multiple symbols on a specific chain (batch operation)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string[]} symbols - Array of token symbols
+ * @param {number} chainId - Chain ID where addresses are needed
+ * @returns {Object} Object mapping symbol to address (only includes tokens available on chain)
+ * @throws {Error} If parameters are invalid
+ * @example
+ * // Get multiple token addresses at once
+ * const addresses = getTokenAddresses(['USDC', 'WETH'], 42161);
+ * // Returns: { USDC: "0xaf88...", WETH: "0x82af..." }
+ * @since 1.0.0
+ */
+export function getTokenAddresses(symbols, chainId) {
+  validateTokenSymbols(symbols);
+  validateChainId(chainId);
+  
+  const addresses = {};
+  symbols.forEach(symbol => {
+    const address = getTokenAddress(symbol, chainId);
+    if (address) {
+      addresses[symbol] = address;
+    }
+  });
+  
+  return addresses;
+}
+
+/**
+ * Validate that multiple token symbols exist in configuration (batch validation)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string[]} symbols - Array of token symbols to validate
+ * @returns {boolean} True if all tokens exist, false otherwise
+ * @throws {Error} If symbols parameter is invalid
+ * @example
+ * // Check if all selected tokens are valid
+ * const isValid = validateTokensExist(['USDC', 'WETH', 'WBTC']);
+ * if (!isValid) {
+ *   console.error('Some tokens not found');
+ * }
+ * @since 1.0.0
+ */
+export function validateTokensExist(symbols) {
+  validateTokenSymbols(symbols);
+  
+  return symbols.every(symbol => tokens[symbol] !== undefined);
+}
+
+/**
+ * Get metadata for multiple tokens (batch operation)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string[]} symbols - Array of token symbols
+ * @returns {Object} Object mapping symbol to token metadata (only includes existing tokens)
+ * @throws {Error} If symbols parameter is invalid
+ * @example
+ * // Get metadata for multiple tokens
+ * const metadata = getTokensMetadata(['USDC', 'WETH']);
+ * // Returns: { 
+ * //   USDC: { name: "USD Coin", decimals: 6, ... },
+ * //   WETH: { name: "Wrapped Ether", decimals: 18, ... }
+ * // }
+ * @since 1.0.0
+ */
+export function getTokensMetadata(symbols) {
+  validateTokenSymbols(symbols);
+  
+  const metadata = {};
+  symbols.forEach(symbol => {
+    const token = tokens[symbol];
+    if (token) {
+      metadata[symbol] = token;
+    }
+  });
+  
+  return metadata;
 }
