@@ -87,28 +87,34 @@ export function getTokenAddress(symbol, chainId) {
 }
 
 /**
- * Get all stablecoins
+ * Get all stablecoin tokens
  * @memberof module:helpers/tokenHelpers
- * @returns {Array<Object>} Array of token objects that are classified as stablecoins
+ * @returns {Object} Object of stablecoin tokens keyed by symbol (same format as getAllTokens)
  * @example
  * // Get all stablecoin tokens
  * const stablecoins = getStablecoins();
- * // Returns: [
- * //   { symbol: "USDC", name: "USD Coin", isStablecoin: true, ... },
- * //   { symbol: "USDT", name: "Tether", isStablecoin: true, ... },
- * //   { symbol: "DAI", name: "Dai", isStablecoin: true, ... }
- * // ]
+ * // Returns: { 
+ * //   USDC: { symbol: "USDC", name: "USD Coin", isStablecoin: true, ... },
+ * //   USDT: { symbol: "USDT", name: "Tether", isStablecoin: true, ... },
+ * //   DAI: { symbol: "DAI", name: "Dai", isStablecoin: true, ... }
+ * // }
+ * 
+ * @example
+ * // Use in strategy configuration
+ * supportedTokens: getStablecoins()
  * 
  * @example
  * // Get stablecoin symbols for a selector
- * const stablecoinOptions = getStablecoins().map(token => ({
+ * const stablecoinOptions = Object.values(getStablecoins()).map(token => ({
  *   value: token.symbol,
  *   label: `${token.name} (${token.symbol})`
  * }));
  * @since 1.0.0
  */
 export function getStablecoins() {
-  return Object.values(tokens).filter(token => token.isStablecoin);
+  return Object.fromEntries(
+    Object.entries(tokens).filter(([_, token]) => token.isStablecoin)
+  );
 }
 
 /**

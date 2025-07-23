@@ -5,7 +5,7 @@
 
 // fum_library/adapters/AdapterFactory.js
 import UniswapV3Adapter from "./UniswapV3Adapter.js";
-import { getChainConfig, getChainPlatformIds } from "../helpers/chainHelpers.js";
+import { getChainConfig, lookupChainPlatformIds } from "../helpers/chainHelpers.js";
 
 /**
  * Factory class for creating and managing platform adapters
@@ -62,7 +62,7 @@ export default class AdapterFactory {
     }
 
     // Get all enabled platform IDs for this chain
-    const platformIds = getChainPlatformIds(chainId);
+    const platformIds = lookupChainPlatformIds(chainId);
 
     // Create an adapter for each supported platform on the chain
     platformIds.forEach(platformId => {

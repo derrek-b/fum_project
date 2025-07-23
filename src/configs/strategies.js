@@ -23,21 +23,42 @@ const strategies = {
     maxPlatforms: 0,
     minPositions: 0,
     maxPositions: 0,
+    templateEnumMap: {
+      'custom': 0
+    },
+    templates: {
+      'custom': {
+        name: "Custom",
+        description: "Fully customized parameter configuration",
+        defaults: {
+          tokenDeposits: {
+            tokens: [],
+            amounts: {}
+          }
+        }
+      }
+    },
     parameters: {
       tokenDeposits: {
         name: "Token Deposits",
         description: "Select tokens and amounts to deposit into your vault",
         type: "token-deposits",
-        defaultValue: { tokens: [], amounts: {} }
+        defaultValue: { tokens: [], amounts: {} },
+        group: 0,
+        contractGroup: "manual"
       }
     },
-    templates: [
-      {
-        id: "custom",
-        name: "Custom",
-        description: "Fully customized parameter configuration"
+    parameterGroups: {
+      0: {
+        name: "Manual Settings",
+        description: "Configure manual token deposits and management"
       }
-    ]
+    },
+    contractParametersGroups: {
+      "manual": {
+        setterMethod: "setTokenDeposits"
+      }
+    }
   },
 
   // Basic strategy - simplified version of Parris Island
@@ -57,53 +78,16 @@ const strategies = {
     maxPlatforms: 1,
     minPositions: 1,
     maxPositions: 1,
-    parameterGroups: [
-      {
-        id: 0,
-        name: "Range Settings",
-        description: "Control how your position responds to price movements",
-        setterMethod: "setRangeParameters"
-      },
-      {
-        id: 1,
-        name: "Fee Settings",
-        description: "Configure how fees are handled and reinvested",
-        setterMethod: "setFeeParameters"
-      },
-      {
-        id: 2,
-        name: "Risk Management",
-        description: "Set safeguards to protect your position",
-        setterMethod: "setRiskParameters"
-      }
-    ],
-    contractParametersGroups: [
-      {
-        id: "range",
-        setterMethod: "setRangeParameters",
-        parameters: ["targetRangeUpper", "targetRangeLower", "rebalanceThresholdUpper", "rebalanceThresholdLower"]
-      },
-      {
-        id: "fee",
-        setterMethod: "setFeeParameters",
-        parameters: ["feeReinvestment", "reinvestmentTrigger", "reinvestmentRatio"]
-      },
-      {
-        id: "risk",
-        setterMethod: "setRiskParameters",
-        parameters: ["maxSlippage", "emergencyExitTrigger", "maxUtilization"]
-      }
-    ],
     // Templates for Basic Strategy
     templateEnumMap: {
+      'custom': 0,
       'conservative': 1,
       'moderate': 2,
       'aggressive': 3,
       'stablecoin': 4
     },
-    templates: [
-      {
-        id: "conservative",
+    templates: {
+      'conservative': {
         name: "Conservative",
         description: "Wider ranges with fewer rebalances, lower risk",
         defaults: {
@@ -111,14 +95,15 @@ const strategies = {
           targetRangeLower: 10.0,
           rebalanceThresholdUpper: 3.0,
           rebalanceThresholdLower: 3.0,
-          maxVaultUtilization: 60,
+          maxUtilization: 60,
           maxSlippage: 0.3,
           emergencyExitTrigger: 20,
-          feeReinvestment: false
+          feeReinvestment: false,
+          reinvestmentTrigger: 50,
+          reinvestmentRatio: 80
         }
       },
-      {
-        id: "moderate",
+      'moderate': {
         name: "Moderate",
         description: "Balanced approach to risk and yield",
         defaults: {
@@ -126,7 +111,7 @@ const strategies = {
           targetRangeLower: 5.0,
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
-          maxVaultUtilization: 80,
+          maxUtilization: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
           feeReinvestment: true,
@@ -134,8 +119,7 @@ const strategies = {
           reinvestmentRatio: 80
         }
       },
-      {
-        id: "aggressive",
+      'aggressive': {
         name: "Aggressive",
         description: "Tighter ranges for maximum fee generation",
         defaults: {
@@ -143,7 +127,7 @@ const strategies = {
           targetRangeLower: 3.0,
           rebalanceThresholdUpper: 0.8,
           rebalanceThresholdLower: 0.8,
-          maxVaultUtilization: 95,
+          maxUtilization: 95,
           maxSlippage: 1.0,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
@@ -151,8 +135,7 @@ const strategies = {
           reinvestmentRatio: 100
         }
       },
-      {
-        id: "stablecoin",
+      'stablecoin': {
         name: "Stablecoin",
         description: "Very tight ranges for stablecoin pairs",
         defaults: {
@@ -160,7 +143,7 @@ const strategies = {
           targetRangeLower: 0.5,
           rebalanceThresholdUpper: 0.2,
           rebalanceThresholdLower: 0.2,
-          maxVaultUtilization: 90,
+          maxUtilization: 90,
           maxSlippage: 0.1,
           emergencyExitTrigger: 2.0,
           feeReinvestment: true,
@@ -168,12 +151,23 @@ const strategies = {
           reinvestmentRatio: 100
         }
       },
-      {
-        id: "custom",
+      'custom': {
         name: "Custom",
-        description: "Fully customized parameter configuration"
+        description: "Fully customized parameter configuration",
+        defaults: {
+          targetRangeUpper: 5.0,
+          targetRangeLower: 5.0,
+          rebalanceThresholdUpper: 1.5,
+          rebalanceThresholdLower: 1.5,
+          feeReinvestment: true,
+          reinvestmentTrigger: 50,
+          reinvestmentRatio: 80,
+          maxSlippage: 0.5,
+          emergencyExitTrigger: 15,
+          maxUtilization: 80
+        }
       }
-    ],
+    },
     parameters: {
       // Range and Rebalance Parameters
       targetRangeUpper: {
@@ -238,7 +232,7 @@ const strategies = {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
         defaultValue: 50,
-        min: 1,
+        min: 5,
         max: 1000,
         step: 5,
         prefix: "$",
@@ -300,6 +294,31 @@ const strategies = {
         group: 2,
         contractGroup: "risk"
       }
+    },
+    parameterGroups: {
+      0: {
+        name: "Range Settings",
+        description: "Control how your position responds to price movements"
+      },
+      1: {
+        name: "Fee Settings",
+        description: "Configure how fees are handled and reinvested"
+      },
+      2: {
+        name: "Risk Management",
+        description: "Set safeguards to protect your position"
+      }
+    },
+    contractParametersGroups: {
+      "range": {
+        setterMethod: "setRangeParameters"
+      },
+      "fee": {
+        setterMethod: "setFeeParameters"
+      },
+      "risk": {
+        setterMethod: "setRiskParameters"
+      }
     }
   },
 
@@ -320,79 +339,16 @@ const strategies = {
     maxPlatforms: 2,
     minPositions: 1,
     maxPositions: 1,
-    parameterGroups: [
-      {
-        id: 0,
-        name: "Range Settings",
-        description: "Control how your position responds to price movements",
-        setterMethod: "setRangeParameters"
-      },
-      {
-        id: 1,
-        name: "Fee Settings",
-        description: "Configure how fees are handled and reinvested",
-        setterMethod: "setFeeParameters"
-      },
-      {
-        id: 2,
-        name: "Risk Management",
-        description: "Set safeguards to protect your position",
-      },
-      {
-        id: 3,
-        name: "Advanced Settings",
-        description: "Fine-tune your strategy behavior",
-      }
-    ],
-    contractParametersGroups: [
-      {
-        id: "range",
-        setterMethod: "setRangeParameters",
-        parameters: ["targetRangeUpper", "targetRangeLower", "rebalanceThresholdUpper", "rebalanceThresholdLower"]
-      },
-      {
-        id: "fee",
-        setterMethod: "setFeeParameters",
-        parameters: ["feeReinvestment", "reinvestmentTrigger", "reinvestmentRatio"]
-      },
-      {
-        id: "risk",
-        setterMethod: "setRiskParameters",
-        parameters: ["maxSlippage", "emergencyExitTrigger", "maxVaultUtilization"]
-      },
-      {
-        id: "adaptive",
-        setterMethod: "setAdaptiveParameters",
-        parameters: ["adaptiveRanges", "rebalanceCountThresholdHigh", "rebalanceCountThresholdLow",
-                     "adaptiveTimeframeHigh", "adaptiveTimeframeLow", "rangeAdjustmentPercentHigh",
-                     "thresholdAdjustmentPercentHigh", "rangeAdjustmentPercentLow", "thresholdAdjustmentPercentLow"]
-      },
-      {
-        id: "oracle",
-        setterMethod: "setOracleParameters",
-        parameters: ["oracleSource", "priceDeviationTolerance"]
-      },
-      {
-        id: "positionSizing",
-        setterMethod: "setPositionSizingParameters",
-        parameters: ["maxPositionSizePercent", "minPositionSize", "targetUtilization"]
-      },
-      {
-        id: "platform",
-        setterMethod: "setPlatformParameters",
-        parameters: ["platformSelectionCriteria", "minPoolLiquidity"]
-      }
-    ],
     // Templates for Parris Island (fixed with correct range values)
     templateEnumMap: {
+      'custom': 0,
       'conservative': 1,
       'moderate': 2,
       'aggressive': 3,
       'stablecoin': 4
     },
-    templates: [
-      {
-        id: "conservative",
+    templates: {
+      'conservative': {
         name: "Conservative",
         description: "Wider ranges with fewer rebalances, lower risk",
         defaults: {
@@ -402,6 +358,14 @@ const strategies = {
           rebalanceThresholdLower: 3.0,
           maxVaultUtilization: 60,
           adaptiveRanges: false,
+          rebalanceCountThresholdHigh: 3,
+          rebalanceCountThresholdLow: 1,
+          adaptiveTimeframeHigh: 7,
+          adaptiveTimeframeLow: 7,
+          rangeAdjustmentPercentHigh: 20,
+          thresholdAdjustmentPercentHigh: 15,
+          rangeAdjustmentPercentLow: 20,
+          thresholdAdjustmentPercentLow: 15,
           maxSlippage: 0.3,
           emergencyExitTrigger: 20,
           oracleSource: "0",
@@ -410,12 +374,13 @@ const strategies = {
           minPositionSize: 200,
           targetUtilization: 15,
           feeReinvestment: false,
+          reinvestmentTrigger: 50,
+          reinvestmentRatio: 80,
           platformSelectionCriteria: "0",
           minPoolLiquidity: 200000
         }
       },
-      {
-        id: "moderate",
+      'moderate': {
         name: "Moderate",
         description: "Balanced approach to risk and yield",
         defaults: {
@@ -447,8 +412,7 @@ const strategies = {
           minPoolLiquidity: 100000
         }
       },
-      {
-        id: "aggressive",
+      'aggressive': {
         name: "Aggressive",
         description: "Tighter ranges for maximum fee generation",
         defaults: {
@@ -480,8 +444,7 @@ const strategies = {
           minPoolLiquidity: 50000
         }
       },
-      {
-        id: "stablecoin",
+      'stablecoin': {
         name: "Stablecoin",
         description: "Very tight ranges for stablecoin pairs",
         defaults: {
@@ -513,12 +476,39 @@ const strategies = {
           minPoolLiquidity: 500000 // Higher liquidity requirement for stablecoins
         }
       },
-      {
-        id: "custom",
+      'custom': {
         name: "Custom",
-        description: "Fully customized parameter configuration"
+        description: "Fully customized parameter configuration",
+        defaults: {
+          targetRangeUpper: 5.0,
+          targetRangeLower: 5.0,
+          rebalanceThresholdUpper: 1.5,
+          rebalanceThresholdLower: 1.5,
+          feeReinvestment: true,
+          reinvestmentTrigger: 50,
+          reinvestmentRatio: 80,
+          maxSlippage: 0.5,
+          emergencyExitTrigger: 15,
+          maxVaultUtilization: 80,
+          adaptiveRanges: true,
+          rebalanceCountThresholdHigh: 3,
+          rebalanceCountThresholdLow: 1,
+          adaptiveTimeframeHigh: 7,
+          adaptiveTimeframeLow: 7,
+          rangeAdjustmentPercentHigh: 20,
+          thresholdAdjustmentPercentHigh: 15,
+          rangeAdjustmentPercentLow: 20,
+          thresholdAdjustmentPercentLow: 15,
+          oracleSource: "0",
+          priceDeviationTolerance: 1.0,
+          maxPositionSizePercent: 30,
+          minPositionSize: 100,
+          targetUtilization: 20,
+          platformSelectionCriteria: "1",
+          minPoolLiquidity: 100000
+        }
       }
-    ],
+    },
     parameters: {
       // Range and Rebalance Parameters
       targetRangeUpper: {
@@ -583,7 +573,7 @@ const strategies = {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
         defaultValue: 50,
-        min: 1,
+        min: 5,
         max: 1000,
         step: 5,
         prefix: "$",
@@ -858,6 +848,47 @@ const strategies = {
         group: 2,
         contractGroup: "platform"
       }
+    },
+    parameterGroups: {
+      0: {
+        name: "Range Settings",
+        description: "Control how your position responds to price movements"
+      },
+      1: {
+        name: "Fee Settings",
+        description: "Configure how fees are handled and reinvested"
+      },
+      2: {
+        name: "Risk Management",
+        description: "Set safeguards to protect your position"
+      },
+      3: {
+        name: "Advanced Settings",
+        description: "Fine-tune your strategy behavior"
+      }
+    },
+    contractParametersGroups: {
+      "range": {
+        setterMethod: "setRangeParameters"
+      },
+      "fee": {
+        setterMethod: "setFeeParameters"
+      },
+      "risk": {
+        setterMethod: "setRiskParameters"
+      },
+      "adaptive": {
+        setterMethod: "setAdaptiveParameters"
+      },
+      "oracle": {
+        setterMethod: "setOracleParameters"
+      },
+      "positionSizing": {
+        setterMethod: "setPositionSizingParameters"
+      },
+      "platform": {
+        setterMethod: "setPlatformParameters"
+      }
     }
   },
 
@@ -878,10 +909,14 @@ const strategies = {
     maxPlatforms: 1,
     minPositions: 1,
     maxPositions: 1,
-    // Templates for The Fed
-    templates: [
-      {
-        id: "stability",
+    templateEnumMap: {
+      'custom': 0,
+      'stability': 1,
+      'yield': 2,
+      'defense': 3
+    },
+    templates: {
+      'stability': {
         name: "Stability Focus",
         description: "Prioritize maintaining peg with minimal deviation",
         defaults: {
@@ -891,8 +926,7 @@ const strategies = {
           maxSlippage: 0.1
         }
       },
-      {
-        id: "yield",
+      'yield': {
         name: "Yield Optimized",
         description: "Balance peg maintenance with fee generation",
         defaults: {
@@ -902,8 +936,7 @@ const strategies = {
           maxSlippage: 0.3
         }
       },
-      {
-        id: "defense",
+      'defense': {
         name: "Peg Defense",
         description: "React quickly to peg deviations",
         defaults: {
@@ -913,48 +946,86 @@ const strategies = {
           maxSlippage: 0.5
         }
       },
-      {
-        id: "custom",
+      'custom': {
         name: "Custom",
-        description: "Fully customized parameter configuration"
+        description: "Fully customized parameter configuration",
+        defaults: {
+          targetRange: 0.5,
+          rebalanceThreshold: 1.0,
+          feeReinvestment: true,
+          maxSlippage: 0.5
+        }
       }
-    ],
+    },
     parameters: {
       targetRange: {
         name: "Range",
         description: "Range around the current price to set the position boundaries",
-        type: "number",
+        type: "percent",
         defaultValue: 0.5,
         min: 0.1,
         max: 5.0,
         step: 0.1,
-        suffix: "%"
+        suffix: "%",
+        group: 0,
+        contractGroup: "range"
       },
       rebalanceThreshold: {
         name: "Rebalance Trigger",
         description: "Price movement percentage that triggers a rebalance",
-        type: "number",
+        type: "percent",
         defaultValue: 1.0,
         min: 0.1,
         max: 10.0,
         step: 0.1,
-        suffix: "%"
+        suffix: "%",
+        group: 0,
+        contractGroup: "range"
       },
       feeReinvestment: {
         name: "Reinvest Fees",
         description: "Automatically reinvest collected fees",
         type: "boolean",
-        defaultValue: true
+        defaultValue: true,
+        group: 1,
+        contractGroup: "fee"
       },
       maxSlippage: {
         name: "Max Slippage",
         description: "Maximum acceptable slippage when executing trades",
-        type: "number",
+        type: "percent",
         defaultValue: 0.5,
         min: 0.1,
         max: 5.0,
         step: 0.1,
-        suffix: "%"
+        suffix: "%",
+        group: 2,
+        contractGroup: "risk"
+      }
+    },
+    parameterGroups: {
+      0: {
+        name: "Range Settings",
+        description: "Control position ranges and rebalance triggers"
+      },
+      1: {
+        name: "Fee Settings",
+        description: "Configure fee reinvestment behavior"
+      },
+      2: {
+        name: "Risk Management",
+        description: "Set risk management parameters"
+      }
+    },
+    contractParametersGroups: {
+      "range": {
+        setterMethod: "setRangeParameters"
+      },
+      "fee": {
+        setterMethod: "setFeeParameters"
+      },
+      "risk": {
+        setterMethod: "setRiskParameters"
       }
     }
   }

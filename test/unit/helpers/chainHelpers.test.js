@@ -6,79 +6,80 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
+  validateChainId,
   getChainConfig,
   getChainName,
   getChainRpcUrls,
   getExecutorAddress,
   isChainSupported,
-  getSupportedChainIds,
+  lookupSupportedChainIds,
   getPlatformAddresses,
-  getChainPlatformIds
+  lookupChainPlatformIds
 } from '../../../src/helpers/chainHelpers.js';
 
 describe('Chain Helpers', () => {
-  describe('validateChainId (internal function - tested through public functions)', () => {
+  describe('validateChainId', () => {
     describe('Success Cases', () => {
       it('should accept valid positive integers', () => {
-        expect(() => getChainName(1)).not.toThrow();
-        expect(() => getChainName(42161)).not.toThrow();
-        expect(() => getChainName(1337)).not.toThrow();
+        expect(() => validateChainId(1)).not.toThrow();
+        expect(() => validateChainId(42161)).not.toThrow();
+        expect(() => validateChainId(1337)).not.toThrow();
       });
 
       it('should accept integers represented as floats (1.0, 42161.0)', () => {
-        expect(() => getChainName(1.0)).not.toThrow();
-        expect(() => getChainName(42161.0)).not.toThrow();
+        expect(() => validateChainId(1.0)).not.toThrow();
+        expect(() => validateChainId(42161.0)).not.toThrow();
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for null chainId', () => {
-        expect(() => getChainName(null)).toThrow('chainId parameter is required');
+        expect(() => validateChainId(null)).toThrow('chainId parameter is required');
       });
 
       it('should throw error for undefined chainId', () => {
-        expect(() => getChainName(undefined)).toThrow('chainId parameter is required');
+        expect(() => validateChainId(undefined)).toThrow('chainId parameter is required');
       });
 
       it('should throw error for string chainId', () => {
-        expect(() => getChainName('1')).toThrow('chainId must be a number');
-        expect(() => getChainName('ethereum')).toThrow('chainId must be a number');
+        expect(() => validateChainId('1')).toThrow('chainId must be a number');
+        expect(() => validateChainId('ethereum')).toThrow('chainId must be a number');
       });
 
       it('should throw error for array chainId', () => {
-        expect(() => getChainName([1])).toThrow('chainId must be a number');
+        expect(() => validateChainId([1])).toThrow('chainId must be a number');
       });
 
       it('should throw error for object chainId', () => {
-        expect(() => getChainName({ chainId: 1 })).toThrow('chainId must be a number');
+        expect(() => validateChainId({ chainId: 1 })).toThrow('chainId must be a number');
       });
 
       it('should throw error for boolean chainId', () => {
-        expect(() => getChainName(true)).toThrow('chainId must be a number');
-        expect(() => getChainName(false)).toThrow('chainId must be a number');
+        expect(() => validateChainId(true)).toThrow('chainId must be a number');
+        expect(() => validateChainId(false)).toThrow('chainId must be a number');
       });
 
       it('should throw error for NaN chainId', () => {
-        expect(() => getChainName(NaN)).toThrow('chainId must be a finite number');
+        expect(() => validateChainId(NaN)).toThrow('chainId must be a finite number');
       });
 
       it('should throw error for Infinity chainId', () => {
-        expect(() => getChainName(Infinity)).toThrow('chainId must be a finite number');
-        expect(() => getChainName(-Infinity)).toThrow('chainId must be a finite number');
+        expect(() => validateChainId(Infinity)).toThrow('chainId must be a finite number');
+        expect(() => validateChainId(-Infinity)).toThrow('chainId must be a finite number');
       });
 
       it('should throw error for zero chainId', () => {
-        expect(() => getChainName(0)).toThrow('chainId must be greater than 0');
+        expect(() => validateChainId(0)).toThrow('chainId must be greater than 0');
       });
 
       it('should throw error for negative chainId', () => {
-        expect(() => getChainName(-1)).toThrow('chainId must be greater than 0');
-        expect(() => getChainName(-42161)).toThrow('chainId must be greater than 0');
+        expect(() => validateChainId(-1)).toThrow('chainId must be greater than 0');
+        expect(() => validateChainId(-42161)).toThrow('chainId must be greater than 0');
       });
 
       it('should throw error for decimal chainId', () => {
-        expect(() => getChainName(1.5)).toThrow('chainId must be an integer');
-        expect(() => getChainName(42161.123)).toThrow('chainId must be an integer');
+        expect(() => validateChainId(1.5)).toThrow('chainId must be an integer');
+        expect(() => validateChainId(42161.123)).toThrow('chainId must be an integer');
       });
     });
   });
@@ -139,6 +140,35 @@ describe('Chain Helpers', () => {
         expect(() => getChainName(999999)).toThrow('Chain 999999 is not supported');
       });
 
+      it('should throw error for chains with missing or empty name', async () => {
+        // Mock chains config with chain that has no name property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              // No name property
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x0'
+            },
+            888: {
+              name: '', // Empty name
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x0'
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getChainName(777)).toThrow('Chain 777 name not configured');
+        expect(() => chainHelpers.getChainName(888)).toThrow('Chain 888 name not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
       it('should validate chainId parameter', () => {
         expect(() => getChainName(null)).toThrow('chainId parameter is required');
         expect(() => getChainName('1')).toThrow('chainId must be a number');
@@ -192,6 +222,35 @@ describe('Chain Helpers', () => {
         vi.resetModules();
       });
 
+      it('should throw error for empty RPC URLs array', async () => {
+        // Mock chains config with empty rpcUrls array
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            666: {
+              name: 'Test Chain With Empty RPC Array',
+              rpcUrls: [], // Empty array
+              executorAddress: '0x0'
+            },
+            777: {
+              name: 'Test Chain With Non-Array RPC',
+              rpcUrls: 'not-an-array', // Not an array
+              executorAddress: '0x0'
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getChainRpcUrls(666)).toThrow('Chain 666 RPC URLs not configured');
+        expect(() => chainHelpers.getChainRpcUrls(777)).toThrow('Chain 777 RPC URLs not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
       it('should validate chainId parameter', () => {
         expect(() => getChainRpcUrls(null)).toThrow('chainId parameter is required');
         expect(() => getChainRpcUrls('1')).toThrow('chainId must be a number');
@@ -218,6 +277,29 @@ describe('Chain Helpers', () => {
       it('should throw error for chains with 0x0 executor address', () => {
         expect(() => getExecutorAddress(1)).toThrow('No executor address configured for chain 1');
         expect(() => getExecutorAddress(42161)).toThrow('No executor address configured for chain 42161');
+      });
+
+      it('should throw error for chains with empty string executor address', async () => {
+        // Mock chains config with empty string executor address
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain With Empty Executor',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '' // Empty string
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExecutorAddress(999)).toThrow('No executor address configured for chain 999');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
       });
 
       it('should throw error when no executor address property is configured', async () => {
@@ -277,10 +359,10 @@ describe('Chain Helpers', () => {
     });
   });
 
-  describe('getSupportedChainIds', () => {
+  describe('lookupSupportedChainIds', () => {
     describe('Success Cases', () => {
       it('should return array containing the current configured chain IDs', () => {
-        const chainIds = getSupportedChainIds();
+        const chainIds = lookupSupportedChainIds();
 
         expect(Array.isArray(chainIds)).toBe(true);
         expect(chainIds).toContain(1);      // Ethereum
@@ -294,7 +376,7 @@ describe('Chain Helpers', () => {
       });
 
       it('should return unique chain IDs', () => {
-        const chainIds = getSupportedChainIds();
+        const chainIds = lookupSupportedChainIds();
         const uniqueIds = [...new Set(chainIds)];
 
         expect(chainIds.length).toBe(uniqueIds.length);
@@ -328,10 +410,33 @@ describe('Chain Helpers', () => {
         expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
       });
 
-      it('should return null for unsupported platform', () => {
-        expect(getPlatformAddresses(1, 'nonexistentPlatform')).toBeNull();
-        expect(getPlatformAddresses(42161, 'aaveV3')).toBeNull();
-        expect(getPlatformAddresses(1337, 'compound')).toBeNull();
+      it('should return null for disabled platform', async () => {
+        // Mock chains config with disabled platform
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain With Disabled Platform',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                uniswapV3: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  enabled: false // Disabled platform
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(chainHelpers.getPlatformAddresses(999, 'uniswapV3')).toBeNull();
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
       });
     });
 
@@ -364,6 +469,12 @@ describe('Chain Helpers', () => {
         vi.resetModules();
       });
 
+      it('should throw error for unconfigured platform', () => {
+        expect(() => getPlatformAddresses(1, 'nonexistentPlatform')).toThrow('Platform nonexistentPlatform not configured for chain 1');
+        expect(() => getPlatformAddresses(42161, 'aaveV3')).toThrow('Platform aaveV3 not configured for chain 42161');
+        expect(() => getPlatformAddresses(1337, 'compound')).toThrow('Platform compound not configured for chain 1337');
+      });
+
       it('should validate chainId parameter', () => {
         expect(() => getPlatformAddresses(null, 'uniswapV3')).toThrow('chainId parameter is required');
         expect(() => getPlatformAddresses('1', 'uniswapV3')).toThrow('chainId must be a number');
@@ -379,12 +490,12 @@ describe('Chain Helpers', () => {
     });
   });
 
-  describe('getChainPlatformIds', () => {
+  describe('lookupChainPlatformIds', () => {
     describe('Success Cases', () => {
       it('should return array containing uniswapV3 for all supported chains', () => {
-        const chain1Platforms = getChainPlatformIds(1);
-        const chain42161Platforms = getChainPlatformIds(42161);
-        const chain1337Platforms = getChainPlatformIds(1337);
+        const chain1Platforms = lookupChainPlatformIds(1);
+        const chain42161Platforms = lookupChainPlatformIds(42161);
+        const chain1337Platforms = lookupChainPlatformIds(1337);
 
         expect(Array.isArray(chain1Platforms)).toBe(true);
         expect(Array.isArray(chain42161Platforms)).toBe(true);
@@ -426,7 +537,7 @@ describe('Chain Helpers', () => {
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
         
-        const platformIds = chainHelpers.getChainPlatformIds(999);
+        const platformIds = chainHelpers.lookupChainPlatformIds(999);
         
         expect(platformIds).toContain('uniswapV3');
         expect(platformIds).toContain('compound');
@@ -440,7 +551,7 @@ describe('Chain Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for unsupported chain', () => {
-        expect(() => getChainPlatformIds(999999)).toThrow('Chain 999999 is not supported');
+        expect(() => lookupChainPlatformIds(999999)).toThrow('Chain 999999 is not supported');
       });
 
       it('should throw error when no platformAddresses property is configured', async () => {
@@ -460,7 +571,7 @@ describe('Chain Helpers', () => {
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
         
-        expect(() => chainHelpers.getChainPlatformIds(888)).toThrow('No platform addresses configured for chain 888');
+        expect(() => chainHelpers.lookupChainPlatformIds(888)).toThrow('No platform addresses configured for chain 888');
 
         // Restore original config
         vi.doUnmock('../../../src/configs/chains.js');
@@ -468,9 +579,9 @@ describe('Chain Helpers', () => {
       });
 
       it('should validate chainId parameter', () => {
-        expect(() => getChainPlatformIds(null)).toThrow('chainId parameter is required');
-        expect(() => getChainPlatformIds('1')).toThrow('chainId must be a number');
-        expect(() => getChainPlatformIds(0)).toThrow('chainId must be greater than 0');
+        expect(() => lookupChainPlatformIds(null)).toThrow('chainId parameter is required');
+        expect(() => lookupChainPlatformIds('1')).toThrow('chainId must be a number');
+        expect(() => lookupChainPlatformIds(0)).toThrow('chainId must be greater than 0');
       });
     });
   });

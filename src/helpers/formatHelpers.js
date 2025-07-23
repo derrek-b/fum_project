@@ -130,7 +130,7 @@ export function formatFeeDisplay(fee) {
  *
  * @since 1.0.0
  */
-export function formatTimestamp(timestamp) {s
+export function formatTimestamp(timestamp) {
   if (!Number.isFinite(timestamp)) throw new Error('Timestamp must be a finite number');
   if (timestamp <= 0) throw new Error('Timestamp must be greater than 0');
 

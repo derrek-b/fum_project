@@ -89,7 +89,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should track failures when adapter creation fails', () => {
-        // First, we need to mock getChainPlatformIds to return a failing platform
+        // First, we need to mock lookupChainPlatformIds to return a failing platform
         // Since we can't easily modify the real chain config, we'll temporarily register
         // a failing adapter and manually test the failure tracking
 
@@ -101,11 +101,11 @@ describe('AdapterFactory - Unit Tests', () => {
           const actual = await importOriginal();
           return {
             ...actual,
-            getChainPlatformIds: (chainId) => {
+            lookupChainPlatformIds: (chainId) => {
               if (chainId === 88888) {
                 return ['failing', 'mock'];
               }
-              return actual.getChainPlatformIds(chainId);
+              return actual.lookupChainPlatformIds(chainId);
             },
             getChainConfig: (chainId) => {
               if (chainId === 88888) {

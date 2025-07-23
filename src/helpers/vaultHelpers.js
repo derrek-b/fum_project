@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { AdapterFactory } from '../adapters/index.js';
 import { getUserVaults, getVaultInfo } from '../blockchain/index.js';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from '../services/index.js';
-import { getAvailableStrategies, getStrategyParameters } from './strategyHelpers.js';
+import { lookupAvailableStrategies, getStrategyParameters } from './strategyHelpers.js';
 import { getAllTokens } from './tokenHelpers.js';
 import contractData from '../artifacts/contracts.js';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
@@ -176,7 +176,7 @@ export const fetchStrategyParameters = async (strategyAddress, strategyId, vault
     let selectedTemplate = 'custom';
 
     // Use the templateEnumMap from strategy config to map enum value to template ID
-    const availableStrategies = getAvailableStrategies();
+    const availableStrategies = lookupAvailableStrategies();
     const strategy = availableStrategies.find(s => s.id === strategyId);
 
     if (strategy?.templateEnumMap) {
@@ -219,7 +219,7 @@ export const fetchStrategyParameters = async (strategyAddress, strategyId, vault
 export const getVaultStrategies = async (provider, chainId) => {
   try {
     // Get strategy information
-    const availableStrategies = getAvailableStrategies();
+    const availableStrategies = lookupAvailableStrategies();
 
     // Create a mapping from contract addresses to strategy IDs
     const addressToStrategyMap = {};
