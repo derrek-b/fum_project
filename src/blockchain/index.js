@@ -11,4 +11,5 @@
 
 export * from './wallet.js';
 export * from './contracts.js';
+export * from './vaults.js';
 

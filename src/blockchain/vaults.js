@@ -1,5 +1,5 @@
 /**
- * @module helpers/vaultHelpers
+ * @module blockchain/vaults
  * @description Vault data management utilities for fetching vault information, calculating TVL, and managing strategy parameters.
  * Provides comprehensive vault management functionality including position tracking, balance calculations, and strategy integration.
  * @since 1.0.0
@@ -7,17 +7,17 @@
 
 import { ethers } from 'ethers';
 import { AdapterFactory } from '../adapters/index.js';
-import { getUserVaults, getVaultInfo } from '../blockchain/index.js';
+import { getUserVaults, getVaultInfo } from './contracts.js';
 import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from '../services/index.js';
-import { lookupAvailableStrategies, getStrategyParameters } from './strategyHelpers.js';
-import { getAllTokens } from './tokenHelpers.js';
+import { lookupAvailableStrategies, getStrategyParameters } from '../helpers/strategyHelpers.js';
+import { getAllTokens } from '../helpers/tokenHelpers.js';
 import contractData from '../artifacts/contracts.js';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
 const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**
  * Map strategy parameters from contract return value to named objects
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} strategyId - Strategy ID (e.g., 'bob', 'parris', 'fed')
  * @param {Array} params - Raw parameters array from contract getAllParameters call
  * @returns {Object} Named parameters with human-readable values
@@ -119,7 +119,7 @@ export const mapStrategyParameters = (strategyId, params) => {
 
 /**
  * Fetch and map parameter values from a strategy contract
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} strategyAddress - The strategy contract address
  * @param {string} strategyId - Strategy ID (e.g., "parris", "fed")
  * @param {string} vaultAddress - The vault address
@@ -203,7 +203,7 @@ export const fetchStrategyParameters = async (strategyAddress, strategyId, vault
 
 /**
  * Get available strategy configurations for a chain
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {Object} provider - Ethers provider instance
  * @param {number} chainId - Chain ID to get strategies for
  * @returns {Promise<Object>} Result object with success flag, strategies array, and address mapping
@@ -286,7 +286,7 @@ export const getVaultStrategies = async (provider, chainId) => {
 
 /**
  * Load basic vault information and contract details
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} vaultAddress - The vault address to query
  * @param {Object} provider - Ethers provider instance
  * @param {Object} [addressToStrategyMap={}] - Map of strategy addresses to strategy IDs
@@ -419,7 +419,7 @@ export const getVaultBasicInfo = async (vaultAddress, provider, addressToStrateg
 
 /**
  * Load token balances for a vault
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} vaultAddress - The vault address to check balances for
  * @param {Object} provider - Ethers provider instance
  * @param {number} chainId - Chain ID for token lookups
@@ -518,7 +518,7 @@ export const getVaultTokenBalances = async (vaultAddress, provider, chainId) => 
 
 /**
  * Load positions for a vault from all adapters
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} vaultAddress - The vault address to get positions for
  * @param {Object} provider - Ethers provider instance
  * @param {number} chainId - Chain ID to query positions on
@@ -593,7 +593,7 @@ export const getVaultPositions = async (vaultAddress, provider, chainId) => {
 
 /**
  * Calculate Total Value Locked (TVL) for positions
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {Array<Object>} positions - Array of position objects from adapters
  * @param {Object} poolData - Pool data keyed by pool address
  * @param {Object} tokenData - Token data keyed by token address
@@ -715,7 +715,7 @@ export const calculatePositionsTVL = async (positions, poolData, tokenData, prov
 
 /**
  * Main function to get a specific vault's complete data including positions and balances
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} vaultAddress - The vault address to query
  * @param {Object} provider - Ethers provider instance
  * @param {number} chainId - Chain ID for the vault
@@ -818,7 +818,7 @@ export const getVaultData = async (vaultAddress, provider, chainId) => {
 
 /**
  * Get all user vaults with full data and aggregate positions
- * @memberof module:helpers/vaultHelpers
+ * @memberof module:blockchain/vaults
  * @param {string} userAddress - The user's wallet address
  * @param {Object} provider - Ethers provider instance
  * @param {number} chainId - Chain ID to query

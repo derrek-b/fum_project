@@ -12,13 +12,13 @@ import {
   getStablecoins,
   areTokensSupportedOnChain,
   getTokenByAddress,
-  getTokensForChain,
+  getTokensByChain,
   getAllTokenSymbols,
   getTokensByType,
   getCoingeckoId,
   getTokenAddresses,
   validateTokensExist,
-  getTokensMetadata
+  getTokensBySymbol
 } from '../../../src/helpers/tokenHelpers.js';
 import tokens from '../../../src/configs/tokens.js';
 
@@ -91,16 +91,6 @@ describe('Token Helpers', () => {
         expect(result.isStablecoin).toBe(false);
       });
 
-      it('should return null for unknown token', () => {
-        const result = getTokenBySymbol('UNKNOWN');
-        expect(result).toBeNull();
-      });
-
-      it('should handle case-sensitive symbols correctly', () => {
-        const result = getTokenBySymbol('usdc');
-        expect(result).toBeNull();
-      });
-
       it('should handle unicode keys correctly', () => {
         const result = getTokenBySymbol('USD₮0');
         expect(result).toBeDefined();
@@ -109,6 +99,15 @@ describe('Token Helpers', () => {
     });
 
     describe('Error Cases', () => {
+      it('should throw error for unknown token', () => {
+        expect(() => getTokenBySymbol('UNKNOWN'))
+          .toThrow('Token UNKNOWN not found');
+      });
+
+      it('should throw error for case-sensitive symbols correctly', () => {
+        expect(() => getTokenBySymbol('usdc'))
+          .toThrow('Token usdc not found');
+      });
       it('should throw error for null symbol', () => {
         expect(() => getTokenBySymbol(null)).toThrow('Token symbol parameter is required');
       });
@@ -146,15 +145,6 @@ describe('Token Helpers', () => {
         expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
       });
 
-      it('should return null for unknown token', () => {
-        const result = getTokenAddress('UNKNOWN', 1);
-        expect(result).toBeNull();
-      });
-
-      it('should return null for token not on chain', () => {
-        const result = getTokenAddress('USDC', 999999);
-        expect(result).toBeNull();
-      });
 
       it('should work with all configured chains', () => {
         const chainIds = [1, 42161, 1337];
@@ -178,6 +168,16 @@ describe('Token Helpers', () => {
         expect(() => getTokenAddress('USDC', 'invalid')).toThrow('Chain ID must be a positive integer');
         expect(() => getTokenAddress('USDC', -1)).toThrow('Chain ID must be a positive integer');
         expect(() => getTokenAddress('USDC', 0)).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for unknown token', () => {
+        expect(() => getTokenAddress('UNKNOWN', 1))
+          .toThrow('Token UNKNOWN not found');
+      });
+
+      it('should throw error for token not on chain', () => {
+        expect(() => getTokenAddress('USDC', 999999))
+          .toThrow('Token USDC not available on chain 999999');
       });
     });
   });
@@ -305,19 +305,6 @@ describe('Token Helpers', () => {
         expect(result.symbol).toBe('WETH');
       });
 
-      it('should return null for unknown address', () => {
-        const address = '0x1234567890123456789012345678901234567890';
-        const result = getTokenByAddress(address, 1);
-        
-        expect(result).toBeNull();
-      });
-
-      it('should return null for address not on chain', () => {
-        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-        const result = getTokenByAddress(address, 999999);
-        
-        expect(result).toBeNull();
-      });
     });
 
     describe('Error Cases', () => {
@@ -343,13 +330,25 @@ describe('Token Helpers', () => {
         expect(() => getTokenByAddress(address, null)).toThrow('Chain ID parameter is required');
         expect(() => getTokenByAddress(address, 'invalid')).toThrow('Chain ID must be a positive integer');
       });
+
+      it('should throw error for unknown address', () => {
+        const address = '0x1234567890123456789012345678901234567890';
+        expect(() => getTokenByAddress(address, 1))
+          .toThrow(`No token found at address ${address} on chain 1`);
+      });
+
+      it('should throw error for address not on chain', () => {
+        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        expect(() => getTokenByAddress(address, 999999))
+          .toThrow(`No token found at address ${address} on chain 999999`);
+      });
     });
   });
 
-  describe('getTokensForChain', () => {
+  describe('getTokensByChain', () => {
     describe('Success Cases', () => {
       it('should return tokens available on Ethereum', () => {
-        const result = getTokensForChain(1);
+        const result = getTokensByChain(1);
         
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
@@ -361,7 +360,7 @@ describe('Token Helpers', () => {
       });
 
       it('should return tokens available on Arbitrum', () => {
-        const result = getTokensForChain(42161);
+        const result = getTokensByChain(42161);
         
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
@@ -372,14 +371,14 @@ describe('Token Helpers', () => {
       });
 
       it('should return tokens available on local chain', () => {
-        const result = getTokensForChain(1337);
+        const result = getTokensByChain(1337);
         
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
       });
 
       it('should return empty array for unsupported chain', () => {
-        const result = getTokensForChain(999999);
+        const result = getTokensByChain(999999);
         expect(result).toEqual([]);
       });
 
@@ -387,7 +386,7 @@ describe('Token Helpers', () => {
         const supportedChains = [1, 42161, 1337];
         
         supportedChains.forEach(chainId => {
-          const tokens = getTokensForChain(chainId);
+          const tokens = getTokensByChain(chainId);
           const symbols = tokens.map(token => token.symbol);
           
           expect(symbols).toContain('USDC');
@@ -398,10 +397,10 @@ describe('Token Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for invalid chainId', () => {
-        expect(() => getTokensForChain(null)).toThrow('Chain ID parameter is required');
-        expect(() => getTokensForChain('invalid')).toThrow('Chain ID must be a positive integer');
-        expect(() => getTokensForChain(-1)).toThrow('Chain ID must be a positive integer');
-        expect(() => getTokensForChain(0)).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokensByChain(null)).toThrow('Chain ID parameter is required');
+        expect(() => getTokensByChain('invalid')).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokensByChain(-1)).toThrow('Chain ID must be a positive integer');
+        expect(() => getTokensByChain(0)).toThrow('Chain ID must be a positive integer');
       });
     });
   });
@@ -570,20 +569,13 @@ describe('Token Helpers', () => {
         expect(result.WETH).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
       });
 
-      it('should only include tokens available on chain', () => {
-        const result = getTokenAddresses(['USDC', 'WETH'], 999999);
-        expect(result).toEqual({});
-      });
 
-      it('should handle mixed availability', () => {
-        // Test with real tokens that exist and make sure we get addresses
+      it('should return all addresses when all tokens are available', () => {
         const result = getTokenAddresses(['USDC', 'WBTC'], 1);
         
-        expect(Object.keys(result).length).toBeGreaterThan(0);
-        Object.values(result).forEach(address => {
-          expect(typeof address).toBe('string');
-          expect(address.startsWith('0x')).toBe(true);
-        });
+        expect(Object.keys(result)).toHaveLength(2);
+        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
       });
 
       it('should work with single token', () => {
@@ -601,6 +593,16 @@ describe('Token Helpers', () => {
       it('should throw error for invalid chainId', () => {
         expect(() => getTokenAddresses(['USDC'], null)).toThrow('Chain ID parameter is required');
         expect(() => getTokenAddresses(['USDC'], 'invalid')).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error when token not found', () => {
+        expect(() => getTokenAddresses(['UNKNOWN', 'USDC'], 1))
+          .toThrow('Token UNKNOWN not found');
+      });
+
+      it('should throw error when token not available on chain', () => {
+        expect(() => getTokenAddresses(['USDC', 'WETH'], 999999))
+          .toThrow('Token USDC not available on chain 999999');
       });
     });
   });
@@ -643,10 +645,10 @@ describe('Token Helpers', () => {
     });
   });
 
-  describe('getTokensMetadata', () => {
+  describe('getTokensBySymbol', () => {
     describe('Success Cases', () => {
-      it('should return metadata for multiple tokens', () => {
-        const result = getTokensMetadata(['USDC', 'WETH']);
+      it('should return tokens for multiple symbols', () => {
+        const result = getTokensBySymbol(['USDC', 'WETH']);
         
         expect(typeof result).toBe('object');
         expect(result.USDC).toBeDefined();
@@ -656,29 +658,27 @@ describe('Token Helpers', () => {
         expect(result.WETH.name).toBe('Wrapped Ether');
       });
 
-      it('should return metadata for single token', () => {
-        const result = getTokensMetadata(['USDC']);
+      it('should return token for single symbol', () => {
+        const result = getTokensBySymbol(['USDC']);
         
         expect(result.USDC).toBeDefined();
         expect(result.USDC.symbol).toBe('USDC');
         expect(result.USDC.decimals).toBe(6);
       });
 
-      it('should only include existing tokens', () => {
-        const result = getTokensMetadata(['USDC', 'UNKNOWN']);
-        
-        expect(result.USDC).toBeDefined();
-        expect(result.UNKNOWN).toBeUndefined();
-        expect(Object.keys(result)).toEqual(['USDC']);
+      it('should throw error when any token not found', () => {
+        expect(() => getTokensBySymbol(['USDC', 'UNKNOWN']))
+          .toThrow('Token UNKNOWN not found');
       });
 
-      it('should return empty object for all unknown tokens', () => {
-        const result = getTokensMetadata(['UNKNOWN1', 'UNKNOWN2']);
-        expect(result).toEqual({});
+      it('should throw error on first unknown token', () => {
+        expect(() => getTokensBySymbol(['UNKNOWN1', 'UNKNOWN2']))
+          .toThrow('Token UNKNOWN1 not found');
       });
 
       it('should return complete token objects', () => {
-        const result = getTokensMetadata(['USDC']);
+        const result = getTokensBySymbol(['USDC']);
+        
         const token = result.USDC;
         
         expect(token).toHaveProperty('name');
@@ -692,9 +692,9 @@ describe('Token Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for invalid symbols parameter', () => {
-        expect(() => getTokensMetadata(null)).toThrow('Token symbols parameter is required');
-        expect(() => getTokensMetadata([])).toThrow('Token symbols array cannot be empty');
-        expect(() => getTokensMetadata('USDC')).toThrow('Token symbols must be an array');
+        expect(() => getTokensBySymbol(null)).toThrow('Token symbols parameter is required');
+        expect(() => getTokensBySymbol([])).toThrow('Token symbols array cannot be empty');
+        expect(() => getTokensBySymbol('USDC')).toThrow('Token symbols must be an array');
       });
     });
   });

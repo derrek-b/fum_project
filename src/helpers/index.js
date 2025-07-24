@@ -5,4 +5,3 @@ export * from './platformHelpers.js';
 export * from './tokenHelpers.js';
 export * from './strategyHelpers.js';
 export * from './formatHelpers.js';
-export * from './vaultHelpers.js';
