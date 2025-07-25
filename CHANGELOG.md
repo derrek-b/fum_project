@@ -5,6 +5,42 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2025-01-25
+
+### BREAKING CHANGES - API Encapsulation
+
+#### **Main Export Changes**
+- **Removed direct config exports**: Configs are now internal implementation details
+  - `export * from './configs/index.js'` removed from main entry point
+  - Prevents direct access to raw configuration objects
+  - Forces usage of validated helper functions instead
+  
+- **Added helper exports to main entry**: Helpers are now available from root import
+  - `export * from './helpers/index.js'` added to main entry point
+  - Cleaner imports: `import { getTokenBySymbol } from 'fum_library'`
+  - No longer need subpath imports for common utilities
+
+#### **Benefits**
+- **Better encapsulation**: Library internals are properly hidden
+- **Safer API**: All data access goes through validated helper functions
+- **Future flexibility**: Can change internal configs without breaking consumers
+- **Cleaner imports**: Single import point for most common functions
+
+#### **Migration Guide**
+```javascript
+// Before (0.9.x) - Direct config access
+import { CHAINS, TOKENS } from 'fum_library/configs';
+const chain = CHAINS[42161]; // Direct access, no validation
+
+// After (0.10.0) - Helper function access
+import { getChainConfig, getTokenBySymbol } from 'fum_library';
+const chain = getChainConfig(42161); // Validated, safe access
+const token = getTokenBySymbol('USDC'); // Returns null if not found
+
+// Subpath imports still work for organization
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+```
+
 ## [0.9.0] - 2025-01-25
 
 ### Major Library Refactor - Cleaner Architecture & Better Separation of Concerns

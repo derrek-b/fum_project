@@ -2,7 +2,7 @@
  * FUM Library - Main Entry Point
  * 
  * This module provides a unified interface for interacting with DeFi protocols.
- * It exports configuration utilities and platform adapters for building
+ * It exports helper utilities and platform adapters for building
  * decentralized finance applications.
  * 
  * @module fum-library
@@ -19,5 +19,5 @@ const __dirname = dirname(__filename);
 // Load .env file from library root
 config({ path: resolve(__dirname, '../.env') });
 
-export * from './configs/index.js';
+export * from './helpers/index.js';
 export * from './adapters/index.js';
