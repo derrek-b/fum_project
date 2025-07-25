@@ -170,17 +170,17 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error for Infinity chainId', () => {
-        expect(() => new UniswapV3Adapter(Infinity)).toThrow('Uniswap V3 not available on chain Infinity');
+        expect(() => new UniswapV3Adapter(Infinity)).toThrow('chainId must be a finite number');
       });
 
       it('should throw error for -Infinity chainId', () => {
-        expect(() => new UniswapV3Adapter(-Infinity)).toThrow('Uniswap V3 not available on chain -Infinity');
+        expect(() => new UniswapV3Adapter(-Infinity)).toThrow('chainId must be a finite number');
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for unsupported chainId', () => {
-        expect(() => new UniswapV3Adapter(999999)).toThrow('Uniswap V3 not available on chain 999999');
+        expect(() => new UniswapV3Adapter(999999)).toThrow('Chain 999999 is not supported');
       });
     });
   });
@@ -2159,11 +2159,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.fetchPoolData(unknownToken, validUsdcAddress, 500, env.provider)
-        ).rejects.toThrow(/Unsupported token.*on chain/);
+        ).rejects.toThrow(/No token found at address.*on chain/);
 
         await expect(
           adapter.fetchPoolData(validWethAddress, unknownToken, 500, env.provider)
-        ).rejects.toThrow(/Unsupported token.*on chain/);
+        ).rejects.toThrow(/No token found at address.*on chain/);
       });
 
       it('should throw error for non-existent pool', async () => {
@@ -2173,7 +2173,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         await expect(
           adapter.fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
-        ).rejects.toThrow(/Unsupported token/);
+        ).rejects.toThrow(/No token found at address.*on chain/);
       });
     });
   });

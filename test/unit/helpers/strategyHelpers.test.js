@@ -22,7 +22,8 @@ import {
   getStrategyTokens,
   strategySupportsTokens,
   formatParameterValue,
-  validateTokensForStrategy
+  validateTokensForStrategy,
+  mapStrategyParameters
 } from '../../../src/helpers/strategyHelpers.js';
 import { getAllTokens } from '../../../src/helpers/tokenHelpers.js';
 import strategies from '../../../src/configs/strategies.js';
@@ -552,7 +553,7 @@ describe('Strategy Helpers', () => {
 
       it('should extract defaultValue from parameter definitions', () => {
         const result = getParamDefaultValues('bob');
-        
+
         // Verify that we're getting the defaultValue from each parameter configuration
         const strategy = strategies.bob;
         Object.entries(strategy.parameters).forEach(([paramId, paramConfig]) => {
@@ -773,7 +774,7 @@ describe('Strategy Helpers', () => {
         // Group 3 in parris strategy contains advanced parameters
         const parameterKeys = Object.keys(result);
         expect(parameterKeys.length).toBeGreaterThan(0);
-        
+
         // Should contain adaptive range parameters
         expect(parameterKeys).toContain('adaptiveRanges');
         expect(parameterKeys).toContain('oracleSource');
@@ -922,7 +923,7 @@ describe('Strategy Helpers', () => {
         // Adaptive contract group in parris strategy contains adaptive parameters
         const parameterKeys = Object.keys(result);
         expect(parameterKeys.length).toBeGreaterThan(0);
-        
+
         // Should contain adaptive range parameters
         expect(parameterKeys).toContain('adaptiveRanges');
         expect(parameterKeys).toContain('rebalanceCountThresholdHigh');
@@ -1371,9 +1372,9 @@ describe('Strategy Helpers', () => {
           unknownParam2: 123,
           targetRangeLower: 5.0
         };
-        
+
         const result = validateStrategyParams('bob', params);
-        
+
         expect(result.isValid).toBe(false);
         expect(result.errors.unknownParam1).toBe('Unknown parameter: unknownParam1');
         expect(result.errors.unknownParam2).toBe('Unknown parameter: unknownParam2');
@@ -1388,9 +1389,9 @@ describe('Strategy Helpers', () => {
           unknownParam: 'test',
           targetRangeLower: 'invalid' // Should be number
         };
-        
+
         const result = validateStrategyParams('bob', params);
-        
+
         expect(result.isValid).toBe(false);
         expect(result.errors.unknownParam).toBe('Unknown parameter: unknownParam');
         expect(result.errors.targetRangeUpper).toContain('must be at most');
@@ -1534,7 +1535,7 @@ describe('Strategy Helpers', () => {
 
       it('should throw error when contract group has invalid setterMethod types', () => {
         const originalBob = strategies.bob;
-        
+
         // Test empty string
         strategies.bob = {
           ...originalBob,
@@ -1722,7 +1723,7 @@ describe('Strategy Helpers', () => {
 
         const reinvestmentRatioConfig = {
           name: 'Reinvestment Ratio',
-          type: 'percent',  
+          type: 'percent',
           conditionalOn: 'feeReinvestment',
           conditionalValue: true
         };
@@ -1831,12 +1832,12 @@ describe('Strategy Helpers', () => {
     describe('Success Cases', () => {
       it('should return all tokens for strategy with tokenSupport "all"', () => {
         const tokens = getStrategyTokens('bob');
-        
+
         expect(tokens).toBeDefined();
         expect(typeof tokens).toBe('object');
         expect(Array.isArray(tokens)).toBe(false);
         expect(Object.keys(tokens).length).toBeGreaterThan(0);
-        
+
         // Should include common tokens
         expect(tokens).toHaveProperty('WETH');
         expect(tokens).toHaveProperty('USDC');
@@ -1844,15 +1845,15 @@ describe('Strategy Helpers', () => {
 
       it('should return stablecoin tokens for strategy with tokenSupport "stablecoins"', () => {
         const tokens = getStrategyTokens('fed');
-        
+
         expect(tokens).toBeDefined();
         expect(typeof tokens).toBe('object');
         expect(Array.isArray(tokens)).toBe(false);
         expect(Object.keys(tokens).length).toBeGreaterThan(0);
-        
+
         // Should include stablecoins
         expect(tokens).toHaveProperty('USDC');
-        
+
         // Should not include non-stablecoins like WETH (if it exists in all tokens)
         const allTokens = getAllTokens();
         if (allTokens.WETH && !tokens.WETH) {
@@ -1863,7 +1864,7 @@ describe('Strategy Helpers', () => {
 
       it('should work for all available strategies', () => {
         const strategies = ['none', 'bob', 'parris', 'fed'];
-        
+
         strategies.forEach(strategyId => {
           const tokens = getStrategyTokens(strategyId);
           expect(tokens).toBeDefined();
@@ -2016,7 +2017,7 @@ describe('Strategy Helpers', () => {
       it('should handle case-sensitive token symbols', () => {
         // Should work with correct case
         expect(strategySupportsTokens('bob', ['WETH'])).toBe(true);
-        
+
         // Should not work with incorrect case
         expect(strategySupportsTokens('bob', ['eth'])).toBe(false);
         expect(strategySupportsTokens('bob', ['Eth'])).toBe(false);
@@ -2129,7 +2130,7 @@ describe('Strategy Helpers', () => {
 
       it('should handle large token lists', () => {
         const manyTokens = ['WETH', 'USDC', 'USDC', 'WBTC', 'LINK'];
-        
+
         expect(strategySupportsTokens('bob', manyTokens)).toBe(true);
         expect(strategySupportsTokens('parris', manyTokens)).toBe(true);
         expect(strategySupportsTokens('fed', manyTokens)).toBe(false); // Fed doesn't support non-stablecoins
@@ -2139,7 +2140,7 @@ describe('Strategy Helpers', () => {
         const selectedTokens = ['WETH', 'USDC'];
 
         // Filter strategies that support the selected tokens
-        const compatibleStrategies = ['bob', 'parris', 'fed', 'none'].filter(strategyId => 
+        const compatibleStrategies = ['bob', 'parris', 'fed', 'none'].filter(strategyId =>
           strategySupportsTokens(strategyId, selectedTokens)
         );
 
@@ -2640,18 +2641,248 @@ describe('Strategy Helpers', () => {
         const strategyTokens = ['WETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
-        
+
         // Should return exactly one warning message
         expect(result).toHaveLength(1);
-        
+
         // Message should inform about tokens that will be swapped
         const message = result[0];
         expect(message).toContain('LINK, WBTC');
         expect(message).toContain('will be swapped');
-        
+
         // Should not mention tokens that are already supported
         expect(message).not.toContain('WETH');
         expect(message).not.toContain('USDC');
+      });
+    });
+  });
+
+  describe('mapStrategyParameters', () => {
+    describe('Success Cases', () => {
+      describe('Bob Strategy', () => {
+        it('should map Bob strategy parameters correctly', () => {
+          const rawParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+          const result = mapStrategyParameters('bob', rawParams);
+
+          expect(result).toEqual({
+            targetRangeUpper: 102,
+            targetRangeLower: 98,
+            rebalanceThresholdUpper: 2,
+            rebalanceThresholdLower: 2,
+            feeReinvestment: true,
+            reinvestmentTrigger: '100.0',
+            reinvestmentRatio: 80,
+            maxSlippage: 0.5,
+            emergencyExitTrigger: 1,
+            maxUtilization: 95
+          });
+        });
+
+        it('should handle Bob strategy with false boolean parameter', () => {
+          const rawParams = [10200, 9800, 200, 200, false, 10000, 8000, 50, 100, 9500];
+          const result = mapStrategyParameters('bob', rawParams);
+
+          expect(result.feeReinvestment).toBe(false);
+        });
+
+        it('should convert basis points to percentages correctly for Bob', () => {
+          const rawParams = [11000, 9000, 300, 150, true, 10000, 8000, 75, 200, 8500];
+          const result = mapStrategyParameters('bob', rawParams);
+
+          expect(result.targetRangeUpper).toBe(110);
+          expect(result.targetRangeLower).toBe(90);
+          expect(result.rebalanceThresholdUpper).toBe(3);
+          expect(result.rebalanceThresholdLower).toBe(1.5);
+        });
+      });
+
+      describe('Parris Strategy', () => {
+        it('should map Parris strategy parameters correctly', () => {
+          const rawParams = [
+            10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500,
+            false, 10, 5, 3600, 1800, 500, 300, 200, 100, 0,
+            1000, 2000, 5000000000000000000n, 8500, 1, 100000000000000000000n
+          ];
+          const result = mapStrategyParameters('parris', rawParams);
+
+          expect(result.targetRangeUpper).toBe(102);
+          expect(result.adaptiveRanges).toBe(false);
+          expect(result.rebalanceCountThresholdHigh).toBe(10);
+          expect(result.oracleSource).toBe(0);
+          expect(result.maxPositionSizePercent).toBe(20);
+        });
+
+        it('should handle Parris strategy with adaptive ranges enabled', () => {
+          const rawParams = [
+            10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500,
+            true, 10, 5, 3600, 1800, 500, 300, 200, 100, 0,
+            1000, 2000, 5000000000000000000n, 8500, 1, 100000000000000000000n
+          ];
+          const result = mapStrategyParameters('parris', rawParams);
+
+          expect(result.adaptiveRanges).toBe(true);
+        });
+      });
+
+      describe('Fed Strategy', () => {
+        it('should map Fed strategy parameters correctly', () => {
+          const rawParams = [500, 200, true, 100];
+          const result = mapStrategyParameters('fed', rawParams);
+
+          expect(result).toEqual({
+            targetRange: 5,
+            rebalanceThreshold: 2,
+            feeReinvestment: true,
+            maxSlippage: 1
+          });
+        });
+
+        it('should handle Fed strategy with false boolean parameter', () => {
+          const rawParams = [500, 200, false, 100];
+          const result = mapStrategyParameters('fed', rawParams);
+
+          expect(result.feeReinvestment).toBe(false);
+        });
+      });
+
+    });
+
+    describe('Error Cases', () => {
+      describe('Parameter Validation', () => {
+        it('should throw error for invalid strategyId types', () => {
+          const validParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+
+          expect(() => mapStrategyParameters(null, validParams)).toThrow('ID parameter is required');
+          expect(() => mapStrategyParameters(undefined, validParams)).toThrow('ID parameter is required');
+          expect(() => mapStrategyParameters(123, validParams)).toThrow('ID must be a string');
+          expect(() => mapStrategyParameters('', validParams)).toThrow('ID cannot be empty');
+        });
+
+        it('should throw error for non-array params', () => {
+          expect(() => mapStrategyParameters('bob', null)).toThrow('Parameters must be an array');
+          expect(() => mapStrategyParameters('bob', undefined)).toThrow('Parameters must be an array');
+          expect(() => mapStrategyParameters('bob', 'not-array')).toThrow('Parameters must be an array');
+          expect(() => mapStrategyParameters('bob', 123)).toThrow('Parameters must be an array');
+          expect(() => mapStrategyParameters('bob', {})).toThrow('Parameters must be an array');
+        });
+
+        it('should throw error for empty params array', () => {
+          expect(() => mapStrategyParameters('bob', [])).toThrow('Parameters array cannot be empty');
+        });
+
+        it('should throw error for unknown strategy', () => {
+          const validParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+          expect(() => mapStrategyParameters('unknown', validParams)).toThrow('Strategy unknown not found');
+        });
+
+        it('should throw error for unsupported strategy', () => {
+          const validParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+          expect(() => mapStrategyParameters('none', validParams)).toThrow('No parameter mapping defined for strategy none');
+        });
+
+        it('should throw error for case-sensitive strategy IDs', () => {
+          const rawParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+          expect(() => mapStrategyParameters('BOB', rawParams)).toThrow('Strategy BOB not found');
+          expect(() => mapStrategyParameters('Bob', rawParams)).toThrow('Strategy Bob not found');
+          expect(() => mapStrategyParameters('bOb', rawParams)).toThrow('Strategy bOb not found');
+        });
+      });
+
+      describe('Bob Strategy Parameter Count Validation', () => {
+        it('should throw error for wrong number of Bob parameters', () => {
+          expect(() => mapStrategyParameters('bob', [1, 2, 3])).toThrow('Bob strategy expects 10 parameters, got 3');
+          expect(() => mapStrategyParameters('bob', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])).toThrow('Bob strategy expects 10 parameters, got 11');
+        });
+      });
+
+      describe('Bob Strategy Type Validation', () => {
+        it('should throw error for invalid Bob parameter types', () => {
+          // Invalid boolean parameter (index 4)
+          expect(() => mapStrategyParameters('bob', [10200, 9800, 200, 200, 'not-boolean', 10000, 8000, 50, 100, 9500]))
+            .toThrow('Bob strategy parameter 4 (feeReinvestment) must be boolean, got string');
+
+          // Invalid numeric parameters
+          expect(() => mapStrategyParameters('bob', ['not-number', 9800, 200, 200, true, 10000, 8000, 50, 100, 9500]))
+            .toThrow('Bob strategy parameter 0 must be a valid number, got not-number');
+
+          expect(() => mapStrategyParameters('bob', [10200, null, 200, 200, true, 10000, 8000, 50, 100, 9500]))
+            .toThrow('Bob strategy parameter 1 must be a valid number, got null');
+
+          expect(() => mapStrategyParameters('bob', [10200, 9800, Infinity, 200, true, 10000, 8000, 50, 100, 9500]))
+            .toThrow('Bob strategy parameter 2 must be a valid number, got Infinity');
+
+          expect(() => mapStrategyParameters('bob', [10200, 9800, 200, NaN, true, 10000, 8000, 50, 100, 9500]))
+            .toThrow('Bob strategy parameter 3 must be a valid number, got NaN');
+        });
+      });
+
+      describe('Parris Strategy Parameter Count Validation', () => {
+        it('should throw error for wrong number of Parris parameters', () => {
+          expect(() => mapStrategyParameters('parris', [1, 2, 3])).toThrow('Parris strategy expects 26 parameters, got 3');
+
+          const shortParams = new Array(25).fill(0);
+          shortParams[4] = false; // boolean parameter
+          shortParams[10] = true; // boolean parameter
+          expect(() => mapStrategyParameters('parris', shortParams)).toThrow('Parris strategy expects 26 parameters, got 25');
+        });
+      });
+
+      describe('Parris Strategy Type Validation', () => {
+        it('should throw error for invalid Parris boolean parameters', () => {
+          const params = new Array(26).fill(100);
+
+          // Invalid feeReinvestment (index 4)
+          params[4] = 'not-boolean';
+          params[10] = true;
+          expect(() => mapStrategyParameters('parris', params))
+            .toThrow('Parris strategy parameter 4 must be boolean, got string');
+
+          // Invalid adaptiveRanges (index 10)
+          params[4] = false;
+          params[10] = 'not-boolean';
+          expect(() => mapStrategyParameters('parris', params))
+            .toThrow('Parris strategy parameter 10 must be boolean, got string');
+        });
+
+        it('should throw error for invalid Parris numeric parameters', () => {
+          const params = new Array(26).fill(100);
+          params[4] = true;
+          params[10] = false;
+
+          // Invalid numeric parameter
+          params[15] = 'not-number';
+          expect(() => mapStrategyParameters('parris', params))
+            .toThrow('Parris strategy parameter 15 must be a valid number, got not-number');
+
+          params[15] = null;
+          expect(() => mapStrategyParameters('parris', params))
+            .toThrow('Parris strategy parameter 15 must be a valid number, got null');
+        });
+      });
+
+      describe('Fed Strategy Parameter Count Validation', () => {
+        it('should throw error for wrong number of Fed parameters', () => {
+          expect(() => mapStrategyParameters('fed', [1, 2])).toThrow('Fed strategy expects 4 parameters, got 2');
+          expect(() => mapStrategyParameters('fed', [1, 2, true, 4, 5])).toThrow('Fed strategy expects 4 parameters, got 5');
+        });
+      });
+
+      describe('Fed Strategy Type Validation', () => {
+        it('should throw error for invalid Fed parameter types', () => {
+          // Invalid boolean parameter (index 2)
+          expect(() => mapStrategyParameters('fed', [500, 200, 'not-boolean', 100]))
+            .toThrow('Fed strategy parameter 2 (feeReinvestment) must be boolean, got string');
+
+          // Invalid numeric parameters
+          expect(() => mapStrategyParameters('fed', ['not-number', 200, true, 100]))
+            .toThrow('Fed strategy parameter 0 must be a valid number, got not-number');
+
+          expect(() => mapStrategyParameters('fed', [500, Infinity, true, 100]))
+            .toThrow('Fed strategy parameter 1 must be a valid number, got Infinity');
+
+          expect(() => mapStrategyParameters('fed', [500, 200, true, null]))
+            .toThrow('Fed strategy parameter 3 must be a valid number, got null');
+        });
       });
     });
   });

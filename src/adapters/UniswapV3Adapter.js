@@ -12,10 +12,9 @@
 
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
-import { formatUnits } from "../helpers/formatHelpers.js";
 import { getPlatformFeeTiers } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
-import { getTokensByChain, getTokenByAddress } from "../helpers/tokenHelpers.js";
+import { getTokenByAddress } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
 import JSBI from "jsbi";

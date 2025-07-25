@@ -290,6 +290,47 @@ export async function getVaultInfo(vaultAddress, provider) {
 }
 
 /**
+ * Get contract information by deployed address
+ * @param {string} address - The contract address to look up
+ * @returns {Object} Contract information with contractName and chainId
+ * @throws {Error} If address is not found in contract data
+ * @example
+ * // Get contract info for a deployed address
+ * const info = getContractInfoByAddress('0x742d35cc6634c0532925a3b8d7d566dd8f4da4d1');
+ * // Returns: { contractName: 'bob', chainId: 1 }
+ * @since 1.0.0
+ */
+export function getContractInfoByAddress(address) {
+  // Validate address parameter
+  if (!address) {
+    throw new Error('Address parameter is required');
+  }
+  try {
+    ethers.getAddress(address);
+  } catch (error) {
+    throw new Error(`Invalid address: ${address}`);
+  }
+
+  const normalizedAddress = address.toLowerCase();
+
+  // Search through all contracts and their deployed addresses
+  for (const [contractName, contractInfo] of Object.entries(contractData)) {
+    if (contractInfo.addresses) {
+      for (const [chainId, contractAddress] of Object.entries(contractInfo.addresses)) {
+        if (contractAddress.toLowerCase() === normalizedAddress) {
+          return {
+            contractName,
+            chainId: parseInt(chainId)
+          };
+        }
+      }
+    }
+  }
+
+  throw new Error(`Contract address ${address} not found in contract data`);
+}
+
+/**
  * Executes a batch of transactions through a vault
  *
  * @function executeVaultTransactions

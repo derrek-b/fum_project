@@ -5,6 +5,7 @@
  * @since 1.0.0
  */
 
+import { ethers } from 'ethers';
 import strategies from '../configs/strategies.js';
 import { getAllTokens, getStablecoins } from './tokenHelpers.js';
 
@@ -26,6 +27,7 @@ export function validateIdString(id) {
     throw new Error('ID cannot be empty');
   }
 }
+
 
 /**
  * Lookup all strategy IDs
@@ -915,4 +917,195 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
   }
 
   return messages;
-};
+}
+
+/**
+ * Map strategy parameters from contract return value to named objects
+ * @memberof module:helpers/strategyHelpers
+ * @param {string} strategyId - Strategy ID (e.g., 'bob', 'parris', 'fed')
+ * @param {Array} params - Raw parameters array from contract getAllParameters call
+ * @returns {Object} Named parameters with human-readable values
+ * @throws {Error} If strategyId is invalid or params array is invalid
+ * @example
+ * // Map Bob strategy parameters from contract
+ * const rawParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
+ * const mapped = mapStrategyParameters('bob', rawParams);
+ * // Returns: {
+ * //   targetRangeUpper: 102,
+ * //   targetRangeLower: 98,
+ * //   rebalanceThresholdUpper: 2,
+ * //   ...
+ * // }
+ * @since 1.0.0
+ */
+export function mapStrategyParameters(strategyId, params) {
+  // Validate strategyId parameter
+  validateIdString(strategyId);
+
+  // Validate params parameter
+  if (!Array.isArray(params)) {
+    throw new Error('Parameters must be an array');
+  }
+
+  if (params.length === 0) {
+    throw new Error('Parameters array cannot be empty');
+  }
+
+  // Validate strategy exists
+  const strategy = strategies[strategyId];
+  if (!strategy) {
+    throw new Error(`Strategy ${strategyId} not found`);
+  }
+
+  try {
+    const strategyIdLower = strategyId.toLowerCase();
+
+    // Strategy-specific parameter mappings with validation
+    if (strategyIdLower === 'bob') {
+      // Bob strategy expects exactly 10 parameters
+      if (params.length !== 10) {
+        throw new Error(`Bob strategy expects 10 parameters, got ${params.length}`);
+      }
+
+      // Validate parameter types for Bob strategy
+      for (let i = 0; i < 10; i++) {
+        if (i === 4) { // feeReinvestment is boolean
+          if (typeof params[i] !== 'boolean') {
+            throw new Error(`Bob strategy parameter ${i} (feeReinvestment) must be boolean, got ${typeof params[i]}`);
+          }
+        } else { // All other parameters should be numeric
+          if (params[i] === null || params[i] === undefined) {
+            throw new Error(`Bob strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+          const numValue = Number(params[i]);
+          if (isNaN(numValue) || !isFinite(numValue)) {
+            throw new Error(`Bob strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+        }
+      }
+
+      return {
+        // Range Parameters
+        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+        targetRangeLower: parseInt(params[1]) / 100,
+        rebalanceThresholdUpper: parseInt(params[2]) / 100,
+        rebalanceThresholdLower: parseInt(params[3]) / 100,
+
+        // Fee Settings
+        feeReinvestment: params[4],
+        reinvestmentTrigger: ethers.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
+        reinvestmentRatio: parseInt(params[6]) / 100,
+
+        // Risk Management
+        maxSlippage: parseInt(params[7]) / 100,
+        emergencyExitTrigger: parseInt(params[8]) / 100,
+        maxUtilization: parseInt(params[9]) / 100
+      };
+    }
+    else if (strategyIdLower === 'parris') {
+      // Parris strategy expects exactly 26 parameters
+      if (params.length !== 26) {
+        throw new Error(`Parris strategy expects 26 parameters, got ${params.length}`);
+      }
+
+      // Validate parameter types for Parris strategy
+      for (let i = 0; i < 26; i++) {
+        if (i === 4 || i === 10) { // feeReinvestment and adaptiveRanges are boolean
+          if (typeof params[i] !== 'boolean') {
+            throw new Error(`Parris strategy parameter ${i} must be boolean, got ${typeof params[i]}`);
+          }
+        } else { // All other parameters should be numeric
+          if (params[i] === null || params[i] === undefined) {
+            throw new Error(`Parris strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+          const numValue = Number(params[i]);
+          if (isNaN(numValue) || !isFinite(numValue)) {
+            throw new Error(`Parris strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+        }
+      }
+
+      return {
+        // Range Parameters
+        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+        targetRangeLower: parseInt(params[1]) / 100,
+        rebalanceThresholdUpper: parseInt(params[2]) / 100,
+        rebalanceThresholdLower: parseInt(params[3]) / 100,
+
+        // Fee Settings
+        feeReinvestment: params[4],
+        reinvestmentTrigger: ethers.formatUnits(params[5], 2),
+        reinvestmentRatio: parseInt(params[6]) / 100,
+
+        // Risk Management
+        maxSlippage: parseInt(params[7]) / 100,
+        emergencyExitTrigger: parseInt(params[8]) / 100,
+        maxVaultUtilization: parseInt(params[9]) / 100,
+
+        // Adaptive Settings
+        adaptiveRanges: params[10],
+        rebalanceCountThresholdHigh: parseInt(params[11]),
+        rebalanceCountThresholdLow: parseInt(params[12]),
+        adaptiveTimeframeHigh: parseInt(params[13]),
+        adaptiveTimeframeLow: parseInt(params[14]),
+        rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
+        thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
+        rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
+        thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
+
+        // Oracle Settings
+        oracleSource: parseInt(params[19]),
+        priceDeviationTolerance: parseInt(params[20]) / 100,
+
+        // Position Sizing
+        maxPositionSizePercent: parseInt(params[21]) / 100,
+        minPositionSize: ethers.formatUnits(params[22], 2),
+        targetUtilization: parseInt(params[23]) / 100,
+
+        // Platform Settings
+        platformSelectionCriteria: parseInt(params[24]),
+        minPoolLiquidity: ethers.formatUnits(params[25], 2)
+      };
+    }
+    else if (strategyIdLower === 'fed') {
+      // Fed strategy expects exactly 4 parameters
+      if (params.length !== 4) {
+        throw new Error(`Fed strategy expects 4 parameters, got ${params.length}`);
+      }
+
+      // Validate parameter types for Fed strategy
+      for (let i = 0; i < 4; i++) {
+        if (i === 2) { // feeReinvestment is boolean
+          if (typeof params[i] !== 'boolean') {
+            throw new Error(`Fed strategy parameter ${i} (feeReinvestment) must be boolean, got ${typeof params[i]}`);
+          }
+        } else { // All other parameters should be numeric
+          if (params[i] === null || params[i] === undefined) {
+            throw new Error(`Fed strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+          const numValue = Number(params[i]);
+          if (isNaN(numValue) || !isFinite(numValue)) {
+            throw new Error(`Fed strategy parameter ${i} must be a valid number, got ${params[i]}`);
+          }
+        }
+      }
+
+      return {
+        targetRange: parseInt(params[0]) / 100,
+        rebalanceThreshold: parseInt(params[1]) / 100,
+        feeReinvestment: params[2],
+        maxSlippage: parseInt(params[3]) / 100
+      };
+    }
+
+    // If we reach here, we don't know how to map this strategy
+    throw new Error(`No parameter mapping defined for strategy ${strategyId}`);
+  } catch (error) {
+    // Re-throw validation errors as-is
+    if (error.message.includes('expects') || error.message.includes('must be') || error.message.includes('No parameter mapping')) {
+      throw error;
+    }
+    // Wrap other errors with context
+    throw new Error(`Error mapping strategy parameters for ${strategyId}: ${error.message}`);
+  }
+}

@@ -5,6 +5,58 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-01-25
+
+### Major Library Refactor - Cleaner Architecture & Better Separation of Concerns
+
+#### **BREAKING CHANGES**
+- **Removed `vaults.js` module**: Moved to fum_automation as `vaultDataHelpers.js`
+  - Vault data orchestration is project-specific, not a shared library concern
+  - Each project (fum, fum_automation) now owns its data orchestration logic
+  - Library now only contains truly shared primitives (contracts, adapters, helpers)
+
+- **Moved `mapStrategyParameters()` function**: Now in `strategyHelpers.js`
+  - Added comprehensive validation for strategyId and params
+  - Added parameter count validation per strategy
+  - Added type validation for boolean/numeric parameters
+  - Better error messages for all failure cases
+
+#### **New Features**
+- **Added `getContractInfoByAddress()` in contracts.js**: Simple contract address lookup
+  - Returns `{ contractName, chainId }` for any deployed contract address
+  - Replaces complex address mapping logic in removed vault functions
+  - Throws descriptive errors for invalid or unknown addresses
+
+- **Enhanced parameter validation**: New validators in strategyHelpers
+  - `validateAddress()` - Validates Ethereum addresses using ethers.getAddress()
+  - `validateChainId()` - Validates positive integer chain IDs
+  - `validateProvider()` - Validates ethers provider instances
+
+#### **Improvements**
+- **Cleaner module exports**: Removed vaults.js from blockchain/index.js
+- **Better error handling**: All functions now throw errors instead of returning null
+- **Improved imports**: Cleaned up unused imports across the library
+- **Test coverage**: Added comprehensive tests for mapStrategyParameters
+
+#### **Architecture Benefits**
+- **Clear ownership**: Each project owns its specific orchestration logic
+- **Smaller library**: Removed ~900 lines of project-specific code
+- **Better maintainability**: No confusion about which project uses what
+- **Independent evolution**: Projects can optimize for their specific needs
+
+#### **Migration Guide**
+```javascript
+// If using vaults.js functions, they're now in fum_automation:
+import { getVaultData } from 'fum_automation/src/helpers/vaultDataHelpers';
+
+// mapStrategyParameters moved to strategyHelpers:
+import { mapStrategyParameters } from 'fum_library/helpers/strategyHelpers';
+
+// New contract lookup function:
+import { getContractInfoByAddress } from 'fum_library/blockchain/contracts';
+const { contractName, chainId } = getContractInfoByAddress('0x...');
+```
+
 ## [0.8.0] - 2025-01-16
 
 ### Major AdapterFactory Refactor & Breaking Changes

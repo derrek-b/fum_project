@@ -333,18 +333,6 @@ describe('Wallet - Unit Tests', () => {
         expect(result).toBe(true);
       });
 
-      it('should return false when chain not in wallet and not in our configs', async () => {
-        const mockProvider = {
-          send: vi.fn().mockRejectedValue({ code: 4902, message: 'Unrecognized chain ID' })
-        };
-        
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
-        
-        const result = await switchChain(mockProvider, 999); // Chain ID not in our configs
-        
-        expect(mockProvider.send).toHaveBeenCalledTimes(1);
-        expect(result).toBe(false);
-      });
     });
 
     describe('Error Cases', () => {
@@ -373,6 +361,15 @@ describe('Wallet - Unit Tests', () => {
         await expect(switchChain(mockProvider, '137')).rejects.toThrow('Chain ID must be a number');
         await expect(switchChain(mockProvider, '0x89')).rejects.toThrow('Chain ID must be a number');
         await expect(switchChain(mockProvider, null)).rejects.toThrow('Chain ID must be a number');
+      });
+
+      it('should throw error for unsupported chain ID', async () => {
+        const mockProvider = {
+          send: vi.fn().mockRejectedValue({ code: 4902, message: 'Unrecognized chain ID' })
+        };
+        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        
+        await expect(switchChain(mockProvider, 999)).rejects.toThrow('Chain 999 is not supported');
       });
 
       it('should return false on generic wallet errors', async () => {

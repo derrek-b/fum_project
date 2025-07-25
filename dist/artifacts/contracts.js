@@ -1,4 +1,4 @@
-// src/artifacts/contracts.js
+// artifacts/contracts.js
       /**
        * Contract ABIs and addresses for the F.U.M. project
        * This file is auto-generated and should not be edited directly
@@ -1619,7 +1619,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xbE3b2EB4daB5B400040227BCd75a042216284c46",
+      "1337": "0x1F99d085050C4763f1C1fB4494897bbd333cE5bc",
       "42161": "0x536D052143f65F054FaF0ADd74f151D57286ba49"
     }
   },
@@ -2436,7 +2436,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x8aE36cE8000743A00Db85F0d9f3F32256ed92Aa3"
+      "1337": "0x6d4923d4873aaBCcF23d4585b127a0eFF1381C91"
     }
   },
   "PositionVault": {
@@ -3285,7 +3285,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xad49D678A5ffc3C5AF67Ddd1Ea35B5aaA8d44B5F",
+      "1337": "0x8a8C8FB21F3099e787b5ad1221310663d73b1d81",
       "42161": "0x87501845182b94f1B7B23E92045819e000CA9B46"
     }
   },
@@ -3478,7 +3478,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x3Da310e19C576dFE50C9F9970aE2d9A70360C5e9"
+      "1337": "0x55730859Aa4204834E132c704090057924DB4b2C"
     }
   }
 };
