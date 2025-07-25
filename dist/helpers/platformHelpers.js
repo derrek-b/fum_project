@@ -9,10 +9,58 @@ import platforms from '../configs/platforms.js';
 import { getPlatformAddresses } from './chainHelpers.js';
 
 /**
+ * Validate chainId parameter using established validation pattern
+ * @param {any} chainId - The value to validate as a chainId
+ * @throws {Error} If chainId is not a valid number
+ */
+export function validateChainId(chainId) {
+  if (chainId === null || chainId === undefined) {
+    throw new Error('chainId parameter is required');
+  }
+
+  if (typeof chainId !== 'number') {
+    throw new Error('chainId must be a number');
+  }
+
+  if (!Number.isFinite(chainId)) {
+    throw new Error('chainId must be a finite number');
+  }
+
+  if (!Number.isInteger(chainId)) {
+    throw new Error('chainId must be an integer');
+  }
+
+  if (chainId <= 0) {
+    throw new Error('chainId must be greater than 0');
+  }
+}
+
+/**
+ * Validate platformId parameter using established validation pattern
+ * @param {any} platformId - The value to validate as a platformId
+ * @throws {Error} If platformId is not a valid string
+ */
+export function validatePlatformId(platformId) {
+  if (platformId === null || platformId === undefined) {
+    throw new Error('platformId parameter is required');
+  }
+
+  if (typeof platformId !== 'string') {
+    throw new Error('platformId must be a string');
+  }
+
+  if (platformId === '') {
+    throw new Error('platformId cannot be empty');
+  }
+}
+
+/**
  * Get platform metadata by ID
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID to look up (e.g., 'uniswapV3', 'aaveV3')
- * @returns {Object|null} Platform metadata object containing name, logo, color, features - null if not found
+ * @returns {Object} Platform metadata object containing name, logo, color, features
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
  * @example
  * // Get Uniswap V3 metadata
  * const metadata = getPlatformMetadata('uniswapV3');
@@ -23,79 +71,193 @@ import { getPlatformAddresses } from './chainHelpers.js';
  * //   description: "...",
  * //   features: {...}
  * // }
- * 
+ *
  * @example
  * // Handle unknown platform
  * const platform = getPlatformMetadata('unknown');
- * if (!platform) {
- *   console.error('Platform not found');
- * }
+ * // Throws: Error: Platform unknown is not supported
  * @since 1.0.0
  */
 export function getPlatformMetadata(platformId) {
-  if (!platformId || !platforms[platformId]) return null;
-  return platforms[platformId];
+  validatePlatformId(platformId);
+
+  const metadata = platforms[platformId];
+  if (!metadata) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  return metadata;
 }
 
 /**
  * Get platform name by ID
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID to look up
- * @returns {string} Human-readable platform name or the ID itself if not found
+ * @returns {string} Human-readable platform name
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If platform name is not configured or is empty
  * @example
  * // Get known platform name
  * getPlatformName('uniswapV3'); // "Uniswap V3"
  * getPlatformName('aaveV3'); // "Aave V3"
- * 
+ *
  * @example
- * // Fallback for unknown platform
- * getPlatformName('unknownPlatform'); // "unknownPlatform"
+ * // Unknown platform throws error
+ * getPlatformName('unknownPlatform'); // Throws: Error: Platform unknownPlatform is not supported
+ *
+ * @example
+ * // Platform without name throws error
+ * getPlatformName('platformWithoutName'); // Throws: Error: Platform platformWithoutName name not configured
  * @since 1.0.0
  */
 export function getPlatformName(platformId) {
-  return platforms[platformId]?.name || platformId;
+  validatePlatformId(platformId);
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!platform.name || platform.name === '') {
+    throw new Error(`Platform ${platformId} name not configured`);
+  }
+
+  return platform.name;
 }
 
 /**
  * Get the primary color for a platform
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID
- * @returns {string} Color hex code for UI theming - defaults to gray (#6c757d) if not defined
+ * @returns {string} Color hex code for UI theming
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If platform color is not configured or is empty
  * @example
  * // Get platform brand color
  * const uniswapColor = getPlatformColor('uniswapV3'); // "#FF007A"
- * 
+ *
  * @example
  * // Use in component styling
  * const platformStyle = {
  *   backgroundColor: getPlatformColor(platformId),
  *   borderColor: getPlatformColor(platformId)
  * };
+ *
+ * @example
+ * // Unknown platform throws error
+ * getPlatformColor('unknownPlatform'); // Throws: Error: Platform unknownPlatform is not supported
+ *
+ * @example
+ * // Platform without color throws error
+ * getPlatformColor('platformWithoutColor'); // Throws: Error: Platform platformWithoutColor color not configured
  * @since 1.0.0
  */
 export function getPlatformColor(platformId) {
-  return platforms[platformId]?.color || "#6c757d"; // Default gray
+  validatePlatformId(platformId);
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!platform.color || platform.color === '') {
+    throw new Error(`Platform ${platformId} color not configured`);
+  }
+
+  return platform.color;
 }
 
 /**
  * Get platform logo URL
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID
- * @returns {string|null} URL to platform logo image - null if not found
+ * @returns {string} URL to platform logo image
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If platform logo is not configured or is empty
  * @example
  * // Get platform logo for display
  * const logoUrl = getPlatformLogo('uniswapV3');
- * if (logoUrl) {
- *   return <img src={logoUrl} alt="Uniswap V3" />;
- * }
- * 
+ * // Returns: "/Platform_Logos/uniswap.svg"
+ * // return <img src={logoUrl} alt="Uniswap V3" />;
+ *
  * @example
- * // Fallback to default logo
- * const logo = getPlatformLogo(platformId) || '/images/default-platform.png';
+ * // Unknown platform throws error
+ * getPlatformLogo('unknownPlatform'); // Throws: Error: Platform unknownPlatform is not supported
+ *
+ * @example
+ * // Platform without logo throws error
+ * getPlatformLogo('platformWithoutLogo'); // Throws: Error: Platform platformWithoutLogo logo not configured
  * @since 1.0.0
  */
 export function getPlatformLogo(platformId) {
-  return platforms[platformId]?.logo || null;
+  validatePlatformId(platformId);
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!platform.logo || platform.logo === '') {
+    throw new Error(`Platform ${platformId} logo not configured`);
+  }
+
+  return platform.logo;
+}
+
+/**
+ * Get fee tiers supported by a platform
+ * @memberof module:helpers/platformHelpers
+ * @param {string} platformId - The platform ID to get fee tiers for
+ * @returns {Array<number>} Array of supported fee tiers in basis points
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If platform feeTiers are not configured or invalid
+ * @example
+ * // Get Uniswap V3 fee tiers
+ * const feeTiers = getPlatformFeeTiers('uniswapV3');
+ * // Returns: [100, 500, 3000, 10000]
+ *
+ * @example
+ * // Build fee tier dropdown options
+ * const feeOptions = getPlatformFeeTiers(platformId).map(tier => ({
+ *   value: tier,
+ *   label: `${tier / 100}%`,
+ *   description: tier === 500 ? 'Most common' : tier === 3000 ? 'Standard' : ''
+ * }));
+ *
+ * @example
+ * // Automation service checking available pools
+ * const supportedFeeTiers = getPlatformFeeTiers('uniswapV3');
+ * for (const feeTier of supportedFeeTiers) {
+ *   const poolExists = await checkPoolExists(token0, token1, feeTier);
+ *   // Process pool...
+ * }
+ *
+ * @example
+ * // Unknown platform throws error
+ * getPlatformFeeTiers('unknownPlatform'); // Throws: Error: Platform unknownPlatform is not supported
+ *
+ * @example
+ * // Platform without feeTiers throws error
+ * getPlatformFeeTiers('platformWithoutFeeTiers'); // Throws: Error: Platform platformWithoutFeeTiers feeTiers not configured
+ * @since 1.0.0
+ */
+export function getPlatformFeeTiers(platformId) {
+  validatePlatformId(platformId);
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!platform.feeTiers || !Array.isArray(platform.feeTiers) || platform.feeTiers.length === 0) {
+    throw new Error(`Platform ${platformId} feeTiers not configured`);
+  }
+
+  return platform.feeTiers;
 }
 
 /**
@@ -103,6 +265,10 @@ export function getPlatformLogo(platformId) {
  * @memberof module:helpers/platformHelpers
  * @param {number} chainId - The current chain ID
  * @returns {Array<Object>} Array of platform objects with complete configuration for the chain
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no platform addresses are configured for the chain
+ * @throws {Error} If platform metadata is missing required properties
  * @example
  * // Get all platforms on Ethereum mainnet
  * const platforms = getAvailablePlatforms(1);
@@ -112,13 +278,15 @@ export function getPlatformLogo(platformId) {
  * //     name: "Uniswap V3",
  * //     factoryAddress: "0x1F98...",
  * //     positionManagerAddress: "0xC365...",
+ * //     routerAddress: "0xE592...",
+ * //     quoterAddress: "0x61fF...",
  * //     logo: "https://...",
  * //     color: "#FF007A",
  * //     description: "..."
  * //   },
  * //   ...
  * // ]
- * 
+ *
  * @example
  * // Build platform selector
  * const platformOptions = getAvailablePlatforms(chainId).map(platform => ({
@@ -129,7 +297,7 @@ export function getPlatformLogo(platformId) {
  * @since 1.0.0
  */
 export function getAvailablePlatforms(chainId) {
-  if (!chainId) return [];
+  validateChainId(chainId);
 
   const availablePlatforms = [];
 
@@ -137,20 +305,41 @@ export function getAvailablePlatforms(chainId) {
   for (const platformId in platforms) {
     const platformAddresses = getPlatformAddresses(chainId, platformId);
 
-    // Skip if platform not available on this chain
+    // Skip if platform not available on this chain (business logic - disabled or not configured for chain)
     if (!platformAddresses) continue;
 
     const metadata = platforms[platformId];
-    if (!metadata) continue;
+    if (!metadata) {
+      throw new Error(`Platform ${platformId} metadata not found`);
+    }
+
+    // Validate required metadata properties
+    if (!metadata.name || metadata.name === '') {
+      throw new Error(`Platform ${platformId} name not configured`);
+    }
+
+    if (!metadata.logo || metadata.logo === '') {
+      throw new Error(`Platform ${platformId} logo not configured`);
+    }
+
+    if (!metadata.color || metadata.color === '') {
+      throw new Error(`Platform ${platformId} color not configured`);
+    }
+
+    if (!metadata.description || metadata.description === '') {
+      throw new Error(`Platform ${platformId} description not configured`);
+    }
 
     availablePlatforms.push({
       id: platformId,
-      name: metadata.name || platformId,
+      name: metadata.name,
       factoryAddress: platformAddresses.factoryAddress,
       positionManagerAddress: platformAddresses.positionManagerAddress,
+      routerAddress: platformAddresses.routerAddress,
+      quoterAddress: platformAddresses.quoterAddress,
       logo: metadata.logo,
-      color: metadata.color || "#6c757d", // Default gray if no color specified
-      description: metadata.description || ""
+      color: metadata.color,
+      description: metadata.description
     });
   }
 
@@ -158,106 +347,118 @@ export function getAvailablePlatforms(chainId) {
 }
 
 /**
- * Get complete platform configuration by ID for a specific chain
+ * Lookup complete platform configuration by ID for a specific chain
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID to look up
  * @param {number} chainId - The current chain ID
  * @returns {Object|null} Combined platform configuration with metadata and addresses - null if not found or not enabled
- * @throws {TypeError} If platformId or chainId are invalid
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If platform metadata properties are missing or invalid (name, logo, color, description, features, feeTiers)
  * @example
- * // Get complete Uniswap V3 config for Ethereum
- * const uniswap = getPlatformById('uniswapV3', 1);
+ * // Lookup complete Uniswap V3 config for Ethereum
+ * const uniswap = lookupPlatformById('uniswapV3', 1);
  * // Returns: {
  * //   id: "uniswapV3",
  * //   name: "Uniswap V3",
  * //   factoryAddress: "0x1F98...",
  * //   positionManagerAddress: "0xC365...",
+ * //   routerAddress: "0xE592...",
+ * //   quoterAddress: "0x61fF...",
  * //   logo: "https://...",
  * //   color: "#FF007A",
  * //   description: "...",
  * //   features: { concentrated: true, ... },
  * //   feeTiers: [500, 3000, 10000]
  * // }
- * 
+ *
  * @example
  * // Check platform availability before using
- * const platform = getPlatformById(platformId, chainId);
+ * const platform = lookupPlatformById(platformId, chainId);
  * if (!platform) {
  *   throw new Error(`Platform ${platformId} not available on chain ${chainId}`);
  * }
  * @since 1.0.0
  */
-export function getPlatformById(platformId, chainId) {
-  if (!platformId || !chainId) return null;
+export function lookupPlatformById(platformId, chainId) {
+  validatePlatformId(platformId);
+  validateChainId(chainId);
 
   // Get platform metadata
   const metadata = getPlatformMetadata(platformId);
-  if (!metadata) return null;
 
   // Get platform addresses for the chain
-  const addresses = getPlatformAddresses(chainId, platformId);
+  let addresses;
+  try {
+    addresses = getPlatformAddresses(chainId, platformId);
+  } catch (error) {
+    // Only return null for "platform not configured" errors (business logic)
+    if (error.message.includes('not configured for chain')) {
+      return null;
+    }
+    // Re-throw all other errors (chain not supported, no platform addresses, etc.)
+    throw error;
+  }
   if (!addresses) return null;
+
+  // Validate required metadata properties
+  if (!metadata.name || metadata.name === '') {
+    throw new Error(`Platform ${platformId} name not configured`);
+  }
+
+  if (!metadata.logo || metadata.logo === '') {
+    throw new Error(`Platform ${platformId} logo not configured`);
+  }
+
+  if (!metadata.color || metadata.color === '') {
+    throw new Error(`Platform ${platformId} color not configured`);
+  }
+
+  if (!metadata.description || metadata.description === '') {
+    throw new Error(`Platform ${platformId} description not configured`);
+  }
+
+  if (!metadata.features || typeof metadata.features !== 'object' || Array.isArray(metadata.features)) {
+    throw new Error(`Platform ${platformId} features not configured`);
+  }
+
+  if (!metadata.feeTiers || !Array.isArray(metadata.feeTiers)) {
+    throw new Error(`Platform ${platformId} feeTiers not configured`);
+  }
 
   // Combine metadata and addresses
   return {
     id: platformId,
-    name: metadata.name || platformId,
+    name: metadata.name,
     factoryAddress: addresses.factoryAddress,
     positionManagerAddress: addresses.positionManagerAddress,
+    routerAddress: addresses.routerAddress,
+    quoterAddress: addresses.quoterAddress,
     logo: metadata.logo,
-    color: metadata.color || "#6c757d",
-    description: metadata.description || "",
-    features: metadata.features || {},
-    feeTiers: metadata.feeTiers || []
+    color: metadata.color,
+    description: metadata.description,
+    features: metadata.features,
+    feeTiers: metadata.feeTiers
   };
 }
 
 /**
- * Check if a platform supports specific tokens
- * @memberof module:helpers/platformHelpers
- * @param {string} platformId - The platform ID to check
- * @param {Array<string>} tokenSymbols - Array of token symbols to check
- * @param {number} chainId - The current chain ID
- * @returns {boolean} Whether the platform supports all specified tokens
- * @example
- * // Check if Uniswap V3 supports token pair
- * const canTrade = platformSupportsTokens('uniswapV3', ['ETH', 'USDC'], 1);
- * if (!canTrade) {
- *   console.warn('Platform does not support this token pair');
- * }
- * 
- * @example
- * // Filter platforms by token support
- * const supportedPlatforms = getAvailablePlatforms(chainId)
- *   .filter(platform => 
- *     platformSupportsTokens(platform.id, selectedTokens, chainId)
- *   );
- * @todo Implement platform-specific token support logic
- * @since 1.0.0
- */
-export function platformSupportsTokens(platformId, tokenSymbols, chainId) {
-  // This is a placeholder implementation
-  // You should expand this based on your token support logic per platform
-  return true;
-}
-
-/**
- * Get all supported platform IDs
+ * Lookup all supported platform IDs
  * @memberof module:helpers/platformHelpers
  * @returns {Array<string>} Array of all configured platform IDs
  * @example
- * // Get all platform IDs
- * const platformIds = getSupportedPlatformIds();
+ * // Lookup all platform IDs
+ * const platformIds = lookupSupportedPlatformIds();
  * // Returns: ['uniswapV3', 'aaveV3', 'compoundV3', ...]
- * 
+ *
  * @example
  * // Check if a platform is supported
- * const supportedPlatforms = getSupportedPlatformIds();
+ * const supportedPlatforms = lookupSupportedPlatformIds();
  * if (!supportedPlatforms.includes(userPlatform)) {
  *   throw new Error('Unsupported platform');
  * }
  * @since 1.0.0
  */
-export function getSupportedPlatformIds() {
+export function lookupSupportedPlatformIds() {
   return Object.keys(platforms);
 }

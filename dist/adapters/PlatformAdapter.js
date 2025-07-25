@@ -7,23 +7,22 @@
 export default class PlatformAdapter {
   /**
    * Constructor for the platform adapter
-   * @param {Object} config - Chain configurations object
-   * @param {Object} config[chainId] - Configuration for each chain
-   * @param {Object} config[chainId].platformAddresses - Platform contract addresses
-   * @param {Object} config[chainId].tokenAddresses - Token contract addresses
-   * @param {Object} provider - Ethers provider instance
+   * @param {number} chainId - Chain ID for the adapter
    * @param {string} platformId - Platform Id
    * @param {string} platformName - Platform Name
    */
-  constructor(config, provider, platformId, platformName) {
-    this.config = config;
-    this.provider = provider;
+  constructor(chainId, platformId, platformName) {
+    this.chainId = chainId;
     this.platformId = platformId;
     this.platformName = platformName;
 
     // Validation
     if (this.constructor === PlatformAdapter) {
       throw new Error("Abstract class cannot be instantiated");
+    }
+
+    if (!chainId || typeof chainId !== 'number') {
+      throw new Error("chainId must be a valid number");
     }
 
     if (!this.platformId) {
@@ -40,17 +39,14 @@ export default class PlatformAdapter {
    * @param {Object} token0 - First token details
    * @param {string} token0.address - Token contract address
    * @param {number} token0.decimals - Token decimals
-   * @param {string} token0.symbol - Token symbol
-   * @param {string} token0.name - Token name
    * @param {Object} token1 - Second token details
    * @param {string} token1.address - Token contract address
    * @param {number} token1.decimals - Token decimals
-   * @param {string} token1.symbol - Token symbol
-   * @param {string} token1.name - Token name
    * @param {number} fee - Fee tier
-   * @returns {Promise<{poolAddress: string, token0: Object, token1: Object}>} Pool information (incl. sorted tokens)
+   * @param {Object} provider - Provider instance
+   * @returns {Promise<string>} Pool contract address
    */
-  async getPoolAddress(token0, token1, fee) {
+  async getPoolAddress(token0, token1, fee, provider) {
     throw new Error("getPoolAddress must be implemented by subclasses");
   }
 
@@ -117,14 +113,6 @@ export default class PlatformAdapter {
     throw new Error("generateClaimFeesData must be implemented by subclasses");
   }
 
-  /**
-   * Claim fees for a position
-   * @param {Object} params - Parameters for claiming fees
-   * @returns {Promise<Object>} - Transaction receipt
-   */
-  async claimFees(params) {
-    throw new Error("claimFees must be implemented by subclasses");
-  }
 
   /**
    * Check if a position is in range (active)
@@ -183,23 +171,7 @@ export default class PlatformAdapter {
     throw new Error("generateRemoveLiquidityData must be implemented by subclasses");
   }
 
-  /**
-   * Remove liquidity from a position and collect fees
-   * @param {Object} params - Parameters for removing liquidity
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async decreaseLiquidity(params) {
-    throw new Error("decreaseLiquidity must be implemented by subclasses");
-  }
 
-  /**
-   * Close a position completely by removing all liquidity and optionally burning the NFT
-   * @param {Object} params - Parameters for closing position
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async closePosition(params) {
-    throw new Error("closePosition must be implemented by subclasses");
-  }
 
   /**
    * Generate transaction data for adding liquidity to an existing position
@@ -211,14 +183,6 @@ export default class PlatformAdapter {
     throw new Error("generateAddLiquidityData must be implemented by subclasses");
   }
 
-  /**
-   * Add liquidity to an existing position
-   * @param {Object} params - Parameters for adding liquidity
-   * @returns {Promise<Object>} Transaction receipt and updated data
-   */
-  async addLiquidity(params) {
-    throw new Error("addLiquidity must be implemented by subclasses");
-  }
 
   /**
    * Generate transaction data for creating a new position
@@ -230,14 +194,6 @@ export default class PlatformAdapter {
     throw new Error("generateCreatePositionData must be implemented by subclasses");
   }
 
-  /**
-   * Create a new liquidity position
-   * @param {Object} params - Parameters for creating a new position
-   * @returns {Promise<Object>} Transaction receipt and position data
-   */
-  async createPosition(params) {
-    throw new Error("createPosition must be implemented by subclasses");
-  }
 
   /**
    * Generate swap transaction data

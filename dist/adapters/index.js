@@ -7,9 +7,11 @@
  * different DeFi platforms (Uniswap V3, Sushiswap, etc.) through adapters.
  */
 
+import AdapterFactory from './AdapterFactory.js';
+
 export { default as PlatformAdapter } from './PlatformAdapter.js';
 export { default as UniswapV3Adapter } from './UniswapV3Adapter.js';
-export { default as AdapterFactory } from './AdapterFactory.js';
+export { AdapterFactory };
 
 // Export a convenience function to get all adapters for a chain
 export const getAdaptersForChain = (config, chainId, provider) => {

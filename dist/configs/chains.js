@@ -8,6 +8,13 @@ const chains = {
   // Arbitrum One
   42161: {
     name: "Arbitrum One",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["https://arb1.arbitrum.io/rpc"],
+    blockExplorerUrls: ["https://arbiscan.io"],
     envPK: process.env.ARBITRUM_DEPLOYER_PK,
     executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
     executorAddress: "0x0",
@@ -16,6 +23,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
         enabled: true,
       },
     },
@@ -23,7 +31,14 @@ const chains = {
 
   // Local Hardhat Fork
   1337: {
-    name: "Forked Arbitrum", 
+    name: "Forked Arbitrum",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["http://localhost:8545"],
+    blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
     envPK: process.env.LOCAL_DEPLOYER_PK,
     executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
@@ -32,6 +47,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88", // Same as Arbitrum since it's a fork
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Same as Arbitrum since it's a fork
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // Same as Arbitrum since it's a fork
         enabled: true,
       },
     },
@@ -40,6 +56,13 @@ const chains = {
   // Ethereum Mainnet
   1: {
     name: "Ethereum",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18
+    },
+    rpcUrls: ["https://cloudflare-eth.com"],
+    blockExplorerUrls: ["https://etherscan.io"],
     envPK: process.env.ETHEREUM_DEPLOYER_PK,
     executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
@@ -48,6 +71,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
         enabled: true,
       },
     },

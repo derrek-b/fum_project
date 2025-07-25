@@ -85,8 +85,7 @@ src/
 │   ├── formatHelpers.js # @module helpers/formatHelpers
 │   ├── platformHelpers.js # @module helpers/platformHelpers
 │   ├── strategyHelpers.js # @module helpers/strategyHelpers
-│   ├── tokenHelpers.js # @module helpers/tokenHelpers
-│   └── vaultHelpers.js # @module helpers/vaultHelpers
+│   └── tokenHelpers.js # @module helpers/tokenHelpers
 ├── services/
 │   ├── index.js
 │   └── coingecko.js # @module services/coingecko

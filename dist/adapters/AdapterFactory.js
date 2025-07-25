@@ -5,11 +5,11 @@
 
 // fum_library/adapters/AdapterFactory.js
 import UniswapV3Adapter from "./UniswapV3Adapter.js";
-import chains from "../configs/chains.js";
+import { getChainConfig, lookupChainPlatformIds } from "../helpers/chainHelpers.js";
 
 /**
  * Factory class for creating and managing platform adapters
- * 
+ *
  * @class AdapterFactory
  * @memberof module:adapters/AdapterFactory
  */
@@ -26,91 +26,107 @@ export default class AdapterFactory {
 
   /**
    * Gets all available adapters for a specific chain
-   * 
+   *
    * @function getAdaptersForChain
    * @memberof module:adapters/AdapterFactory
    * @static
-   * 
+   *
    * @param {number} chainId - Chain ID
-   * @param {Object} provider - Ethers provider
-   * 
-   * @returns {Array} Array of platform adapter instances
-   * 
+   *
+   * @returns {Object} Result object containing adapters and failures
+   * @returns {Array} result.adapters - Array of successfully created platform adapter instances
+   * @returns {Array} result.failures - Array of failure objects with platformId and error details
+   *
    * @example
-   * const adapters = AdapterFactory.getAdaptersForChain(1, provider);
-   * console.log(`Found ${adapters.length} adapters for mainnet`);
-   * 
+   * const result = AdapterFactory.getAdaptersForChain(42161);
+   * console.log(`Found ${result.adapters.length} adapters for Arbitrum`);
+   * if (result.failures.length > 0) {
+   *   console.warn('Failed to create some adapters:', result.failures);
+   * }
+   *
    * @since 1.0.0
    */
-  static getAdaptersForChain(chainId, provider) {
+  static getAdaptersForChain(chainId) {
     const adapters = [];
+    const failures = [];
 
-    if (!chainId || !provider || !chains?.[chainId]) {
-      return adapters;
+    // Validate chainId using established pattern
+    if (!chainId || typeof chainId !== 'number') {
+      throw new Error("chainId must be a valid number");
     }
 
-    const chainConfig = chains[chainId];
+    // Check if chain is supported
+    const chainConfig = getChainConfig(chainId);
+    if (!chainConfig) {
+      return { adapters, failures };
+    }
+
+    // Get all enabled platform IDs for this chain
+    const platformIds = lookupChainPlatformIds(chainId);
 
     // Create an adapter for each supported platform on the chain
-    Object.keys(chainConfig.platformAddresses || {}).forEach(platformId => {
+    platformIds.forEach(platformId => {
       const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
 
       if (AdapterClass) {
-        adapters.push(new AdapterClass(chains, provider));
+        try {
+          adapters.push(new AdapterClass(chainId));
+        } catch (error) {
+          // Track failures so consumer can handle them appropriately
+          failures.push({
+            platformId,
+            error: error.message,
+            errorDetails: error
+          });
+        }
       }
     });
 
-    return adapters;
+    return { adapters, failures };
   }
 
   /**
    * Gets an adapter for a specific platform
-   * 
+   *
    * @function getAdapter
    * @memberof module:adapters/AdapterFactory
    * @static
-   * 
+   *
    * @param {string} platformId - Platform ID (e.g., 'uniswapV3')
-   * @param {Object} provider - Ethers provider
-   * 
-   * @returns {Object|null} Platform adapter instance or null if not found
-   * 
-   * @throws {Error} If platform ID or provider not provided
-   * 
+   * @param {number} chainId - Chain ID
+   *
+   * @returns {Object} Platform adapter instance
+   *
+   * @throws {Error} If platform ID or chainId are invalid, platform not found, or adapter creation fails
+   *
    * @example
-   * const adapter = AdapterFactory.getAdapter('uniswapV3', provider);
-   * if (adapter) {
-   *   const poolInfo = await adapter.getPoolAddress(token0, token1, 3000);
-   * }
-   * 
+   * const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
+   * const poolInfo = await adapter.fetchPoolData(token0, token1, 3000, 42161, provider);
+   *
    * @since 1.0.0
    */
-  static getAdapter(platformId, provider) {
-    if (!platformId || !provider) {
-      throw new Error("Platform ID and provider are required");
+  static getAdapter(platformId, chainId) {
+    // Validate platformId
+    if (!platformId || typeof platformId !== 'string') {
+      throw new Error("Platform ID must be a valid string");
+    }
+
+    // Validate chainId using established pattern
+    if (!chainId || typeof chainId !== 'number') {
+      throw new Error("chainId must be a valid number");
     }
 
     const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
 
     if (!AdapterClass) {
-      console.error(`No adapter available for platform: ${platformId}`);
-      return null;
+      throw new Error(`No adapter available for platform: ${platformId}`);
     }
 
-    return new AdapterClass(chains, provider);
-  }
-
-  /**
-   * Register a new adapter class
-   * @param {string} platformId - Platform ID
-   * @param {class} AdapterClass - Adapter class
-   */
-  static registerAdapter(platformId, AdapterClass) {
-    if (!platformId || !AdapterClass) {
-      throw new Error("Platform ID and Adapter class are required for registration");
+    try {
+      return new AdapterClass(chainId);
+    } catch (error) {
+      throw new Error(`Failed to create ${platformId} adapter for chain ${chainId}: ${error.message}`);
     }
-
-    this.#PLATFORM_ADAPTERS[platformId] = AdapterClass;
   }
 
   /**
@@ -128,5 +144,24 @@ export default class AdapterFactory {
    */
   static hasAdapter(platformId) {
     return platformId in this.#PLATFORM_ADAPTERS;
+  }
+
+  /**
+   * Register a new adapter class
+   *
+   * NOTE: This is intended ONLY for testing and plugin scenarios. Registered adapters
+   * are not persistent and will be lost when the application restarts. For production
+   * adapters, add them directly to the PLATFORM_ADAPTERS object in this file.
+   *
+   * @param {string} platformId - Platform ID
+   * @param {class} AdapterClass - Adapter class
+   * @throws {Error} If platform ID or adapter class are invalid
+   */
+  static registerAdapterForTestingOnly(platformId, AdapterClass) {
+    if (!platformId || !AdapterClass) {
+      throw new Error("Platform ID and Adapter class are required for registration");
+    }
+
+    this.#PLATFORM_ADAPTERS[platformId] = AdapterClass;
   }
 }

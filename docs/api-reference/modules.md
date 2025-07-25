@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-06-24T19:51:41.632Z
+Generated on: 2025-07-25T16:09:31.809Z
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Generated on: 2025-06-24T19:51:41.632Z
 **Path:** `src/adapters/AdapterFactory.js`
 
 **Imports:**
-- from `../configs/chains.js`
+- from `../helpers/chainHelpers.js`
 - from `./UniswapV3Adapter.js`
 
 **Exports:**
@@ -39,6 +39,9 @@ Adapter system for DeFi platforms
 
 **Path:** `src/adapters/index.js`
 
+**Imports:**
+- from `./AdapterFactory.js`
+
 **Exports:**
 - `getAdaptersForChain` (variable)
 - `getAdapter` (variable)
@@ -46,7 +49,6 @@ Adapter system for DeFi platforms
 - `registerAdapter` (variable)
 - `PlatformAdapter` (class) (from `./PlatformAdapter.js`)
 - `UniswapV3Adapter` (class) (from `./UniswapV3Adapter.js`)
-- `AdapterFactory` (class) (from `./AdapterFactory.js`)
 
 ---
 
@@ -68,13 +70,16 @@ UniswapV3Adapter - Uniswap V3 Protocol Integration
 **Path:** `src/adapters/UniswapV3Adapter.js`
 
 **Imports:**
-- from `../helpers/formatHelpers.js`
+- from `../helpers/chainHelpers.js`
+- from `../helpers/platformHelpers.js`
+- from `../helpers/tokenHelpers.js`
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
 - from `@uniswap/sdk-core`
 - from `@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json`
 - from `@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json`
 - from `@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json`
+- from `@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json`
 - from `@uniswap/v3-sdk`
 - from `ethers`
 - from `jsbi`
@@ -110,12 +115,9 @@ Contract ABIs and addresses for the F.U.M. project
 - from `ethers`
 
 **Exports:**
-- `getContract` (function)
-- `getVaultContract` (function)
-- `getVaultFactory` (function)
-- `getBatchExecutor` (function)
 - `getVaultFactoryAddress` (function)
-- `getBatchExecutorAddress` (function)
+- `getVaultContract` (function)
+- `getContractInfoByAddress` (function)
 
 ---
 
@@ -138,10 +140,8 @@ Blockchain Module - Ethereum Interaction Utilities
 **Path:** `src/blockchain/wallet.js`
 
 **Imports:**
+- from `../helpers/chainHelpers.js`
 - from `ethers`
-
-**Exports:**
-- `createJsonRpcProvider` (function)
 
 ---
 
@@ -187,9 +187,6 @@ Strategy configuration with templates and parameters
 
 **Path:** `src/configs/strategies.js`
 
-**Imports:**
-- from `../helpers/tokenHelpers.js`
-
 **Exports:**
 - default: `strategies` (other)
 
@@ -218,14 +215,15 @@ Token configuration with addresses on multiple chains
 - from `../configs/chains.js`
 
 **Exports:**
+- `validateChainId` (function)
 - `getChainConfig` (function)
 - `getChainName` (function)
-- `getChainRpcUrl` (function)
+- `getChainRpcUrls` (function)
 - `getExecutorAddress` (function)
 - `isChainSupported` (function)
-- `getSupportedChainIds` (function)
+- `lookupSupportedChainIds` (function)
 - `getPlatformAddresses` (function)
-- `getChainPlatformIds` (function)
+- `lookupChainPlatformIds` (function)
 
 ---
 
@@ -237,7 +235,6 @@ Token configuration with addresses on multiple chains
 
 **Exports:**
 - `formatPrice` (function)
-- `formatUnits` (function)
 - `formatFeeDisplay` (function)
 - `formatTimestamp` (function)
 
@@ -253,7 +250,6 @@ Token configuration with addresses on multiple chains
 - re-exports from `./tokenHelpers.js`
 - re-exports from `./strategyHelpers.js`
 - re-exports from `./formatHelpers.js`
-- re-exports from `./vaultHelpers.js`
 
 ---
 
@@ -268,14 +264,16 @@ Token configuration with addresses on multiple chains
 - from `./chainHelpers.js`
 
 **Exports:**
+- `validateChainId` (function)
+- `validatePlatformId` (function)
 - `getPlatformMetadata` (function)
 - `getPlatformName` (function)
 - `getPlatformColor` (function)
 - `getPlatformLogo` (function)
+- `getPlatformFeeTiers` (function)
 - `getAvailablePlatforms` (function)
-- `getPlatformById` (function)
-- `platformSupportsTokens` (function)
-- `getSupportedPlatformIds` (function)
+- `lookupPlatformById` (function)
+- `lookupSupportedPlatformIds` (function)
 
 ---
 
@@ -287,23 +285,28 @@ Token configuration with addresses on multiple chains
 
 **Imports:**
 - from `../configs/strategies.js`
+- from `./tokenHelpers.js`
+- from `ethers`
 
 **Exports:**
-- `getAvailableStrategies` (function)
+- `validateIdString` (function)
+- `lookupAllStrategyIds` (function)
+- `lookupAvailableStrategies` (function)
 - `getStrategyDetails` (function)
 - `getStrategyTemplates` (function)
 - `getTemplateDefaults` (function)
-- `getDefaultParams` (function)
+- `getParamDefaultValues` (function)
 - `getStrategyParameters` (function)
 - `getStrategyParametersByGroup` (function)
 - `getStrategyParametersByContractGroup` (function)
 - `validateStrategyParams` (function)
 - `getParameterSetterMethod` (function)
 - `shouldShowParameter` (function)
-- `getAllStrategyIds` (function)
+- `getStrategyTokens` (function)
 - `strategySupportsTokens` (function)
 - `formatParameterValue` (function)
 - `validateTokensForStrategy` (function)
+- `mapStrategyParameters` (function)
 
 ---
 
@@ -317,45 +320,19 @@ Token configuration with addresses on multiple chains
 - from `../configs/tokens.js`
 
 **Exports:**
-- `getAllTokens` (function)
-- `getTokenBySymbol` (function)
-- `getTokenAddress` (function)
-- `getStablecoins` (function)
-- `areTokensSupportedOnChain` (function)
-- `getTokenByAddress` (function)
-- `registerToken` (function)
-- `getTokensForChain` (function)
 - `getAllTokenSymbols` (function)
+- `getAllTokens` (function)
+- `getStablecoins` (function)
+- `getTokensByChain` (function)
+- `getTokenBySymbol` (function)
+- `getTokensBySymbol` (function)
+- `getTokenByAddress` (function)
 - `getTokensByType` (function)
-
----
-
-### vaultHelpers.js
-
-@module helpers/vaultHelpers
-
-**Path:** `src/helpers/vaultHelpers.js`
-
-**Imports:**
-- from `../adapters/index.js`
-- from `../artifacts/contracts.js`
-- from `../blockchain/index.js`
-- from `../services/index.js`
-- from `./strategyHelpers.js`
-- from `./tokenHelpers.js`
-- from `@openzeppelin/contracts/build/contracts/ERC20.json`
-- from `ethers`
-
-**Exports:**
-- `mapStrategyParameters` (variable)
-- `fetchStrategyParameters` (variable)
-- `getVaultStrategies` (variable)
-- `getVaultBasicInfo` (variable)
-- `getVaultTokenBalances` (variable)
-- `getVaultPositions` (variable)
-- `calculatePositionsTVL` (variable)
-- `getVaultData` (variable)
-- `getAllUserVaultData` (variable)
+- `getTokenAddress` (function)
+- `getTokenAddresses` (function)
+- `areTokensSupportedOnChain` (function)
+- `validateTokensExist` (function)
+- `getCoingeckoId` (function)
 
 ---
 
@@ -386,15 +363,15 @@ FUM Library - Main Entry Point
 
 **Path:** `src/services/coingecko.js`
 
+**Imports:**
+- from `../helpers/tokenHelpers.js`
+
 **Exports:**
-- `configureCoingecko` (function)
-- `getCoingeckoId` (function)
-- `registerTokenMapping` (function)
-- `calculateUsdValueSync` (function)
-- `getPriceCache` (function)
+- `ENDPOINTS` (variable)
+- `CACHE_DURATIONS` (variable)
+- `priceCache` (variable)
+- `buildApiUrl` (function)
 - `clearPriceCache` (function)
-- `isConfigured` (function)
-- `setApiKey` (function)
 
 ---
 
