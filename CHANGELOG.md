@@ -1,5 +1,56 @@
 # F.U.M. Project Changelog
 
+## v0.5.0 - 2025-01-26
+
+### WIP - Major Cache Architecture Refactor
+
+#### **Cache Structure Centralization**
+- **BREAKING**: Pool data moved from VaultDataService to AutomationService for better centralization
+- **BREAKING**: Position structure simplified to minimal fields (id, pool, tickLower, tickUpper, liquidity, lastUpdated)
+- **BREAKING**: Token configurations centralized in AutomationService during initialization
+- Removed poolData from VaultDataService - now managed centrally in AutomationService
+- Enhanced position management with object-keyed positions for O(1) access
+
+#### **Enhanced Validation & Adapter Improvements**
+- **BREAKING**: getPoolData() method now requires options parameter (no longer optional with default {})
+- Added abstract getPoolData() method to PlatformAdapter base class for consistency
+- Enhanced parameter validation for getPoolData():
+  - includeTicks must be array of integers if provided
+  - includeTokens must be boolean if provided
+  - Better error messages for all validation failures
+- Unified pool data fetching across automation service and strategies
+
+#### **Documentation & Architecture**
+- **Added comprehensive cache-structures.md documentation** showing complete data architecture
+- Documented all cache structures across AutomationService, VaultDataService, and VaultRegistry
+- Added data flow diagrams and access patterns for development reference
+- Enhanced AdapterFactory test coverage with proper validation error handling
+
+#### **Strategy & Pool Data Management**
+- Added strategy parameter caching in AutomationService.strategyCache
+- Added vault processing locks (AutomationService.vaultLocks) for race condition prevention
+- Centralized pool data initialization during service startup
+- Improved pool data loading with unified adapter.getPoolData() method
+
+#### **Test Infrastructure Updates**
+- Updated AdapterFactory tests to match enhanced validation behavior
+- Fixed test expectations for new chain validation error messages
+- Added comprehensive getPoolData() test coverage in UniswapV3Adapter
+- Enhanced parameter validation testing for edge cases
+
+#### **Benefits**
+- **Single Source of Truth**: All pool data centralized in AutomationService
+- **Better Performance**: Object-keyed positions for faster lookups
+- **Improved Reliability**: Enhanced validation prevents runtime errors
+- **Complete Documentation**: Comprehensive reference for all cache structures
+- **Architectural Consistency**: Unified pool data API across all adapters
+
+#### **Migration Notes**
+- Pool data access: `vaultDataService.getPool()` → `automationService.poolData[poolAddress]`
+- Position access: Array-based → Object-keyed by position ID
+- Token configurations: Now initialized once at AutomationService startup
+- Strategy implementations: Must pass {} as options to adapter.getPoolData()
+
 ## v0.4.0
 
 ### Security & Production Readiness
