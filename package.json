@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.10.0",
+  "version": "0.11.1",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",

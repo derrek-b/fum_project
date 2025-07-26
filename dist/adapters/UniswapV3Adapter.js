@@ -594,6 +594,128 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get pool data by address with optional tick data and token information
+   * @param {string} poolAddress - Pool contract address
+   * @param {Object} options - Options object for additional data to include (required)
+   * @param {Array<number>} [options.includeTicks] - Array of tick indices to fetch data for (must be integers)
+   * @param {boolean} [options.includeTokens] - Whether to fetch token0 and token1 addresses
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Complete pool data with requested additional fields
+   * @throws {Error} If parameters are invalid or pool data cannot be retrieved
+   */
+  async getPoolData(poolAddress, options, provider) {
+    // Validate options parameter
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      throw new Error("Options parameter must be an object");
+    }
+
+    // Validate includeTicks if provided
+    if (options.includeTicks !== undefined) {
+      if (!Array.isArray(options.includeTicks)) {
+        throw new Error("includeTicks must be an array");
+      }
+      if (!options.includeTicks.every(tick => typeof tick === 'number' && Number.isInteger(tick))) {
+        throw new Error("All includeTicks values must be integers");
+      }
+    }
+
+    // Validate includeTokens if provided  
+    if (options.includeTokens !== undefined) {
+      if (typeof options.includeTokens !== 'boolean') {
+        throw new Error("includeTokens must be a boolean");
+      }
+    }
+
+    const { includeTicks = [], includeTokens = false } = options;
+
+    // Validate pool address
+    if (!poolAddress) {
+      throw new Error("Pool address parameter is required");
+    }
+
+    let normalizedAddress;
+    try {
+      normalizedAddress = ethers.getAddress(poolAddress);
+    } catch (error) {
+      throw new Error(`Invalid pool address: ${poolAddress}`);
+    }
+
+    // Validate provider
+    if (!provider || !(provider instanceof ethers.AbstractProvider)) {
+      throw new Error("Provider parameter is required");
+    }
+
+    try {
+      // Create pool contract
+      const poolContract = new ethers.Contract(normalizedAddress, this.uniswapV3PoolABI, provider);
+
+      // Fetch core pool state data
+      const [slot0, liquidity, feeGrowthGlobal0X128, feeGrowthGlobal1X128, fee] =
+        await Promise.all([
+          poolContract.slot0(),
+          poolContract.liquidity(),
+          poolContract.feeGrowthGlobal0X128(),
+          poolContract.feeGrowthGlobal1X128(),
+          poolContract.fee()
+        ]);
+
+      // Build base pool data object
+      const poolData = {
+        address: normalizedAddress,
+        sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+        tick: Number(slot0.tick),
+        observationIndex: Number(slot0.observationIndex),
+        observationCardinality: Number(slot0.observationCardinality),
+        observationCardinalityNext: Number(slot0.observationCardinalityNext),
+        feeProtocol: Number(slot0.feeProtocol),
+        unlocked: slot0.unlocked,
+        liquidity: liquidity.toString(),
+        feeGrowthGlobal0X128: feeGrowthGlobal0X128.toString(),
+        feeGrowthGlobal1X128: feeGrowthGlobal1X128.toString(),
+        fee: Number(fee),
+        lastUpdated: Date.now()
+      };
+
+      // Add tick data if requested
+      if (includeTicks.length > 0) {
+        poolData.ticks = {};
+        const tickPromises = includeTicks.map(tick =>
+          poolContract.ticks(tick).then(data => ({ tick, data }))
+        );
+        const tickResults = await Promise.all(tickPromises);
+
+        for (const { tick, data } of tickResults) {
+          poolData.ticks[tick.toString()] = {
+            liquidityGross: data.liquidityGross.toString(),
+            liquidityNet: data.liquidityNet.toString(),
+            feeGrowthOutside0X128: data.feeGrowthOutside0X128.toString(),
+            feeGrowthOutside1X128: data.feeGrowthOutside1X128.toString(),
+            tickCumulativeOutside: data.tickCumulativeOutside.toString(),
+            secondsPerLiquidityOutsideX128: data.secondsPerLiquidityOutsideX128.toString(),
+            secondsOutside: Number(data.secondsOutside),
+            initialized: data.initialized,
+            lastUpdated: Date.now()
+          };
+        }
+      }
+
+      // Add token addresses if requested
+      if (includeTokens) {
+        const [token0, token1] = await Promise.all([
+          poolContract.token0(),
+          poolContract.token1()
+        ]);
+        poolData.token0 = token0;
+        poolData.token1 = token1;
+      }
+
+      return poolData;
+    } catch (error) {
+      throw new Error(`Failed to get pool data for ${normalizedAddress}: ${error.message}`);
+    }
+  }
+
+  /**
    * Fetch tick-specific data for fee calculations
    * @param {string} poolAddress - Pool contract address
    * @param {number} tickLower - Lower tick of the position

@@ -5,6 +5,63 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2025-01-26
+
+### Added - Abstract Method & Enhanced Validation
+
+#### **BREAKING CHANGES**
+- **Added abstract `getPoolData()` method to PlatformAdapter**: All future adapters must implement this method
+  - Ensures consistent pool data API across all DeFi platforms
+  - Method signature: `async getPoolData(poolAddress, options, provider)`
+  - Options parameter is now required (not optional with default `{}`)
+
+#### **Enhanced Parameter Validation**
+- **Improved `UniswapV3Adapter.getPoolData()` validation**:
+  - `options` parameter now required (breaking change from `options = {}`)
+  - `includeTicks` must be array of integers if provided
+  - `includeTokens` must be boolean if provided
+  - Better error messages for all validation failures
+
+#### **Test Coverage**
+- **Added comprehensive test suite for `getPoolData()` method**
+  - Basic functionality tests with real test environment data
+  - Parameter validation tests for all edge cases
+  - Value verification tests using known test pool (WETH/USDC 500)
+  - Tests for all option combinations (`{}`, `{includeTicks}`, `{includeTokens}`, combined)
+
+#### **Benefits**
+- **Platform Consistency**: Future adapters must implement unified pool data method
+- **Better Reliability**: Robust parameter validation prevents runtime errors
+- **Complete Coverage**: Critical method now has comprehensive tests
+- **Architectural Integrity**: Base class enforces required method implementation
+
+## [0.11.0] - 2025-01-25
+
+### Added - Unified Pool Data Method
+
+#### **New UniswapV3Adapter Method**
+- **Added `getPoolData(poolAddress, options, provider)` method**: Unified pool data fetching
+  - Replaces fragmented pool data approaches across automation service and strategies
+  - Optional tick data fetching via `options.includeTicks` array
+  - Optional token address fetching via `options.includeTokens` boolean
+  - Comprehensive pool state data with proper validation and error handling
+  - Fixes broken strategy calls to non-existent `getPoolData` method
+
+#### **Method Signature**
+```javascript
+async getPoolData(poolAddress, options = {}, provider)
+// options.includeTicks: Array<number> - tick indices to fetch
+// options.includeTokens: boolean - whether to include token0/token1 addresses
+// Returns: Complete pool data object with lastUpdated timestamps
+```
+
+#### **Benefits**
+- **Fixes broken strategy code**: Strategies can now call `adapter.getPoolData(poolAddress)`
+- **Eliminates duplication**: Single method replaces 3 different pool data approaches
+- **Flexible data fetching**: Get only the data you need via options
+- **Proper timestamps**: All returned data includes `lastUpdated` fields
+- **Consistent validation**: Standardized error handling and address normalization
+
 ## [0.10.0] - 2025-01-25
 
 ### BREAKING CHANGES - API Encapsulation

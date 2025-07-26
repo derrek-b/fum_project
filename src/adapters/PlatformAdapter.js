@@ -214,4 +214,37 @@ export default class PlatformAdapter {
   async discoverAvailablePools(token0Address, token1Address, chainId) {
     throw new Error("discoverAvailablePools must be implemented by subclasses");
   }
+
+  /**
+   * Get comprehensive pool data by pool address with optional additional data
+   * @param {string} poolAddress - Pool contract address
+   * @param {Object} options - Options for additional data to include
+   * @param {Array<number>} [options.includeTicks] - Array of tick indices to fetch data for (must be integers)
+   * @param {boolean} [options.includeTokens] - Whether to fetch token0 and token1 addresses
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Complete pool data object with requested additional fields
+   * @throws {Error} If parameters are invalid or pool data cannot be retrieved
+   * @example
+   * // Basic pool data
+   * const poolData = await adapter.getPoolData(poolAddress, {}, provider);
+   * 
+   * // With tick data for specific ticks
+   * const poolDataWithTicks = await adapter.getPoolData(poolAddress, {
+   *   includeTicks: [-887220, 887220]
+   * }, provider);
+   * 
+   * // With token addresses
+   * const poolDataWithTokens = await adapter.getPoolData(poolAddress, {
+   *   includeTokens: true
+   * }, provider);
+   * 
+   * // Combined options
+   * const fullPoolData = await adapter.getPoolData(poolAddress, {
+   *   includeTicks: [-60000, 60000],
+   *   includeTokens: true
+   * }, provider);
+   */
+  async getPoolData(poolAddress, options, provider) {
+    throw new Error("getPoolData must be implemented by subclasses");
+  }
 }

@@ -65,12 +65,10 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result.adapters[0].chainId).toBe(1337);
       });
 
-      it('should return empty result for unsupported chain', () => {
-        const result = AdapterFactory.getAdaptersForChain(999999);
-
-        expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(0);
-        expect(result.failures.length).toBe(0);
+      it('should throw error for unsupported chain', () => {
+        expect(() => {
+          AdapterFactory.getAdaptersForChain(999999);
+        }).toThrow('Chain 999999 is not supported');
       });
 
       it('should handle failures gracefully and return working adapters', () => {
@@ -93,8 +91,7 @@ describe('AdapterFactory - Unit Tests', () => {
         // Since we can't easily modify the real chain config, we'll temporarily register
         // a failing adapter and manually test the failure tracking
 
-        // Save original method
-        const originalGetChainPlatformIds = vi.fn();
+        // Mock setup for failure tracking test
 
         // Mock the chainHelpers to return our test platform
         vi.mock('../../../src/helpers/chainHelpers.js', async (importOriginal) => {
@@ -194,30 +191,24 @@ describe('AdapterFactory - Unit Tests', () => {
         }).toThrow('chainId must be a valid number');
       });
 
-      it('should return empty result for Infinity chainId', () => {
-        // Infinity passes typeof check but isn't a valid chain
-        const result = AdapterFactory.getAdaptersForChain(Infinity);
-
-        expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(0);
-        expect(result.failures.length).toBe(0);
+      it('should throw error for Infinity chainId', () => {
+        // Infinity fails finite number validation
+        expect(() => {
+          AdapterFactory.getAdaptersForChain(Infinity);
+        }).toThrow('chainId must be a finite number');
       });
 
-      it('should return empty result for negative Infinity chainId', () => {
-        // -Infinity passes typeof check but isn't a valid chain
-        const result = AdapterFactory.getAdaptersForChain(-Infinity);
-
-        expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(0);
-        expect(result.failures.length).toBe(0);
+      it('should throw error for negative Infinity chainId', () => {
+        // -Infinity fails finite number validation
+        expect(() => {
+          AdapterFactory.getAdaptersForChain(-Infinity);
+        }).toThrow('chainId must be a finite number');
       });
 
-      it('should return empty result for negative chainId', () => {
-        const result = AdapterFactory.getAdaptersForChain(-1);
-
-        expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(0);
-        expect(result.failures.length).toBe(0);
+      it('should throw error for negative chainId', () => {
+        expect(() => {
+          AdapterFactory.getAdaptersForChain(-1);
+        }).toThrow('chainId must be greater than 0');
       });
     });
   });
@@ -391,25 +382,25 @@ describe('AdapterFactory - Unit Tests', () => {
       it('should throw error for unsupported chain', () => {
         expect(() => {
           AdapterFactory.getAdapter('uniswapV3', 999999);
-        }).toThrow('Failed to create uniswapV3 adapter for chain 999999: Uniswap V3 not available on chain 999999');
+        }).toThrow('Failed to create uniswapV3 adapter for chain 999999: Chain 999999 is not supported');
       });
 
       it('should throw error for Infinity chainId', () => {
         expect(() => {
           AdapterFactory.getAdapter('uniswapV3', Infinity);
-        }).toThrow('Failed to create uniswapV3 adapter for chain Infinity: Uniswap V3 not available on chain Infinity');
+        }).toThrow('Failed to create uniswapV3 adapter for chain Infinity: chainId must be a finite number');
       });
 
       it('should throw error for negative Infinity chainId', () => {
         expect(() => {
           AdapterFactory.getAdapter('uniswapV3', -Infinity);
-        }).toThrow('Failed to create uniswapV3 adapter for chain -Infinity: Uniswap V3 not available on chain -Infinity');
+        }).toThrow('Failed to create uniswapV3 adapter for chain -Infinity: chainId must be a finite number');
       });
 
       it('should throw error for negative chainId', () => {
         expect(() => {
           AdapterFactory.getAdapter('uniswapV3', -1);
-        }).toThrow('Failed to create uniswapV3 adapter for chain -1: Uniswap V3 not available on chain -1');
+        }).toThrow('Failed to create uniswapV3 adapter for chain -1: chainId must be greater than 0');
       });
 
       it('should throw error with custom adapter validation failure', () => {

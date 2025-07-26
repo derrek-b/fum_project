@@ -2178,6 +2178,173 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getPoolData', () => {
+    describe('Success Cases', () => {
+      it('should fetch basic pool data with empty options', async () => {
+        const testStartTime = Date.now();
+        
+        // Use test environment pool address (WETH/USDC 500)
+        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {}, env.provider);
+
+        // Test structure - all required properties present
+        expect(poolData).toHaveProperty('address');
+        expect(poolData).toHaveProperty('sqrtPriceX96');
+        expect(poolData).toHaveProperty('tick');
+        expect(poolData).toHaveProperty('liquidity');
+        expect(poolData).toHaveProperty('fee');
+        expect(poolData).toHaveProperty('lastUpdated');
+
+        // Test specific values from test environment
+        expect(poolData.address).toBe(env.poolData.poolAddress);
+        expect(poolData.fee).toBe(500); // Test environment uses 500 fee tier
+        expect(typeof poolData.tick).toBe('number');
+        expect(poolData.lastUpdated).toBeGreaterThan(testStartTime);
+
+        // Test data types
+        expect(typeof poolData.sqrtPriceX96).toBe('string');
+        expect(typeof poolData.liquidity).toBe('string');
+        expect(Number.isInteger(poolData.tick)).toBe(true);
+      });
+
+      it('should fetch pool data with includeTicks option', async () => {
+        const ticksToFetch = [env.testPosition.tickLower, env.testPosition.tickUpper];
+        
+        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
+          includeTicks: ticksToFetch
+        }, env.provider);
+
+        // Should have basic pool data
+        expect(poolData.address).toBe(env.poolData.poolAddress);
+        expect(poolData.fee).toBe(500);
+
+        // Should have ticks data
+        expect(poolData).toHaveProperty('ticks');
+        expect(typeof poolData.ticks).toBe('object');
+
+        // Should have data for requested ticks
+        ticksToFetch.forEach(tick => {
+          expect(poolData.ticks).toHaveProperty(tick.toString());
+          const tickData = poolData.ticks[tick.toString()];
+          expect(tickData).toHaveProperty('liquidityGross');
+          expect(tickData).toHaveProperty('liquidityNet');
+          expect(tickData).toHaveProperty('feeGrowthOutside0X128');
+          expect(tickData).toHaveProperty('feeGrowthOutside1X128');
+          expect(tickData).toHaveProperty('initialized');
+          expect(tickData).toHaveProperty('lastUpdated');
+        });
+      });
+
+      it('should fetch pool data with includeTokens option', async () => {
+        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
+          includeTokens: true
+        }, env.provider);
+
+        // Should have basic pool data
+        expect(poolData.address).toBe(env.poolData.poolAddress);
+        expect(poolData.fee).toBe(500);
+
+        // Should have token addresses
+        expect(poolData).toHaveProperty('token0');
+        expect(poolData).toHaveProperty('token1');
+        expect(typeof poolData.token0).toBe('string');
+        expect(typeof poolData.token1).toBe('string');
+        expect(poolData.token0.length).toBe(42); // Ethereum address length
+        expect(poolData.token1.length).toBe(42);
+      });
+
+      it('should fetch pool data with combined options', async () => {
+        const ticksToFetch = [env.testPosition.tickLower];
+        
+        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
+          includeTicks: ticksToFetch,
+          includeTokens: true
+        }, env.provider);
+
+        // Should have basic pool data
+        expect(poolData.address).toBe(env.poolData.poolAddress);
+        expect(poolData.fee).toBe(500);
+
+        // Should have ticks data
+        expect(poolData).toHaveProperty('ticks');
+        expect(poolData.ticks).toHaveProperty(ticksToFetch[0].toString());
+
+        // Should have token addresses  
+        expect(poolData).toHaveProperty('token0');
+        expect(poolData).toHaveProperty('token1');
+      });
+    });
+
+    describe('Parameter Validation', () => {
+      const validPoolAddress = '0x1234567890123456789012345678901234567890';
+
+      it('should reject invalid options parameter - null', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, null, env.provider)
+        ).rejects.toThrow('Options parameter must be an object');
+      });
+
+      it('should reject invalid options parameter - array', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, [], env.provider)
+        ).rejects.toThrow('Options parameter must be an object');
+      });
+
+      it('should reject invalid options parameter - string', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, 'invalid', env.provider)
+        ).rejects.toThrow('Options parameter must be an object');
+      });
+
+      it('should reject invalid includeTicks - not array', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, { includeTicks: 'invalid' }, env.provider)
+        ).rejects.toThrow('includeTicks must be an array');
+      });
+
+      it('should reject invalid includeTicks - non-integer values', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, { includeTicks: [1.5, 2] }, env.provider)
+        ).rejects.toThrow('All includeTicks values must be integers');
+      });
+
+      it('should reject invalid includeTicks - string values', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, { includeTicks: ['123', 456] }, env.provider)
+        ).rejects.toThrow('All includeTicks values must be integers');
+      });
+
+      it('should reject invalid includeTokens - not boolean', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, { includeTokens: 'true' }, env.provider)
+        ).rejects.toThrow('includeTokens must be a boolean');
+      });
+
+      it('should reject invalid includeTokens - number', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, { includeTokens: 1 }, env.provider)
+        ).rejects.toThrow('includeTokens must be a boolean');
+      });
+
+      it('should reject invalid pool address - null', async () => {
+        await expect(
+          adapter.getPoolData(null, {}, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+      });
+
+      it('should reject invalid pool address - invalid format', async () => {
+        await expect(
+          adapter.getPoolData('invalid-address', {}, env.provider)
+        ).rejects.toThrow('Invalid pool address');
+      });
+
+      it('should reject missing provider', async () => {
+        await expect(
+          adapter.getPoolData(validPoolAddress, {}, null)
+        ).rejects.toThrow('Provider parameter is required');
+      });
+    });
+  });
+
   describe('fetchTickData', () => {
     let validPoolAddress;
     let validTickLower;
