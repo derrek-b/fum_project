@@ -7,7 +7,7 @@
 
 import { ethers } from 'ethers';
 import { startGanache, TEST_ACCOUNTS } from './setup/ganache-config.js';
-import { deployFUMContracts, deployTestVault, syncBytecodeFromFUM } from './setup/test-contracts.js';
+import { deployFUMContracts, deployTestVault } from './setup/test-contracts.js';
 import chains from '../src/configs/chains.js';
 import tokens from '../src/configs/tokens.js';
 import UniswapV3Adapter from '../src/adapters/UniswapV3Adapter.js';
@@ -31,17 +31,9 @@ export async function setupTestEnvironment(options = {}) {
     deployContracts = true,
     updateContractsFile = false,
     quiet = true,
-    syncBytecode = false,
-    fumProjectPath = path.join(__dirname, '../../fum'), // Path to actual FUM project
   } = options;
 
   console.log('🚀 Starting test environment...');
-
-  // Sync bytecode if requested
-  if (syncBytecode) {
-    console.log('📦 Syncing bytecode from FUM project...');
-    await syncBytecodeFromFUM(fumProjectPath);
-  }
 
   // Start Ganache
   console.log('🔧 Starting Ganache with Arbitrum fork...');

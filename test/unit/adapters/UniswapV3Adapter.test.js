@@ -21,7 +21,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       // Setup test environment with Ganache fork and full deployment for contract testing
       env = await setupTestEnvironment({
         deployContracts: true, // Need deployed contracts for gas estimation tests
-        syncBytecode: true, // Sync bytecode from FUM project
       });
 
       // Create adapter instance using chainId from provider

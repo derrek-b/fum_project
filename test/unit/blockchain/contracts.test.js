@@ -19,7 +19,6 @@ describe('contracts.js - Unit Tests', () => {
       // Setup test environment with Ganache fork and full deployment for contract testing
       env = await setupTestEnvironment({
         deployContracts: true, // Need deployed contracts for testing
-        syncBytecode: true, // Sync latest bytecode from FUM project
       });
 
       console.log('Ganache test environment started successfully');

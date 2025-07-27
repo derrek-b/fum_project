@@ -234,31 +234,3 @@ export async function deployTestVault(vaultFactory, params) {
   return getContract(vaultAddress, abi, vaultFactory.runner);
 }
 
-/**
- * Sync bytecode from fum project if needed
- * @param {string} fumProjectPath - Path to fum project
- */
-export async function syncBytecodeFromFUM(fumProjectPath) {
-  const sourceBytecodeDir = path.join(fumProjectPath, 'bytecode');
-  
-  if (!fs.existsSync(sourceBytecodeDir)) {
-    console.warn(`FUM bytecode directory not found at ${sourceBytecodeDir}`);
-    return;
-  }
-  
-  // Create bytecode directory if it doesn't exist
-  if (!fs.existsSync(BYTECODE_DIR)) {
-    fs.mkdirSync(BYTECODE_DIR, { recursive: true });
-  }
-  
-  // Copy bytecode files (.bin files, not .json)
-  const files = fs.readdirSync(sourceBytecodeDir);
-  for (const file of files) {
-    if (file.endsWith('.bin')) {
-      const sourcePath = path.join(sourceBytecodeDir, file);
-      const destPath = path.join(BYTECODE_DIR, file);
-      fs.copyFileSync(sourcePath, destPath);
-      console.log(`Copied ${file} to bytecode directory`);
-    }
-  }
-}
