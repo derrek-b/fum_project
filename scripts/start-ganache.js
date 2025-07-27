@@ -58,7 +58,14 @@ function updateLibraryContracts(contractsData) {
 // Main function to start Ganache and deploy contracts
 async function main() {
   try {
-    console.log("Starting Ganache with Arbitrum mainnet fork...");
+    // Parse command line arguments
+    const args = process.argv.slice(2);
+    const portArgIndex = args.indexOf('--port');
+    const port = portArgIndex !== -1 && args.length > portArgIndex + 1
+      ? parseInt(args[portArgIndex + 1], 10)
+      : 8545; // Default port
+
+    console.log(`Starting Ganache with Arbitrum mainnet fork on port ${port}...`);
 
     const chainId = 1337; // Arbitrum One chain ID
     const server = ganache.server({
@@ -85,15 +92,15 @@ async function main() {
       }
     });
 
-    server.listen(8545, async (err) => {
+    server.listen(port, async (err) => {
       if (err) {
         console.error(`Error starting Ganache: ${err}`);
         return;
       }
 
       console.log("Ganache started with Local Arbitrum Fork");
-      console.log("WebSocket URL: ws://localhost:8545");
-      console.log("HTTP URL: http://localhost:8545");
+      console.log(`WebSocket URL: ws://localhost:${port}`);
+      console.log(`HTTP URL: http://localhost:${port}`);
 
       // Display test accounts for reference
       const provider = server.provider;
@@ -105,7 +112,7 @@ async function main() {
 
       // Deploy contracts
       console.log("\nDeploying contracts to Ganache...");
-      const ethProvider = new ethers.JsonRpcProvider("http://localhost:8545");
+      const ethProvider = new ethers.JsonRpcProvider(`http://localhost:${port}`);
       const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; // Matches Hardhat/Ganache account #0
       const wallet = new ethers.Wallet(privateKey, ethProvider);
       console.log(`Deploying with account: ${wallet.address}: ${ethers.formatEther(await ethProvider.getBalance(wallet.address))} ETH`);

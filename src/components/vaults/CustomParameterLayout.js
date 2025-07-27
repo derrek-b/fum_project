@@ -2,6 +2,7 @@
 import React from 'react';
 import { Card, Form, Row, Col, InputGroup, OverlayTrigger, Tooltip } from 'react-bootstrap';
 import { InfoCircle } from 'react-bootstrap-icons';
+import { shouldShowParameter } from 'fum_library/helpers/strategyHelpers';
 
 /**
  * Component to render custom parameter layouts
@@ -308,11 +309,14 @@ const CustomParameterLayout = ({
   const renderConditionalItems = (item, paramConfigs) => {
     if (!item.condition || !item.items) return null;
 
-    const { param, value } = item.condition;
-    const paramValue = params[param];
+    // Convert the condition format to match our library function
+    const conditionalParam = {
+      conditionalOn: item.condition.param,
+      conditionalValue: item.condition.value
+    };
 
-    // Only render if the condition is met
-    if (paramValue !== value) return null;
+    // Use centralized conditional logic
+    if (!shouldShowParameter(conditionalParam, params)) return null;
 
     return (
       <div className="conditional-items ps-3 border-start">

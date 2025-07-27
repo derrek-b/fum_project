@@ -23,7 +23,9 @@ import {
   validateStrategyParams,
   getDefaultParams,
   getStrategyTemplates,
-  getTemplateDefaults
+  getTemplateDefaults,
+  shouldShowParameter,
+  getStrategyTokens
 } from 'fum_library/helpers/strategyHelpers';
 import { getAvailablePlatforms } from 'fum_library/helpers/platformHelpers';
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
@@ -98,8 +100,12 @@ const StrategyDetailsSection = ({
       return getAllTokens();
     }
 
-    const strategyDetails = getStrategyDetails(strategyId);
-    return strategyDetails?.supportedTokens || getAllTokens();
+    try {
+      return getStrategyTokens(strategyId);
+    } catch (error) {
+      console.error('Failed to get strategy tokens:', error);
+      return getAllTokens();
+    }
   }, [strategyId]);
 
   // Get available platforms for the current chain
@@ -629,8 +635,8 @@ const StrategyDetailsSection = ({
           <Card.Body>
             <Form>
               {Object.entries(groupParameters).map(([paramId, config]) => {
-                // Skip conditional parameters that aren't applicable
-                if (config.conditionalOn && params[config.conditionalOn] !== config.conditionalValue) {
+                // Use centralized conditional logic
+                if (!shouldShowParameter(config, params)) {
                   return null;
                 }
 
