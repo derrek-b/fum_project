@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -36,12 +36,15 @@
     "./test/setup/test-contracts": "./test/setup/test-contracts.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "test/setup",
+    "bytecode"
   ],
   "scripts": {
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
+    "pack": "npm run build && npm pack",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -52,13 +55,13 @@
     "@anthropic-ai/claude-code": "^1.0.55",
     "@uniswap/sdk-core": "^7.7.2",
     "@uniswap/v3-sdk": "^3.25.2",
-    "claude": "^0.1.2",
-    "ethers": "^6.13.5"
+    "claude": "^0.1.2"
   },
   "peerDependencies": {
     "@openzeppelin/contracts": "^5.0.0",
     "@uniswap/v3-core": "^1.0.1",
-    "@uniswap/v3-periphery": "^1.4.3"
+    "@uniswap/v3-periphery": "^1.4.3",
+    "ethers": "^6.13.5"
   },
   "devDependencies": {
     "@openzeppelin/contracts": "^5.3.0",
@@ -66,6 +69,7 @@
     "@uniswap/v3-periphery": "^1.4.4",
     "chai": "^5.2.0",
     "dotenv": "^16.5.0",
+    "ethers": "^6.13.5",
     "ganache": "^7.9.2",
     "sinon": "^20.0.0",
     "vitest": "^3.1.3"

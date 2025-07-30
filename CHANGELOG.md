@@ -5,6 +5,46 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2025-01-30
+
+### BREAKING CHANGES - Dependency Management & Node.js 20+ Support
+
+#### **Ethers.js Moved to Peer Dependencies**
+- **Moved `ethers` from dependencies to peerDependencies**: Prevents dual package hazard
+  - Consumers must now install ethers themselves: `npm install ethers@^6.13.5`
+  - Ensures single ethers instance across library and consumer projects
+  - Fixes "Invalid provider. Must be an ethers provider instance" errors
+  - Still included in devDependencies for library development
+
+#### **Added JSON Import Assertions**
+- **Updated JSON imports for Node.js 20+ compatibility**:
+  - Added `with { type: 'json' }` to all JSON imports
+  - Affects: UniswapV3Adapter.js, test-env.js
+  - Required for Node.js 20+ with ESM modules
+  - Example: `import artifact from './file.json' with { type: 'json' };`
+
+#### **New Pack Script**
+- **Added `pack` script**: Builds and creates npm package in one command
+  - Usage: `npm run pack`
+  - Useful for local testing without npm publish
+
+#### **Benefits**
+- **Eliminates dual package issues**: Single ethers instance across all modules
+- **Node.js 20+ compatibility**: Proper JSON import syntax
+- **Better local testing**: Easy package creation for development
+
+#### **Migration Guide**
+```javascript
+// If using fum_library, ensure ethers is installed:
+npm install ethers@^6.13.5
+
+// For local development, use npm pack instead of npm link:
+cd fum_library
+npm run pack
+cd ../your-project
+npm install ../fum_library/fum_library-0.12.0.tgz
+```
+
 ## [0.11.1] - 2025-01-26
 
 ### Added - Abstract Method & Enhanced Validation
