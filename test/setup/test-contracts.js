@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getContract } from './ganache-config.js';
+import contractsData from '../../dist/artifacts/contracts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,8 +34,7 @@ async function loadContractBytecode(contractName) {
   const bytecodeHex = "0x" + fs.readFileSync(bytecodePath, 'utf8').trim();
   
   // Get ABI from artifacts
-  const contractsData = await import('../../src/artifacts/contracts.js');
-  const contractInfo = contractsData.default[mapContractName(contractName)];
+  const contractInfo = contractsData[mapContractName(contractName)];
   
   if (!contractInfo || !contractInfo.abi) {
     throw new Error(`ABI not found for ${contractName}`);

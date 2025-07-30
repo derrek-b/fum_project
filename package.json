@@ -30,7 +30,10 @@
     "./services": "./dist/services/index.js",
     "./services/coingecko": "./dist/services/coingecko.js",
     "./artifacts": "./dist/artifacts/index.js",
-    "./artifacts/contracts": "./dist/artifacts/contracts.js"
+    "./artifacts/contracts": "./dist/artifacts/contracts.js",
+    "./artifacts/contracts.js": "./dist/artifacts/contracts.js",
+    "./test/setup/ganache-config": "./test/setup/ganache-config.js",
+    "./test/setup/test-contracts": "./test/setup/test-contracts.js"
   },
   "files": [
     "dist"
