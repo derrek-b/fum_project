@@ -2805,14 +2805,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const result = await adapter.getPositions(testAddress, env.provider);
 
         expect(result).toBeDefined();
-        expect(result.positions).toBeInstanceOf(Array);
+        expect(typeof result.positions).toBe('object');
+        expect(Array.isArray(result.positions)).toBe(false);
         expect(result.poolData).toBeTypeOf('object');
       });
 
       it('should return correct position count', async () => {
         const result = await adapter.getPositions(testAddress, env.provider);
 
-        expect(result.positions).toHaveLength(1);
+        expect(Object.keys(result.positions)).toHaveLength(1);
       });
 
       it('should return position with correct structure', async () => {
@@ -2873,7 +2874,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Use a different signer that has no positions
         const result = await adapter.getPositions(env.signers[4].address, env.provider);
 
-        expect(result.positions).toEqual([]);
+        expect(result.positions).toEqual({});
         expect(result.poolData).toEqual({});
       });
 
@@ -2945,7 +2946,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const result = await adapter.getPositions(testAddress, env.provider);
 
           // Should have 2 positions
-          expect(result.positions).toHaveLength(2);
+          expect(Object.keys(result.positions)).toHaveLength(2);
 
           // Should have only 1 pool (same pool, cached)
           const poolAddresses = Object.keys(result.poolData);
@@ -3642,7 +3643,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(positions.positions).toBeDefined();
         expect(Object.keys(positions.positions).length).toBeGreaterThan(0);
 
-        const position = positions.positions[0];
+        const position = Object.values(positions.positions)[0];
         const poolAddress = position.pool;
         const poolData = positions.poolData[poolAddress];
 
@@ -3666,7 +3667,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get initial position and pool data
         const vaultAddress = await env.testVault.getAddress();
         const initialPositions = await adapter.getPositions(vaultAddress, env.provider);
-        const position = initialPositions.positions[0];
+        const position = Object.values(initialPositions.positions)[0];
         const poolAddress = position.pool;
         const initialPoolData = initialPositions.poolData[poolAddress];
 
@@ -3831,7 +3832,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get position data
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        const position = positions.positions[0];
+        const position = Object.values(positions.positions)[0];
         const poolData = positions.poolData[position.pool];
 
         // Create a modified position with some pre-existing tokensOwed
@@ -3868,7 +3869,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       beforeEach(async () => {
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        validPosition = positions.positions[0];
+        validPosition = Object.values(positions.positions)[0];
         validPoolData = positions.poolData[validPosition.pool];
       });
 
@@ -4158,7 +4159,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       beforeEach(async () => {
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        validPosition = positions.positions[0];
+        validPosition = Object.values(positions.positions)[0];
         validPoolData = positions.poolData[validPosition.pool];
       });
 
@@ -4253,7 +4254,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getPositionsForVDS', () => {
     describe('Success Cases', () => {
-      it('should return normalized positions and enhanced pool data', async () => {
+      it('should return normalized positions and static pool data with correct values', async () => {
         // Create a vault with positions
         const vaultAddress = await env.testVault.getAddress();
         
@@ -4270,28 +4271,70 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         
         // Check position structure
         const positionIds = Object.keys(result.positions);
-        expect(positionIds.length).toBeGreaterThan(0);
+        expect(positionIds.length).toBe(1); // Test environment creates exactly 1 position
         
-        const firstPosition = result.positions[positionIds[0]];
-        expect(firstPosition).toHaveProperty('id');
-        expect(firstPosition).toHaveProperty('pool');
-        expect(firstPosition).toHaveProperty('tickLower');
-        expect(firstPosition).toHaveProperty('tickUpper');
-        expect(firstPosition).toHaveProperty('liquidity');
-        expect(firstPosition).toHaveProperty('lastUpdated');
-        expect(typeof firstPosition.lastUpdated).toBe('number');
+        const positionId = positionIds[0];
+        const position = result.positions[positionId];
+        
+        // Verify we got the exact position ID that was created in test setup
+        expect(positionId).toBe(env.testPosition.tokenId.toString());
+        expect(positionId).toBe(env.positionTokenId.toString());
+        
+        // Verify position structure
+        expect(position).toHaveProperty('id');
+        expect(position).toHaveProperty('pool');
+        expect(position).toHaveProperty('tickLower');
+        expect(position).toHaveProperty('tickUpper');
+        expect(position).toHaveProperty('liquidity');
+        expect(position).toHaveProperty('lastUpdated');
+        expect(typeof position.lastUpdated).toBe('number');
         
         // Verify only expected fields are present (no extra fields)
         const expectedFields = ['id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated'];
-        expect(Object.keys(firstPosition).sort()).toEqual(expectedFields.sort());
+        expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
         
-        // Check pool data has lastUpdated
+        // Verify position data values match test environment setup
+        expect(position.id).toBe(positionId); // ID should match the key
+        expect(position.id).toBe(env.testPosition.tokenId.toString()); // Should match test position ID
+        expect(position.pool).toBe(env.poolData.poolAddress); // Pool address from test env
+        expect(position.tickLower).toBe(env.testPosition.tickLower); // Exact tick values from setup
+        expect(position.tickUpper).toBe(env.testPosition.tickUpper); // Exact tick values from setup
+        expect(position.liquidity).toBe(env.testPosition.liquidity); // Exact liquidity from mint
+        
+        // Check pool data structure and values
         const poolAddresses = Object.keys(result.poolData);
-        if (poolAddresses.length > 0) {
-          const firstPool = result.poolData[poolAddresses[0]];
-          expect(firstPool).toHaveProperty('lastUpdated');
-          expect(typeof firstPool.lastUpdated).toBe('number');
-        }
+        expect(poolAddresses.length).toBe(1); // Should have data for 1 pool
+        expect(poolAddresses[0]).toBe(env.poolData.poolAddress); // Should match test pool
+        
+        const poolData = result.poolData[poolAddresses[0]];
+        
+        // Verify pool metadata structure
+        expect(poolData).toHaveProperty('poolAddress');
+        expect(poolData).toHaveProperty('token0Symbol');
+        expect(poolData).toHaveProperty('token1Symbol');
+        expect(poolData).toHaveProperty('fee');
+        expect(poolData).toHaveProperty('platform');
+        
+        // Verify pool metadata values match test environment
+        expect(poolData.poolAddress).toBe(env.poolData.poolAddress); // Exact pool address
+        expect(poolData.fee).toBe(env.testPosition.fee); // Exact fee tier from setup (500)
+        expect(poolData.platform).toBe('uniswapV3');
+        
+        // Verify token symbols match the test position's tokens
+        // Test environment uses WETH and USDC, order depends on addresses
+        const tokenSymbols = [poolData.token0Symbol, poolData.token1Symbol].sort();
+        expect(tokenSymbols).toEqual(['USDC', 'WETH']);
+        
+        // Verify the token order matches the test position setup
+        // env.testPosition.token0 and token1 are the actual addresses in pool order
+        const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
+        const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
+        expect(poolData.token0Symbol).toBe(expectedToken0Symbol);
+        expect(poolData.token1Symbol).toBe(expectedToken1Symbol);
+        
+        // Verify only expected fields in poolData (no time-sensitive data)
+        const expectedPoolFields = ['poolAddress', 'token0Symbol', 'token1Symbol', 'fee', 'platform'];
+        expect(Object.keys(poolData).sort()).toEqual(expectedPoolFields.sort());
       });
 
       it('should handle empty positions gracefully', async () => {
@@ -4358,7 +4401,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(positions.positions).toBeDefined();
         expect(Object.keys(positions.positions).length).toBeGreaterThan(0);
 
-        const position = positions.positions[0];
+        const position = Object.values(positions.positions)[0];
         const poolAddress = position.pool;
         const poolData = positions.poolData[poolAddress];
 
@@ -4410,7 +4453,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get valid pool data from environment for realistic test
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        const poolData = positions.poolData[positions.positions[0].pool];
+        const poolData = positions.poolData[Object.values(positions.positions)[0].pool];
 
         // Create mock position with zero liquidity
         const zeroLiquidityPosition = {
@@ -4442,7 +4485,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get pool data
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        const poolData = positions.poolData[positions.positions[0].pool];
+        const poolData = positions.poolData[Object.values(positions.positions)[0].pool];
 
         // Create position with ticks below current tick
         // Fee tier 500 (0.05%) has tick spacing of 10
@@ -4484,7 +4527,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Get pool data
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        const poolData = positions.poolData[positions.positions[0].pool];
+        const poolData = positions.poolData[Object.values(positions.positions)[0].pool];
 
         // Create position with ticks above current tick
         // Fee tier 500 (0.05%) has tick spacing of 10
@@ -4530,7 +4573,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       beforeEach(async () => {
         const vaultAddress = await env.testVault.getAddress();
         const positions = await adapter.getPositions(vaultAddress, env.provider);
-        validPosition = positions.positions[0];
+        validPosition = Object.values(positions.positions)[0];
         validPoolData = positions.poolData[validPosition.pool];
         validToken0Data = {
           address: validPoolData.token0.address,

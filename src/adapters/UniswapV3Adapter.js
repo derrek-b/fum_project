@@ -959,20 +959,24 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         });
       }
 
-      // Add lastUpdated timestamp to each pool in poolData
-      const enhancedPoolData = {};
+      // Extract only essential metadata from poolData (no time-sensitive data)
+      const metadataPoolData = {};
       if (result.poolData) {
         for (const [poolAddress, poolInfo] of Object.entries(result.poolData)) {
-          enhancedPoolData[poolAddress] = {
-            ...poolInfo,
-            lastUpdated: Date.now()
+          metadataPoolData[poolAddress] = {
+            // Only stable metadata - no time-sensitive data
+            poolAddress: poolAddress,
+            token0Symbol: poolInfo.token0?.symbol,
+            token1Symbol: poolInfo.token1?.symbol,
+            fee: poolInfo.fee,
+            platform: 'uniswapV3'
           };
         }
       }
 
       return {
         positions: normalizedPositions,
-        poolData: enhancedPoolData
+        poolData: metadataPoolData
       };
 
     } catch (error) {

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed - Data Structure Standardization
 
+#### **Removed lastUpdated from Pool Metadata**
+- **Removed unnecessary timestamp**: Pool metadata no longer includes `lastUpdated` field
+  - Pool data now only contains stable metadata: `token0Symbol`, `token1Symbol`, `fee`, `platform`
+  - Since no time-sensitive data is cached, timestamps are not needed
+  - Simplifies data structure and reduces memory footprint
+
+#### **Updated Test Suite for Object-Based Position Data**
+- **Fixed all getPositions tests**: Updated test expectations to match object-based position format
+  - Changed array type checks to object type checks
+  - Updated array access patterns (`positions[0]`) to object access (`Object.values(positions)[0]`)
+  - Modified length checks to use `Object.keys().length` instead of array `.length`
+  - Updated empty case expectations from `[]` to `{}`
+- **Enhanced getPositionsForVDS test validation**: Added comprehensive data validation with actual test environment values
+  - Validates exact position ID, tick values, liquidity, and pool address from test setup
+  - Confirms token symbols match WETH/USDC in correct order
+  - Verifies pool metadata structure contains only expected fields
+
+### Changed - Data Structure Standardization
+
 #### **getPositions Method Standardization**
 - **Updated `getPositions()` return format**: Now returns positions as ID-keyed objects instead of arrays
   - **Before**: `{ positions: [array], poolData: {} }`
