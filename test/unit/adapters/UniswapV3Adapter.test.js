@@ -2817,7 +2817,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should return position with correct structure', async () => {
         const result = await adapter.getPositions(testAddress, env.provider);
-        const position = result.positions[0];
+        const position = result.positions[Object.keys(result.positions)[0]];
 
         // Test position structure matches expected
         expect(position.id).toBe(expectedPosition.id);
@@ -3640,7 +3640,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const positions = await adapter.getPositions(vaultAddress, env.provider);
 
         expect(positions.positions).toBeDefined();
-        expect(positions.positions.length).toBeGreaterThan(0);
+        expect(Object.keys(positions.positions).length).toBeGreaterThan(0);
 
         const position = positions.positions[0];
         const poolAddress = position.pool;
@@ -4356,7 +4356,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const positions = await adapter.getPositions(vaultAddress, env.provider);
 
         expect(positions.positions).toBeDefined();
-        expect(positions.positions.length).toBeGreaterThan(0);
+        expect(Object.keys(positions.positions).length).toBeGreaterThan(0);
 
         const position = positions.positions[0];
         const poolAddress = position.pool;

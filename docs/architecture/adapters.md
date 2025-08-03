@@ -363,7 +363,8 @@ describe('SushiswapAdapter', () => {
 ```javascript
 it('should fetch real positions from testnet', async () => {
   const adapter = new SushiswapAdapter(testConfig, testProvider);
-  const positions = await adapter.getPositions(testAddress, testChainId);
+  const positions = await adapter.getPositions(testAddress, testProvider);
+  expect(typeof positions.positions).toBe('object'); // ID-keyed object
   
   expect(positions).toHaveProperty('positions');
   expect(positions).toHaveProperty('poolData');

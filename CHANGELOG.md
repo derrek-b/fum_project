@@ -5,6 +5,33 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2025-08-03
+
+### Changed - Data Structure Standardization
+
+#### **getPositions Method Standardization**
+- **Updated `getPositions()` return format**: Now returns positions as ID-keyed objects instead of arrays
+  - **Before**: `{ positions: [array], poolData: {} }`
+  - **After**: `{ positions: {id1: position1, id2: position2}, poolData: {} }`
+  - Standardizes data format across entire codebase for consistent object-based access patterns
+
+#### **Simplified getPositionsForVDS Implementation**
+- **Updated iteration logic**: Now iterates over object values instead of array elements
+  - Changed from `result.positions.forEach()` to `Object.values(result.positions).forEach()`
+  - **Maintained data paring**: Still reduces 13 position fields down to 6 essential VDS fields
+  - **Performance improvement**: Direct object key access instead of array iteration
+
+#### **Test and Documentation Updates**
+- **Updated test assertions**: All tests now expect object format instead of array format
+- **Updated README examples**: Shows object-based position access patterns
+- **Maintained backward compatibility**: Internal change only, no external API impact
+
+#### **Benefits**
+- **Consistent data structures**: All position data now uses standardized ID-keyed object format
+- **Better performance**: Direct position access by ID instead of array searching
+- **Simplified codebase**: Single data format standard eliminates format conversion complexity
+- **Future-proof**: Sets foundation for consistent object-based data patterns across all adapters
+
 ## [0.12.1] - 2025-08-03
 
 ### Added - Vault Data Service Integration

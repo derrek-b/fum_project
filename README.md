@@ -64,8 +64,9 @@ const adapter = AdapterFactory.getAdapter('uniswap_v3', provider);
 // Get all adapters for a chain
 const chainAdapters = AdapterFactory.getAdaptersForChain(chainId, provider);
 
-// Get positions for a user/vault
-const positions = await adapter.getPositions(address, chainId);
+// Get positions for a user/vault (returns object keyed by position ID)
+const positions = await adapter.getPositions(address, provider);
+console.log(Object.keys(positions.positions)); // position IDs
 ```
 
 ### Helpers

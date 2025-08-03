@@ -861,10 +861,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const tokenIds = await this._fetchUserPositionIds(address, positionManager);
 
       if (tokenIds.length === 0) {
-        return { positions: [], poolData: {} };
+        return { positions: {}, poolData: {} };
       }
 
-      const positions = [];
+      const positions = {};
       const poolDataMap = {};
       const processingErrors = [];
 
@@ -896,7 +896,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
           // Assemble position data
           const position = this._assemblePositionData(tokenId, positionData, cachedPoolData);
-          positions.push(position);
+          positions[position.id] = position;
 
         } catch (error) {
           processingErrors.push(`Position ${tokenId}: ${error.message}`);
@@ -944,10 +944,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Call the existing getPositions method
       const result = await this.getPositions(address, provider);
       
-      // Normalize positions to VDS format - convert array to object keyed by ID
+      // Normalize positions to VDS format - pare down to essential fields only
       const normalizedPositions = {};
-      if (result.positions && result.positions.length > 0) {
-        result.positions.forEach(position => {
+      if (result.positions && Object.keys(result.positions).length > 0) {
+        Object.values(result.positions).forEach(position => {
           normalizedPositions[position.id] = {
             id: position.id,
             pool: position.pool,
