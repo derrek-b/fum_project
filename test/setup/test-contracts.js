@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BYTECODE_DIR = path.join(__dirname, '../../bytecode');
 const BLOCKCHAIN_CONTRACTS_FILE = path.join(__dirname, '../../src/blockchain/contracts.js');
 const ARTIFACTS_CONTRACTS_FILE = path.join(__dirname, '../../src/artifacts/contracts.js');
+const DIST_ARTIFACTS_CONTRACTS_FILE = path.join(__dirname, '../../dist/artifacts/contracts.js');
 
 /**
  * Load contract bytecode from file
@@ -118,21 +119,23 @@ export async function deployFUMContracts(deployer, config = {}) {
  * @param {Object} addresses - Deployed contract addresses
  */
 async function updateContractsFile(addresses) {
-  // Update artifacts/contracts.js (main contracts data file)
-  await updateArtifactsContracts(addresses);
+  // Update both src and dist versions using the same logic
+  await updateArtifactsContracts(addresses, ARTIFACTS_CONTRACTS_FILE);
+  await updateArtifactsContracts(addresses, DIST_ARTIFACTS_CONTRACTS_FILE);
 }
 
 /**
- * Update the artifacts/contracts.js file with deployed addresses
+ * Update a contracts.js file with deployed addresses
  * @param {Object} addresses - Deployed contract addresses
+ * @param {string} filePath - Path to the contracts file to update
  */
-async function updateArtifactsContracts(addresses) {
-  if (!fs.existsSync(ARTIFACTS_CONTRACTS_FILE)) {
-    console.warn(`Artifacts contracts file not found at ${ARTIFACTS_CONTRACTS_FILE}`);
+async function updateArtifactsContracts(addresses, filePath) {
+  if (!fs.existsSync(filePath)) {
+    console.warn(`Contracts file not found at ${filePath}`);
     return;
   }
   
-  let content = fs.readFileSync(ARTIFACTS_CONTRACTS_FILE, 'utf8');
+  let content = fs.readFileSync(filePath, 'utf8');
   
   // Update each contract's 1337 address
   Object.entries(addresses).forEach(([contractName, address]) => {
@@ -162,8 +165,8 @@ async function updateArtifactsContracts(addresses) {
     });
   });
   
-  fs.writeFileSync(ARTIFACTS_CONTRACTS_FILE, content);
-  console.log('Updated artifacts/contracts.js with test addresses:');
+  fs.writeFileSync(filePath, content);
+  console.log(`Updated ${filePath} with test addresses:`);
   Object.entries(addresses).forEach(([name, address]) => {
     console.log(`  ${name}: ${address}`);
   });

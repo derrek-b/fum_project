@@ -4251,6 +4251,103 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getPositionsForVDS', () => {
+    describe('Success Cases', () => {
+      it('should return normalized positions and enhanced pool data', async () => {
+        // Create a vault with positions
+        const vaultAddress = await env.testVault.getAddress();
+        
+        // Call getPositionsForVDS
+        const result = await adapter.getPositionsForVDS(vaultAddress, env.provider);
+        
+        // Verify structure
+        expect(result).toHaveProperty('positions');
+        expect(result).toHaveProperty('poolData');
+        
+        // Verify positions are normalized to object format (not array)
+        expect(typeof result.positions).toBe('object');
+        expect(Array.isArray(result.positions)).toBe(false);
+        
+        // Check position structure
+        const positionIds = Object.keys(result.positions);
+        expect(positionIds.length).toBeGreaterThan(0);
+        
+        const firstPosition = result.positions[positionIds[0]];
+        expect(firstPosition).toHaveProperty('id');
+        expect(firstPosition).toHaveProperty('pool');
+        expect(firstPosition).toHaveProperty('tickLower');
+        expect(firstPosition).toHaveProperty('tickUpper');
+        expect(firstPosition).toHaveProperty('liquidity');
+        expect(firstPosition).toHaveProperty('lastUpdated');
+        expect(typeof firstPosition.lastUpdated).toBe('number');
+        
+        // Verify only expected fields are present (no extra fields)
+        const expectedFields = ['id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated'];
+        expect(Object.keys(firstPosition).sort()).toEqual(expectedFields.sort());
+        
+        // Check pool data has lastUpdated
+        const poolAddresses = Object.keys(result.poolData);
+        if (poolAddresses.length > 0) {
+          const firstPool = result.poolData[poolAddresses[0]];
+          expect(firstPool).toHaveProperty('lastUpdated');
+          expect(typeof firstPool.lastUpdated).toBe('number');
+        }
+      });
+
+      it('should handle empty positions gracefully', async () => {
+        // Use a random Ganache account address that has no positions
+        const emptyAddress = env.accounts[4].address; // Use account 4 which won't have positions
+        
+        const result = await adapter.getPositionsForVDS(emptyAddress, env.provider);
+        
+        expect(result.positions).toEqual({});
+        expect(result.poolData).toEqual({});
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing address', async () => {
+        await expect(
+          adapter.getPositionsForVDS(null, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+        
+        await expect(
+          adapter.getPositionsForVDS(undefined, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+        
+        await expect(
+          adapter.getPositionsForVDS('', env.provider)
+        ).rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw error for invalid address', async () => {
+        await expect(
+          adapter.getPositionsForVDS('invalid-address', env.provider)
+        ).rejects.toThrow('Invalid address: invalid-address');
+        
+        await expect(
+          adapter.getPositionsForVDS('0x123', env.provider)
+        ).rejects.toThrow('Invalid address: 0x123');
+      });
+
+      it('should throw error for missing provider', async () => {
+        const validAddress = await env.testVault.getAddress();
+        
+        await expect(
+          adapter.getPositionsForVDS(validAddress, null)
+        ).rejects.toThrow('Valid provider parameter is required');
+        
+        await expect(
+          adapter.getPositionsForVDS(validAddress, undefined)
+        ).rejects.toThrow('Valid provider parameter is required');
+        
+        await expect(
+          adapter.getPositionsForVDS(validAddress, {})
+        ).rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+  });
+
   describe('calculateTokenAmounts', () => {
     describe('Success Cases', () => {
       it('should calculate token amounts for a valid position', async () => {

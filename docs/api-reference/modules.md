@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-07-30T02:04:10.134Z
+Generated on: 2025-08-03T15:48:51.460Z
 
 ## Table of Contents
 
@@ -352,6 +352,7 @@ FUM Library - Main Entry Point
 **Exports:**
 - re-exports from `./helpers/index.js`
 - re-exports from `./adapters/index.js`
+- re-exports from `./blockchain/index.js`
 
 ---
 

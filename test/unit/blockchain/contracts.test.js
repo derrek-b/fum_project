@@ -7,8 +7,18 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
 import { setupTestEnvironment } from '../../test-env.js';
-import { getContract, getVaultFactory, getVaultFactoryAddress, createVault, getVaultInfo, getVaultContract, getUserVaults, executeVaultTransactions, getContractInfoByAddress } from '../../../src/blockchain/contracts.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
+import { 
+  getContract,
+  getVaultFactory,
+  getVaultFactoryAddress,
+  createVault,
+  getVaultContract,
+  getUserVaults,
+  getVaultInfo,
+  getContractInfoByAddress,
+  executeVaultTransactions
+} from 'fum_library';
 
 describe('contracts.js - Unit Tests', () => {
   let env;

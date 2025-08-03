@@ -919,6 +919,68 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get positions formatted for VaultDataService
+   * @param {string} address - Vault address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{positions: Object, poolData: Object}>} Normalized position data and pool data
+   */
+  async getPositionsForVDS(address, provider) {
+    // Validate address
+    if (!address) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.getAddress(address);
+    } catch (error) {
+      throw new Error(`Invalid address: ${address}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      // Call the existing getPositions method
+      const result = await this.getPositions(address, provider);
+      
+      // Normalize positions to VDS format - convert array to object keyed by ID
+      const normalizedPositions = {};
+      if (result.positions && result.positions.length > 0) {
+        result.positions.forEach(position => {
+          normalizedPositions[position.id] = {
+            id: position.id,
+            pool: position.pool,
+            tickLower: position.tickLower,
+            tickUpper: position.tickUpper,
+            liquidity: position.liquidity,
+            lastUpdated: Date.now()
+          };
+        });
+      }
+
+      // Add lastUpdated timestamp to each pool in poolData
+      const enhancedPoolData = {};
+      if (result.poolData) {
+        for (const [poolAddress, poolInfo] of Object.entries(result.poolData)) {
+          enhancedPoolData[poolAddress] = {
+            ...poolInfo,
+            lastUpdated: Date.now()
+          };
+        }
+      }
+
+      return {
+        positions: normalizedPositions,
+        poolData: enhancedPoolData
+      };
+
+    } catch (error) {
+      throw new Error(`Failed to fetch positions for VDS: ${error.message}`);
+    }
+  }
+
+  /**
    * Check if a position is in range (active)
    * @param {number} currentTick - Current tick of the pool
    * @param {number} tickLower - Lower tick of the position

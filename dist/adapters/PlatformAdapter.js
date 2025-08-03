@@ -92,6 +92,16 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get positions formatted for VaultDataService
+   * @param {string} address - Vault address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{positions: Object, poolData: Object}>} Normalized position data and pool data
+   */
+  async getPositionsForVDS(address, provider) {
+    throw new Error("getPositionsForVDS must be implemented by subclasses");
+  }
+
+  /**
    * Calculate uncollected fees for a position
    * @param {Object} position - Position object with liquidity and fee growth data
    * @param {Object} poolData - Current pool state including fee growth globals and tick data

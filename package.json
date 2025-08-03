@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -33,18 +33,20 @@
     "./artifacts/contracts": "./dist/artifacts/contracts.js",
     "./artifacts/contracts.js": "./dist/artifacts/contracts.js",
     "./test/setup/ganache-config": "./test/setup/ganache-config.js",
-    "./test/setup/test-contracts": "./test/setup/test-contracts.js"
+    "./test/setup/test-contracts": "./test/setup/test-contracts.js",
+    "./test/test-env": "./test/test-env.js"
   },
   "files": [
     "dist",
     "test/setup",
+    "test/test-env.js",
     "bytecode"
   ],
   "scripts": {
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
-    "pack": "npm run build && npm pack",
+    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.12.1.tgz",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

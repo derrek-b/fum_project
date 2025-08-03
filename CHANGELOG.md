@@ -5,6 +5,36 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2025-08-03
+
+### Added - Vault Data Service Integration
+
+#### **New getPositionsForVDS Method**
+- **Added `getPositionsForVDS()` method to PlatformAdapter base class**: Abstract method for VaultDataService integration
+  - Method signature: `async getPositionsForVDS(address, provider)`
+  - Returns normalized position data specifically formatted for VaultDataService
+  - Enables event-driven poolData caching architecture
+  - Separates VDS-specific data handling from general position fetching
+
+#### **UniswapV3Adapter Implementation**
+- **Implemented `getPositionsForVDS()` in UniswapV3Adapter**: Complete integration with existing getPositions logic
+  - Normalizes position data to VDS format with consistent structure
+  - Adds `lastUpdated` timestamps to both positions and poolData
+  - Returns `{ positions: {}, poolData: {} }` object for event emission
+  - Leverages existing getPositions method for data consistency
+
+#### **Event-Driven Architecture Support**
+- **Enhanced poolData structure**: All poolData now includes lastUpdated timestamps
+  - Supports AutomationService caching via PoolDataFetched events
+  - Eliminates need for cross-service poolData parameter passing
+  - Reduces function complexity by removing 4+ layer parameter bubbling
+
+#### **Benefits**
+- **Cleaner separation of concerns**: VDS gets properly formatted data without adapter modifications
+- **Event-driven caching**: poolData flows to AutomationService through events, not parameters
+- **Consistent timestamps**: All cached data includes when it was last updated
+- **Future-proof architecture**: Other adapters can implement same pattern for VDS integration
+
 ## [0.12.0] - 2025-01-30
 
 ### BREAKING CHANGES - Dependency Management & Node.js 20+ Support
