@@ -1,5 +1,43 @@
 # F.U.M. Project Changelog
 
+## v0.6.0 - 2025-01-27
+
+### Service Initialization Workflow Refactor & Testing Complete
+
+#### **Adapter Cache Optimization**
+- **BREAKING**: VaultDataService now uses shared adapter cache from AutomationService instead of creating new adapters
+- Added `setAdapters()` method to VaultDataService for receiving adapter cache reference
+- Eliminated redundant adapter creation in `fetchPositions()` - now uses cached adapter instances
+- AutomationService passes adapter cache to VDS after initialization for efficiency
+
+#### **Contract Method Fixes**
+- **BREAKING**: Fixed `getTotalPositions()` to use actual contract method `getPositionIds()`
+- **BREAKING**: Fixed `getStrategyParameters()` to use actual contract method `getAllParameters()`
+- Removed position ID validation that prevented managing vaults with 0 positions
+- Updated `fetchPositions()` to handle empty position arrays correctly (returns `{}`)
+
+#### **Token Balance Structure Simplification**  
+- **BREAKING**: Simplified vault.tokens structure from `{USDC: {balance: '...', usdValue: '...'}}` to `{USDC: '...'}`
+- Fixed temporal dead zone error in `fetchTokenBalances()` by using `.reduce()` instead of incorrect `.forEach()` usage
+- Updated cache-structures.md documentation to reflect actual simplified token structure
+
+#### **Pool Data Event Structure**
+- **BREAKING**: PoolDataFetched event now emits nested structure with `{poolData: {...}, source: '...', vaultAddress: '...'}`
+- Pool metadata includes `poolAddress` property within each pool data object
+- Maintains backward compatibility for pool data caching while improving event structure
+
+#### **Testing Enhancements**
+- Added Test 11a to verify adapter cache sharing between AutomationService and VaultDataService
+- Fixed all tests to handle object-based position data instead of arrays
+- Updated comprehensive vault structure validation in Test 22
+- Improved test debugging with proper event data structure logging
+
+#### **Documentation Updates**
+- Updated cache-structures.md to accurately reflect adapter cache (actual class instances vs data values)
+- Added VaultDataService adapter reference documentation
+- Corrected token balance structure examples in documentation
+- Updated access pattern examples for simplified token structure
+
 ## v0.5.0 - 2025-01-26
 
 ### WIP - Major Cache Architecture Refactor
