@@ -72,11 +72,28 @@ describe('The Graph Service - Real API Tests', () => {
         expect(result7Days).toBeGreaterThan(100000);
       });
 
+      it('should handle different pool addresses on same chain', async () => {
+        // Test different pool on Ethereum mainnet
+        const wbtcEthPool = '0xcbcdf9626bc03e24f779434178a73a0b4bad62ed'; // WBTC/WETH pool
+        
+        const result = await getPoolTVLAverage(
+          wbtcEthPool,
+          validParams.chainId,
+          validParams.platformId,
+          3, // Shorter period for faster test
+          validParams.apiKey
+        );
+
+        expect(typeof result).toBe('number');
+        expect(result).toBeGreaterThan(0);
+        expect(Number.isFinite(result)).toBe(true);
+      });
+
     });
 
     describe('Error Cases', () => {
       // poolAddress parameter validation
-      it('should throw error for null poolAddress parameter', async () => {
+      it('should throw error for invalid poolAddress values', async () => {
         await expect(getPoolTVLAverage(
           null,
           validParams.chainId,
@@ -84,9 +101,7 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('poolAddress must be a non-empty string');
-      });
 
-      it('should throw error for undefined poolAddress parameter', async () => {
         await expect(getPoolTVLAverage(
           undefined,
           validParams.chainId,
@@ -94,9 +109,7 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('poolAddress must be a non-empty string');
-      });
 
-      it('should throw error for empty poolAddress', async () => {
         await expect(getPoolTVLAverage(
           '',
           validParams.chainId,
@@ -104,11 +117,25 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('poolAddress must be a non-empty string');
-      });
 
-      it('should throw error for non-string poolAddress', async () => {
         await expect(getPoolTVLAverage(
           123,
+          validParams.chainId,
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('poolAddress must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          {},
+          validParams.chainId,
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('poolAddress must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          [],
           validParams.chainId,
           validParams.platformId,
           validParams.days,
@@ -141,10 +168,50 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('chainId must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          null,
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('chainId must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          undefined,
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('chainId must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          'Claude is awesome',
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('chainId must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          {},
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('chainId must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          [],
+          validParams.platformId,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('chainId must be a positive integer');
       });
 
       // platformId parameter validation
-      it('should throw error for null platformId parameter', async () => {
+      it('should throw error for invalid platformId values', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
@@ -152,9 +219,7 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('platformId must be a non-empty string');
-      });
 
-      it('should throw error for undefined platformId parameter', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
@@ -162,13 +227,35 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('platformId must be a non-empty string');
-      });
 
-      it('should throw error for empty platformId', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
           '',
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('platformId must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          123,
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('platformId must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          {},
+          validParams.days,
+          validParams.apiKey
+        )).rejects.toThrow('platformId must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          [],
           validParams.days,
           validParams.apiKey
         )).rejects.toThrow('platformId must be a non-empty string');
@@ -199,10 +286,50 @@ describe('The Graph Service - Real API Tests', () => {
           1.5,
           validParams.apiKey
         )).rejects.toThrow('days must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          null,
+          validParams.apiKey
+        )).rejects.toThrow('days must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          undefined,
+          validParams.apiKey
+        )).rejects.toThrow('days must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          'Claude is awesome',
+          validParams.apiKey
+        )).rejects.toThrow('days must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          {},
+          validParams.apiKey
+        )).rejects.toThrow('days must be a positive integer');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          [],
+          validParams.apiKey
+        )).rejects.toThrow('days must be a positive integer');
       });
 
       // apiKey parameter validation
-      it('should throw error for null apiKey parameter', async () => {
+      it('should throw error for invalid apiKey values', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
@@ -210,9 +337,7 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           null
         )).rejects.toThrow('apiKey must be a non-empty string');
-      });
 
-      it('should throw error for undefined apiKey parameter', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
@@ -220,15 +345,37 @@ describe('The Graph Service - Real API Tests', () => {
           validParams.days,
           undefined
         )).rejects.toThrow('apiKey must be a non-empty string');
-      });
 
-      it('should throw error for empty apiKey', async () => {
         await expect(getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
           validParams.platformId,
           validParams.days,
           ''
+        )).rejects.toThrow('apiKey must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          validParams.days,
+          123
+        )).rejects.toThrow('apiKey must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          validParams.days,
+          {}
+        )).rejects.toThrow('apiKey must be a non-empty string');
+
+        await expect(getPoolTVLAverage(
+          validParams.poolAddress,
+          validParams.chainId,
+          validParams.platformId,
+          validParams.days,
+          []
         )).rejects.toThrow('apiKey must be a non-empty string');
       });
     });
@@ -255,38 +402,6 @@ describe('The Graph Service - Real API Tests', () => {
       });
     });
 
-    describe('Special Cases', () => {
-      it('should handle different pool addresses on same chain', async () => {
-        // Test different pool on Ethereum mainnet
-        const wbtcEthPool = '0xcbcdf9626bc03e24f779434178a73a0b4bad62ed'; // WBTC/WETH pool
-        
-        const result = await getPoolTVLAverage(
-          wbtcEthPool,
-          validParams.chainId,
-          validParams.platformId,
-          3, // Shorter period for faster test
-          validParams.apiKey
-        );
-
-        expect(typeof result).toBe('number');
-        expect(result).toBeGreaterThan(0);
-        expect(Number.isFinite(result)).toBe(true);
-      });
-
-      it('should handle minimum day period (1 day)', async () => {
-        const result = await getPoolTVLAverage(
-          validParams.poolAddress,
-          validParams.chainId,
-          validParams.platformId,
-          1,
-          validParams.apiKey
-        );
-
-        expect(typeof result).toBe('number');
-        expect(result).toBeGreaterThan(100000);
-        expect(Number.isFinite(result)).toBe(true);
-      });
-    });
 
     describe('Network and API Errors (Mocked)', () => {
       let originalFetch;
