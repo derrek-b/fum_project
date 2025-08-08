@@ -2181,7 +2181,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should fetch basic pool data with empty options', async () => {
         const testStartTime = Date.now();
-        
+
         // Use test environment pool address (WETH/USDC 500)
         const poolData = await adapter.getPoolData(env.poolData.poolAddress, {}, env.provider);
 
@@ -2207,7 +2207,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should fetch pool data with includeTicks option', async () => {
         const ticksToFetch = [env.testPosition.tickLower, env.testPosition.tickUpper];
-        
+
         const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
           includeTicks: ticksToFetch
         }, env.provider);
@@ -2253,7 +2253,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should fetch pool data with combined options', async () => {
         const ticksToFetch = [env.testPosition.tickLower];
-        
+
         const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
           includeTicks: ticksToFetch,
           includeTokens: true
@@ -2267,7 +2267,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(poolData).toHaveProperty('ticks');
         expect(poolData.ticks).toHaveProperty(ticksToFetch[0].toString());
 
-        // Should have token addresses  
+        // Should have token addresses
         expect(poolData).toHaveProperty('token0');
         expect(poolData).toHaveProperty('token1');
       });
@@ -2534,6 +2534,160 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.fetchTickData(nonExistentPool, validTickLower, validTickUpper, env.provider)
         ).rejects.toThrow('Failed to fetch tick data');
       });
+    });
+  });
+
+  describe('getCurrentTick', () => {
+    describe('Success Cases', () => {
+      it('should return current tick for valid pool', async () => {
+        const poolAddress = await adapter.getPoolAddress(
+          env.wethAddress,
+          env.usdcAddress,
+          500,
+          env.provider
+        );
+
+        const tick = await adapter.getCurrentTick(poolAddress, env.provider);
+
+        expect(tick).toBeDefined();
+        expect(typeof tick).toBe('number');
+        expect(Number.isInteger(tick)).toBe(true);
+        expect(tick).toBeGreaterThanOrEqual(-887272);
+        expect(tick).toBeLessThanOrEqual(887272);
+      });
+
+      it('should return same tick as getPoolData', async () => {
+        const poolAddress = await adapter.getPoolAddress(
+          env.wethAddress,
+          env.usdcAddress,
+          500,
+          env.provider
+        );
+
+        const tick = await adapter.getCurrentTick(poolAddress, env.provider);
+        const poolData = await adapter.getPoolData(poolAddress, {}, env.provider);
+
+        expect(tick).toBe(poolData.tick);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing pool address', async () => {
+        await expect(
+          adapter.getCurrentTick(null, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+
+        await expect(
+          adapter.getCurrentTick(undefined, env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+
+        await expect(
+          adapter.getCurrentTick('', env.provider)
+        ).rejects.toThrow('Pool address parameter is required');
+      });
+
+      it('should throw error for invalid pool address', async () => {
+        const invalidAddresses = [
+          'not-an-address',
+          '0x123',
+          '0xGGGG',
+          123
+        ];
+
+        for (const invalidAddress of invalidAddresses) {
+          await expect(
+            adapter.getCurrentTick(invalidAddress, env.provider)
+          ).rejects.toThrow(`Invalid pool address: ${invalidAddress}`);
+        }
+      });
+
+      it('should throw error for non-existent pool', async () => {
+        const fakePoolAddress = '0x0000000000000000000000000000000000000001';
+
+        await expect(
+          adapter.getCurrentTick(fakePoolAddress, env.provider)
+        ).rejects.toThrow(`Failed to get current tick for pool ${fakePoolAddress}`);
+      });
+
+      it('should throw error for invalid provider', async () => {
+        const poolAddress = await adapter.getPoolAddress(
+          env.wethAddress,
+          env.usdcAddress,
+          500,
+          env.provider
+        );
+
+        await expect(
+          adapter.getCurrentTick(poolAddress, null)
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+
+        await expect(
+          adapter.getCurrentTick(poolAddress, undefined)
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+
+        await expect(
+          adapter.getCurrentTick(poolAddress, {})
+        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+      });
+
+      it('should throw error for wrong chain provider', async () => {
+        const poolAddress = await adapter.getPoolAddress(
+          env.wethAddress,
+          env.usdcAddress,
+          500,
+          env.provider
+        );
+
+        // MockProvider should be imported at the top of the test file
+        class MockProvider extends ethers.AbstractProvider {
+          constructor(chainId, name) {
+            super();
+            this._network = { chainId: BigInt(chainId), name };
+          }
+
+          async getNetwork() {
+            return this._network;
+          }
+        }
+
+        const wrongChainProvider = new MockProvider(1, 'mainnet');
+
+        await expect(
+          adapter.getCurrentTick(poolAddress, wrongChainProvider)
+        ).rejects.toThrow('Provider chain 1 doesn\'t match adapter chain 1337');
+      });
+    });
+  });
+
+  describe('getPoolABI', () => {
+    it('should return pool ABI array', () => {
+      const abi = adapter.getPoolABI();
+
+      expect(Array.isArray(abi)).toBe(true);
+      expect(abi.length).toBeGreaterThan(0);
+    });
+
+    it('should include expected pool methods', () => {
+      const abi = adapter.getPoolABI();
+      const methodNames = abi
+        .filter(item => item.type === 'function')
+        .map(item => item.name);
+
+      // Check for essential Uniswap V3 pool methods
+      expect(methodNames).toContain('slot0');
+      expect(methodNames).toContain('liquidity');
+      expect(methodNames).toContain('ticks');
+      expect(methodNames).toContain('fee');
+      expect(methodNames).toContain('token0');
+      expect(methodNames).toContain('token1');
+      expect(methodNames).toContain('observations');
+    });
+
+    it('should return same ABI used internally', () => {
+      const abi = adapter.getPoolABI();
+
+      // Should be same reference as internal ABI
+      expect(abi).toBe(adapter.uniswapV3PoolABI);
     });
   });
 
@@ -4257,29 +4411,29 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should return normalized positions and static pool data with correct values', async () => {
         // Create a vault with positions
         const vaultAddress = await env.testVault.getAddress();
-        
+
         // Call getPositionsForVDS
         const result = await adapter.getPositionsForVDS(vaultAddress, env.provider);
-        
+
         // Verify structure
         expect(result).toHaveProperty('positions');
         expect(result).toHaveProperty('poolData');
-        
+
         // Verify positions are normalized to object format (not array)
         expect(typeof result.positions).toBe('object');
         expect(Array.isArray(result.positions)).toBe(false);
-        
+
         // Check position structure
         const positionIds = Object.keys(result.positions);
         expect(positionIds.length).toBe(1); // Test environment creates exactly 1 position
-        
+
         const positionId = positionIds[0];
         const position = result.positions[positionId];
-        
+
         // Verify we got the exact position ID that was created in test setup
         expect(positionId).toBe(env.testPosition.tokenId.toString());
         expect(positionId).toBe(env.positionTokenId.toString());
-        
+
         // Verify position structure
         expect(position).toHaveProperty('id');
         expect(position).toHaveProperty('pool');
@@ -4288,11 +4442,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(position).toHaveProperty('liquidity');
         expect(position).toHaveProperty('lastUpdated');
         expect(typeof position.lastUpdated).toBe('number');
-        
+
         // Verify only expected fields are present (no extra fields)
         const expectedFields = ['id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated'];
         expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
-        
+
         // Verify position data values match test environment setup
         expect(position.id).toBe(positionId); // ID should match the key
         expect(position.id).toBe(env.testPosition.tokenId.toString()); // Should match test position ID
@@ -4300,38 +4454,38 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(position.tickLower).toBe(env.testPosition.tickLower); // Exact tick values from setup
         expect(position.tickUpper).toBe(env.testPosition.tickUpper); // Exact tick values from setup
         expect(position.liquidity).toBe(env.testPosition.liquidity); // Exact liquidity from mint
-        
+
         // Check pool data structure and values
         const poolAddresses = Object.keys(result.poolData);
         expect(poolAddresses.length).toBe(1); // Should have data for 1 pool
         expect(poolAddresses[0]).toBe(env.poolData.poolAddress); // Should match test pool
-        
+
         const poolData = result.poolData[poolAddresses[0]];
-        
+
         // Verify pool metadata structure
         expect(poolData).toHaveProperty('poolAddress');
         expect(poolData).toHaveProperty('token0Symbol');
         expect(poolData).toHaveProperty('token1Symbol');
         expect(poolData).toHaveProperty('fee');
         expect(poolData).toHaveProperty('platform');
-        
+
         // Verify pool metadata values match test environment
         expect(poolData.poolAddress).toBe(env.poolData.poolAddress); // Exact pool address
         expect(poolData.fee).toBe(env.testPosition.fee); // Exact fee tier from setup (500)
         expect(poolData.platform).toBe('uniswapV3');
-        
+
         // Verify token symbols match the test position's tokens
         // Test environment uses WETH and USDC, order depends on addresses
         const tokenSymbols = [poolData.token0Symbol, poolData.token1Symbol].sort();
         expect(tokenSymbols).toEqual(['USDC', 'WETH']);
-        
+
         // Verify the token order matches the test position setup
         // env.testPosition.token0 and token1 are the actual addresses in pool order
         const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
         const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
         expect(poolData.token0Symbol).toBe(expectedToken0Symbol);
         expect(poolData.token1Symbol).toBe(expectedToken1Symbol);
-        
+
         // Verify only expected fields in poolData (no time-sensitive data)
         const expectedPoolFields = ['poolAddress', 'token0Symbol', 'token1Symbol', 'fee', 'platform'];
         expect(Object.keys(poolData).sort()).toEqual(expectedPoolFields.sort());
@@ -4340,9 +4494,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should handle empty positions gracefully', async () => {
         // Use a random Ganache account address that has no positions
         const emptyAddress = env.accounts[4].address; // Use account 4 which won't have positions
-        
+
         const result = await adapter.getPositionsForVDS(emptyAddress, env.provider);
-        
+
         expect(result.positions).toEqual({});
         expect(result.poolData).toEqual({});
       });
@@ -4353,11 +4507,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.getPositionsForVDS(null, env.provider)
         ).rejects.toThrow('Address parameter is required');
-        
+
         await expect(
           adapter.getPositionsForVDS(undefined, env.provider)
         ).rejects.toThrow('Address parameter is required');
-        
+
         await expect(
           adapter.getPositionsForVDS('', env.provider)
         ).rejects.toThrow('Address parameter is required');
@@ -4367,7 +4521,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.getPositionsForVDS('invalid-address', env.provider)
         ).rejects.toThrow('Invalid address: invalid-address');
-        
+
         await expect(
           adapter.getPositionsForVDS('0x123', env.provider)
         ).rejects.toThrow('Invalid address: 0x123');
@@ -4375,15 +4529,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should throw error for missing provider', async () => {
         const validAddress = await env.testVault.getAddress();
-        
+
         await expect(
           adapter.getPositionsForVDS(validAddress, null)
         ).rejects.toThrow('Valid provider parameter is required');
-        
+
         await expect(
           adapter.getPositionsForVDS(validAddress, undefined)
         ).rejects.toThrow('Valid provider parameter is required');
-        
+
         await expect(
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');

@@ -5,6 +5,37 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2025-08-08
+
+### Added - Multi-Schema The Graph Support
+
+#### **Enhanced The Graph Service for Multiple Subgraph Schemas**
+- **Added queryType support**: Platform configurations now include `queryType` field to distinguish between different subgraph schemas
+  - `uniswap`: Uses official Uniswap V3 schema with `poolDayDatas` entity and `tvlUSD` field
+  - `messari`: Uses Messari standardized schema with `liquidityPoolDailySnapshots` entity and `totalValueLockedUSD` field
+- **Updated platform configuration**: Added structured subgraph configuration with ID and query type
+  - Ethereum mainnet (chain 1): Official Uniswap V3 subgraph (`5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV`)
+  - Arbitrum/Ganache (chains 42161/1337): Messari subgraph (`FQ6JYszEKApsBpAmiHesRsd9Ygc6mzmpNRANeVQFYoVX`)
+
+#### **Fixed The Graph Gateway URL**
+- **Updated endpoint URL**: Changed from deprecated `gateway.thegraph.com` to `gateway-arbitrum.network.thegraph.com`
+  - Fixes connection issues after The Graph's migration to Arbitrum in 2024
+  - Maintains compatibility with existing API keys
+
+#### **Improved Test Coverage**
+- **Comprehensive test restructure**: Reformatted theGraph tests to match library standards
+  - Added thorough parameter validation tests for all function parameters
+  - Enhanced success case testing with schema-specific test descriptions
+  - Added special cases section for edge case testing
+  - Consolidated mocked tests into organized error scenarios
+- **Multi-schema validation**: Added real API tests for both Uniswap V3 and Messari subgraphs
+  - Ethereum mainnet pool testing with Uniswap V3 schema
+  - Arbitrum pool testing with Messari schema
+
+### Changed
+- **theGraph service refactor**: `getPoolTVLAverage` function now dynamically selects query based on platform configuration
+- **Platform configuration structure**: Subgraph entries changed from simple string IDs to objects with `id` and `queryType` properties
+
 ## [0.12.2] - 2025-08-03
 
 ### Changed - Data Structure Standardization

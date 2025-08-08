@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-08-03T21:59:04.311Z
+Generated on: 2025-08-08T02:55:52.876Z
 
 ## Table of Contents
 
@@ -353,6 +353,7 @@ FUM Library - Main Entry Point
 - re-exports from `./helpers/index.js`
 - re-exports from `./adapters/index.js`
 - re-exports from `./blockchain/index.js`
+- re-exports from `./services/index.js`
 
 ---
 
@@ -382,6 +383,18 @@ FUM Library - Main Entry Point
 
 **Exports:**
 - re-exports from `./coingecko.js`
+- re-exports from `./theGraph.js`
+
+---
+
+### theGraph.js
+
+@module services/theGraph
+
+**Path:** `src/services/theGraph.js`
+
+**Imports:**
+- from `../helpers/platformHelpers.js`
 
 ---
 

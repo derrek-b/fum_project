@@ -607,7 +607,8 @@ describe('Strategy Configuration Validation', () => {
     ];
 
     const requiredNumberProperties = [
-      'minTokens', 'maxTokens', 'minPlatforms', 'maxPlatforms', 'minPositions', 'maxPositions'
+      'minTokens', 'maxTokens', 'minPlatforms', 'maxPlatforms', 'minPositions', 'maxPositions',
+      'minTVL', 'minPoolAge', 'maxFeeTier', 'tvlAveragingPeriod'
     ];
 
     const requiredObjectProperties = [

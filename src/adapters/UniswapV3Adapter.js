@@ -789,6 +789,47 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get current tick for a Uniswap V3 pool
+   * @param {string} poolAddress - Pool contract address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<number>} Current tick value
+   * @throws {Error} If parameters invalid or pool query fails
+   */
+  async getCurrentTick(poolAddress, provider) {
+    // Parameter validation (follows fetchTickData pattern)
+    if (!poolAddress) {
+      throw new Error("Pool address parameter is required");
+    }
+    
+    try {
+      ethers.getAddress(poolAddress);
+    } catch (error) {
+      throw new Error(`Invalid pool address: ${poolAddress}`);
+    }
+    
+    // Provider validation
+    await this._validateProviderChain(provider);
+    
+    // Create pool contract and get tick
+    const poolContract = new ethers.Contract(poolAddress, this.uniswapV3PoolABI, provider);
+    
+    try {
+      const slot0 = await poolContract.slot0();
+      return Number(slot0.tick);
+    } catch (error) {
+      throw new Error(`Failed to get current tick for pool ${poolAddress}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get the pool contract ABI
+   * @returns {Array} Pool contract ABI
+   */
+  getPoolABI() {
+    return this.uniswapV3PoolABI;
+  }
+
+  /**
    * Assemble position data from contract data and pool data
    * @param {string} tokenId - Position token ID
    * @param {Object} positionData - Raw position data from contract

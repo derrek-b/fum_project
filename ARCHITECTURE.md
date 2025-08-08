@@ -88,7 +88,8 @@ src/
 │   └── tokenHelpers.js # @module helpers/tokenHelpers
 ├── services/
 │   ├── index.js
-│   └── coingecko.js # @module services/coingecko
+│   ├── coingecko.js # @module services/coingecko
+│   └── theGraph.js # @module services/theGraph
 ```
 
 ## Core Components

@@ -70,10 +70,83 @@ function validateFeatures(platformId, features) {
   });
 }
 
+/**
+ * Validate subgraph ID format (The Graph Protocol format - IPFS CID)
+ * @param {string} subgraphId - Subgraph ID to validate
+ * @returns {boolean} Whether subgraph ID is valid format
+ */
+function validateSubgraphId(subgraphId) {
+  if (typeof subgraphId !== 'string') return false;
+  
+  // The Graph subgraph IDs are IPFS Content Identifiers (CIDs)
+  // CIDv0: Base58 encoded, starts with "Qm", ~46 characters
+  // CIDv1: Base32/Base58 encoded, variable length, typically 44-59+ characters
+  
+  // Basic validation for IPFS CID format
+  if (subgraphId.length < 30 || subgraphId.length > 100) {
+    return false;
+  }
+  
+  // Check for valid base58/base32 characters (alphanumeric, no special chars except some CID formats)
+  return /^[A-Za-z0-9]+$/.test(subgraphId);
+}
+
+/**
+ * Validate subgraphs object and cross-reference with chains
+ * @param {string} platformId - Platform ID for error reporting
+ * @param {Object} subgraphs - Subgraphs object to validate
+ * @param {Object} chains - Chains configuration for cross-validation
+ * @throws {Error} If subgraphs are invalid
+ */
+function validateSubgraphs(platformId, subgraphs, chains) {
+  if (!subgraphs || typeof subgraphs !== 'object' || Array.isArray(subgraphs)) {
+    throw new Error(`Platform ${platformId} subgraphs must be an object`);
+  }
+
+  // Get chains that have this platform enabled
+  const enabledChainIds = [];
+  Object.entries(chains).forEach(([chainId, chain]) => {
+    if (chain.platformAddresses && 
+        chain.platformAddresses[platformId] && 
+        chain.platformAddresses[platformId].enabled === true) {
+      enabledChainIds.push(chainId);
+    }
+  });
+
+  // Validate each subgraph entry
+  Object.entries(subgraphs).forEach(([chainId, subgraphId]) => {
+    // Validate chainId is a string that represents a number (chain IDs)
+    if (!/^\d+$/.test(chainId)) {
+      throw new Error(`Platform ${platformId} subgraphs key '${chainId}' must be a numeric chain ID string`);
+    }
+
+    // Validate subgraph ID format
+    if (!validateSubgraphId(subgraphId)) {
+      throw new Error(`Platform ${platformId} subgraphs['${chainId}'] must be a valid IPFS CID subgraph ID, got: ${subgraphId}`);
+    }
+
+    // Validate chain exists in chains config
+    if (!chains[chainId]) {
+      throw new Error(`Platform ${platformId} subgraphs references unknown chain ID '${chainId}'. Available chains: [${Object.keys(chains).join(', ')}]`);
+    }
+
+    // Validate platform is enabled on this chain
+    if (!enabledChainIds.includes(chainId)) {
+      throw new Error(`Platform ${platformId} subgraphs references chain '${chainId}' but platform is not enabled on that chain`);
+    }
+  });
+
+  // Validate all enabled chains have subgraphs defined
+  const missingSubgraphs = enabledChainIds.filter(chainId => !subgraphs[chainId]);
+  if (missingSubgraphs.length > 0) {
+    throw new Error(`Platform ${platformId} missing subgraphs for enabled chains: [${missingSubgraphs.join(', ')}]`);
+  }
+}
+
 describe('Platform Configuration Validation', () => {
   it('should have all required properties for every platform', () => {
     const requiredStringProperties = ['id', 'name', 'logo', 'color', 'description'];
-    const requiredObjectProperties = ['features'];
+    const requiredObjectProperties = ['features', 'subgraphs'];
     const requiredArrayProperties = ['feeTiers'];
 
     const errors = [];
@@ -128,6 +201,13 @@ describe('Platform Configuration Validation', () => {
         validateFeatures(platformKey, platform.features);
       } catch (error) {
         platformErrors.push(`features validation failed: ${error.message}`);
+      }
+
+      // Validate subgraphs structure and cross-dependencies
+      try {
+        validateSubgraphs(platformKey, platform.subgraphs, chains);
+      } catch (error) {
+        platformErrors.push(`subgraphs validation failed: ${error.message}`);
       }
 
       // If there are errors for this platform, add them to the main errors array

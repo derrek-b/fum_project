@@ -22,3 +22,4 @@ config({ path: resolve(__dirname, '../.env') });
 export * from './helpers/index.js';
 export * from './adapters/index.js';
 export * from './blockchain/index.js';
+export * from './services/index.js';

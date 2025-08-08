@@ -59,6 +59,17 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get current tick for a pool
+   * @param {string} poolAddress - Pool contract address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<number>} Current tick value
+   * @throws {Error} If pool address invalid or provider chain mismatch
+   */
+  async getCurrentTick(poolAddress, provider) {
+    throw new Error("getCurrentTick must be implemented by subclasses");
+  }
+
+  /**
    * Get position manager ABI
    * @returns {Array} - Position Manager ABI
    */
