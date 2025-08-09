@@ -5,6 +5,35 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2025-08-09
+
+### Added - Pool Age Validation Support
+
+#### **New getPoolAge Function in The Graph Service**
+- **Added getPoolAge function**: New service function to retrieve pool creation timestamps from The Graph subgraphs
+  - Supports both Uniswap and Messari schema types with automatic query selection
+  - Returns pool creation timestamp in seconds since epoch
+  - Includes comprehensive parameter validation and error handling
+- **Multi-schema support**: Automatically handles different timestamp field names
+  - Uniswap schema: Uses `createdAtTimestamp` field from `pool` entity
+  - Messari schema: Uses `createdTimestamp` field from `liquidityPool` entity
+- **Comprehensive test coverage**: Added full test suite with 100+ test cases
+  - Parameter validation tests for all function parameters
+  - Success cases for both schema types with real API integration
+  - Configuration error handling for unsupported platforms and chains
+  - Network/API error simulation with mocked responses
+
+#### **Enhanced Pool Validation in BabyStepsStrategy**
+- **Added pool age validation**: Extended `validatePoolCriteria` function to include minimum pool age requirements
+  - Fetches pool creation timestamp via new `getPoolAge` function
+  - Calculates pool age in days and validates against `minPoolAge` strategy parameter
+  - Provides detailed logging for validation results and failures
+- **Improved validation workflow**: Complete pool validation now includes:
+  - TVL validation (existing)
+  - Fee tier validation (existing)
+  - Pool age validation (new)
+- **Environment variable integration**: Uses `process.env.NEXT_PUBLIC_THEGRAPH_API_KEY` for API authentication
+
 ## [0.13.0] - 2025-08-08
 
 ### Added - Multi-Schema The Graph Support

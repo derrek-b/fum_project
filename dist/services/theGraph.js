@@ -140,3 +140,80 @@ export async function getPoolTVLAverage(poolAddress, chainId, platformId, days, 
 
   return averageTVL;
 }
+
+/**
+ * Get pool creation timestamp from TheGraph
+ * @param {string} poolAddress - Pool contract address
+ * @param {number} chainId - Chain ID (1, 42161, etc.)
+ * @param {string} platformId - Platform ID (uniswapV3, etc.)
+ * @param {string} apiKey - The Graph API key
+ * @returns {Promise<number>} Pool creation timestamp in seconds
+ */
+export async function getPoolAge(poolAddress, chainId, platformId, apiKey) {
+  // Validate inputs
+  if (!poolAddress || typeof poolAddress !== 'string') {
+    throw new Error('poolAddress must be a non-empty string');
+  }
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    throw new Error('chainId must be a positive integer');
+  }
+  if (!platformId || typeof platformId !== 'string') {
+    throw new Error('platformId must be a non-empty string');
+  }
+  if (!apiKey || typeof apiKey !== 'string') {
+    throw new Error('apiKey must be a non-empty string');
+  }
+
+  // Get platform metadata using helper
+  const platform = getPlatformMetadata(platformId);
+
+  const subgraphConfig = platform.subgraphs[chainId];
+  if (!subgraphConfig) {
+    throw new Error(`No subgraph configured for platform ${platformId} on chain ${chainId}`);
+  }
+
+  const poolId = poolAddress.toLowerCase();
+
+  // Use different queries based on subgraph type
+  let query;
+  if (subgraphConfig.queryType === 'messari') {
+    query = `
+      query GetPoolCreationTime($poolId: String!) {
+        liquidityPool(id: $poolId) {
+          createdTimestamp
+        }
+      }
+    `;
+  } else { // uniswap
+    query = `
+      query GetPoolCreationTime($poolId: String!) {
+        pool(id: $poolId) {
+          createdAtTimestamp
+        }
+      }
+    `;
+  }
+
+  // Execute query
+  const data = await executeQuery(apiKey, subgraphConfig.id, query, { poolId });
+
+  // Extract timestamp based on queryType
+  let createdTimestamp;
+  if (subgraphConfig.queryType === 'messari') {
+    if (!data.liquidityPool) {
+      throw new Error(`Pool ${poolAddress} not found`);
+    }
+    createdTimestamp = data.liquidityPool.createdTimestamp;
+  } else {
+    if (!data.pool) {
+      throw new Error(`Pool ${poolAddress} not found`);
+    }
+    createdTimestamp = data.pool.createdAtTimestamp;
+  }
+
+  if (!createdTimestamp) {
+    throw new Error(`No creation timestamp available for pool ${poolAddress}`);
+  }
+
+  return parseInt(createdTimestamp, 10);
+}

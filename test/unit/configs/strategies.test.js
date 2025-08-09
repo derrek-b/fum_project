@@ -607,12 +607,11 @@ describe('Strategy Configuration Validation', () => {
     ];
 
     const requiredNumberProperties = [
-      'minTokens', 'maxTokens', 'minPlatforms', 'maxPlatforms', 'minPositions', 'maxPositions',
-      'minTVL', 'minPoolAge', 'maxFeeTier', 'tvlAveragingPeriod'
+      'minTokens', 'maxTokens', 'minPlatforms', 'maxPlatforms', 'minPositions', 'maxPositions'
     ];
 
     const requiredObjectProperties = [
-      'parameters', 'templates', 'parameterGroups', 'contractParametersGroups'
+      'parameters', 'templates', 'parameterGroups', 'contractParametersGroups', 'strategyProperties'
     ];
 
     const errors = [];
@@ -747,5 +746,29 @@ describe('Strategy Configuration Validation', () => {
 
     // If we get here, all strategies are valid
     expect(errors).toHaveLength(0);
+  });
+
+  it('should have valid Baby Steps strategy properties', () => {
+    const babyStepsConfig = strategies.bob;
+
+    expect(babyStepsConfig).toBeDefined();
+    expect(babyStepsConfig.strategyProperties).toBeDefined();
+    expect(typeof babyStepsConfig.strategyProperties).toBe('object');
+
+    // Test that all required pool properties exist and are valid numbers
+    const requiredPoolProperties = ['minTVL', 'minPoolAge', 'maxFeeTier', 'tvlAveragingPeriod'];
+
+    requiredPoolProperties.forEach(prop => {
+      expect(babyStepsConfig.strategyProperties[prop]).toBeDefined();
+      expect(typeof babyStepsConfig.strategyProperties[prop]).toBe('number');
+      expect(Number.isFinite(babyStepsConfig.strategyProperties[prop])).toBe(true);
+      expect(babyStepsConfig.strategyProperties[prop]).toBeGreaterThan(0);
+    });
+
+    // Test the actual expected values
+    expect(babyStepsConfig.strategyProperties.minTVL).toBe(1000000);
+    expect(babyStepsConfig.strategyProperties.minPoolAge).toBe(90);
+    expect(babyStepsConfig.strategyProperties.maxFeeTier).toBe(3000);
+    expect(babyStepsConfig.strategyProperties.tvlAveragingPeriod).toBe(14);
   });
 });
