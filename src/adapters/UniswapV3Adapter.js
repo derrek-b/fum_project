@@ -2823,6 +2823,112 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get best swap quote by comparing multiple fee tiers
+   * @param {Object} params - Parameters for getting best swap quote
+   * @param {string} params.tokenInAddress - Address of input token
+   * @param {string} params.tokenOutAddress - Address of output token
+   * @param {number} [params.maxFeeTier] - Maximum fee tier to consider (optional, defaults to highest available)
+   * @param {string} params.amountIn - Amount of input tokens (in wei string)
+   * @param {Object} params.provider - Ethers provider instance
+   * @returns {Promise<Object>} Best quote with { amountOut: string, optimalFeeTier: number }
+   * @throws {Error} If no valid quotes can be obtained
+   */
+  async getBestSwapQuote(params) {
+    const { tokenInAddress, tokenOutAddress, maxFeeTier, amountIn, provider } = params;
+
+    // Validate parameters (reuse same validation as getSwapQuote)
+    if (!tokenInAddress) {
+      throw new Error("TokenIn address parameter is required");
+    }
+    try {
+      ethers.getAddress(tokenInAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    }
+    
+    if (!tokenOutAddress) {
+      throw new Error("TokenOut address parameter is required");
+    }
+    try {
+      ethers.getAddress(tokenOutAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+    }
+
+    if (!amountIn) {
+      throw new Error("AmountIn parameter is required");
+    }
+    if (typeof amountIn !== 'string') {
+      throw new Error("AmountIn must be a string");
+    }
+    if (!/^\d+$/.test(amountIn)) {
+      throw new Error("AmountIn must be a positive numeric string");
+    }
+    if (amountIn === '0') {
+      throw new Error("AmountIn cannot be zero");
+    }
+
+    // Validate maxFeeTier if provided
+    if (maxFeeTier !== undefined && maxFeeTier !== null) {
+      if (typeof maxFeeTier !== 'number' || !Number.isFinite(maxFeeTier)) {
+        throw new Error("maxFeeTier must be a valid number");
+      }
+      if (maxFeeTier <= 0) {
+        throw new Error("maxFeeTier must be greater than 0");
+      }
+    }
+
+    await this._validateProviderChain(provider);
+
+    // Filter fee tiers based on maxFeeTier
+    const validFeeTiers = this.feeTiers.filter(tier => !maxFeeTier || tier <= maxFeeTier);
+    
+    if (validFeeTiers.length === 0) {
+      throw new Error(`No valid fee tiers found. maxFeeTier: ${maxFeeTier}, available tiers: ${this.feeTiers.join(', ')}`);
+    }
+
+    // Get quotes for all valid fee tiers in parallel
+    const quotePromises = validFeeTiers.map(async (feeTier) => {
+      try {
+        const amountOut = await this.getSwapQuote({
+          tokenInAddress,
+          tokenOutAddress,
+          fee: feeTier,
+          amountIn,
+          provider
+        });
+        return { amountOut, feeTier };
+      } catch (error) {
+        // Pool doesn't exist for this fee tier, skip it
+        return null;
+      }
+    });
+
+    const quotes = await Promise.all(quotePromises);
+    const validQuotes = quotes.filter(quote => quote !== null);
+
+    if (validQuotes.length === 0) {
+      throw new Error(`No pools exist for token pair ${tokenInAddress}/${tokenOutAddress} with fee tiers: ${validFeeTiers.join(', ')}`);
+    }
+
+    // Sort by amountOut descending (highest first)
+    validQuotes.sort((a, b) => {
+      const amountA = BigInt(a.amountOut);
+      const amountB = BigInt(b.amountOut);
+      if (amountA > amountB) return -1;
+      if (amountA < amountB) return 1;
+      return 0;
+    });
+
+    // Return the best quote
+    const bestQuote = validQuotes[0];
+    return {
+      amountOut: bestQuote.amountOut,
+      optimalFeeTier: bestQuote.feeTier
+    };
+  }
+
+  /**
    * Generate swap transaction data for Uniswap V3
    * @param {Object} params - Parameters for swap
    * @param {string} params.tokenIn - Address of input token

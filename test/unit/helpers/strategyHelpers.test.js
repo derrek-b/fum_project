@@ -184,7 +184,8 @@ describe('Strategy Helpers', () => {
         parameterGroups: expect.any(Object),
         contractParametersGroups: expect.any(Object),
         templateEnumMap: expect.any(Object),
-        templates: expect.any(Object)
+        templates: expect.any(Object),
+        strategyProperties: expect.any(Object)
       });
 
       // Cherry pick specific values for bob strategy
@@ -194,6 +195,15 @@ describe('Strategy Helpers', () => {
       expect(result.color).toBe('gold');
       expect(result.minTokens).toBe(2);
       expect(result.maxTokens).toBe(2);
+      
+      // Test strategyProperties specific values for bob strategy
+      expect(result.strategyProperties).toMatchObject({
+        minTVL: 1000000,
+        minPoolAge: 90,
+        maxFeeTier: 3000,
+        tvlAveragingPeriod: 14,
+        transactionDeadlineSeconds: 60
+      });
       });
     })
 
@@ -236,6 +246,15 @@ describe('Strategy Helpers', () => {
         strategies.bob = { ...originalBob, templates: undefined };
 
         expect(() => getStrategyDetails('bob')).toThrow('Strategy bob missing or invalid property: templates');
+
+        strategies.bob = originalBob;
+      });
+
+      it('should throw error for missing strategyProperties property', () => {
+        const originalBob = strategies.bob;
+        strategies.bob = { ...originalBob, strategyProperties: undefined };
+
+        expect(() => getStrategyDetails('bob')).toThrow('Strategy bob missing or invalid property: strategyProperties');
 
         strategies.bob = originalBob;
       });

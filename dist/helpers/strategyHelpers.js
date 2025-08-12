@@ -142,7 +142,7 @@ export function getStrategyDetails(strategyId) {
   });
 
   // Validate required object properties
-  const requiredObjectProperties = ['parameters'];
+  const requiredObjectProperties = ['parameters', 'strategyProperties'];
   requiredObjectProperties.forEach(prop => {
     if (!strategy[prop] || typeof strategy[prop] !== 'object' || Array.isArray(strategy[prop])) {
       throw new Error(`Strategy ${strategyId} missing or invalid property: ${prop}`);
@@ -217,7 +217,8 @@ export function getStrategyDetails(strategyId) {
     parameterGroups: strategy.parameterGroups,
     contractParametersGroups: strategy.contractParametersGroups,
     templateEnumMap: strategy.templateEnumMap,
-    templates: strategy.templates
+    templates: strategy.templates,
+    strategyProperties: strategy.strategyProperties
   };
 }
 

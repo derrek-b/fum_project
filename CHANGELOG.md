@@ -5,6 +5,16 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2025-08-12
+
+### Changed - Repository Maintenance
+
+#### **Node Modules Cleanup**
+- **Removed node_modules from tracking**: Cleaned up git tracking to exclude node_modules directory
+  - Updated .gitignore to properly exclude node_modules from version control
+  - Removes accidental tracking of npm dependencies in repository
+  - Reduces repository size and focuses on source code changes only
+
 ## [0.14.0] - 2025-08-09
 
 ### Added - Pool Age Validation Support

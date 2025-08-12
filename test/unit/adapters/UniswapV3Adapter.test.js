@@ -8569,4 +8569,280 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
   });
+
+  describe('getBestSwapQuote', () => {
+    describe('Success Cases', () => {
+      it('should return best quote from multiple fee tiers', async () => {
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.parseEther('1').toString(), // 1 ETH
+          provider: env.provider
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should return an object with amountOut and optimalFeeTier
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote).toHaveProperty('amountOut');
+        expect(bestQuote).toHaveProperty('optimalFeeTier');
+
+        // Amount out should be positive
+        expect(typeof bestQuote.amountOut).toBe('string');
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+
+        // Fee tier should be one of the valid tiers
+        expect(adapter.feeTiers).toContain(bestQuote.optimalFeeTier);
+
+        // Compare with individual fee tier quotes to verify it's the best
+        const individualQuotes = [];
+        for (const feeTier of adapter.feeTiers) {
+          try {
+            const quote = await adapter.getSwapQuote({
+              ...quoteParams,
+              fee: feeTier
+            });
+            individualQuotes.push({ amountOut: quote, feeTier });
+          } catch (error) {
+            // Pool doesn't exist for this fee tier
+          }
+        }
+
+        // Best quote should have the highest amount out
+        const maxIndividual = individualQuotes.reduce((max, current) => {
+          return BigInt(current.amountOut) > BigInt(max.amountOut) ? current : max;
+        });
+
+        expect(bestQuote.amountOut).toBe(maxIndividual.amountOut);
+        expect(bestQuote.optimalFeeTier).toBe(maxIndividual.feeTier);
+      });
+
+      it('should respect maxFeeTier parameter', async () => {
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          maxFeeTier: 500, // Only allow 0.05% fee tier
+          amountIn: ethers.parseEther('0.5').toString(),
+          provider: env.provider
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Fee tier should not exceed maxFeeTier
+        expect(bestQuote.optimalFeeTier).toBeLessThanOrEqual(500);
+
+        // Should still return valid quote
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should work without maxFeeTier parameter', async () => {
+        const quoteParams = {
+          tokenInAddress: env.usdcAddress,
+          tokenOutAddress: env.wethAddress,
+          amountIn: ethers.parseUnits('2000', 6).toString(),
+          provider: env.provider
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should return valid quote
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountOut).toBeDefined();
+        expect(bestQuote.optimalFeeTier).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+
+        // Fee tier should be one of the platform's fee tiers
+        expect(adapter.feeTiers).toContain(bestQuote.optimalFeeTier);
+      });
+
+      it('should handle single pool existence gracefully', async () => {
+        // Use a less common fee tier that might only have one pool
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          maxFeeTier: 10000, // Allow up to 1% fee tier
+          amountIn: ethers.parseEther('0.1').toString(),
+          provider: env.provider
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should still return a valid quote even if only one pool exists
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountOut).toBeDefined();
+        expect(bestQuote.optimalFeeTier).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should return consistent results across multiple calls', async () => {
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          maxFeeTier: 3000,
+          amountIn: ethers.parseEther('0.25').toString(),
+          provider: env.provider
+        };
+
+        const quote1 = await adapter.getBestSwapQuote(quoteParams);
+        const quote2 = await adapter.getBestSwapQuote(quoteParams);
+
+        // Results should be consistent
+        expect(quote1.amountOut).toBe(quote2.amountOut);
+        expect(quote1.optimalFeeTier).toBe(quote2.optimalFeeTier);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid tokenInAddress', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: null,
+            tokenOutAddress: env.usdcAddress,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: 'invalid-address',
+            tokenOutAddress: env.usdcAddress,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('Invalid tokenIn address');
+      });
+
+      it('should throw error for invalid tokenOutAddress', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: null,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: 'invalid-address',
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('Invalid tokenOut address');
+      });
+
+      it('should throw error for invalid amountIn', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            amountIn: null,
+            provider: env.provider
+          })
+        ).rejects.toThrow('AmountIn parameter is required');
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            amountIn: '0',
+            provider: env.provider
+          })
+        ).rejects.toThrow('AmountIn cannot be zero');
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            amountIn: 'not-a-number',
+            provider: env.provider
+          })
+        ).rejects.toThrow('AmountIn must be a positive numeric string');
+      });
+
+      it('should throw error for invalid maxFeeTier', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            maxFeeTier: 'not-a-number',
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('maxFeeTier must be a valid number');
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            maxFeeTier: -100,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow('maxFeeTier must be greater than 0');
+      });
+
+      it('should throw error when no pools exist for token pair', async () => {
+        const fakeToken1 = '0x0000000000000000000000000000000000000001';
+        const fakeToken2 = '0x0000000000000000000000000000000000000002';
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: fakeToken1,
+            tokenOutAddress: fakeToken2,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow(/No pools exist for token pair/);
+      });
+
+      it('should throw error when maxFeeTier filters out all fee tiers', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            maxFeeTier: 50, // Too low - no fee tiers are this small
+            amountIn: ethers.parseEther('1').toString(),
+            provider: env.provider
+          })
+        ).rejects.toThrow(/No valid fee tiers found/);
+      });
+
+      it('should throw error for missing provider', async () => {
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: env.wethAddress,
+            tokenOutAddress: env.usdcAddress,
+            amountIn: ethers.parseEther('1').toString(),
+            provider: null
+          })
+        ).rejects.toThrow();
+      });
+    });
+
+    describe('Performance', () => {
+      it('should execute parallel quotes efficiently', async () => {
+        const startTime = Date.now();
+
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.parseEther('1').toString(),
+          provider: env.provider
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+        const endTime = Date.now();
+
+        // Should complete in reasonable time (parallel execution)
+        expect(endTime - startTime).toBeLessThan(5000); // 5 seconds max
+
+        // Should still return valid result
+        expect(bestQuote).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+    });
+  });
 });

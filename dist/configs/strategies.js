@@ -82,7 +82,8 @@ const strategies = {
       minTVL: 1000000,
       minPoolAge: 90,
       maxFeeTier: 3000,
-      tvlAveragingPeriod: 14
+      tvlAveragingPeriod: 14,
+      transactionDeadlineSeconds: 60
     },
     // Templates for Basic Strategy
     templateEnumMap: {
