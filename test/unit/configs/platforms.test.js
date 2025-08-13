@@ -30,23 +30,30 @@ function validatePath(path) {
 }
 
 /**
- * Validate fee tiers array
+ * Validate fee tiers object structure
  * @param {string} platformId - Platform ID for error reporting
- * @param {Array} feeTiers - Fee tiers array to validate
+ * @param {Object} feeTiers - Fee tiers object to validate
  * @throws {Error} If fee tiers are invalid
  */
 function validateFeeTiers(platformId, feeTiers) {
-  if (!Array.isArray(feeTiers)) {
-    throw new Error(`Platform ${platformId} feeTiers must be an array`);
+  if (!feeTiers || typeof feeTiers !== 'object' || Array.isArray(feeTiers)) {
+    throw new Error(`Platform ${platformId} feeTiers must be an object`);
   }
 
-  if (feeTiers.length === 0) {
-    throw new Error(`Platform ${platformId} feeTiers must be a non-empty array`);
+  const feeKeys = Object.keys(feeTiers);
+  if (feeKeys.length === 0) {
+    throw new Error(`Platform ${platformId} feeTiers must be a non-empty object`);
   }
 
-  feeTiers.forEach((tier, index) => {
-    if (!Number.isFinite(tier) || tier <= 0) {
-      throw new Error(`Platform ${platformId} feeTiers[${index}] must be a finite number > 0, got: ${tier}`);
+  feeKeys.forEach(feeKey => {
+    const feeNumber = Number(feeKey);
+    if (!Number.isFinite(feeNumber) || feeNumber <= 0) {
+      throw new Error(`Platform ${platformId} feeTiers key '${feeKey}' must be a finite number > 0`);
+    }
+
+    const feeConfig = feeTiers[feeKey];
+    if (!feeConfig || typeof feeConfig !== 'object' || Array.isArray(feeConfig)) {
+      throw new Error(`Platform ${platformId} feeTiers['${feeKey}'] must be an object`);
     }
   });
 }
@@ -114,15 +121,25 @@ function validateSubgraphs(platformId, subgraphs, chains) {
   });
 
   // Validate each subgraph entry
-  Object.entries(subgraphs).forEach(([chainId, subgraphId]) => {
+  Object.entries(subgraphs).forEach(([chainId, subgraphConfig]) => {
     // Validate chainId is a string that represents a number (chain IDs)
     if (!/^\d+$/.test(chainId)) {
       throw new Error(`Platform ${platformId} subgraphs key '${chainId}' must be a numeric chain ID string`);
     }
 
+    // Validate subgraph config structure
+    if (!subgraphConfig || typeof subgraphConfig !== 'object' || Array.isArray(subgraphConfig)) {
+      throw new Error(`Platform ${platformId} subgraphs['${chainId}'] must be an object with id and queryType`);
+    }
+
     // Validate subgraph ID format
-    if (!validateSubgraphId(subgraphId)) {
-      throw new Error(`Platform ${platformId} subgraphs['${chainId}'] must be a valid IPFS CID subgraph ID, got: ${subgraphId}`);
+    if (!subgraphConfig.id || !validateSubgraphId(subgraphConfig.id)) {
+      throw new Error(`Platform ${platformId} subgraphs['${chainId}'].id must be a valid IPFS CID subgraph ID, got: ${subgraphConfig.id}`);
+    }
+
+    // Validate queryType
+    if (!subgraphConfig.queryType || typeof subgraphConfig.queryType !== 'string') {
+      throw new Error(`Platform ${platformId} subgraphs['${chainId}'].queryType must be a non-empty string, got: ${subgraphConfig.queryType}`);
     }
 
     // Validate chain exists in chains config
@@ -146,8 +163,8 @@ function validateSubgraphs(platformId, subgraphs, chains) {
 describe('Platform Configuration Validation', () => {
   it('should have all required properties for every platform', () => {
     const requiredStringProperties = ['id', 'name', 'logo', 'color', 'description'];
-    const requiredObjectProperties = ['features', 'subgraphs'];
-    const requiredArrayProperties = ['feeTiers'];
+    const requiredObjectProperties = ['features', 'subgraphs', 'feeTiers'];
+    const requiredNumberProperties = ['minTick', 'maxTick'];
 
     const errors = [];
 
@@ -173,12 +190,19 @@ describe('Platform Configuration Validation', () => {
         }
       });
 
-      // Validate required array properties
-      requiredArrayProperties.forEach(prop => {
-        if (!Array.isArray(platform[prop])) {
-          platformErrors.push(`Property ${prop} must be an array`);
+      // Validate required number properties
+      requiredNumberProperties.forEach(prop => {
+        if (!Number.isFinite(platform[prop])) {
+          platformErrors.push(`Missing or invalid number property: ${prop}`);
         }
       });
+
+      // Validate tick bounds relationship
+      if (Number.isFinite(platform.minTick) && Number.isFinite(platform.maxTick)) {
+        if (platform.minTick >= platform.maxTick) {
+          platformErrors.push(`minTick (${platform.minTick}) must be less than maxTick (${platform.maxTick})`);
+        }
+      }
 
       // Validate specific format requirements
       if (platform.color && !validateHexColor(platform.color)) {
@@ -254,5 +278,42 @@ describe('Platform Configuration Validation', () => {
     
     // We expect this to pass even with warnings
     expect(true).toBe(true);
+  });
+
+  describe('Uniswap V3 Platform Validation', () => {
+    it('should have correct fee tiers and tick spacings', () => {
+      const uniswapV3 = platforms.uniswapV3;
+      expect(uniswapV3).toBeDefined();
+
+      // Validate expected fee tiers with correct spacing values
+      const expectedFeeTiers = {
+        100: { spacing: 1 },    // 0.01% fee = 1 tick spacing
+        500: { spacing: 10 },   // 0.05% fee = 10 tick spacing
+        3000: { spacing: 60 },  // 0.3% fee = 60 tick spacing
+        10000: { spacing: 200 } // 1% fee = 200 tick spacing
+      };
+
+      Object.entries(expectedFeeTiers).forEach(([fee, expectedConfig]) => {
+        expect(uniswapV3.feeTiers[fee]).toBeDefined();
+        expect(uniswapV3.feeTiers[fee].spacing).toBe(expectedConfig.spacing);
+        expect(typeof uniswapV3.feeTiers[fee].spacing).toBe('number');
+        expect(uniswapV3.feeTiers[fee].spacing).toBeGreaterThan(0);
+      });
+
+      // Validate no extra fee tiers
+      const actualFees = Object.keys(uniswapV3.feeTiers);
+      const expectedFees = Object.keys(expectedFeeTiers);
+      expect(actualFees.sort()).toEqual(expectedFees.sort());
+    });
+
+    it('should have correct tick bounds', () => {
+      const uniswapV3 = platforms.uniswapV3;
+      
+      // Validate Uniswap V3 specific tick bounds
+      expect(uniswapV3.minTick).toBe(-887272);
+      expect(uniswapV3.maxTick).toBe(887272);
+      expect(typeof uniswapV3.minTick).toBe('number');
+      expect(typeof uniswapV3.maxTick).toBe('number');
+    });
   });
 });

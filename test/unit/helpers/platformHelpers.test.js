@@ -15,6 +15,8 @@ import {
   getAvailablePlatforms,
   lookupPlatformById,
   getPlatformFeeTiers,
+  getPlatformTickSpacing,
+  getPlatformTickBounds,
   lookupSupportedPlatformIds
 } from '../../../src/helpers/platformHelpers.js';
 
@@ -163,9 +165,15 @@ describe('Platform Helpers', () => {
         expect(metadata.color).toBe('#FF007A');
         expect(metadata.description).toBe('Uniswap V3 concentrated liquidity positions');
 
-        // Test fee tiers array and values
-        expect(Array.isArray(metadata.feeTiers)).toBe(true);
-        expect(metadata.feeTiers).toEqual([100, 500, 3000, 10000]);
+        // Test fee tiers object structure
+        expect(typeof metadata.feeTiers).toBe('object');
+        expect(Array.isArray(metadata.feeTiers)).toBe(false);
+        expect(metadata.feeTiers).toEqual({
+          100: { spacing: 1 },
+          500: { spacing: 10 },
+          3000: { spacing: 60 },
+          10000: { spacing: 200 }
+        });
 
         // Test features object structure
         expect(typeof metadata.features).toBe('object');
@@ -1028,6 +1036,100 @@ describe('Platform Helpers', () => {
       it('should include known platforms', () => {
         const platformIds = lookupSupportedPlatformIds();
         expect(platformIds).toContain('uniswapV3');
+      });
+    });
+  });
+
+  describe('getPlatformTickSpacing', () => {
+    describe('Success Cases', () => {
+      it('should return correct tick spacing for Uniswap V3 fee tiers', () => {
+        expect(getPlatformTickSpacing('uniswapV3', 100)).toBe(1);
+        expect(getPlatformTickSpacing('uniswapV3', 500)).toBe(10);
+        expect(getPlatformTickSpacing('uniswapV3', 3000)).toBe(60);
+        expect(getPlatformTickSpacing('uniswapV3', 10000)).toBe(200);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid platform', () => {
+        expect(() => getPlatformTickSpacing('unknownPlatform', 500)).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for invalid fee tier', () => {
+        expect(() => getPlatformTickSpacing('uniswapV3', 250)).toThrow('Invalid fee tier: 250. Must be one of: 100, 500, 3000, 10000');
+        expect(() => getPlatformTickSpacing('uniswapV3', 999)).toThrow('Invalid fee tier: 999. Must be one of: 100, 500, 3000, 10000');
+      });
+
+      it('should throw error for invalid fee parameter types', () => {
+        expect(() => getPlatformTickSpacing('uniswapV3', NaN)).toThrow('Invalid fee: NaN. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', Infinity)).toThrow('Invalid fee: Infinity. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', null)).toThrow('Invalid fee: null. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', 'string')).toThrow('Invalid fee: string. Must be a finite number.');
+      });
+
+      it('should throw error for invalid platformId parameter types', () => {
+        expect(() => getPlatformTickSpacing(null, 500)).toThrow('platformId parameter is required');
+        expect(() => getPlatformTickSpacing('', 500)).toThrow('platformId cannot be empty');
+        expect(() => getPlatformTickSpacing(123, 500)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformTickBounds', () => {
+    describe('Success Cases', () => {
+      it('should return correct tick bounds for Uniswap V3', () => {
+        const bounds = getPlatformTickBounds('uniswapV3');
+        expect(bounds).toEqual({
+          minTick: -887272,
+          maxTick: 887272
+        });
+        expect(typeof bounds.minTick).toBe('number');
+        expect(typeof bounds.maxTick).toBe('number');
+        expect(bounds.minTick).toBeLessThan(bounds.maxTick);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid platform', () => {
+        expect(() => getPlatformTickBounds('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for invalid platformId parameter types', () => {
+        expect(() => getPlatformTickBounds(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformTickBounds('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformTickBounds(123)).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for platform with invalid tick bounds', async () => {
+        // Mock platforms config with platform missing tick bounds
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutBounds: {
+              id: 'platformWithoutBounds',
+              name: 'Platform Without Bounds',
+              feeTiers: { 500: { spacing: 10 } }
+              // Missing minTick/maxTick
+            },
+            platformWithInvalidBounds: {
+              id: 'platformWithInvalidBounds',
+              name: 'Platform With Invalid Bounds',
+              feeTiers: { 500: { spacing: 10 } },
+              minTick: 100,
+              maxTick: 50  // Invalid: minTick > maxTick
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformTickBounds('platformWithoutBounds')).toThrow('Platform platformWithoutBounds tick bounds not configured');
+        expect(() => platformHelpers.getPlatformTickBounds('platformWithInvalidBounds')).toThrow('Platform platformWithInvalidBounds invalid tick bounds: minTick must be less than maxTick');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
       });
     });
   });

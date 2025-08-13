@@ -12,7 +12,7 @@
 
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
-import { getPlatformFeeTiers } from "../helpers/platformHelpers.js";
+import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
 import { getTokenByAddress } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
@@ -251,6 +251,84 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     return tokensSwapped
       ? { sortedToken0: token1, sortedToken1: token0, tokensSwapped: true }
       : { sortedToken0: token0, sortedToken1: token1, tokensSwapped: false };
+  }
+
+  /**
+   * Calculate tick range from percentage parameters
+   * @static
+   * @param {number} currentTick - Current tick of the pool
+   * @param {number} upperPercent - Upper range in percentage (e.g., 10 for 10%)
+   * @param {number} lowerPercent - Lower range in percentage (e.g., 10 for 10%)
+   * @param {number} fee - Fee tier (100, 500, 3000, or 10000)
+   * @returns {{tickLower: number, tickUpper: number}} Tick range aligned to tick spacing
+   * @throws {Error} If fee tier is invalid
+   */
+  static calculateTickRangeFromPercentages(currentTick, upperPercent, lowerPercent, fee) {
+    // Validate currentTick
+    if (!Number.isFinite(currentTick)) {
+      throw new Error(`Invalid currentTick: ${currentTick}. Must be a finite number.`);
+    }
+    
+    // Validate upperPercent
+    if (!Number.isFinite(upperPercent)) {
+      throw new Error(`Invalid upperPercent: ${upperPercent}. Must be a finite number.`);
+    }
+    if (upperPercent <= 0 || upperPercent > 100) {
+      throw new Error(`Invalid upperPercent: ${upperPercent}. Must be between 0 and 100 (exclusive of 0).`);
+    }
+    
+    // Validate lowerPercent
+    if (!Number.isFinite(lowerPercent)) {
+      throw new Error(`Invalid lowerPercent: ${lowerPercent}. Must be a finite number.`);
+    }
+    if (lowerPercent <= 0 || lowerPercent > 100) {
+      throw new Error(`Invalid lowerPercent: ${lowerPercent}. Must be between 0 and 100 (exclusive of 0).`);
+    }
+    
+    // Validate fee
+    if (!Number.isFinite(fee)) {
+      throw new Error(`Invalid fee: ${fee}. Must be a finite number.`);
+    }
+    
+    // Get tick spacing from platform configuration
+    const tickSpacing = getPlatformTickSpacing('uniswapV3', fee);
+    
+    // Convert percentages to tick offsets
+    // Formula: 1% price change ≈ 100 ticks (since 1.0001^100 ≈ 1.01)
+    const ticksPerPercent = Math.round(Math.log(1.01) / Math.log(1.0001));
+    const upperOffset = Math.round(upperPercent * ticksPerPercent);
+    const lowerOffset = Math.round(lowerPercent * ticksPerPercent);
+    
+    // Calculate raw tick positions
+    const rawUpperTick = currentTick + upperOffset;
+    const rawLowerTick = currentTick - lowerOffset;
+    
+    // Align ticks to tick spacing boundaries
+    // Upper tick: round up to next valid tick
+    // Lower tick: round down to previous valid tick
+    let tickUpper = Math.ceil(rawUpperTick / tickSpacing) * tickSpacing;
+    let tickLower = Math.floor(rawLowerTick / tickSpacing) * tickSpacing;
+    
+    // Convert -0 to +0 for consistency (JavaScript distinguishes between them)
+    if (Object.is(tickUpper, -0)) tickUpper = 0;
+    if (Object.is(tickLower, -0)) tickLower = 0;
+    
+    // Validate against platform tick bounds
+    const { minTick, maxTick } = getPlatformTickBounds('uniswapV3');
+    
+    if (tickLower < minTick || tickLower > maxTick) {
+      throw new Error(`Invalid tickLower: ${tickLower}. Must be between ${minTick} and ${maxTick}.`);
+    }
+    if (tickUpper < minTick || tickUpper > maxTick) {
+      throw new Error(`Invalid tickUpper: ${tickUpper}. Must be between ${minTick} and ${maxTick}.`);
+    }
+    
+    // Ensure valid range (tickLower must be less than tickUpper)
+    if (tickLower >= tickUpper) {
+      throw new Error(`Invalid tick range: tickLower (${tickLower}) must be less than tickUpper (${tickUpper})`);
+    }
+    
+    return { tickLower, tickUpper };
   }
 
   /**

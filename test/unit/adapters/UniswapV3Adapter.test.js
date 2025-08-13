@@ -8845,4 +8845,414 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
   });
+
+  describe('calculateTickRangeFromPercentages', () => {
+    let realPoolTick;
+
+    beforeAll(async () => {
+      // Get the actual current tick from the forked pool
+      if (env && env.poolData) {
+        realPoolTick = env.poolData.tick;
+        console.log(`Using real pool tick from WETH/USDC 0.05% pool: ${realPoolTick}`);
+      } else {
+        // Fallback to a realistic tick if pool data not available
+        realPoolTick = 201400; // Typical WETH/USDC tick
+        console.log(`Using realistic fallback tick: ${realPoolTick}`);
+      }
+    });
+
+    describe('Success Cases', () => {
+      it('should calculate tick range for 0.01% fee tier (spacing=1) with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 5;
+        const lowerPercent = 5;
+        const fee = 100; // 0.01% fee tier
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeDefined();
+        expect(result.tickUpper).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Check alignment to tick spacing (1 for 0.01% fee)
+        expect(Math.abs(result.tickLower % 1)).toBe(0);
+        expect(Math.abs(result.tickUpper % 1)).toBe(0);
+
+        // 5% ≈ 500 ticks (since 1% ≈ 100 ticks)
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        expect(upperOffset).toBeGreaterThanOrEqual(495);
+        expect(upperOffset).toBeLessThanOrEqual(505);
+        expect(lowerOffset).toBeGreaterThanOrEqual(495);
+        expect(lowerOffset).toBeLessThanOrEqual(505);
+
+        // Verify the ticks are actually different from currentTick
+        expect(result.tickUpper).not.toBe(currentTick);
+        expect(result.tickLower).not.toBe(currentTick);
+      });
+
+      it('should calculate tick range for 0.05% fee tier (spacing=10) with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 10;
+        const lowerPercent = 10;
+        const fee = 500; // 0.05% fee tier
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Check alignment to tick spacing (10 for 0.05% fee)
+        expect(Math.abs(result.tickLower % 10)).toBe(0);
+        expect(Math.abs(result.tickUpper % 10)).toBe(0);
+
+        // 10% ≈ 1000 ticks
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        expect(upperOffset).toBeGreaterThanOrEqual(990);
+        expect(upperOffset).toBeLessThanOrEqual(1010);
+        expect(lowerOffset).toBeGreaterThanOrEqual(990);
+        expect(lowerOffset).toBeLessThanOrEqual(1010);
+      });
+
+      it('should calculate tick range for 0.3% fee tier (spacing=60) with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 15;
+        const lowerPercent = 15;
+        const fee = 3000; // 0.3% fee tier
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Check alignment to tick spacing (60 for 0.3% fee)
+        expect(Math.abs(result.tickLower % 60)).toBe(0);
+        expect(Math.abs(result.tickUpper % 60)).toBe(0);
+
+        // 15% ≈ 1500 ticks
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        // Allow for rounding to tick spacing boundaries
+        expect(upperOffset).toBeGreaterThanOrEqual(1440); // 1500 - 60
+        expect(upperOffset).toBeLessThanOrEqual(1560); // 1500 + 60
+        expect(lowerOffset).toBeGreaterThanOrEqual(1440);
+        expect(lowerOffset).toBeLessThanOrEqual(1560);
+      });
+
+      it('should calculate tick range for 1% fee tier (spacing=200) with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 20;
+        const lowerPercent = 20;
+        const fee = 10000; // 1% fee tier
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Check alignment to tick spacing (200 for 1% fee)
+        expect(Math.abs(result.tickLower % 200)).toBe(0);
+        expect(Math.abs(result.tickUpper % 200)).toBe(0);
+
+        // 20% ≈ 2000 ticks
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        // Allow for rounding to tick spacing boundaries
+        expect(upperOffset).toBeGreaterThanOrEqual(1800); // 2000 - 200
+        expect(upperOffset).toBeLessThanOrEqual(2200); // 2000 + 200
+        expect(lowerOffset).toBeGreaterThanOrEqual(1800);
+        expect(lowerOffset).toBeLessThanOrEqual(2200);
+      });
+
+      it('should handle asymmetric ranges with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 5;
+        const lowerPercent = 10;
+        const fee = 500; // 0.05% fee tier
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Check alignment
+        expect(Math.abs(result.tickLower % 10)).toBe(0);
+        expect(Math.abs(result.tickUpper % 10)).toBe(0);
+
+        // 5% up ≈ 500 ticks, 10% down ≈ 1000 ticks (allow for spacing alignment)
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        expect(upperOffset).toBeCloseTo(500, -2); // ±50 tolerance for spacing alignment
+        expect(lowerOffset).toBeCloseTo(1000, -2); // ±50 tolerance for spacing alignment
+      });
+
+      it('should handle very small percentages with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 0.01;
+        const lowerPercent = 0.01;
+        const fee = 500; // 0.05% fee tier (spacing=10)
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Must still be aligned
+        expect(Math.abs(result.tickLower % 10)).toBe(0);
+        expect(Math.abs(result.tickUpper % 10)).toBe(0);
+
+        // 0.01% ≈ 1 tick, but spacing=10 means minimum offset is 10 ticks
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        // With very small percentages and tick spacing, we expect at least the spacing amount
+        expect(Math.abs(upperOffset)).toBeGreaterThanOrEqual(1); // At least some movement
+        expect(Math.abs(lowerOffset)).toBeGreaterThanOrEqual(1); // At least some movement
+      });
+
+      it('should handle large percentages with real tick', () => {
+        const currentTick = realPoolTick;
+        const upperPercent = 100;
+        const lowerPercent = 100;
+        const fee = 3000; // 0.3% fee tier (spacing=60)
+
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          currentTick,
+          upperPercent,
+          lowerPercent,
+          fee
+        );
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Must be aligned
+        expect(Math.abs(result.tickLower % 60)).toBe(0);
+        expect(Math.abs(result.tickUpper % 60)).toBe(0);
+
+        // 100% ≈ 10000 ticks
+        const upperOffset = result.tickUpper - currentTick;
+        const lowerOffset = currentTick - result.tickLower;
+        expect(upperOffset).toBeGreaterThan(9900);
+        expect(upperOffset).toBeLessThan(10100);
+        expect(lowerOffset).toBeGreaterThan(9900);
+        expect(lowerOffset).toBeLessThan(10100);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid currentTick', () => {
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(NaN, 10, 10, 500)
+        ).toThrow('Invalid currentTick: NaN. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(Infinity, 10, 10, 500)
+        ).toThrow('Invalid currentTick: Infinity. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(null, 10, 10, 500)
+        ).toThrow('Invalid currentTick: null. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(undefined, 10, 10, 500)
+        ).toThrow('Invalid currentTick: undefined. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages("100", 10, 10, 500)
+        ).toThrow('Invalid currentTick: 100. Must be a finite number.');
+      });
+
+      it('should throw error for invalid upperPercent', () => {
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, NaN, 10, 500)
+        ).toThrow('Invalid upperPercent: NaN. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, Infinity, 10, 500)
+        ).toThrow('Invalid upperPercent: Infinity. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, null, 10, 500)
+        ).toThrow('Invalid upperPercent: null. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, "10", 10, 500)
+        ).toThrow('Invalid upperPercent: 10. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 0, 10, 500)
+        ).toThrow('Invalid upperPercent: 0. Must be between 0 and 100 (exclusive of 0).');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, -5, 10, 500)
+        ).toThrow('Invalid upperPercent: -5. Must be between 0 and 100 (exclusive of 0).');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 101, 10, 500)
+        ).toThrow('Invalid upperPercent: 101. Must be between 0 and 100 (exclusive of 0).');
+      });
+
+      it('should throw error for invalid lowerPercent', () => {
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, NaN, 500)
+        ).toThrow('Invalid lowerPercent: NaN. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, Infinity, 500)
+        ).toThrow('Invalid lowerPercent: Infinity. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, null, 500)
+        ).toThrow('Invalid lowerPercent: null. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, "10", 500)
+        ).toThrow('Invalid lowerPercent: 10. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 0, 500)
+        ).toThrow('Invalid lowerPercent: 0. Must be between 0 and 100 (exclusive of 0).');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, -5, 500)
+        ).toThrow('Invalid lowerPercent: -5. Must be between 0 and 100 (exclusive of 0).');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 101, 500)
+        ).toThrow('Invalid lowerPercent: 101. Must be between 0 and 100 (exclusive of 0).');
+      });
+
+      it('should throw error for invalid fee', () => {
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, NaN)
+        ).toThrow('Invalid fee: NaN. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, Infinity)
+        ).toThrow('Invalid fee: Infinity. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, null)
+        ).toThrow('Invalid fee: null. Must be a finite number.');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, "500")
+        ).toThrow('Invalid fee: 500. Must be a finite number.');
+      });
+
+      it('should throw error for invalid fee tier values', () => {
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 250)
+        ).toThrow('Invalid fee tier: 250. Must be one of: 100, 500, 3000, 10000');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 0)
+        ).toThrow('Invalid fee tier: 0. Must be one of: 100, 500, 3000, 10000');
+
+        expect(() =>
+          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 999)
+        ).toThrow('Invalid fee tier: 999. Must be one of: 100, 500, 3000, 10000');
+      });
+
+    });
+
+    describe('Tick Spacing Verification', () => {
+      it('should correctly apply all fee tier spacings with real tick', () => {
+        const testCases = [
+          { fee: 100, spacing: 1 },    // 0.01%
+          { fee: 500, spacing: 10 },   // 0.05%
+          { fee: 3000, spacing: 60 },  // 0.3%
+          { fee: 10000, spacing: 200 } // 1%
+        ];
+
+        testCases.forEach(({ fee, spacing }) => {
+          const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+            realPoolTick, // Use real tick from fork
+            10,
+            10,
+            fee
+          );
+
+          expect(Math.abs(result.tickLower % spacing)).toBe(0);
+          expect(Math.abs(result.tickUpper % spacing)).toBe(0);
+        });
+      });
+
+      it('should work with actual WETH/USDC pool data from fork', async () => {
+        // This test uses the exact pool data from our test environment
+        if (!env || !env.poolData) {
+          console.log('Skipping - pool data not available');
+          return;
+        }
+
+        const poolTick = env.poolData.tick;
+        const poolFee = env.poolData.fee || 500; // WETH/USDC 0.05% pool
+
+        console.log(`Testing with actual pool: tick=${poolTick}, fee=${poolFee}`);
+
+        // Test creating a ±5% range around current price
+        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          poolTick,
+          5,  // 5% above
+          5,  // 5% below
+          poolFee
+        );
+
+        // Verify the range is valid
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+
+        // Verify alignment to the pool's tick spacing
+        const expectedSpacing = poolFee === 100 ? 1 :
+                               poolFee === 500 ? 10 :
+                               poolFee === 3000 ? 60 : 200;
+
+        expect(Math.abs(result.tickLower % expectedSpacing)).toBe(0);
+        expect(Math.abs(result.tickUpper % expectedSpacing)).toBe(0);
+
+        // Verify the range is approximately ±5% (±500 ticks)
+        const upperOffset = result.tickUpper - poolTick;
+        const lowerOffset = poolTick - result.tickLower;
+
+        // Allow for spacing alignment variations
+        expect(upperOffset).toBeGreaterThan(490);
+        expect(upperOffset).toBeLessThan(510);
+        expect(lowerOffset).toBeGreaterThan(490);
+        expect(lowerOffset).toBeLessThan(510);
+
+        console.log(`Created range: [${result.tickLower}, ${result.tickUpper}] from tick ${poolTick}`);
+      });
+    });
+  });
 });

@@ -253,11 +253,84 @@ export function getPlatformFeeTiers(platformId) {
     throw new Error(`Platform ${platformId} is not supported`);
   }
 
-  if (!platform.feeTiers || !Array.isArray(platform.feeTiers) || platform.feeTiers.length === 0) {
+  if (!platform.feeTiers || typeof platform.feeTiers !== 'object' || Array.isArray(platform.feeTiers)) {
     throw new Error(`Platform ${platformId} feeTiers not configured`);
   }
 
-  return platform.feeTiers;
+  const feeArray = Object.keys(platform.feeTiers).map(Number);
+  if (feeArray.length === 0) {
+    throw new Error(`Platform ${platformId} feeTiers not configured`);
+  }
+
+  return feeArray;
+}
+
+/**
+ * Get tick spacing for a specific fee tier on a platform
+ * @param {string} platformId - Platform identifier (e.g., 'uniswapV3')
+ * @param {number} fee - Fee tier in basis points (e.g., 500)
+ * @returns {number} Tick spacing for the fee tier
+ * @throws {Error} If platform is not supported, feeTiers not configured, or fee tier not found
+ * @example
+ * const spacing = getPlatformTickSpacing('uniswapV3', 500);
+ * // Returns: 10
+ * @since 1.0.0
+ */
+export function getPlatformTickSpacing(platformId, fee) {
+  validatePlatformId(platformId);
+
+  if (!Number.isFinite(fee)) {
+    throw new Error(`Invalid fee: ${fee}. Must be a finite number.`);
+  }
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!platform.feeTiers || typeof platform.feeTiers !== 'object' || Array.isArray(platform.feeTiers)) {
+    throw new Error(`Platform ${platformId} feeTiers not configured`);
+  }
+
+  const feeConfig = platform.feeTiers[fee];
+  if (!feeConfig || typeof feeConfig.spacing !== 'number') {
+    const availableFees = Object.keys(platform.feeTiers).join(', ');
+    throw new Error(`Invalid fee tier: ${fee}. Must be one of: ${availableFees}`);
+  }
+
+  return feeConfig.spacing;
+}
+
+/**
+ * Get tick bounds for a platform
+ * @param {string} platformId - Platform identifier (e.g., 'uniswapV3')
+ * @returns {{minTick: number, maxTick: number}} Tick bounds for the platform
+ * @throws {Error} If platform is not supported or tick bounds not configured
+ * @example
+ * const bounds = getPlatformTickBounds('uniswapV3');
+ * // Returns: { minTick: -887272, maxTick: 887272 }
+ * @since 1.0.0
+ */
+export function getPlatformTickBounds(platformId) {
+  validatePlatformId(platformId);
+
+  const platform = platforms[platformId];
+  if (!platform) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (!Number.isFinite(platform.minTick) || !Number.isFinite(platform.maxTick)) {
+    throw new Error(`Platform ${platformId} tick bounds not configured`);
+  }
+
+  if (platform.minTick >= platform.maxTick) {
+    throw new Error(`Platform ${platformId} invalid tick bounds: minTick must be less than maxTick`);
+  }
+
+  return {
+    minTick: platform.minTick,
+    maxTick: platform.maxTick
+  };
 }
 
 /**
@@ -422,9 +495,8 @@ export function lookupPlatformById(platformId, chainId) {
     throw new Error(`Platform ${platformId} features not configured`);
   }
 
-  if (!metadata.feeTiers || !Array.isArray(metadata.feeTiers)) {
-    throw new Error(`Platform ${platformId} feeTiers not configured`);
-  }
+  // Validate feeTiers using our helper (which validates the object format)
+  const feeTiersArray = getPlatformFeeTiers(platformId);
 
   // Combine metadata and addresses
   return {
@@ -438,7 +510,7 @@ export function lookupPlatformById(platformId, chainId) {
     color: metadata.color,
     description: metadata.description,
     features: metadata.features,
-    feeTiers: metadata.feeTiers
+    feeTiers: feeTiersArray
   };
 }
 

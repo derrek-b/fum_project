@@ -16,8 +16,16 @@ const platforms = {
       concentratedLiquidity: true,
       multipleFeeTiers: true,
     },
-    // Supported fee tiers (in basis points)
-    feeTiers: [100, 500, 3000, 10000],
+    // Supported fee tiers with tick spacing (in basis points)
+    feeTiers: {
+      100: { spacing: 1 },    // 0.01% fee = 1 tick spacing
+      500: { spacing: 10 },   // 0.05% fee = 10 tick spacing
+      3000: { spacing: 60 },  // 0.3% fee = 60 tick spacing
+      10000: { spacing: 200 } // 1% fee = 200 tick spacing
+    },
+    // Uniswap V3 tick bounds
+    minTick: -887272,
+    maxTick: 887272,
     // The Graph subgraph IDs and query types for different chains
     subgraphs: {
       1: {

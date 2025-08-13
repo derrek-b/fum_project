@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-08-12T15:41:12.514Z
+Generated on: 2025-08-13T20:05:57.541Z
 
 ## Table of Contents
 
@@ -271,6 +271,8 @@ Token configuration with addresses on multiple chains
 - `getPlatformColor` (function)
 - `getPlatformLogo` (function)
 - `getPlatformFeeTiers` (function)
+- `getPlatformTickSpacing` (function)
+- `getPlatformTickBounds` (function)
 - `getAvailablePlatforms` (function)
 - `lookupPlatformById` (function)
 - `lookupSupportedPlatformIds` (function)
