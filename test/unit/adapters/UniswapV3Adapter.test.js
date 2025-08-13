@@ -8868,7 +8868,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 5;
         const fee = 100; // 0.01% fee tier
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -8903,7 +8903,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 10;
         const fee = 500; // 0.05% fee tier
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -8932,7 +8932,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 15;
         const fee = 3000; // 0.3% fee tier
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -8962,7 +8962,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 20;
         const fee = 10000; // 1% fee tier
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -8992,7 +8992,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 10;
         const fee = 500; // 0.05% fee tier
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -9019,7 +9019,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 0.01;
         const fee = 500; // 0.05% fee tier (spacing=10)
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -9047,7 +9047,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const lowerPercent = 100;
         const fee = 3000; // 0.3% fee tier (spacing=60)
 
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           currentTick,
           upperPercent,
           lowerPercent,
@@ -9074,115 +9074,115 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Error Cases', () => {
       it('should throw error for invalid currentTick', () => {
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(NaN, 10, 10, 500)
+          adapter.calculateTickRangeFromPercentages(NaN, 10, 10, 500)
         ).toThrow('Invalid currentTick: NaN. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(Infinity, 10, 10, 500)
+          adapter.calculateTickRangeFromPercentages(Infinity, 10, 10, 500)
         ).toThrow('Invalid currentTick: Infinity. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(null, 10, 10, 500)
+          adapter.calculateTickRangeFromPercentages(null, 10, 10, 500)
         ).toThrow('Invalid currentTick: null. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(undefined, 10, 10, 500)
+          adapter.calculateTickRangeFromPercentages(undefined, 10, 10, 500)
         ).toThrow('Invalid currentTick: undefined. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages("100", 10, 10, 500)
+          adapter.calculateTickRangeFromPercentages("100", 10, 10, 500)
         ).toThrow('Invalid currentTick: 100. Must be a finite number.');
       });
 
       it('should throw error for invalid upperPercent', () => {
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, NaN, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, NaN, 10, 500)
         ).toThrow('Invalid upperPercent: NaN. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, Infinity, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, Infinity, 10, 500)
         ).toThrow('Invalid upperPercent: Infinity. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, null, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, null, 10, 500)
         ).toThrow('Invalid upperPercent: null. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, "10", 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, "10", 10, 500)
         ).toThrow('Invalid upperPercent: 10. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 0, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, 0, 10, 500)
         ).toThrow('Invalid upperPercent: 0. Must be between 0 and 100 (exclusive of 0).');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, -5, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, -5, 10, 500)
         ).toThrow('Invalid upperPercent: -5. Must be between 0 and 100 (exclusive of 0).');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 101, 10, 500)
+          adapter.calculateTickRangeFromPercentages(0, 101, 10, 500)
         ).toThrow('Invalid upperPercent: 101. Must be between 0 and 100 (exclusive of 0).');
       });
 
       it('should throw error for invalid lowerPercent', () => {
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, NaN, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, NaN, 500)
         ).toThrow('Invalid lowerPercent: NaN. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, Infinity, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, Infinity, 500)
         ).toThrow('Invalid lowerPercent: Infinity. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, null, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, null, 500)
         ).toThrow('Invalid lowerPercent: null. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, "10", 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, "10", 500)
         ).toThrow('Invalid lowerPercent: 10. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 0, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, 0, 500)
         ).toThrow('Invalid lowerPercent: 0. Must be between 0 and 100 (exclusive of 0).');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, -5, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, -5, 500)
         ).toThrow('Invalid lowerPercent: -5. Must be between 0 and 100 (exclusive of 0).');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 101, 500)
+          adapter.calculateTickRangeFromPercentages(0, 10, 101, 500)
         ).toThrow('Invalid lowerPercent: 101. Must be between 0 and 100 (exclusive of 0).');
       });
 
       it('should throw error for invalid fee', () => {
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, NaN)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, NaN)
         ).toThrow('Invalid fee: NaN. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, Infinity)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, Infinity)
         ).toThrow('Invalid fee: Infinity. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, null)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, null)
         ).toThrow('Invalid fee: null. Must be a finite number.');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, "500")
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, "500")
         ).toThrow('Invalid fee: 500. Must be a finite number.');
       });
 
       it('should throw error for invalid fee tier values', () => {
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 250)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, 250)
         ).toThrow('Invalid fee tier: 250. Must be one of: 100, 500, 3000, 10000');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 0)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, 0)
         ).toThrow('Invalid fee tier: 0. Must be one of: 100, 500, 3000, 10000');
 
         expect(() =>
-          UniswapV3Adapter.calculateTickRangeFromPercentages(0, 10, 10, 999)
+          adapter.calculateTickRangeFromPercentages(0, 10, 10, 999)
         ).toThrow('Invalid fee tier: 999. Must be one of: 100, 500, 3000, 10000');
       });
 
@@ -9198,7 +9198,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ];
 
         testCases.forEach(({ fee, spacing }) => {
-          const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+          const result = adapter.calculateTickRangeFromPercentages(
             realPoolTick, // Use real tick from fork
             10,
             10,
@@ -9223,7 +9223,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         console.log(`Testing with actual pool: tick=${poolTick}, fee=${poolFee}`);
 
         // Test creating a ±5% range around current price
-        const result = UniswapV3Adapter.calculateTickRangeFromPercentages(
+        const result = adapter.calculateTickRangeFromPercentages(
           poolTick,
           5,  // 5% above
           5,  // 5% below
