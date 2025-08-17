@@ -7,6 +7,7 @@ const tokens = {
   "USDC": {
     name: "USD Coin",
     symbol: "USDC",
+    displaySymbol: "USDC",
     decimals: 6,
     coingeckoId: "usd-coin",
     addresses: {
@@ -21,7 +22,8 @@ const tokens = {
   // USDT
   "USD₮0": {
     name: "Tether USD",
-    symbol: "USDT",
+    symbol: "USD₮0",
+    displaySymbol: "USDT",
     decimals: 6,
     coingeckoId: "tether",
     addresses: {
@@ -37,6 +39,7 @@ const tokens = {
   "WETH": {
     name: "Wrapped Ether",
     symbol: "WETH",
+    displaySymbol: "WETH",
     decimals: 18,
     coingeckoId: "ethereum",
     addresses: {
@@ -52,6 +55,7 @@ const tokens = {
   "WBTC": {
     name: "Wrapped BTC",
     symbol: "WBTC",
+    displaySymbol: "WBTC",
     decimals: 8,
     coingeckoId: "wrapped-bitcoin",
     addresses: {
@@ -67,6 +71,7 @@ const tokens = {
   "LINK": {
     name: "Chainlink",
     symbol: "LINK",
+    displaySymbol: "LINK",
     decimals: 18,
     coingeckoId: "chainlink",
     addresses: {

@@ -76,7 +76,7 @@ function validateTokenAddresses(tokenKey, addresses, expectedChainIds) {
 
 describe('Token Configuration Validation', () => {
   it('should have all required properties for every token', () => {
-    const requiredStringProperties = ['name', 'symbol', 'coingeckoId', 'logoURI'];
+    const requiredStringProperties = ['name', 'symbol', 'displaySymbol', 'coingeckoId', 'logoURI'];
     const requiredNumberProperties = ['decimals'];
     const requiredObjectProperties = ['addresses'];
     const requiredBooleanProperties = ['isStablecoin'];
@@ -137,12 +137,17 @@ describe('Token Configuration Validation', () => {
         tokenErrors.push(`addresses validation failed: ${error.message}`);
       }
 
-      // Validate that symbol matches or is a reasonable variant of the token key
-      // Note: We allow for cases like key="USD₮0" with symbol="USDT"
+      // Validate that symbol matches the token key for consistent lookups
       if (token.symbol && tokenKey !== token.symbol) {
-        // This is informational - some tokens have different keys vs symbols
-        // e.g., "USD₮0" key with "USDT" symbol
-        // Just ensure symbol is not empty, which we already check above
+        tokenErrors.push(`Symbol "${token.symbol}" must match token key "${tokenKey}" for consistent lookups`);
+      }
+      
+      // Validate displaySymbol is present and reasonable for user display
+      if (token.displaySymbol) {
+        // displaySymbol should be a clean version without special characters for user interfaces
+        if (!/^[A-Z0-9]+$/.test(token.displaySymbol)) {
+          tokenErrors.push(`displaySymbol "${token.displaySymbol}" should contain only uppercase letters and numbers for user display`);
+        }
       }
 
       // If there are errors for this token, add them to the main errors array

@@ -5,6 +5,55 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2025-08-17
+
+### Fixed - Critical Token Lookup Bug
+
+#### **BREAKING CHANGES - Token Configuration**
+- **Fixed USD₮0 token symbol mismatch**: Changed `symbol` from `"USDT"` to `"USD₮0"` to match configuration key
+  - **Root Cause**: AutomationService stored tokens by symbol (`"USDT"`) but `getTokenAddress()` expected config key (`"USD₮0"`)
+  - **Impact**: Token balance fetching was failing with "Token USDT not found" errors
+  - **Solution**: Made symbol match the configuration key for consistent internal lookups
+  - **Before**: `{ "USD₮0": { symbol: "USDT", ... } }`
+  - **After**: `{ "USD₮0": { symbol: "USD₮0", ... } }`
+
+#### **Added displaySymbol Property**
+- **Added `displaySymbol` to all token configurations**: New property for user-friendly display
+  - USD₮0 gets `displaySymbol: "USDT"` (clean version without special characters)
+  - All other tokens get `displaySymbol` same as `symbol` (USDC, WETH, WBTC, LINK)
+  - Enables clean separation between internal lookups and user interfaces
+  - Required property validated by test suite
+
+#### **Enhanced Token Validation Tests**
+- **Updated token configuration tests**: Added comprehensive validation for new `displaySymbol` property
+  - Added `displaySymbol` to required string properties
+  - Added validation that `symbol` matches token key for consistent lookups
+  - Added validation that `displaySymbol` contains only uppercase letters/numbers
+  - Ensures configuration integrity and prevents future lookup failures
+
+#### **Benefits**
+- **Fixes token balance fetching**: Service initialization no longer fails on USD₮0 token lookup
+- **Maintains official symbols**: Preserves special characters in official token symbols (₮)
+- **Improves user experience**: Provides clean display symbols for UI components
+- **Prevents regressions**: Test validation ensures symbol/key consistency
+
+#### **Migration Guide**
+```javascript
+// No code changes required for consumers
+// Token lookups that were failing will now work correctly
+
+// Before (0.15.x) - Token lookups failed
+const balance = await fetchTokenBalances(vault, ['USD₮0']); // Failed with "Token USDT not found"
+
+// After (0.16.x) - Token lookups work correctly
+const balance = await fetchTokenBalances(vault, ['USD₮0']); // Works correctly
+
+// New displaySymbol property available for UI display
+const config = getTokenConfig('USD₮0');
+console.log(config.symbol);        // "USD₮0" (for internal lookups)
+console.log(config.displaySymbol); // "USDT" (for user display)
+```
+
 ## [0.15.0] - 2025-08-12
 
 ### Changed - Repository Maintenance
