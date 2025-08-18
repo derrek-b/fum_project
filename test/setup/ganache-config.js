@@ -25,7 +25,7 @@ export const TEST_CONFIG = {
     : 'https://arb1.arbitrum.io/rpc', // Fallback to public RPC
   
   // Test accounts
-  mnemonic: 'test test test test test test test test test test test junk',
+  mnemonic: 'debris coral coral sleep shed prison nation mountain fatigue prosper dose portion',
   accountCount: 10,
   defaultBalance: 10000, // ETH per account
   
@@ -36,27 +36,27 @@ export const TEST_CONFIG = {
   quiet: process.env.NODE_ENV === 'test',
 };
 
-// Deterministic test accounts derived from mnemonic
+// Deterministic test accounts derived from custom mnemonic
 export const TEST_ACCOUNTS = [
   {
-    address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+    address: '0x18eE269ff740eA684da2Be21dE294e44253D0eb8',
+    privateKey: '0x111cebb9a4c4f2dbc6df8404a145bf7018b7aa857e7b54e76189e7300004a4a0'
   },
   {
-    address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-    privateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
+    address: '0x45695CF68386Ab226678F238455a8Dd41c028d69',
+    privateKey: '0xd1fa41caac59aa98a67a21e77580b9ad136c67efa79ecab073b4cbfdf23c0901'
   },
   {
-    address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-    privateKey: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a'
+    address: '0xDAAe129a01d2A49cD031246D21f1bD7812e1F059',
+    privateKey: '0x68ae895aa97f0a547d9a34f39e0f3bb72706f0c56a4ce2e03fe91738abb09a5d'
   },
   {
-    address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
-    privateKey: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6'
+    address: '0xe2dD4a816bB1a4A2128053F5b9CF59Eeeda07E12',
+    privateKey: '0x412dc9b4712fc682f9aeaa51466b6d05a2cce5720b65a241fe2444754fae454f'
   },
   {
-    address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
-    privateKey: '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a'
+    address: '0xabA472B2EA519490EE10E643A422D578a507197A',
+    privateKey: '0x153b8bcb033769a3f3d51b6c2c99be54e76ea190a20752a308a7ec0873383470'
   }
 ];
 

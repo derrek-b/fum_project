@@ -265,7 +265,7 @@ describe('Chain Helpers', () => {
         const address = getExecutorAddress(1337);
 
         expect(typeof address).toBe('string');
-        expect(address).toBe('0x70997970c51812dc3a010c7d01b50e0d17dc79c8');
+        expect(address).toBe('0x18eE269ff740eA684da2Be21dE294e44253D0eb8');
       });
     });
 

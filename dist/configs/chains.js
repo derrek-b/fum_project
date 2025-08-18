@@ -41,7 +41,7 @@ const chains = {
     blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
     envPK: process.env.LOCAL_DEPLOYER_PK,
     executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
-    executorAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+    executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",

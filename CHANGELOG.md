@@ -5,6 +5,50 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2025-08-18
+
+### Fixed - Account Separation
+- **Separated deployer and executor accounts**: Updated executor address to use account #4 instead of account #0
+  - **Before**: Both vault deployer and automation executor used account #0 (`0x18eE269ff740eA684da2Be21dE294e44253D0eb8`)
+  - **After**: Deployer uses account #0, executor uses account #4 (`0xabA472B2EA519490EE10E643A422D578a507197A`)
+  - **Benefits**: Eliminates nonce conflicts and transaction authorization issues between vault operations and automation execution
+
+## [0.17.0] - 2025-08-18
+
+### Fixed - Deterministic Test Environment
+
+#### **BREAKING CHANGES - Test Configuration**
+- **Fixed non-deterministic contract addresses**: Replaced default Hardhat test mnemonic with custom mnemonic for consistent address generation
+  - **Root Cause**: Someone was using the default Hardhat test mnemonic on real Arbitrum mainnet, causing nonce changes and non-deterministic contract addresses
+  - **Impact**: Tests would get different contract addresses between runs, breaking address validation and causing hard-to-debug failures
+  - **Solution**: Implemented custom mnemonic `'debris coral coral sleep shed prison nation mountain fatigue prosper dose portion'`
+  - **Before**: Used `'test test test test test test test test test test test junk'` (Hardhat default)
+  - **After**: Uses custom mnemonic ensuring deterministic addresses across all test runs
+
+- **Updated test executor address for chain 1337**: Changed from `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` to `0xabA472B2EA519490EE10E643A422D578a507197A`
+  - **Root Cause**: Vault deployer and executor were using the same account, causing transaction conflicts
+  - **Impact**: Strategy transactions would fail with nonce issues and authorization errors
+  - **Solution**: Updated `executorAddress` in chains.js to use account #4 (separate from deployer account #0)
+
+#### **Added Fast-Fail Address Validation**
+- **Added deterministic address validation**: Contract deployment now validates addresses against stored values and fails fast if they don't match
+  - **Benefits**: Catches address generation issues within seconds instead of running 2-3 minute tests before hitting errors
+  - **Implementation**: Compares deployed addresses with stored addresses in contracts.js file
+  - **Error handling**: Provides clear error messages about potential causes (mnemonic changes, deployment order, etc.)
+
+#### **Updated Test Account Configuration**
+- **Updated TEST_ACCOUNTS array**: All test accounts now derived from custom mnemonic
+  - Account 0: `0x18eE269ff740eA684da2Be21dE294e44253D0eb8` (deployer/vault owner)
+  - Account 1: `0x45695CF68386Ab226678F238455a8Dd41c028d69`
+  - Account 2: `0xDAAe129a01d2A49cD031246D21f1bD7812e1F059`
+  - Account 3: `0xe2dD4a816bB1a4A2128053F5b9CF59Eeeda07E12`
+  - Account 4: `0xabA472B2EA519490EE10E643A422D578a507197A` (executor/automation service)
+
+#### **Migration Guide**
+- **For test environments**: No action required - new addresses will be automatically used
+- **For custom test setups**: Update any hardcoded addresses to use the new deterministic addresses
+- **For CI/CD**: Tests should now be more reliable with consistent contract addresses
+
 ## [0.16.0] - 2025-08-17
 
 ### Fixed - Critical Token Lookup Bug
