@@ -257,6 +257,18 @@ export async function setupTestEnvironment(options = {}) {
     };
   }
 
+  // Fund additional test accounts for use in tests
+  console.log('💰 Funding test accounts...');
+  for (let i = 1; i < Math.min(5, ganache.signers.length); i++) {
+    const tx = await ganache.signers[0].sendTransaction({
+      to: ganache.signers[i].address,
+      value: ethers.parseEther('10')
+    });
+    await tx.wait();
+    console.log(`  - Funded account ${i} (${ganache.signers[i].address}) with 10 ETH`);
+  }
+  console.log('  ✅ Test accounts funded!');
+
   // Create test environment object
   const env = {
     // Ganache utilities

@@ -1067,6 +1067,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const normalizedPositions = {};
       if (result.positions && Object.keys(result.positions).length > 0) {
         Object.values(result.positions).forEach(position => {
+          // Skip positions with zero liquidity (closed positions)
+          if (BigInt(position.liquidity) === 0n) {
+            return;
+          }
           normalizedPositions[position.id] = {
             id: position.id,
             pool: position.pool,

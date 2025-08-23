@@ -4500,6 +4500,152 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.positions).toEqual({});
         expect(result.poolData).toEqual({});
       });
+
+      it('should filter out positions with zero liquidity', async () => {
+        // 1. Setup - Use signers[0] as a regular user
+        const user = env.signers[0];
+        const vaultAddress = await env.testVault.getAddress();
+
+        // Get existing position to copy parameters
+        const existingPositions = await adapter.getPositions(vaultAddress, env.provider);
+        const existingPosition = Object.values(existingPositions.positions)[0];
+
+        // 2. Create a new position as the user (not through vault)
+        const positionManagerABI = [
+          'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) calldata params) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
+          'function safeTransferFrom(address from, address to, uint256 tokenId) external'
+        ];
+
+        const positionManager = new ethers.Contract(
+          adapter.addresses.positionManagerAddress,
+          positionManagerABI,
+          user
+        );
+
+        // Approve tokens before minting
+        const wethContract = new ethers.Contract(
+          env.wethAddress,
+          [
+            'function approve(address spender, uint256 amount) external returns (bool)',
+            'function balanceOf(address account) external view returns (uint256)'
+          ],
+          user
+        );
+        const usdcContract = new ethers.Contract(
+          env.usdcAddress,
+          [
+            'function approve(address spender, uint256 amount) external returns (bool)',
+            'function balanceOf(address account) external view returns (uint256)'
+          ],
+          user
+        );
+
+        await (await wethContract.approve(adapter.addresses.positionManagerAddress, ethers.parseEther('0.1'))).wait();
+        await (await usdcContract.approve(adapter.addresses.positionManagerAddress, ethers.parseUnits('100', 6))).wait();
+
+        // Sort tokens to match pool order - same pattern as test-env.js
+        const wethAmount = ethers.parseEther('0.1'); // Normal amount
+        const usdcAmount = ethers.parseUnits('100', 6); // 100 USDC
+        const [token0, token1, amount0Desired, amount1Desired] =
+          env.wethAddress.toLowerCase() < env.usdcAddress.toLowerCase()
+            ? [env.wethAddress, env.usdcAddress, wethAmount, usdcAmount]
+            : [env.usdcAddress, env.wethAddress, usdcAmount, wethAmount];
+
+        // Get pool data first
+        const poolData = await adapter.fetchPoolData(
+          token0,
+          token1,
+          500,
+          env.provider
+        );
+
+        // Use adapter to generate create position data (no position.id = new position)
+        const createPositionData = await adapter.generateCreatePositionData({
+          position: {
+            tickLower: existingPosition.tickLower,
+            tickUpper: existingPosition.tickUpper
+            // No id means create new position
+          },
+          token0Amount: amount0Desired.toString(),
+          token1Amount: amount1Desired.toString(),
+          provider: env.provider,
+          walletAddress: user.address,
+          poolData: poolData,
+          token0Data: poolData.token0,
+          token1Data: poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 2
+        });
+
+        // Execute the create position transaction
+        const mintTx = await user.sendTransaction({
+          to: createPositionData.to,
+          data: createPositionData.data,
+          value: createPositionData.value || 0
+        });
+        const mintReceipt = await mintTx.wait();
+
+        // Extract tokenId from the transaction receipt logs
+        const mintEventLog = mintReceipt.logs.find(log =>
+          log.address.toLowerCase() === adapter.addresses.positionManagerAddress.toLowerCase()
+        );
+
+        // Extract tokenId directly from Transfer event topics[3]
+        const newTokenId = BigInt(mintEventLog.topics[3]);
+
+        // For liquidity, we can use a placeholder since we'll remove it all anyway
+        const liquidity = '1000000'; // Non-zero placeholder
+
+        // 3. Remove all liquidity from the position
+
+        const removeLiquidityData = await adapter.generateRemoveLiquidityData({
+          position: {
+            id: newTokenId.toString(),
+            pool: existingPosition.pool,
+            tickLower: existingPosition.tickLower,
+            tickUpper: existingPosition.tickUpper,
+            liquidity: liquidity.toString()
+          },
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: user.address,
+          recipient: user.address,
+          poolData: poolData,
+          token0Data: poolData.token0,
+          token1Data: poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 2
+        });
+
+        const removeTx = await user.sendTransaction({
+          to: removeLiquidityData.to,
+          data: removeLiquidityData.data,
+          value: removeLiquidityData.value || 0
+        });
+        await removeTx.wait();
+
+        // 4. Transfer the zero-liquidity NFT to the vault
+        await (await positionManager.safeTransferFrom(
+          user.address,
+          vaultAddress,
+          newTokenId
+        )).wait();
+
+        // 5. Verify filtering behavior
+        // Get positions through regular method (should include zero-liquidity)
+        const allPositions = await adapter.getPositions(vaultAddress, env.provider);
+        expect(allPositions.positions[newTokenId]).toBeDefined();
+        expect(allPositions.positions[newTokenId].liquidity).toBe('0');
+
+        // Get positions through VDS method (should exclude zero-liquidity)
+        const vdsPositions = await adapter.getPositionsForVDS(vaultAddress, env.provider);
+        expect(vdsPositions.positions[newTokenId]).toBeUndefined();
+
+        // Verify counts
+        const allCount = Object.keys(allPositions.positions).length;
+        const vdsCount = Object.keys(vdsPositions.positions).length;
+        expect(vdsCount).toBe(allCount - 1); // VDS should have one less
+      }, 60000); // Extended timeout for this complex test
     });
 
     describe('Error Cases', () => {

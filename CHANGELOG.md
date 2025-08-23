@@ -5,6 +5,48 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2025-08-23
+
+### Enhanced - Position Data Quality & Testing
+
+#### **Zero Liquidity Position Filtering**
+- **Added intelligent position filtering**: `getPositionsForVDS` now automatically filters out positions with zero liquidity
+  - **Root Cause**: Zero liquidity positions appear as valid positions but cannot generate fees or be managed effectively
+  - **Implementation**: Added liquidity validation check that filters positions where `liquidity === '0'`
+  - **Benefits**: VDS (Vault Data Service) only receives positions that can actually generate returns
+  - **Logging**: Added detailed filtering statistics showing total vs active positions
+
+#### **Enhanced Test Infrastructure**
+- **Fixed contract ABI completeness**: Resolved test failures due to incomplete token contract ABIs
+  - **Issue**: Test token contracts only included `approve` function, missing required `balanceOf` function
+  - **Fix**: Added `balanceOf` function to all test token contract ABI definitions
+  - **Impact**: Eliminates "balanceOf is not a function" errors in position creation tests
+- **Improved test account funding**: Enhanced test environment with automatic account funding
+  - **Added**: Automatic ETH funding for test accounts 1-4 during environment setup
+  - **Amount**: 10 ETH per account for comprehensive testing scenarios
+  - **Benefits**: Eliminates "insufficient funds" errors in multi-account test scenarios
+  - **Location**: Integrated into `test-env.js` setup process for all tests
+
+#### **Test Robustness Improvements**
+- **Simplified event parsing**: Enhanced position token ID extraction from blockchain events
+  - **Method**: Direct extraction from Transfer event `topics[3]` instead of interface parsing
+  - **Reliability**: Eliminates parsing failures when event interface cannot decode logs
+  - **Performance**: Faster token ID extraction without complex parsing overhead
+- **Enhanced debugging workflow**: Improved test debugging and cleanup processes
+  - **Debug markers**: Used consistent emoji markers (🔍) for easy identification and removal
+  - **Systematic cleanup**: Removed all debug logging after successful test validation
+
+#### **Architecture Benefits**
+- **Data quality**: VDS consumers get higher quality position data without manual filtering
+- **Test reliability**: More robust test suite with fewer intermittent failures
+- **Developer experience**: Better debugging tools and cleaner test output
+- **Future-proof**: Enhanced event parsing patterns applicable to other blockchain interactions
+
+#### **Migration Impact**
+- **No breaking changes**: Existing code continues to work, but now receives filtered position data
+- **Improved performance**: Applications processing positions will skip zero-liquidity entries automatically
+- **Better analytics**: Position counts and statistics now reflect only productive positions
+
 ## [0.17.1] - 2025-08-18
 
 ### Fixed - Account Separation
