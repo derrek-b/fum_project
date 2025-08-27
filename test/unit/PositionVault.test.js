@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 0.3.1", function() {
+describe("PositionVault - 0.3.2", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
@@ -191,10 +191,99 @@ describe("PositionVault - 0.3.1", function() {
     });
   });
 
+  // Test for executor management
+  describe("Executor Management", function() {
+    it("should set executor and emit ExecutorChanged event with authorization", async function() {
+      // Initially executor should be zero address
+      expect(await vault.executor()).to.equal(ethers.ZeroAddress);
+
+      // Set executor
+      const tx = await vault.setExecutor(executorWallet.address);
+      
+      // Check executor was set
+      expect(await vault.executor()).to.equal(executorWallet.address);
+
+      // Check event was emitted correctly
+      await expect(tx)
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(executorWallet.address, true);
+    });
+
+    it("should remove executor and emit ExecutorChanged event with revocation", async function() {
+      // First set an executor
+      await vault.setExecutor(executorWallet.address);
+      expect(await vault.executor()).to.equal(executorWallet.address);
+
+      // Remove executor
+      const tx = await vault.removeExecutor();
+      
+      // Check executor was cleared
+      expect(await vault.executor()).to.equal(ethers.ZeroAddress);
+
+      // Check event was emitted with the old executor address and false
+      await expect(tx)
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(executorWallet.address, false);
+    });
+
+    it("should only allow owner to set executor", async function() {
+      await expect(
+        vault.connect(user1).setExecutor(executorWallet.address)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should only allow owner to remove executor", async function() {
+      await vault.setExecutor(executorWallet.address);
+      
+      await expect(
+        vault.connect(user1).removeExecutor()
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
+    });
+
+    it("should not allow setting zero address as executor", async function() {
+      await expect(
+        vault.setExecutor(ethers.ZeroAddress)
+      ).to.be.revertedWith("PositionVault: zero executor address");
+    });
+
+    it("should allow executor to call execute function", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      // Test execute function - using a simple call that should succeed
+      const targets = [await token.getAddress()];
+      const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
+
+      // This should not revert (executor is authorized)
+      await expect(vault.connect(executorWallet).execute(targets, data))
+        .to.not.be.reverted;
+    });
+
+    it("should not allow unauthorized user to call execute function", async function() {
+      // Don't set any executor, try with unauthorized user
+      const targets = [await token.getAddress()];
+      const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
+
+      await expect(
+        vault.connect(user1).execute(targets, data)
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should always allow owner to call execute function", async function() {
+      // Owner should be able to execute even without setting executor
+      const targets = [await token.getAddress()];
+      const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
+
+      // This should not revert (owner is always authorized)
+      await expect(vault.connect(owner).execute(targets, data))
+        .to.not.be.reverted;
+    });
+  });
+
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("0.3.1");
+      expect(await vault.getVersion()).to.equal("0.3.2");
     });
   });
 });

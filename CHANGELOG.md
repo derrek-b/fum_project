@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.3.2] - 2025-08-27
+### Changed
+- Enhanced ExecutorChanged event in PositionVault contract
+  - Added boolean parameter to indicate authorization (true) vs revocation (false)
+  - Event now emits `ExecutorChanged(address indexed executor, bool indexed isAuthorized)`
+  - Enables more efficient vault authorization workflow by eliminating need for additional contract calls
+- Updated removeExecutor function to emit the current executor address before clearing it
+  - Ensures authorization service can identify if revocation affects their service
+
+### Added
+- Comprehensive test suite for executor management functionality
+  - Tests for setExecutor and removeExecutor functions
+  - Event emission validation with new boolean parameter
+  - Authorization and access control testing
+
 ## [0.3.1] - 2025-04-16
 ### Added
 - Event monitoring system for automated strategies

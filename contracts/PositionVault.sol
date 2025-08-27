@@ -42,7 +42,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     event TokensWithdrawn(address indexed token, address indexed to, uint256 amount);
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
     event StrategyChanged(address indexed strategy);
-    event ExecutorChanged(address indexed executor);
+    event ExecutorChanged(address indexed executor, bool indexed isAuthorized);
 
     // NEW: Events for token and platform updates
     event TargetTokensUpdated(string[] tokens);
@@ -132,15 +132,15 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     function setExecutor(address _executor) external onlyOwner {
         require(_executor != address(0), "PositionVault: zero executor address");
         executor = _executor;
-        emit ExecutorChanged(executor);
+        emit ExecutorChanged(_executor, true);
     }
 
     /**
      * @notice De-authorises a executor
      */
     function removeExecutor() external onlyOwner {
+        emit ExecutorChanged(executor, false);
         executor = address(0);
-        emit ExecutorChanged(executor);
     }
 
     /**
@@ -272,6 +272,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.3.1";
+        return "0.3.2";
     }
 }
