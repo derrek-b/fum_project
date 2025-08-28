@@ -1,5 +1,36 @@
 # F.U.M. Project Changelog
 
+## v0.7.2 - 2025-01-28
+
+### Vault Authorization Revocation Workflow Implementation
+
+This release completes the vault authorization lifecycle by implementing a comprehensive revocation workflow with proper cleanup sequencing, event emissions, and strategy architecture improvements.
+
+#### **Vault Revocation Workflow Implementation**
+- **NEW**: Complete vault authorization revocation workflow with proper event sequencing
+- **NEW**: VaultOffboarded event emission for internal vault cleanup tracking
+- **NEW**: VaultMonitoringStopped event with listener removal details  
+- **NEW**: VaultPositionChecksCleared event from strategy cleanup
+
+#### **Event System Refactoring**
+- **REFACTOR**: Renamed internal events to avoid blockchain event conflicts (VaultOnboarded/VaultOffboarded vs VaultAuthGranted/VaultAuthRevoked)
+- **FIX**: Made EventManager.removeAllVaultListeners async to properly await removeListener calls
+- **NEW**: AllVaultListenersRemoved event emission with removal statistics
+- **IMPROVEMENT**: Added unknown listener type detection in EventManager.removeListener
+
+#### **Strategy Architecture Improvements**
+- **REFACTOR**: Made StrategyBase.cleanup() abstract requiring subclass implementation
+- **FIX**: Removed problematic listener tracking from StrategyBase to prevent iteration errors
+- **IMPROVEMENT**: BabyStepsStrategy.cleanup() now only manages strategy-specific state (lastPositionCheck)
+- **ARCHITECTURE**: Established clear separation - AutomationService manages infrastructure, Strategies handle business logic
+
+#### **Test Suite Enhancements**
+- **NEW**: Comprehensive vault revocation test suite (BS-1vault-1111.test.js)
+- **TEST**: Added VaultMonitoringStopped event verification
+- **TEST**: Added VaultPositionChecksCleared event verification
+- **TEST**: Added strategy lastPositionCheck cache cleanup verification
+- **FIX**: Use hasVault() instead of getVault() to prevent re-caching in tests
+
 ## v0.7.1 - 2025-01-28
 
 ### Vault Authorization Workflow Fixes
