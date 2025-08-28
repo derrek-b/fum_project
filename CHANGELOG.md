@@ -1,5 +1,32 @@
 # F.U.M. Project Changelog
 
+## v0.7.1 - 2025-01-28
+
+### Vault Authorization Workflow Fixes
+
+This patch release resolves critical issues with the vault authorization workflow, ensuring proper async handling and eliminating environment variable conflicts that were preventing the authorization test suite from completing successfully.
+
+#### **Critical Async/Await Fixes**
+- **CRITICAL FIX**: Fixed `handleNewVaultAuthorization` async execution - converted from floating promise chains to proper async/await pattern
+- **FIX**: Resolved "provider destroyed" errors during async initialization by eliminating premature cleanup
+- **FIX**: Fixed vault authorization test timing issues by increasing timeout from 15s to 60s
+
+#### **Environment Configuration Improvements**
+- **NEW**: Added `envPath` configuration parameter to AutomationService constructor for explicit environment file control
+- **FIX**: Resolved competing .env file conflicts between `.env.local` and `.env.test` that caused "AUTOMATION_PRIVATE_KEY not found" errors
+- **IMPROVEMENT**: Eliminated dependency on NODE_ENV checks for environment file loading
+
+#### **Test Suite Enhancements**
+- **NEW**: Complete vault authorization workflow test suite with event validation
+- **IMPROVEMENT**: Fixed async vault data retrieval in monitoring setup tests
+- **IMPROVEMENT**: Added comprehensive event capture for LiquidityAddedToPosition and monitoring events
+- **FIX**: Corrected test assertions for vault object property access
+
+#### **Debug & Logging Improvements**
+- **NEW**: Added detailed debug logging throughout handleNewVaultAuthorization workflow
+- **NEW**: Enhanced VaultDataService logging for Promise.all operations
+- **IMPROVEMENT**: Better error reporting for async operation failures
+
 ## v0.7.0 - 2025-01-27
 
 ### Major Service Initialization Workflow Refactor Complete
