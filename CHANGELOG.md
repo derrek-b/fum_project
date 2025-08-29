@@ -1,5 +1,41 @@
 # F.U.M. Project Changelog
 
+## v0.7.3 - 2025-01-29
+
+### Service Initialization Workflow Refactor
+
+This release delivers a major architectural improvement to service initialization, implementing a robust two-phase startup process with comprehensive error handling and consistent vault setup workflows.
+
+#### **Service Initialization Architecture** 
+- **REFACTOR**: Implemented two-phase initialization in AutomationService.start()
+  - **Phase 1**: Core service setup (must succeed) - provider, contracts, event subscriptions
+  - **Phase 2**: Vault loading (graceful failure handling) - individual vault setup and monitoring
+- **IMPROVEMENT**: Service can now start successfully with zero vaults and handle new authorizations
+- **FIX**: Core service failures no longer crash due to vault loading issues
+
+#### **Vault Setup Workflow Unification**
+- **NEW**: Created shared setupVault() method implementing consistent 1-2-3 flow: load → initialize strategy → start monitoring  
+- **REFACTOR**: Both service startup and new vault authorizations now use identical setup process
+- **SIMPLIFICATION**: Removed isNewAuthorization parameter - event emissions handled in appropriate contexts
+- **IMPROVEMENT**: All vault setup now includes comprehensive retry logic with RetryHelper
+
+#### **VaultRegistry Simplification**
+- **REFACTOR**: VaultRegistry.getAuthorizedVaults() now returns simple array of vault addresses
+- **REMOVED**: Complex vault data loading logic moved to appropriate service layer
+- **IMPROVEMENT**: Single responsibility - registry only handles authorization status checking
+
+#### **Enhanced Error Handling & Events**
+- **NEW**: ServiceStarted event with initialized vault addresses and failure counts
+- **NEW**: ServiceStartFailed event for core service initialization failures only
+- **IMPROVEMENT**: Meaningful return objects from start() instead of boolean values
+- **FIX**: Failed vault tracking and retry mechanisms work consistently across all vault loading contexts
+
+#### **Service Resilience Improvements**  
+- **ARCHITECTURE**: Clear separation of critical vs non-critical startup operations
+- **IMPROVEMENT**: Service remains operational even with persistent vault loading failures
+- **ENHANCEMENT**: Automatic recovery through periodic retry mechanism
+- **ROBUSTNESS**: Graceful degradation - service functions with partial vault loading success
+
 ## v0.7.2 - 2025-01-28
 
 ### Vault Authorization Revocation Workflow Implementation
