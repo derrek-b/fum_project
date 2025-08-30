@@ -1,5 +1,48 @@
 # F.U.M. Project Changelog
 
+## v0.7.4 - 2025-01-30
+
+### Production-Ready Error Handling & Resource Management
+
+This release eliminates infinite retry loops and implements persistent vault blacklisting with comprehensive cleanup workflows, making the automation service truly production-ready with bulletproof resource management.
+
+#### **Persistent Vault Blacklisting System**
+- **NEW**: Persistent vault blacklisting prevents infinite retry loops after 24 hours of failures (configurable)
+- **NEW**: Blacklist survives service restarts via JSON file storage with atomic writes  
+- **NEW**: Automatic blacklist removal on vault revocation (clean recovery path for users)
+- **NEW**: VaultBlacklisted and VaultUnblacklisted events for external monitoring
+- **ARCHITECTURE**: Required blacklistFilePath parameter ensures explicit configuration
+
+#### **Zombie Listener Recovery System** 
+- **FIX**: Event listeners marked for removal but still attached are now automatically reactivated
+- **IMPROVEMENT**: Prevents duplicate event handlers from accumulating during failed cleanups
+- **ENHANCEMENT**: All listener registration methods (filter, contract, interval) check for zombies
+- **RESILIENCE**: Vaults can recover from partial cleanup failures without permanent issues
+
+#### **Vault Cleanup Workflow Consolidation**
+- **REFACTOR**: Unified cleanup logic between vault revocation and failed setup scenarios
+- **ENHANCEMENT**: Added retryWithBackoff to cleanupVault for consistent error handling
+- **SIMPLIFICATION**: Single cleanup method handles both failure and revocation cases
+- **IMPROVEMENT**: Comprehensive result tracking with detailed event emission
+
+#### **Enhanced Service Resilience**
+- **IMPROVEMENT**: Service startup now skips blacklisted vaults with detailed logging
+- **NEW**: ServiceStarted event includes blacklistedVaults count for monitoring
+- **ENHANCEMENT**: Failed vault retry mechanism now properly blacklists persistent failures
+- **ROBUSTNESS**: Multiple recovery paths ensure vaults don't get permanently stuck
+
+#### **Test Infrastructure Updates**
+- **FIX**: All test configurations updated to include required blacklistFilePath parameter
+- **ENHANCEMENT**: Centralized blacklist configuration in ganache-setup.js
+- **NEW**: resetBlacklistFile() helper method for test cleanup
+- **IMPROVEMENT**: Tests inherit blacklist configuration automatically
+
+#### **Breaking Changes**
+- **BREAKING**: AutomationService constructor now requires blacklistFilePath parameter
+- **MIGRATION**: Add `blacklistFilePath: './path/to/.vault-blacklist.json'` to service configuration
+
+This release transforms the automation service from a proof-of-concept into a production-ready system with enterprise-grade error handling, resource management, and recovery mechanisms.
+
 ## v0.7.3 - 2025-01-29
 
 ### Service Initialization Workflow Refactor
