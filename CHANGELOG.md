@@ -1,6 +1,40 @@
 # F.U.M. Project Changelog
 
-## v0.7.4 - 2025-01-30
+## v0.7.5 - 2025-07-30
+
+### Service Shutdown Workflow & Graceful Termination
+
+This release delivers a complete refactor of the service shutdown workflow, implementing graceful termination with proper resource cleanup and preventing race conditions during service stop.
+
+#### **Service Shutdown Refactor**
+- **REFACTOR**: Simplified `.stop()` method from 130+ lines to ~60 lines using existing infrastructure
+- **IMPROVEMENT**: Parallel vault cleanup using `Promise.allSettled` for faster shutdown
+- **REMOVED**: Unnecessary 5-second wait for vault locks that could cause race conditions
+- **SIMPLIFICATION**: Reuses `cleanupVault` infrastructure from vault-revoke workflow
+
+#### **Graceful Shutdown Implementation**
+- **NEW**: `isShuttingDown` flag prevents new work from starting during shutdown
+- **ENHANCEMENT**: All event handlers check shutdown state before processing
+- **IMPROVEMENT**: Retry mechanism respects shutdown state
+- **ROBUSTNESS**: Public methods return early during shutdown with appropriate status
+
+#### **Resource Cleanup Improvements**
+- **FIX**: Provider cleanup now uses proper optional chaining to prevent errors
+- **NEW**: Fallback handling for providers without standard cleanup methods
+- **REMOVED**: Redundant registry.stopListening() call that duplicated cleanup
+- **SIMPLIFICATION**: VaultRegistry.stopListening() now defers to AutomationService
+
+#### **Dead Code Removal**
+- **REMOVED**: Unused `onVaultLoadFailed` callback and related infrastructure
+- **REMOVED**: Unused `onAuthorizationRevoked` callback
+- **CLEANUP**: VaultRegistry constructor simplified to only include used callbacks
+
+#### **Test Coverage**
+- **NEW**: Comprehensive service-stop workflow test with 1111 configuration
+- **TEST**: Validates graceful shutdown and event emissions
+- **TEST**: Error handling during shutdown with vault cleanup failures
+
+## v0.7.4 - 2025-07-30
 
 ### Production-Ready Error Handling & Resource Management
 
@@ -8,12 +42,12 @@ This release eliminates infinite retry loops and implements persistent vault bla
 
 #### **Persistent Vault Blacklisting System**
 - **NEW**: Persistent vault blacklisting prevents infinite retry loops after 24 hours of failures (configurable)
-- **NEW**: Blacklist survives service restarts via JSON file storage with atomic writes  
+- **NEW**: Blacklist survives service restarts via JSON file storage with atomic writes
 - **NEW**: Automatic blacklist removal on vault revocation (clean recovery path for users)
 - **NEW**: VaultBlacklisted and VaultUnblacklisted events for external monitoring
 - **ARCHITECTURE**: Required blacklistFilePath parameter ensures explicit configuration
 
-#### **Zombie Listener Recovery System** 
+#### **Zombie Listener Recovery System**
 - **FIX**: Event listeners marked for removal but still attached are now automatically reactivated
 - **IMPROVEMENT**: Prevents duplicate event handlers from accumulating during failed cleanups
 - **ENHANCEMENT**: All listener registration methods (filter, contract, interval) check for zombies
@@ -43,13 +77,13 @@ This release eliminates infinite retry loops and implements persistent vault bla
 
 This release transforms the automation service from a proof-of-concept into a production-ready system with enterprise-grade error handling, resource management, and recovery mechanisms.
 
-## v0.7.3 - 2025-01-29
+## v0.7.3 - 2025-07-29
 
 ### Service Initialization Workflow Refactor
 
 This release delivers a major architectural improvement to service initialization, implementing a robust two-phase startup process with comprehensive error handling and consistent vault setup workflows.
 
-#### **Service Initialization Architecture** 
+#### **Service Initialization Architecture**
 - **REFACTOR**: Implemented two-phase initialization in AutomationService.start()
   - **Phase 1**: Core service setup (must succeed) - provider, contracts, event subscriptions
   - **Phase 2**: Vault loading (graceful failure handling) - individual vault setup and monitoring
@@ -57,7 +91,7 @@ This release delivers a major architectural improvement to service initializatio
 - **FIX**: Core service failures no longer crash due to vault loading issues
 
 #### **Vault Setup Workflow Unification**
-- **NEW**: Created shared setupVault() method implementing consistent 1-2-3 flow: load → initialize strategy → start monitoring  
+- **NEW**: Created shared setupVault() method implementing consistent 1-2-3 flow: load → initialize strategy → start monitoring
 - **REFACTOR**: Both service startup and new vault authorizations now use identical setup process
 - **SIMPLIFICATION**: Removed isNewAuthorization parameter - event emissions handled in appropriate contexts
 - **IMPROVEMENT**: All vault setup now includes comprehensive retry logic with RetryHelper
@@ -73,13 +107,13 @@ This release delivers a major architectural improvement to service initializatio
 - **IMPROVEMENT**: Meaningful return objects from start() instead of boolean values
 - **FIX**: Failed vault tracking and retry mechanisms work consistently across all vault loading contexts
 
-#### **Service Resilience Improvements**  
+#### **Service Resilience Improvements**
 - **ARCHITECTURE**: Clear separation of critical vs non-critical startup operations
 - **IMPROVEMENT**: Service remains operational even with persistent vault loading failures
 - **ENHANCEMENT**: Automatic recovery through periodic retry mechanism
 - **ROBUSTNESS**: Graceful degradation - service functions with partial vault loading success
 
-## v0.7.2 - 2025-01-28
+## v0.7.2 - 2025-07-28
 
 ### Vault Authorization Revocation Workflow Implementation
 
@@ -88,7 +122,7 @@ This release completes the vault authorization lifecycle by implementing a compr
 #### **Vault Revocation Workflow Implementation**
 - **NEW**: Complete vault authorization revocation workflow with proper event sequencing
 - **NEW**: VaultOffboarded event emission for internal vault cleanup tracking
-- **NEW**: VaultMonitoringStopped event with listener removal details  
+- **NEW**: VaultMonitoringStopped event with listener removal details
 - **NEW**: VaultPositionChecksCleared event from strategy cleanup
 
 #### **Event System Refactoring**
@@ -110,7 +144,7 @@ This release completes the vault authorization lifecycle by implementing a compr
 - **TEST**: Added strategy lastPositionCheck cache cleanup verification
 - **FIX**: Use hasVault() instead of getVault() to prevent re-caching in tests
 
-## v0.7.1 - 2025-01-28
+## v0.7.1 - 2025-07-28
 
 ### Vault Authorization Workflow Fixes
 
@@ -137,7 +171,7 @@ This patch release resolves critical issues with the vault authorization workflo
 - **NEW**: Enhanced VaultDataService logging for Promise.all operations
 - **IMPROVEMENT**: Better error reporting for async operation failures
 
-## v0.7.0 - 2025-01-27
+## v0.7.0 - 2025-07-27
 
 ### Major Service Initialization Workflow Refactor Complete
 
@@ -200,7 +234,7 @@ This release represents a complete overhaul of the service initialization workfl
 
 This refactor establishes the foundation for production deployment with enterprise-grade testing, monitoring, and error handling capabilities.
 
-## v0.6.0 - 2025-01-27
+## v0.6.0 - 2025-07-27
 
 ### Service Initialization Workflow Refactor & Testing Complete
 
@@ -216,7 +250,7 @@ This refactor establishes the foundation for production deployment with enterpri
 - Removed position ID validation that prevented managing vaults with 0 positions
 - Updated `fetchPositions()` to handle empty position arrays correctly (returns `{}`)
 
-#### **Token Balance Structure Simplification**  
+#### **Token Balance Structure Simplification**
 - **BREAKING**: Simplified vault.tokens structure from `{USDC: {balance: '...', usdValue: '...'}}` to `{USDC: '...'}`
 - Fixed temporal dead zone error in `fetchTokenBalances()` by using `.reduce()` instead of incorrect `.forEach()` usage
 - Updated cache-structures.md documentation to reflect actual simplified token structure
@@ -238,7 +272,7 @@ This refactor establishes the foundation for production deployment with enterpri
 - Corrected token balance structure examples in documentation
 - Updated access pattern examples for simplified token structure
 
-## v0.5.0 - 2025-01-26
+## v0.5.0 - 2025-07-26
 
 ### WIP - Major Cache Architecture Refactor
 
