@@ -2476,6 +2476,12 @@
             "internalType": "address",
             "name": "executor",
             "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "bool",
+            "name": "isAuthorized",
+            "type": "bool"
           }
         ],
         "name": "ExecutorChanged",

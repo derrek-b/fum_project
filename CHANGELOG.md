@@ -5,6 +5,27 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2025-08-31
+
+### Added - Vault Authorization Discovery
+
+#### **New getAuthorizedVaults Function**
+- **Added**: `getAuthorizedVaults(executorAddress, provider)` to blockchain/contracts module
+- **Purpose**: Discovers all vaults that have authorized a specific executor address
+- **Implementation**: 
+  - Iterates through all vaults from the factory contract
+  - Checks each vault's executor to match the provided address
+  - Returns array of authorized vault addresses
+  - Includes comprehensive parameter validation and error handling
+- **Testing**: Complete unit test coverage with 12 test cases covering success scenarios and error conditions
+- **Usage**: Enables automation services to discover which vaults they are authorized to manage
+- **Integration**: Replaces VaultRegistry.getAuthorizedVaults() in automation services
+
+#### **Enhanced Error Handling**
+- **Fail-fast approach**: Function throws on any vault check failure to ensure complete discovery
+- **Validation**: Robust input validation for executor address format and provider instance
+- **Error propagation**: Proper error messages with context for debugging
+
 ## [0.18.0] - 2025-08-23
 
 ### Enhanced - Position Data Quality & Testing
