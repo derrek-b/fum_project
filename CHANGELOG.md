@@ -1,5 +1,31 @@
 # F.U.M. Project Changelog
 
+## [WIP] VaultRegistry Refactoring - 2025-08-31
+
+### Work In Progress - Library Migration
+
+This is a work-in-progress refactor to migrate vault discovery functionality from VaultRegistry to the fum_library for better separation of concerns and reusability.
+
+#### **Vault Discovery Migration**
+- **MIGRATED**: `getAuthorizedVaults()` functionality moved from VaultRegistry to fum_library v0.18.1
+- **ENHANCED**: AutomationService now uses library function with retry logic via `retryWithBackoff`
+- **REMOVED**: VaultRegistry.getAuthorizedVaults() method (dead code elimination)
+- **IMPROVEMENT**: Fail-fast error handling ensures complete vault discovery during service initialization
+- **BENEFIT**: Vault discovery logic now shared across projects and properly tested in library
+
+#### **Error Handling Enhancement**  
+- **ROBUST**: Library function throws on any vault check failure to prevent missing authorized vaults
+- **RETRY**: AutomationService implements 3-retry pattern with exponential backoff for transient failures
+- **SAFETY**: Service startup will fail if it cannot determine complete set of authorized vaults
+
+#### **Technical Debt Reduction**
+- **ELIMINATED**: ~45 lines of duplicate vault discovery code from VaultRegistry
+- **CONSOLIDATED**: All contract interaction patterns now use library functions
+- **TESTED**: Comprehensive unit test coverage added to library (12 test cases)
+
+**Status**: ✅ Core functionality working, service-init tests passing  
+**Next**: Complete VaultRegistry refactor and remove remaining dead code
+
 ## v0.7.5 - 2025-07-30
 
 ### Service Shutdown Workflow & Graceful Termination
