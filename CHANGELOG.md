@@ -1,22 +1,31 @@
 # F.U.M. Project Changelog
 
-## [WIP] VaultRegistry Refactoring - 2025-08-31
+## [0.8.0] VaultRegistry Deconstruction - Event-Driven Architecture - 2025-09-01
 
-### Work In Progress - Library Migration
+### Major Refactor - Complete VaultRegistry Removal
 
-This is a work-in-progress refactor to migrate vault discovery functionality from VaultRegistry to the fum_library for better separation of concerns and reusability.
+Complete deconstruction of VaultRegistry with migration to clean event-driven architecture using EventManager.
 
-#### **Vault Discovery Migration**
-- **MIGRATED**: `getAuthorizedVaults()` functionality moved from VaultRegistry to fum_library v0.18.1
-- **ENHANCED**: AutomationService now uses library function with retry logic via `retryWithBackoff`
-- **REMOVED**: VaultRegistry.getAuthorizedVaults() method (dead code elimination)
-- **IMPROVEMENT**: Fail-fast error handling ensures complete vault discovery during service initialization
-- **BENEFIT**: Vault discovery logic now shared across projects and properly tested in library
+#### **VaultRegistry Deconstruction**
+- **MIGRATED**: `subscribeToAuthorizationEvents()` from VaultRegistry → EventManager with event emission
+- **MIGRATED**: `subscribeToVaultConfigEvents()` from VaultRegistry → EventManager with event emission  
+- **MIGRATED**: `subscribeToStrategyParameterEvents()` from VaultRegistry → EventManager with event emission
+- **MIGRATED**: `getAuthorizedVaults()` functionality moved to fum_library v0.18.1 (previous WIP)
+- **REMOVED**: `subscribeToVaultStrategyEvents()` (unused method, dead code elimination)
+- **DELETED**: Entire VaultRegistry.js file (functionality fully migrated)
 
-#### **Error Handling Enhancement**  
-- **ROBUST**: Library function throws on any vault check failure to prevent missing authorized vaults
-- **RETRY**: AutomationService implements 3-retry pattern with exponential backoff for transient failures
-- **SAFETY**: Service startup will fail if it cannot determine complete set of authorized vaults
+#### **Event-Driven Architecture**
+- **NEW**: Clean event-driven architecture - no more callback passing
+- **ENHANCED**: EventManager now handles all blockchain event subscriptions consistently
+- **IMPROVED**: AutomationService subscribes to events (`VaultAuthGranted`, `VaultAuthRevoked`, `TargetTokensUpdated`, `TargetPlatformsUpdated`, `StrategyParameterUpdated`) instead of using callbacks
+- **ADDED**: Event emissions (`ConfigMonitoringRegistered`, `ParameterMonitoringRegistered`) for better observability
+- **CLEANER**: Eliminated complex constructor callback dependencies
+
+#### **Testing & Documentation**
+- **UPDATED**: All tests updated to reflect new architecture
+- **FIXED**: Service initialization tests now expect event handlers during construction
+- **COMPREHENSIVE**: Documentation updated across all workflow and API reference docs
+- **MAINTAINED**: Full test coverage for new event-driven patterns
 
 #### **Technical Debt Reduction**
 - **ELIMINATED**: ~45 lines of duplicate vault discovery code from VaultRegistry
