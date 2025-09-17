@@ -14,7 +14,8 @@ import {
   isChainSupported,
   lookupSupportedChainIds,
   getPlatformAddresses,
-  lookupChainPlatformIds
+  lookupChainPlatformIds,
+  getMinDeploymentForGas
 } from '../../../src/helpers/chainHelpers.js';
 
 describe('Chain Helpers', () => {
@@ -265,7 +266,7 @@ describe('Chain Helpers', () => {
         const address = getExecutorAddress(1337);
 
         expect(typeof address).toBe('string');
-        expect(address).toBe('0x18eE269ff740eA684da2Be21dE294e44253D0eb8');
+        expect(address).toBe('0xabA472B2EA519490EE10E643A422D578a507197A');
       });
     });
 
@@ -536,9 +537,9 @@ describe('Chain Helpers', () => {
         // Reset modules to use the mocked config
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
-        
+
         const platformIds = chainHelpers.lookupChainPlatformIds(999);
-        
+
         expect(platformIds).toContain('uniswapV3');
         expect(platformIds).toContain('compound');
         expect(platformIds).not.toContain('aaveV3'); // disabled platform should not be returned
@@ -570,7 +571,7 @@ describe('Chain Helpers', () => {
         // Reset modules to use the mocked config
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
-        
+
         expect(() => chainHelpers.lookupChainPlatformIds(888)).toThrow('No platform addresses configured for chain 888');
 
         // Restore original config
@@ -582,6 +583,57 @@ describe('Chain Helpers', () => {
         expect(() => lookupChainPlatformIds(null)).toThrow('chainId parameter is required');
         expect(() => lookupChainPlatformIds('1')).toThrow('chainId must be a number');
         expect(() => lookupChainPlatformIds(0)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getMinDeploymentForGas', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getMinDeploymentForGas(1)).toBe('number');
+        expect(typeof getMinDeploymentForGas(42161)).toBe('number');
+        expect(typeof getMinDeploymentForGas(1337)).toBe('number');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMinDeploymentForGas(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when minDeploymentForGas is not configured', async () => {
+        // Mock chains config to include a chain without minDeploymentForGas property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain Without Min Deployment',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                uniswapV3: { enabled: true, factoryAddress: '0x456' }
+              }
+              // No minDeploymentForGas property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getMinDeploymentForGas(777)).toThrow('No minimum deployment amount configured for chain 777');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMinDeploymentForGas(null)).toThrow('chainId parameter is required');
+        expect(() => getMinDeploymentForGas(undefined)).toThrow('chainId parameter is required');
+        expect(() => getMinDeploymentForGas('1')).toThrow('chainId must be a number');
+        expect(() => getMinDeploymentForGas(0)).toThrow('chainId must be greater than 0');
+        expect(() => getMinDeploymentForGas(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

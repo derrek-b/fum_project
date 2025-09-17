@@ -1111,3 +1111,47 @@ export function mapStrategyParameters(strategyId, params) {
   }
 }
 
+/**
+ * Get minimum deployment multiplier for a specific strategy
+ * @memberof module:helpers/strategyHelpers
+ * @param {string} strategyId - The strategy identifier (e.g., 'bob', 'parris', 'fed')
+ * @returns {number} Minimum deployment multiplier for the strategy
+ * @throws {Error} If strategyId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If strategy is not supported
+ * @throws {Error} If no minimum deployment multiplier is configured for the strategy
+ * @example
+ * // Get multiplier for Baby Steps strategy (simple strategy)
+ * const multiplier = getMinDeploymentMultiplier('bob');
+ * // Returns: 1.0
+ *
+ * @example
+ * // Get multiplier for Parris Island strategy (complex strategy)
+ * const multiplier = getMinDeploymentMultiplier('parris');
+ * // Returns: 2.0
+ *
+ * @example
+ * // Use in strategy logic
+ * const strategyMultiplier = getMinDeploymentMultiplier(strategyId);
+ * const effectiveMinimum = Math.max(chainMin, platformMin) * strategyMultiplier;
+ * @since 1.0.0
+ */
+export function getMinDeploymentMultiplier(strategyId) {
+  validateIdString(strategyId);
+
+  const strategy = strategies[strategyId];
+  if (!strategy) {
+    throw new Error(`Strategy ${strategyId} is not supported`);
+  }
+
+  if (!strategy.strategyProperties || typeof strategy.strategyProperties !== 'object') {
+    throw new Error(`No strategy properties configured for strategy ${strategyId}`);
+  }
+
+  const multiplier = strategy.strategyProperties.minDeploymentMultiplier;
+  if (typeof multiplier !== 'number' || !Number.isFinite(multiplier) || multiplier <= 0) {
+    throw new Error(`No minimum deployment multiplier configured for strategy ${strategyId}`);
+  }
+
+  return multiplier;
+}
+

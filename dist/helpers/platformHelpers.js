@@ -534,3 +534,39 @@ export function lookupPlatformById(platformId, chainId) {
 export function lookupSupportedPlatformIds() {
   return Object.keys(platforms);
 }
+
+/**
+ * Get minimum liquidity amount for a specific platform
+ * @memberof module:helpers/platformHelpers
+ * @param {string} platformId - The platform identifier (e.g., 'uniswapV3', 'aaveV3')
+ * @returns {number} Minimum liquidity amount in USD for gas-efficient operations
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If no minimum liquidity amount is configured for the platform
+ * @example
+ * // Get minimum liquidity for Uniswap V3
+ * const minAmount = getMinLiquidityAmount('uniswapV3');
+ * // Returns: 10 (USD)
+ *
+ * @example
+ * // Use in strategy logic
+ * const minLiquidity = getMinLiquidityAmount(platformId);
+ * if (availableLiquidity > minLiquidity) {
+ *   // Proceed with liquidity provision
+ * }
+ * @since 1.0.0
+ */
+export function getMinLiquidityAmount(platformId) {
+  validatePlatformId(platformId);
+
+  const metadata = platforms[platformId];
+  if (!metadata) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (typeof metadata.minLiquidityAmount !== 'number' || !Number.isFinite(metadata.minLiquidityAmount) || metadata.minLiquidityAmount <= 0) {
+    throw new Error(`No minimum liquidity amount configured for platform ${platformId}`);
+  }
+
+  return metadata.minLiquidityAmount;
+}

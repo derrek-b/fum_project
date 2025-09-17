@@ -35,13 +35,13 @@ describe('Token Helpers', () => {
       it('should return tokens with expected structure', () => {
         const result = getAllTokens();
         const tokenKeys = Object.keys(result);
-        
+
         expect(tokenKeys.length).toBeGreaterThan(0);
-        
+
         // Test with known tokens
         expect(result.USDC).toBeDefined();
         expect(result.WETH).toBeDefined();
-        
+
         // Verify token structure
         const usdc = result.USDC;
         expect(usdc).toHaveProperty('name');
@@ -54,7 +54,7 @@ describe('Token Helpers', () => {
       it('should include all expected token properties', () => {
         const result = getAllTokens();
         const firstToken = Object.values(result)[0];
-        
+
         const expectedProperties = ['name', 'symbol', 'decimals', 'coingeckoId', 'addresses', 'logoURI', 'isStablecoin'];
         expectedProperties.forEach(prop => {
           expect(firstToken).toHaveProperty(prop);
@@ -73,7 +73,7 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return token for valid symbol', () => {
         const result = getTokenBySymbol('USDC');
-        
+
         expect(result).toBeDefined();
         expect(result.symbol).toBe('USDC');
         expect(result.name).toBe('USD Coin');
@@ -83,7 +83,7 @@ describe('Token Helpers', () => {
 
       it('should return WETH token correctly', () => {
         const result = getTokenBySymbol('WETH');
-        
+
         expect(result).toBeDefined();
         expect(result.symbol).toBe('WETH');
         expect(result.name).toBe('Wrapped Ether');
@@ -94,7 +94,7 @@ describe('Token Helpers', () => {
       it('should handle unicode keys correctly', () => {
         const result = getTokenBySymbol('USD₮0');
         expect(result).toBeDefined();
-        expect(result.symbol).toBe('USDT');
+        expect(result.symbol).toBe('USD₮0');
       });
     });
 
@@ -186,10 +186,10 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return only stablecoin tokens', () => {
         const result = getStablecoins();
-        
+
         expect(typeof result).toBe('object');
         expect(Array.isArray(result)).toBe(false);
-        
+
         Object.values(result).forEach(token => {
           expect(token.isStablecoin).toBe(true);
         });
@@ -215,7 +215,7 @@ describe('Token Helpers', () => {
       it('should have consistent structure with getAllTokens', () => {
         const allTokens = getAllTokens();
         const stablecoins = getStablecoins();
-        
+
         Object.entries(stablecoins).forEach(([symbol, token]) => {
           expect(allTokens[symbol]).toEqual(token);
         });
@@ -253,7 +253,7 @@ describe('Token Helpers', () => {
       it('should work with mixed token support', () => {
         const supportedResult = areTokensSupportedOnChain(['USDC', 'WETH'], 1);
         expect(supportedResult).toBe(true);
-        
+
         const unsupportedResult = areTokensSupportedOnChain(['USDC', 'NONEXISTENT'], 1);
         expect(unsupportedResult).toBe(false);
       });
@@ -284,7 +284,7 @@ describe('Token Helpers', () => {
       it('should return token for valid address and chain', () => {
         const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
         const result = getTokenByAddress(address, 1);
-        
+
         expect(result).toBeDefined();
         expect(result.symbol).toBe('USDC');
       });
@@ -292,7 +292,7 @@ describe('Token Helpers', () => {
       it('should handle case-insensitive addresses', () => {
         const address = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
         const result = getTokenByAddress(address, 1);
-        
+
         expect(result).toBeDefined();
         expect(result.symbol).toBe('USDC');
       });
@@ -300,7 +300,7 @@ describe('Token Helpers', () => {
       it('should work with WETH address', () => {
         const address = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
         const result = getTokenByAddress(address, 42161);
-        
+
         expect(result).toBeDefined();
         expect(result.symbol).toBe('WETH');
       });
@@ -349,10 +349,10 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return tokens available on Ethereum', () => {
         const result = getTokensByChain(1);
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
-        
+
         result.forEach(token => {
           expect(token.addresses[1]).toBeDefined();
           expect(typeof token.addresses[1]).toBe('string');
@@ -361,10 +361,10 @@ describe('Token Helpers', () => {
 
       it('should return tokens available on Arbitrum', () => {
         const result = getTokensByChain(42161);
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
-        
+
         result.forEach(token => {
           expect(token.addresses[42161]).toBeDefined();
         });
@@ -372,7 +372,7 @@ describe('Token Helpers', () => {
 
       it('should return tokens available on local chain', () => {
         const result = getTokensByChain(1337);
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
       });
@@ -384,11 +384,11 @@ describe('Token Helpers', () => {
 
       it('should include USDC and WETH on all supported chains', () => {
         const supportedChains = [1, 42161, 1337];
-        
+
         supportedChains.forEach(chainId => {
           const tokens = getTokensByChain(chainId);
           const symbols = tokens.map(token => token.symbol);
-          
+
           expect(symbols).toContain('USDC');
           expect(symbols).toContain('WETH');
         });
@@ -409,10 +409,10 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return array of all token symbols', () => {
         const result = getAllTokenSymbols();
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
-        
+
         expect(result).toContain('USDC');
         expect(result).toContain('WETH');
         expect(result).toContain('WBTC');
@@ -426,13 +426,13 @@ describe('Token Helpers', () => {
       it('should return same symbols as Object.keys(getAllTokens())', () => {
         const result = getAllTokenSymbols();
         const expected = Object.keys(getAllTokens());
-        
+
         expect(result).toEqual(expected);
       });
 
       it('should contain only strings', () => {
         const result = getAllTokenSymbols();
-        
+
         result.forEach(symbol => {
           expect(typeof symbol).toBe('string');
           expect(symbol.length).toBeGreaterThan(0);
@@ -445,29 +445,29 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return stablecoins when isStablecoin is true', () => {
         const result = getTokensByType(true);
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
-        
+
         result.forEach(token => {
           expect(token.isStablecoin).toBe(true);
         });
-        
+
         const symbols = result.map(token => token.symbol);
         expect(symbols).toContain('USDC');
-        expect(symbols).toContain('USDT');
+        expect(symbols).toContain('USD₮0');
       });
 
       it('should return non-stablecoins when isStablecoin is false', () => {
         const result = getTokensByType(false);
-        
+
         expect(Array.isArray(result)).toBe(true);
         expect(result.length).toBeGreaterThan(0);
-        
+
         result.forEach(token => {
           expect(token.isStablecoin).toBe(false);
         });
-        
+
         const symbols = result.map(token => token.symbol);
         expect(symbols).toContain('WETH');
         expect(symbols).toContain('WBTC');
@@ -476,12 +476,12 @@ describe('Token Helpers', () => {
       it('should have consistent results with getStablecoins', () => {
         const stablecoinsByType = getTokensByType(true);
         const stablecoinsHelper = Object.values(getStablecoins());
-        
+
         expect(stablecoinsByType.length).toBe(stablecoinsHelper.length);
-        
+
         const symbolsByType = stablecoinsByType.map(token => token.symbol);
         const symbolsHelper = stablecoinsHelper.map(token => token.symbol);
-        
+
         expect(symbolsByType.sort()).toEqual(symbolsHelper.sort());
       });
 
@@ -489,7 +489,7 @@ describe('Token Helpers', () => {
         const stablecoins = getTokensByType(true);
         const nonStablecoins = getTokensByType(false);
         const totalTokens = stablecoins.length + nonStablecoins.length;
-        
+
         const allTokens = Object.values(getAllTokens());
         expect(totalTokens).toBe(allTokens.length);
       });
@@ -530,7 +530,7 @@ describe('Token Helpers', () => {
 
       it('should work with all configured tokens', () => {
         const allSymbols = getAllTokenSymbols();
-        
+
         allSymbols.forEach(symbol => {
           const result = getCoingeckoId(symbol);
           expect(typeof result).toBe('string');
@@ -556,7 +556,7 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return addresses for multiple tokens', () => {
         const result = getTokenAddresses(['USDC', 'WETH'], 1);
-        
+
         expect(typeof result).toBe('object');
         expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
         expect(result.WETH).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
@@ -564,7 +564,7 @@ describe('Token Helpers', () => {
 
       it('should return addresses for Arbitrum chain', () => {
         const result = getTokenAddresses(['USDC', 'WETH'], 42161);
-        
+
         expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
         expect(result.WETH).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
       });
@@ -572,7 +572,7 @@ describe('Token Helpers', () => {
 
       it('should return all addresses when all tokens are available', () => {
         const result = getTokenAddresses(['USDC', 'WBTC'], 1);
-        
+
         expect(Object.keys(result)).toHaveLength(2);
         expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
         expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
@@ -649,18 +649,18 @@ describe('Token Helpers', () => {
     describe('Success Cases', () => {
       it('should return tokens for multiple symbols', () => {
         const result = getTokensBySymbol(['USDC', 'WETH']);
-        
+
         expect(typeof result).toBe('object');
         expect(result.USDC).toBeDefined();
         expect(result.WETH).toBeDefined();
-        
+
         expect(result.USDC.name).toBe('USD Coin');
         expect(result.WETH.name).toBe('Wrapped Ether');
       });
 
       it('should return token for single symbol', () => {
         const result = getTokensBySymbol(['USDC']);
-        
+
         expect(result.USDC).toBeDefined();
         expect(result.USDC.symbol).toBe('USDC');
         expect(result.USDC.decimals).toBe(6);
@@ -678,9 +678,9 @@ describe('Token Helpers', () => {
 
       it('should return complete token objects', () => {
         const result = getTokensBySymbol(['USDC']);
-        
+
         const token = result.USDC;
-        
+
         expect(token).toHaveProperty('name');
         expect(token).toHaveProperty('symbol');
         expect(token).toHaveProperty('decimals');

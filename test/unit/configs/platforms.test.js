@@ -164,7 +164,7 @@ describe('Platform Configuration Validation', () => {
   it('should have all required properties for every platform', () => {
     const requiredStringProperties = ['id', 'name', 'logo', 'color', 'description'];
     const requiredObjectProperties = ['features', 'subgraphs', 'feeTiers'];
-    const requiredNumberProperties = ['minTick', 'maxTick'];
+    const requiredNumberProperties = ['minTick', 'maxTick', 'minLiquidityAmount'];
 
     const errors = [];
 
@@ -202,6 +202,11 @@ describe('Platform Configuration Validation', () => {
         if (platform.minTick >= platform.maxTick) {
           platformErrors.push(`minTick (${platform.minTick}) must be less than maxTick (${platform.maxTick})`);
         }
+      }
+
+      // Validate minLiquidityAmount is positive
+      if (Number.isFinite(platform.minLiquidityAmount) && platform.minLiquidityAmount <= 0) {
+        platformErrors.push(`minLiquidityAmount (${platform.minLiquidityAmount}) must be greater than 0`);
       }
 
       // Validate specific format requirements

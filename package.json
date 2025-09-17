@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.18.1",
+  "version": "0.19.0",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -46,7 +46,7 @@
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
-    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.18.1.tgz",
+    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.19.0.tgz",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

@@ -18,6 +18,7 @@ const chains = {
     envPK: process.env.ARBITRUM_DEPLOYER_PK,
     executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
     executorAddress: "0x0",
+    minDeploymentForGas: 10,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -42,6 +43,7 @@ const chains = {
     envPK: process.env.LOCAL_DEPLOYER_PK,
     executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
+    minDeploymentForGas: 10,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -66,6 +68,7 @@ const chains = {
     envPK: process.env.ETHEREUM_DEPLOYER_PK,
     executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
+    minDeploymentForGas: 100,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",

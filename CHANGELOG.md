@@ -5,6 +5,80 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2025-09-17
+
+### Added - Minimum Deployment Threshold System
+
+#### **BREAKING CHANGES - New Minimum Deployment Architecture**
+- **Added comprehensive minimum deployment threshold system**: Three-tier minimum validation to prevent dust transactions and gas estimation failures
+  - **Chain level**: `minDeploymentForGas` property for gas economics across different networks
+  - **Platform level**: `minLiquidityAmount` property for protocol-specific minimums
+  - **Strategy level**: `minDeploymentMultiplier` property for complexity-based scaling
+  - **Root Cause**: Floating-point precision was causing tiny positive values (like $0.000001) to pass deployment checks, leading to failed gas estimation when trying to add dust amounts of liquidity
+
+#### **Chain Configuration Updates**
+- **Added `minDeploymentForGas` to all chain configurations**:
+  - Ethereum mainnet (chainId 1): `100` USD (high gas costs)
+  - Arbitrum One (chainId 42161): `10` USD (low gas costs)
+  - Local/Ganache (chainId 1337): `10` USD (development environment)
+  - Based on real-world gas economics and transaction costs per network
+
+#### **Platform Configuration Updates**
+- **Added `minLiquidityAmount` to platform configurations**:
+  - Uniswap V3: `10` USD minimum liquidity deployment
+  - Prevents protocol-level transaction failures with insufficient amounts
+  - Accounts for Uniswap V3's minimum position requirements
+
+#### **Strategy Configuration Updates**
+- **Added `minDeploymentMultiplier` to all strategy configurations**:
+  - Baby Steps (bob): `1.0` (simple strategy, no complexity penalty)
+  - Parris Island (parris): `2.0` (complex strategy, 2x minimum threshold)
+  - Fed strategy: `1.5` (moderate complexity, 1.5x minimum threshold)
+  - Scales minimum deployment based on strategy complexity and gas requirements
+
+#### **New Helper Functions**
+- **Added `getMinDeploymentForGas(chainId)` in chainHelpers**: Retrieves chain-specific gas minimum
+  - Validates chainId parameter and throws descriptive errors for unsupported chains
+  - Returns minimum deployment amount in USD based on gas economics
+  - Used for preventing uneconomical transactions on high-gas networks
+
+- **Added `getMinLiquidityAmount(platformId)` in platformHelpers**: Retrieves platform-specific minimum
+  - Validates platformId parameter and throws descriptive errors for unsupported platforms
+  - Returns minimum liquidity amount in USD based on protocol requirements
+  - Used for preventing protocol-level transaction failures
+
+- **Added `getMinDeploymentMultiplier(strategyId)` in strategyHelpers**: Retrieves strategy complexity multiplier
+  - Validates strategyId parameter and throws descriptive errors for unsupported strategies
+  - Returns multiplier value based on strategy complexity (1.0-2.0 range)
+  - Used for scaling minimum deployment based on strategy gas requirements
+
+#### **Comprehensive Test Coverage**
+- **Added complete test suites for all new configurations**: Validates all new properties in chain, platform, and strategy configs
+- **Added comprehensive helper function tests**: Parameter validation, success cases, and error scenarios
+- **Updated existing tests**: Modified configuration tests to validate new required properties
+- **Error handling validation**: Tests for invalid chainIds, platformIds, and strategyIds
+
+#### **Integration in BabyStepsStrategy**
+- **Updated `calculateAvailableDeployment()` method**: Now uses three-tier minimum validation
+  - Calculates chain minimum using `getMinDeploymentForGas()`
+  - Calculates platform minimum using `getMinLiquidityAmount()` for all target platforms
+  - Calculates strategy multiplier using `getMinDeploymentMultiplier()`
+  - Effective minimum = `max(chainMinimum, maxPlatformMinimum) * strategyMultiplier`
+  - Returns 0 if available deployment is below effective minimum threshold
+
+#### **Benefits**
+- **Eliminates dust transaction failures**: Prevents gas estimation errors from tiny liquidity additions
+- **Prevents uneconomical transactions**: Accounts for gas costs relative to transaction value
+- **Multi-level validation**: Comprehensive coverage across network, protocol, and strategy levels
+- **Configurable per environment**: Different minimums for mainnet vs testnet gas costs
+- **Strategy-aware scaling**: Complex strategies have appropriately higher minimums
+
+#### **Architecture Impact**
+- **Backward compatible**: Existing code continues to work with enhanced validation
+- **Event-driven compatible**: Works seamlessly with existing vault utilization calculations
+- **Future-proof**: New chains, platforms, and strategies can easily add minimum configurations
+- **Performance optimized**: Validation happens before expensive blockchain operations
+
 ## [0.18.1] - 2025-08-31
 
 ### Added - Vault Authorization Discovery

@@ -93,6 +93,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get the Uniswap V3 swap event signature
+   * @returns {string} The Uniswap V3 Swap event signature
+   */
+  getSwapEventSignature() {
+    return 'Swap(address,address,int256,int256,uint160,uint128,int24)';
+  }
+
+  /**
    * Validate and normalize slippage tolerance
    * @param {number} slippageTolerance - Slippage tolerance percentage (0-100)
    * @returns {number} Validated slippage tolerance
@@ -1299,6 +1307,94 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       console.error("Error converting tick to price:", error);
       throw new Error(`Failed to convert tick to price: ${error.message}`);
     }
+  }
+
+  /**
+   * Calculate the original tick where a position was created based on its tick range
+   * 
+   * This method reverse-engineers the tick at position creation time by analyzing
+   * the tick range boundaries and the target range percentages used. This is useful
+   * for tracking price movements from the original position creation point.
+   * 
+   * @param {Object} position - Position data
+   * @param {number} position.tickLower - Lower tick boundary of the position
+   * @param {number} position.tickUpper - Upper tick boundary of the position
+   * @param {number} position.fee - Fee tier (used to get tick spacing)
+   * @param {number} targetRangeUpper - Target range upper percentage (0-100)
+   * @param {number} targetRangeLower - Target range lower percentage (0-100)
+   * @returns {number} Estimated original tick where position was created
+   * @throws {Error} If position data is invalid or missing required fields
+   * @throws {Error} If target range percentages are invalid
+   * 
+   * @example
+   * const originalTick = adapter.calculateOriginalTick(
+   *   { tickLower: 195000, tickUpper: 205000, fee: 500 },
+   *   10, // 10% upper range
+   *   10  // 10% lower range
+   * );
+   * // Returns: 200000 (the original tick)
+   * @since 1.0.0
+   */
+  calculateOriginalTick(position, targetRangeUpper, targetRangeLower) {
+    // Parameter validation following adapter patterns
+    if (!position) {
+      throw new Error("Position parameter is required");
+    }
+    
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("position.tickLower must be a finite number");
+    }
+    
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("position.tickUpper must be a finite number");
+    }
+    
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("position.tickLower must be less than position.tickUpper");
+    }
+    
+    if (!Number.isFinite(position.fee)) {
+      throw new Error("position.fee must be a finite number");
+    }
+    
+    if (!Number.isFinite(targetRangeUpper) || targetRangeUpper < 0 || targetRangeUpper > 100) {
+      throw new Error("targetRangeUpper must be a number between 0 and 100");
+    }
+    
+    if (!Number.isFinite(targetRangeLower) || targetRangeLower < 0 || targetRangeLower > 100) {
+      throw new Error("targetRangeLower must be a number between 0 and 100");
+    }
+    
+    // Get tick spacing for the fee tier
+    const tickSpacing = getPlatformTickSpacing('uniswapV3', position.fee);
+    
+    // Calculate ticks per percent (approximately 100 ticks = 1% price movement)
+    const ticksPerPercent = Math.round(Math.log(1.01) / Math.log(1.0001));
+    
+    // Calculate expected tick distances from original price
+    const expectedUpperTicks = Math.round(targetRangeUpper * ticksPerPercent);
+    const expectedLowerTicks = Math.round(targetRangeLower * ticksPerPercent);
+    
+    // For symmetric ranges, the original tick is the midpoint
+    if (targetRangeUpper === targetRangeLower) {
+      const midpoint = (position.tickLower + position.tickUpper) / 2;
+      return Math.round(midpoint);
+    }
+    
+    // For asymmetric ranges, calculate based on the proportion
+    // The original tick divides the range proportionally to the target percentages
+    const totalRange = expectedUpperTicks + expectedLowerTicks;
+    const actualRange = position.tickUpper - position.tickLower;
+    
+    // Account for tick spacing alignment
+    // The actual range might be slightly different due to tick spacing rounding
+    // We estimate the original tick based on the proportional split
+    const lowerProportion = expectedLowerTicks / totalRange;
+    const originalTick = Math.round(
+      position.tickLower + (lowerProportion * actualRange)
+    );
+    
+    return originalTick;
   }
 
   /**

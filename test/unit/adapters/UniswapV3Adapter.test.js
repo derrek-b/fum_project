@@ -184,6 +184,20 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getSwapEventSignature', () => {
+    it('should return the correct Uniswap V3 swap event signature', () => {
+      const signature = adapter.getSwapEventSignature();
+      expect(signature).toBe('Swap(address,address,int256,int256,uint160,uint128,int24)');
+    });
+
+    it('should generate the correct topic hash for V3 swap events', () => {
+      const signature = adapter.getSwapEventSignature();
+      const topicHash = ethers.id(signature);
+      // This is the actual V3 Swap event topic hash
+      expect(topicHash).toBe('0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67');
+    });
+  });
+
   describe('_validateSlippageTolerance', () => {
     describe('Success Cases', () => {
       it('should accept boundary minimum (0)', () => {
@@ -3783,6 +3797,274 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         // Should be deterministic
         expect(price1.toSignificant(18)).toBe(price2.toSignificant(18));
+      });
+    });
+  });
+
+  describe('calculateOriginalTick', () => {
+    describe('Success Cases', () => {
+      it('should calculate original tick for symmetric range', () => {
+        const position = {
+          tickLower: 195000,
+          tickUpper: 205000,
+          fee: 500
+        };
+        
+        const originalTick = adapter.calculateOriginalTick(position, 10, 10);
+        
+        // For symmetric 10% ranges, original should be midpoint
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should calculate original tick for asymmetric range', () => {
+        const position = {
+          tickLower: 198000,
+          tickUpper: 203000, 
+          fee: 500
+        };
+        
+        // 5% upper, 2% lower (asymmetric)
+        const originalTick = adapter.calculateOriginalTick(position, 5, 2);
+        
+        // Original tick should be closer to lower bound (2/7 of range)
+        const expectedTick = Math.round(198000 + (2/7) * 5000);
+        expect(originalTick).toBeCloseTo(expectedTick, -1);
+      });
+      
+      it('should handle positions with different fee tiers', () => {
+        const position3000 = {
+          tickLower: 194000,
+          tickUpper: 206000,
+          fee: 3000
+        };
+        
+        const originalTick = adapter.calculateOriginalTick(position3000, 10, 10);
+        
+        expect(originalTick).toBeCloseTo(200000, -2);
+      });
+      
+      it('should handle very small ranges', () => {
+        const position = {
+          tickLower: 199900,
+          tickUpper: 200100,
+          fee: 100
+        };
+        
+        const originalTick = adapter.calculateOriginalTick(position, 1, 1);
+        
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should handle large asymmetric ranges', () => {
+        const position = {
+          tickLower: 180000,
+          tickUpper: 210000,
+          fee: 10000
+        };
+        
+        // 20% upper, 10% lower
+        const originalTick = adapter.calculateOriginalTick(position, 20, 10);
+        
+        // Original tick should be 1/3 from lower bound
+        const expectedTick = Math.round(180000 + (10/30) * 30000);
+        expect(originalTick).toBeCloseTo(expectedTick, -2);
+      });
+    });
+    
+    describe('Error Cases', () => {
+      it('should throw error when position is missing', () => {
+        expect(() => adapter.calculateOriginalTick(null, 10, 10))
+          .toThrow('Position parameter is required');
+        
+        expect(() => adapter.calculateOriginalTick(undefined, 10, 10))
+          .toThrow('Position parameter is required');
+      });
+      
+      it('should throw error for invalid tick values', () => {
+        const invalidPositions = [
+          { tickLower: NaN, tickUpper: 200000, fee: 500 },
+          { tickLower: Infinity, tickUpper: 200000, fee: 500 },
+          { tickLower: 'not-a-number', tickUpper: 200000, fee: 500 },
+          { tickLower: 195000, tickUpper: NaN, fee: 500 },
+          { tickLower: 195000, tickUpper: Infinity, fee: 500 },
+          { tickLower: 195000, tickUpper: 'not-a-number', fee: 500 }
+        ];
+        
+        invalidPositions.forEach(position => {
+          expect(() => adapter.calculateOriginalTick(position, 10, 10))
+            .toThrow();
+        });
+      });
+      
+      it('should throw error when tickLower >= tickUpper', () => {
+        const invalidPositions = [
+          { tickLower: 200000, tickUpper: 200000, fee: 500 },
+          { tickLower: 200000, tickUpper: 195000, fee: 500 }
+        ];
+        
+        invalidPositions.forEach(position => {
+          expect(() => adapter.calculateOriginalTick(position, 10, 10))
+            .toThrow('position.tickLower must be less than position.tickUpper');
+        });
+      });
+      
+      it('should throw error for invalid fee tier', () => {
+        const invalidPositions = [
+          { tickLower: 195000, tickUpper: 205000, fee: NaN },
+          { tickLower: 195000, tickUpper: 205000, fee: Infinity },
+          { tickLower: 195000, tickUpper: 205000, fee: 'not-a-number' },
+          { tickLower: 195000, tickUpper: 205000, fee: null },
+          { tickLower: 195000, tickUpper: 205000, fee: undefined }
+        ];
+        
+        invalidPositions.forEach(position => {
+          expect(() => adapter.calculateOriginalTick(position, 10, 10))
+            .toThrow('position.fee must be a finite number');
+        });
+      });
+      
+      it('should throw error for invalid target ranges', () => {
+        const position = { tickLower: 195000, tickUpper: 205000, fee: 500 };
+        
+        // Invalid upper ranges
+        expect(() => adapter.calculateOriginalTick(position, -1, 10))
+          .toThrow('targetRangeUpper must be a number between 0 and 100');
+        expect(() => adapter.calculateOriginalTick(position, 101, 10))
+          .toThrow('targetRangeUpper must be a number between 0 and 100');
+        expect(() => adapter.calculateOriginalTick(position, NaN, 10))
+          .toThrow('targetRangeUpper must be a number between 0 and 100');
+        
+        // Invalid lower ranges
+        expect(() => adapter.calculateOriginalTick(position, 10, -1))
+          .toThrow('targetRangeLower must be a number between 0 and 100');
+        expect(() => adapter.calculateOriginalTick(position, 10, 101))
+          .toThrow('targetRangeLower must be a number between 0 and 100');
+        expect(() => adapter.calculateOriginalTick(position, 10, NaN))
+          .toThrow('targetRangeLower must be a number between 0 and 100');
+      });
+    });
+    
+    describe('Edge Cases', () => {
+      it('should handle zero range percentages', () => {
+        const position = {
+          tickLower: 199999,
+          tickUpper: 200001,
+          fee: 100
+        };
+        
+        // Both ranges at 0% (position created at exact tick)
+        const originalTick = adapter.calculateOriginalTick(position, 0, 0);
+        
+        // Should return midpoint for 0% ranges
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should handle maximum range percentages', () => {
+        const position = {
+          tickLower: 190000,
+          tickUpper: 210000,
+          fee: 10000
+        };
+        
+        const originalTick = adapter.calculateOriginalTick(position, 100, 100);
+        
+        // Should still calculate reasonable midpoint
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should handle extreme asymmetric ranges', () => {
+        const position = {
+          tickLower: 190000,
+          tickUpper: 200100,
+          fee: 500
+        };
+        
+        // 1% upper, 50% lower (very asymmetric)
+        const originalTick = adapter.calculateOriginalTick(position, 1, 50);
+        
+        // Should be very close to upper bound
+        expect(originalTick).toBeGreaterThan(199000);
+        expect(originalTick).toBeLessThan(200100);
+      });
+      
+      it('should handle very large tick ranges', () => {
+        const position = {
+          tickLower: -500000,
+          tickUpper: 500000,
+          fee: 10000
+        };
+        
+        const originalTick = adapter.calculateOriginalTick(position, 50, 50);
+        
+        // Should be close to zero for symmetric large range
+        expect(originalTick).toBeCloseTo(0, -3);
+      });
+      
+      it('should handle positions near tick boundaries', () => {
+        // Near maximum tick boundary
+        const maxPosition = {
+          tickLower: 880000,
+          tickUpper: 887000,
+          fee: 10000
+        };
+        
+        const maxOriginalTick = adapter.calculateOriginalTick(maxPosition, 5, 5);
+        expect(maxOriginalTick).toBeGreaterThan(880000);
+        expect(maxOriginalTick).toBeLessThan(887000);
+        
+        // Near minimum tick boundary
+        const minPosition = {
+          tickLower: -887000,
+          tickUpper: -880000,
+          fee: 10000
+        };
+        
+        const minOriginalTick = adapter.calculateOriginalTick(minPosition, 5, 5);
+        expect(minOriginalTick).toBeGreaterThan(-887000);
+        expect(minOriginalTick).toBeLessThan(-880000);
+      });
+    });
+    
+    describe('Mathematical Accuracy', () => {
+      it('should match expected calculations for known scenarios', () => {
+        // Test with known tick spacing alignment
+        const position = {
+          tickLower: 199980, // Aligned to 500 fee tier (spacing 10)
+          tickUpper: 200020, // Aligned to 500 fee tier (spacing 10)
+          fee: 500
+        };
+        
+        // 0.2% range each way (approximately 20 ticks)
+        const originalTick = adapter.calculateOriginalTick(position, 0.2, 0.2);
+        
+        // Should be exactly at midpoint
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should handle fractional percentage inputs correctly', () => {
+        const position = {
+          tickLower: 199500,
+          tickUpper: 200500,
+          fee: 500
+        };
+        
+        // 2.5% ranges
+        const originalTick = adapter.calculateOriginalTick(position, 2.5, 2.5);
+        
+        expect(originalTick).toBe(200000);
+      });
+      
+      it('should produce consistent results for equivalent inputs', () => {
+        const position = {
+          tickLower: 190000,
+          tickUpper: 210000,
+          fee: 3000
+        };
+        
+        const result1 = adapter.calculateOriginalTick(position, 15, 15);
+        const result2 = adapter.calculateOriginalTick(position, 15, 15);
+        
+        expect(result1).toBe(result2);
       });
     });
   });

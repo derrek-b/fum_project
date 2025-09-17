@@ -93,6 +93,14 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get the swap event signature for this platform
+   * @returns {string} The event signature string for the platform's swap event
+   */
+  getSwapEventSignature() {
+    throw new Error("getSwapEventSignature must be implemented by subclasses");
+  }
+
+  /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID

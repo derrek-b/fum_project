@@ -322,3 +322,44 @@ export function lookupChainPlatformIds(chainId) {
     .filter(([_, config]) => config.enabled)
     .map(([id, _]) => id);
 }
+
+/**
+ * Get minimum deployment amount for gas economics on a specific chain
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number} Minimum deployment amount in USD for gas-efficient operations
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no minimum deployment amount is configured for the chain
+ * @example
+ * // Get minimum deployment for Ethereum (high gas)
+ * const minAmount = getMinDeploymentForGas(1);
+ * // Returns: 100 (USD)
+ *
+ * @example
+ * // Get minimum deployment for Arbitrum (low gas)
+ * const minAmount = getMinDeploymentForGas(42161);
+ * // Returns: 10 (USD)
+ *
+ * @example
+ * // Use in strategy logic
+ * const minDeployment = getMinDeploymentForGas(chainId);
+ * if (availableDeployment > minDeployment) {
+ *   // Proceed with deployment
+ * }
+ * @since 1.0.0
+ */
+export function getMinDeploymentForGas(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (typeof config.minDeploymentForGas !== 'number' || !Number.isFinite(config.minDeploymentForGas) || config.minDeploymentForGas <= 0) {
+    throw new Error(`No minimum deployment amount configured for chain ${chainId}`);
+  }
+
+  return config.minDeploymentForGas;
+}

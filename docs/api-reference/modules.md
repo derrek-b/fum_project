@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-08-31T18:40:08.127Z
+Generated on: 2025-09-17T13:57:46.371Z
 
 ## Table of Contents
 
@@ -224,6 +224,7 @@ Token configuration with addresses on multiple chains
 - `lookupSupportedChainIds` (function)
 - `getPlatformAddresses` (function)
 - `lookupChainPlatformIds` (function)
+- `getMinDeploymentForGas` (function)
 
 ---
 
@@ -276,6 +277,7 @@ Token configuration with addresses on multiple chains
 - `getAvailablePlatforms` (function)
 - `lookupPlatformById` (function)
 - `lookupSupportedPlatformIds` (function)
+- `getMinLiquidityAmount` (function)
 
 ---
 
@@ -309,6 +311,7 @@ Token configuration with addresses on multiple chains
 - `formatParameterValue` (function)
 - `validateTokensForStrategy` (function)
 - `mapStrategyParameters` (function)
+- `getMinDeploymentMultiplier` (function)
 
 ---
 

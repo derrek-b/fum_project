@@ -23,7 +23,8 @@ import {
   strategySupportsTokens,
   formatParameterValue,
   validateTokensForStrategy,
-  mapStrategyParameters
+  mapStrategyParameters,
+  getMinDeploymentMultiplier
 } from '../../../src/helpers/strategyHelpers.js';
 import { getAllTokens } from '../../../src/helpers/tokenHelpers.js';
 import strategies from '../../../src/configs/strategies.js';
@@ -2902,6 +2903,51 @@ describe('Strategy Helpers', () => {
           expect(() => mapStrategyParameters('fed', [500, 200, true, null]))
             .toThrow('Fed strategy parameter 3 must be a valid number, got null');
         });
+      });
+    });
+  });
+
+  describe('getMinDeploymentMultiplier', () => {
+    describe('Success Cases', () => {
+      it('should return correct multiplier for Baby Steps strategy', () => {
+        const multiplier = getMinDeploymentMultiplier('bob');
+
+        expect(typeof multiplier).toBe('number');
+        expect(Number.isFinite(multiplier)).toBe(true);
+        expect(multiplier).toBe(1.0);
+      });
+
+      it('should return correct multiplier for Parris Island strategy', () => {
+        const multiplier = getMinDeploymentMultiplier('parris');
+
+        expect(typeof multiplier).toBe('number');
+        expect(Number.isFinite(multiplier)).toBe(true);
+        expect(multiplier).toBe(2.0);
+      });
+
+      it('should return correct multiplier for Fed strategy', () => {
+        const multiplier = getMinDeploymentMultiplier('fed');
+
+        expect(typeof multiplier).toBe('number');
+        expect(Number.isFinite(multiplier)).toBe(true);
+        expect(multiplier).toBe(1.5);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported strategy', () => {
+        expect(() => getMinDeploymentMultiplier('unknownStrategy')).toThrow('Strategy unknownStrategy is not supported');
+      });
+
+      it('should throw error for strategy without minDeploymentMultiplier', () => {
+        expect(() => getMinDeploymentMultiplier('none')).toThrow('No minimum deployment multiplier configured for strategy none');
+      });
+
+      it('should validate strategyId parameter', () => {
+        expect(() => getMinDeploymentMultiplier(null)).toThrow('ID parameter is required');
+        expect(() => getMinDeploymentMultiplier(undefined)).toThrow('ID parameter is required');
+        expect(() => getMinDeploymentMultiplier('')).toThrow('ID cannot be empty');
+        expect(() => getMinDeploymentMultiplier(123)).toThrow('ID must be a string');
       });
     });
   });

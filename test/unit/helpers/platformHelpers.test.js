@@ -17,7 +17,8 @@ import {
   getPlatformFeeTiers,
   getPlatformTickSpacing,
   getPlatformTickBounds,
-  lookupSupportedPlatformIds
+  lookupSupportedPlatformIds,
+  getMinLiquidityAmount
 } from '../../../src/helpers/platformHelpers.js';
 
 describe('Platform Helpers', () => {
@@ -1130,6 +1131,62 @@ describe('Platform Helpers', () => {
         // Restore original config
         vi.doUnmock('../../../src/configs/platforms.js');
         vi.resetModules();
+      });
+    });
+  });
+
+  describe('getMinLiquidityAmount', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid platform', () => {
+        const minAmount = getMinLiquidityAmount('uniswapV3');
+
+        expect(typeof minAmount).toBe('number');
+        expect(Number.isFinite(minAmount)).toBe(true);
+        expect(minAmount).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported platform', () => {
+        expect(() => getMinLiquidityAmount('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error when minLiquidityAmount is not configured', async () => {
+        // Mock platforms config to include a platform without minLiquidityAmount property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            testPlatform: {
+              id: 'testPlatform',
+              name: 'Test Platform Without Min Liquidity',
+              logo: '/test.svg',
+              color: '#000000',
+              description: 'Test platform',
+              features: { test: true },
+              feeTiers: { 500: { spacing: 10 } },
+              minTick: -1000,
+              maxTick: 1000,
+              subgraphs: {}
+              // No minLiquidityAmount property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getMinLiquidityAmount('testPlatform')).toThrow('No minimum liquidity amount configured for platform testPlatform');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getMinLiquidityAmount(null)).toThrow('platformId parameter is required');
+        expect(() => getMinLiquidityAmount(undefined)).toThrow('platformId parameter is required');
+        expect(() => getMinLiquidityAmount('')).toThrow('platformId cannot be empty');
+        expect(() => getMinLiquidityAmount(123)).toThrow('platformId must be a string');
       });
     });
   });

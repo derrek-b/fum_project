@@ -118,6 +118,7 @@ describe('Chain Configuration Validation', () => {
     const requiredArrayProperties = ['rpcUrls', 'blockExplorerUrls'];
     const requiredObjectProperties = ['nativeCurrency', 'platformAddresses'];
     const requiredExecutorProperties = ['executorAddress'];
+    const requiredNumberProperties = ['minDeploymentForGas'];
     // Note: envPK and executorEnvPK can be null/undefined (environment variables)
 
     const errors = [];
@@ -162,6 +163,13 @@ describe('Chain Configuration Validation', () => {
       requiredExecutorProperties.forEach(prop => {
         if (!validateExecutorAddress(chain[prop])) {
           chainErrors.push(`Property ${prop} must be a valid Ethereum address or '0x0', got: ${chain[prop]}`);
+        }
+      });
+
+      // Validate required number properties
+      requiredNumberProperties.forEach(prop => {
+        if (typeof chain[prop] !== 'number' || !Number.isFinite(chain[prop]) || chain[prop] <= 0) {
+          chainErrors.push(`Property ${prop} must be a positive finite number, got: ${chain[prop]}`);
         }
       });
 
