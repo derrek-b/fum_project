@@ -4795,7 +4795,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // 2. Create a new position as the user (not through vault)
         const positionManagerABI = [
           'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) calldata params) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
-          'function safeTransferFrom(address from, address to, uint256 tokenId) external'
+          'function safeTransferFrom(address from, address to, uint256 tokenId) external',
+          'function positions(uint256 tokenId) external view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)'
         ];
 
         const positionManager = new ethers.Contract(
@@ -4867,16 +4868,30 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         });
         const mintReceipt = await mintTx.wait();
 
-        // Extract tokenId from the transaction receipt logs
-        const mintEventLog = mintReceipt.logs.find(log =>
-          log.address.toLowerCase() === adapter.addresses.positionManagerAddress.toLowerCase()
-        );
+        // Parse the mint receipt to get tokenId from Transfer event
+        let newTokenId, actualLiquidity;
 
-        // Extract tokenId directly from Transfer event topics[3]
-        const newTokenId = BigInt(mintEventLog.topics[3]);
+        // Find the Transfer event to get the tokenId (mint creates new NFT, so Transfer from 0x0 to user)
+        for (const log of mintReceipt.logs) {
+          if (log.address.toLowerCase() === adapter.addresses.positionManagerAddress.toLowerCase()) {
+            // Transfer event topic
+            if (log.topics[0] === ethers.id('Transfer(address,address,uint256)')) {
+              // topics[1] = from (0x0 for mint), topics[2] = to, topics[3] = tokenId
+              if (log.topics[1] === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                newTokenId = BigInt(log.topics[3]);
+                break;
+              }
+            }
+          }
+        }
 
-        // For liquidity, we can use a placeholder since we'll remove it all anyway
-        const liquidity = '1000000'; // Non-zero placeholder
+        if (!newTokenId) {
+          throw new Error('Failed to extract tokenId from mint transaction');
+        }
+
+        // Query the position to get the actual liquidity
+        const positionData = await positionManager.positions(newTokenId);
+        actualLiquidity = positionData.liquidity;
 
         // 3. Remove all liquidity from the position
 
@@ -4886,7 +4901,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             pool: existingPosition.pool,
             tickLower: existingPosition.tickLower,
             tickUpper: existingPosition.tickUpper,
-            liquidity: liquidity.toString()
+            liquidity: actualLiquidity.toString()
           },
           percentage: 100,
           provider: env.provider,
@@ -4898,6 +4913,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           slippageTolerance: 1,
           deadlineMinutes: 2
         });
+
+        // Verify we have valid transaction data
+        if (!removeLiquidityData.data || removeLiquidityData.data === '0x') {
+          throw new Error('Failed to generate remove liquidity data');
+        }
 
         const removeTx = await user.sendTransaction({
           to: removeLiquidityData.to,
