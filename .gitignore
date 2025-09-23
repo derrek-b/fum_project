@@ -6,3 +6,5 @@ node_modules
 
 /bytecode/
 /dist/
+
+/test/data/.vault-blacklist.json

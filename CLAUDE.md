@@ -22,3 +22,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **File Structure**: Follow the established pattern of platform-specific strategy implementations.
 
 When adding new strategies, follow the pattern established with BabyStepsStrategy, using proper inheritance and platform-specific implementations.
+- Data structure format is saved in /docs/architecture/cache-structures.md
+- Do NOT assume what is or is not part of the data structure or the contracts or the library modules; look up code you want to call or use before you use it.
