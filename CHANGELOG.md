@@ -1,5 +1,51 @@
 # F.U.M. Project Changelog
 
+## [0.8.1] Price Event Workflow Refactor - Fee Distribution & Collection - 2025-09-24
+
+### Complete Price Event Workflow Implementation
+
+This release delivers a comprehensive refactor of the BabySteps strategy swap event handling, implementing proper fee collection with distribution, respecting reinvestment ratios during rebalances, and ensuring consistent fee handling across all operations.
+
+#### **Fee Collection Implementation**
+- **IMPLEMENTED**: Actual fee collection via Uniswap V3 Position Manager's collect function
+- **ADDED**: Transaction execution through vault's execute function for proper authorization
+- **ENHANCED**: Transfer event parsing to track collected amounts accurately
+- **FIXED**: Multiple import and reference errors in fee collection logic
+
+#### **Fee Distribution System**
+- **NEW**: `distributeFeesToOwner` helper method for consistent fee distribution
+- **RESPECTS**: ReinvestmentRatio parameter - owner receives their percentage (0-100%)
+- **UNIFIED**: Same distribution logic for explicit collection and rebalance scenarios
+- **IMPROVED**: Proper basis points calculation accounting for percentage vs basis points storage
+
+#### **Rebalance Fee Handling**
+- **MAJOR FIX**: Rebalances now properly distribute fees to owner based on reinvestmentRatio
+- **ADDED**: `extractFeesFromClosureEvents` method to parse fees from position closure
+- **ENHANCED**: `closePositions` returns receipt and metadata for fee extraction
+- **REFACTORED**: `rebalancePosition` to handle fee distribution during position closure
+
+#### **Event Architecture**
+- **STREAMLINED**: Single `FeesCollected` event contains all fee distribution information
+- **REMOVED**: Redundant `TokensDisbursed` event (info already in FeesCollected)
+- **ENHANCED**: Events include source tracking ('explicit_collection' vs 'rebalance')
+- **IMPROVED**: Comprehensive event data including reinvested and distributed amounts
+
+#### **Test Improvements**
+- **UPDATED**: Tests use one-way swaps (ETH→USDC) for more predictable behavior
+- **ADDED**: Break condition when fee collection triggers to prevent unnecessary swaps
+- **ENHANCED**: Safety limits and pre-approvals for efficient test execution
+- **VERIFIED**: All swap event detection tests passing with new implementation
+
+#### **Technical Fixes**
+- **FIXED**: Dynamic import replaced with static imports for coingecko service
+- **FIXED**: Missing provider parameter in generateClaimFeesData calls
+- **FIXED**: Non-existent getVaultSigner method - creates signer directly
+- **FIXED**: "Not approved" error by executing through vault's execute function
+- **FIXED**: fetchPrices typo corrected to fetchTokenPrices
+
+**Status**: ✅ All tests passing - complete implementation ready for production
+**Impact**: Critical feature addition for automated fee management in liquidity positions
+
 ## [0.8.0] VaultRegistry Deconstruction - Event-Driven Architecture - 2025-09-01
 
 ### Major Refactor - Complete VaultRegistry Removal
