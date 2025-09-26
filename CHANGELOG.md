@@ -5,6 +5,32 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2025-09-26
+
+### Added
+- **New token helper functions** for stablecoin detection:
+  - `isStablecoin(symbol)`: Check if a single token is a stablecoin
+  - `detectStablePair(tokenAddressA, tokenAddressB, chainId)`: Detect if both tokens in a pair are stablecoins
+  - Useful for applying different slippage and fee tier strategies for stable vs volatile pairs
+
+### Changed
+- **Fixed reinvestmentTrigger parameter configuration**:
+  - Corrected value representation to use cents consistently (5000 = $50.00)
+  - Updated min/max/step values: min: 500 ($5), max: 10000 ($100), step: 500 ($5)
+  - Aligned template defaults with parameter constraints
+
+### Removed
+- **Removed deprecated maxFeeTier property** from strategy configurations:
+  - Removed from Baby Steps and Parris Island strategies
+  - Cleaned up related test validations
+  - Fee tier selection is now handled dynamically by platform adapters
+
+### Fixed
+- **UniswapV3Adapter improvements**:
+  - Enhanced fee tier selection logic for better pool matching
+  - Improved error handling and validation
+  - Updated tests for better coverage
+
 ## [0.19.0] - 2025-09-17
 
 ### Added - Minimum Deployment Threshold System

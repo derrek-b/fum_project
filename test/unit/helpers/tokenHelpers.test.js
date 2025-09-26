@@ -18,7 +18,9 @@ import {
   getCoingeckoId,
   getTokenAddresses,
   validateTokensExist,
-  getTokensBySymbol
+  getTokensBySymbol,
+  isStablecoin,
+  detectStablePair
 } from '../../../src/helpers/tokenHelpers.js';
 import tokens from '../../../src/configs/tokens.js';
 
@@ -219,6 +221,269 @@ describe('Token Helpers', () => {
         Object.entries(stablecoins).forEach(([symbol, token]) => {
           expect(allTokens[symbol]).toEqual(token);
         });
+      });
+    });
+  });
+
+  describe('isStablecoin', () => {
+    describe('Success Cases', () => {
+      it('should return correct value for all configured tokens', () => {
+        Object.entries(tokens).forEach(([symbol, token]) => {
+          const result = isStablecoin(symbol);
+          expect(result).toBe(token.isStablecoin);
+        });
+      });
+
+      it('should be consistent with getStablecoins', () => {
+        const stablecoins = getStablecoins();
+
+        // All tokens in getStablecoins should return true
+        Object.keys(stablecoins).forEach(symbol => {
+          expect(isStablecoin(symbol)).toBe(true);
+        });
+
+        // All tokens not in getStablecoins should return false
+        const allTokens = Object.keys(tokens);
+        const nonStablecoins = allTokens.filter(symbol => !stablecoins[symbol]);
+
+        nonStablecoins.forEach(symbol => {
+          expect(isStablecoin(symbol)).toBe(false);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null symbol', () => {
+        expect(() => isStablecoin(null))
+          .toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for undefined symbol', () => {
+        expect(() => isStablecoin(undefined))
+          .toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for empty string symbol', () => {
+        expect(() => isStablecoin(''))
+          .toThrow('Token symbol cannot be empty');
+      });
+
+      it('should throw error for non-string symbol', () => {
+        expect(() => isStablecoin(123))
+          .toThrow('Token symbol must be a string');
+        expect(() => isStablecoin({}))
+          .toThrow('Token symbol must be a string');
+        expect(() => isStablecoin([]))
+          .toThrow('Token symbol must be a string');
+        expect(() => isStablecoin(true))
+          .toThrow('Token symbol must be a string');
+      });
+
+      it('should throw error for unknown token', () => {
+        expect(() => isStablecoin('UNKNOWN'))
+          .toThrow('Token UNKNOWN not found');
+      });
+
+      it('should throw error for case-sensitive mismatch', () => {
+        expect(() => isStablecoin('usdc'))
+          .toThrow('Token usdc not found');
+        expect(() => isStablecoin('Usdc'))
+          .toThrow('Token Usdc not found');
+        expect(() => isStablecoin('USDC '))
+          .toThrow('Token USDC  not found');
+      });
+    });
+  });
+
+  describe('detectStablePair', () => {
+    describe('Success Cases', () => {
+      it('should return true for USDC-USDT stable pair', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const usdtAddress = getTokenAddress('USD₮0', 1337);
+
+        const result = detectStablePair(usdcAddress, usdtAddress, 1337);
+
+        expect(result).toBe(true);
+        expect(typeof result).toBe('boolean');
+      });
+
+      it('should return true for USDT-USDC stable pair (reversed order)', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const usdtAddress = getTokenAddress('USD₮0', 1337);
+
+        const result = detectStablePair(usdtAddress, usdcAddress, 1337);
+
+        expect(result).toBe(true);
+      });
+
+      it('should return false for WETH-USDC mixed pair', () => {
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        const result = detectStablePair(wethAddress, usdcAddress, 1337);
+
+        expect(result).toBe(false);
+        expect(typeof result).toBe('boolean');
+      });
+
+      it('should return false for USDC-WETH mixed pair (reversed)', () => {
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        const result = detectStablePair(usdcAddress, wethAddress, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should return false for WETH-WBTC non-stable pair', () => {
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const wbtcAddress = getTokenAddress('WBTC', 1337);
+
+        const result = detectStablePair(wethAddress, wbtcAddress, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should work with all combinations of known tokens', () => {
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const usdtAddress = getTokenAddress('USD₮0', 1337);
+        const wbtcAddress = getTokenAddress('WBTC', 1337);
+
+        // Test all combinations
+        const pairs = [
+          { tokenA: usdcAddress, tokenB: usdtAddress, expected: true },  // stable-stable
+          { tokenA: usdtAddress, tokenB: usdcAddress, expected: true },  // stable-stable reversed
+          { tokenA: usdcAddress, tokenB: wethAddress, expected: false }, // stable-volatile
+          { tokenA: wethAddress, tokenB: usdcAddress, expected: false }, // volatile-stable
+          { tokenA: usdcAddress, tokenB: wbtcAddress, expected: false }, // stable-volatile
+          { tokenA: wbtcAddress, tokenB: usdcAddress, expected: false }, // volatile-stable
+          { tokenA: wethAddress, tokenB: wbtcAddress, expected: false }, // volatile-volatile
+          { tokenA: wbtcAddress, tokenB: wethAddress, expected: false }, // volatile-volatile reversed
+        ];
+
+        for (const { tokenA, tokenB, expected } of pairs) {
+          const result = detectStablePair(tokenA, tokenB, 1337);
+          expect(result).toBe(expected);
+        }
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should return false for unknown token addresses', () => {
+        const unknownAddress1 = '0x1234567890123456789012345678901234567890';
+        const unknownAddress2 = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+
+        const result = detectStablePair(unknownAddress1, unknownAddress2, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should return false when first token is unknown', () => {
+        const unknownAddress = '0x1234567890123456789012345678901234567890';
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        const result = detectStablePair(unknownAddress, usdcAddress, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should return false when second token is unknown', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const unknownAddress = '0x1234567890123456789012345678901234567890';
+
+        const result = detectStablePair(usdcAddress, unknownAddress, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should return false for addresses not on chain', () => {
+        // These are mainnet addresses that might not be in our 1337 test chain config
+        const mainnetOnlyToken1 = '0x4Fabb145d64652a948d72533023f6E7A623C7C53'; // BUSD mainnet
+        const mainnetOnlyToken2 = '0x956F47F50A910163D8BF957Cf5846D573E7f87CA'; // FEI mainnet
+
+        const result = detectStablePair(mainnetOnlyToken1, mainnetOnlyToken2, 1337);
+
+        expect(result).toBe(false);
+      });
+
+      it('should throw error for invalid tokenAddressA', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        expect(() => detectStablePair(null, usdcAddress, 1337))
+          .toThrow('Address parameter is required');
+        expect(() => detectStablePair('', usdcAddress, 1337))
+          .toThrow('Address must be a valid Ethereum address');
+        expect(() => detectStablePair('0xinvalid', usdcAddress, 1337))
+          .toThrow('Address must be a valid Ethereum address');
+        expect(() => detectStablePair(123, usdcAddress, 1337))
+          .toThrow('Address must be a string');
+      });
+
+      it('should throw error for invalid tokenAddressB', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        expect(() => detectStablePair(usdcAddress, null, 1337))
+          .toThrow('Address parameter is required');
+        expect(() => detectStablePair(usdcAddress, '', 1337))
+          .toThrow('Address must be a valid Ethereum address');
+        expect(() => detectStablePair(usdcAddress, '0xinvalid', 1337))
+          .toThrow('Address must be a valid Ethereum address');
+        expect(() => detectStablePair(usdcAddress, 123, 1337))
+          .toThrow('Address must be a string');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const usdtAddress = getTokenAddress('USD₮0', 1337);
+
+        expect(() => detectStablePair(usdcAddress, usdtAddress, null))
+          .toThrow('Chain ID parameter is required');
+        expect(() => detectStablePair(usdcAddress, usdtAddress, 'invalid'))
+          .toThrow('Chain ID must be a positive integer');
+        expect(() => detectStablePair(usdcAddress, usdtAddress, -1))
+          .toThrow('Chain ID must be a positive integer');
+        expect(() => detectStablePair(usdcAddress, usdtAddress, 0))
+          .toThrow('Chain ID must be a positive integer');
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should return false for zero addresses', () => {
+        const zeroAddress = '0x0000000000000000000000000000000000000000';
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        const result1 = detectStablePair(zeroAddress, usdcAddress, 1337);
+        const result2 = detectStablePair(usdcAddress, zeroAddress, 1337);
+        const result3 = detectStablePair(zeroAddress, zeroAddress, 1337);
+
+        expect(result1).toBe(false);
+        expect(result2).toBe(false);
+        expect(result3).toBe(false);
+      });
+
+      it('should be deterministic and return same result on multiple calls', () => {
+        const usdcAddress = getTokenAddress('USDC', 1337);
+        const usdtAddress = getTokenAddress('USD₮0', 1337);
+
+        const result1 = detectStablePair(usdcAddress, usdtAddress, 1337);
+        const result2 = detectStablePair(usdcAddress, usdtAddress, 1337);
+        const result3 = detectStablePair(usdcAddress, usdtAddress, 1337);
+
+        expect(result1).toBe(result2);
+        expect(result2).toBe(result3);
+        expect(result1).toBe(true);
+      });
+
+      it('should be deterministic for non-stable pairs', () => {
+        const wethAddress = getTokenAddress('WETH', 1337);
+        const usdcAddress = getTokenAddress('USDC', 1337);
+
+        const result1 = detectStablePair(wethAddress, usdcAddress, 1337);
+        const result2 = detectStablePair(wethAddress, usdcAddress, 1337);
+
+        expect(result1).toBe(result2);
+        expect(result1).toBe(false);
       });
     });
   });

@@ -208,6 +208,65 @@ export function getPlatformLogo(platformId) {
 }
 
 /**
+ * Lookup all supported platform IDs
+ * @memberof module:helpers/platformHelpers
+ * @returns {Array<string>} Array of all configured platform IDs
+ * @example
+ * // Lookup all platform IDs
+ * const platformIds = lookupSupportedPlatformIds();
+ * // Returns: ['uniswapV3', 'aaveV3', 'compoundV3', ...]
+ *
+ * @example
+ * // Check if a platform is supported
+ * const supportedPlatforms = lookupSupportedPlatformIds();
+ * if (!supportedPlatforms.includes(userPlatform)) {
+ *   throw new Error('Unsupported platform');
+ * }
+ * @since 1.0.0
+ */
+export function lookupSupportedPlatformIds() {
+  return Object.keys(platforms);
+}
+
+/**
+ * Get minimum liquidity amount for a specific platform
+ * @memberof module:helpers/platformHelpers
+ * @param {string} platformId - The platform identifier (e.g., 'uniswapV3', 'aaveV3')
+ * @returns {number} Minimum liquidity amount in USD for gas-efficient operations
+ * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
+ * @throws {Error} If platform is not supported
+ * @throws {Error} If no minimum liquidity amount is configured for the platform
+ * @example
+ * // Get minimum liquidity for Uniswap V3
+ * const minAmount = getMinLiquidityAmount('uniswapV3');
+ * // Returns: 10 (USD)
+ *
+ * @example
+ * // Use in strategy logic
+ * const minLiquidity = getMinLiquidityAmount(platformId);
+ * if (availableLiquidity > minLiquidity) {
+ *   // Proceed with liquidity provision
+ * }
+ * @since 1.0.0
+ */
+export function getMinLiquidityAmount(platformId) {
+  validatePlatformId(platformId);
+
+  const metadata = platforms[platformId];
+  if (!metadata) {
+    throw new Error(`Platform ${platformId} is not supported`);
+  }
+
+  if (typeof metadata.minLiquidityAmount !== 'number' || !Number.isFinite(metadata.minLiquidityAmount) || metadata.minLiquidityAmount <= 0) {
+    throw new Error(`No minimum liquidity amount configured for platform ${platformId}`);
+  }
+
+  return metadata.minLiquidityAmount;
+}
+
+
+
+/**
  * Get fee tiers supported by a platform
  * @memberof module:helpers/platformHelpers
  * @param {string} platformId - The platform ID to get fee tiers for
@@ -512,61 +571,4 @@ export function lookupPlatformById(platformId, chainId) {
     features: metadata.features,
     feeTiers: feeTiersArray
   };
-}
-
-/**
- * Lookup all supported platform IDs
- * @memberof module:helpers/platformHelpers
- * @returns {Array<string>} Array of all configured platform IDs
- * @example
- * // Lookup all platform IDs
- * const platformIds = lookupSupportedPlatformIds();
- * // Returns: ['uniswapV3', 'aaveV3', 'compoundV3', ...]
- *
- * @example
- * // Check if a platform is supported
- * const supportedPlatforms = lookupSupportedPlatformIds();
- * if (!supportedPlatforms.includes(userPlatform)) {
- *   throw new Error('Unsupported platform');
- * }
- * @since 1.0.0
- */
-export function lookupSupportedPlatformIds() {
-  return Object.keys(platforms);
-}
-
-/**
- * Get minimum liquidity amount for a specific platform
- * @memberof module:helpers/platformHelpers
- * @param {string} platformId - The platform identifier (e.g., 'uniswapV3', 'aaveV3')
- * @returns {number} Minimum liquidity amount in USD for gas-efficient operations
- * @throws {Error} If platformId is not valid (null, undefined, not a string, or empty)
- * @throws {Error} If platform is not supported
- * @throws {Error} If no minimum liquidity amount is configured for the platform
- * @example
- * // Get minimum liquidity for Uniswap V3
- * const minAmount = getMinLiquidityAmount('uniswapV3');
- * // Returns: 10 (USD)
- *
- * @example
- * // Use in strategy logic
- * const minLiquidity = getMinLiquidityAmount(platformId);
- * if (availableLiquidity > minLiquidity) {
- *   // Proceed with liquidity provision
- * }
- * @since 1.0.0
- */
-export function getMinLiquidityAmount(platformId) {
-  validatePlatformId(platformId);
-
-  const metadata = platforms[platformId];
-  if (!metadata) {
-    throw new Error(`Platform ${platformId} is not supported`);
-  }
-
-  if (typeof metadata.minLiquidityAmount !== 'number' || !Number.isFinite(metadata.minLiquidityAmount) || metadata.minLiquidityAmount <= 0) {
-    throw new Error(`No minimum liquidity amount configured for platform ${platformId}`);
-  }
-
-  return metadata.minLiquidityAmount;
 }

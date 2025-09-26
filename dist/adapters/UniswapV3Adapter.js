@@ -1311,11 +1311,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Calculate the original tick where a position was created based on its tick range
-   * 
+   *
    * This method reverse-engineers the tick at position creation time by analyzing
    * the tick range boundaries and the target range percentages used. This is useful
    * for tracking price movements from the original position creation point.
-   * 
+   *
    * @param {Object} position - Position data
    * @param {number} position.tickLower - Lower tick boundary of the position
    * @param {number} position.tickUpper - Upper tick boundary of the position
@@ -1325,7 +1325,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {number} Estimated original tick where position was created
    * @throws {Error} If position data is invalid or missing required fields
    * @throws {Error} If target range percentages are invalid
-   * 
+   *
    * @example
    * const originalTick = adapter.calculateOriginalTick(
    *   { tickLower: 195000, tickUpper: 205000, fee: 500 },
@@ -1340,52 +1340,52 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     if (!position) {
       throw new Error("Position parameter is required");
     }
-    
+
     if (!Number.isFinite(position.tickLower)) {
       throw new Error("position.tickLower must be a finite number");
     }
-    
+
     if (!Number.isFinite(position.tickUpper)) {
       throw new Error("position.tickUpper must be a finite number");
     }
-    
+
     if (position.tickLower >= position.tickUpper) {
       throw new Error("position.tickLower must be less than position.tickUpper");
     }
-    
+
     if (!Number.isFinite(position.fee)) {
       throw new Error("position.fee must be a finite number");
     }
-    
+
     if (!Number.isFinite(targetRangeUpper) || targetRangeUpper < 0 || targetRangeUpper > 100) {
       throw new Error("targetRangeUpper must be a number between 0 and 100");
     }
-    
+
     if (!Number.isFinite(targetRangeLower) || targetRangeLower < 0 || targetRangeLower > 100) {
       throw new Error("targetRangeLower must be a number between 0 and 100");
     }
-    
+
     // Get tick spacing for the fee tier
     const tickSpacing = getPlatformTickSpacing('uniswapV3', position.fee);
-    
+
     // Calculate ticks per percent (approximately 100 ticks = 1% price movement)
     const ticksPerPercent = Math.round(Math.log(1.01) / Math.log(1.0001));
-    
+
     // Calculate expected tick distances from original price
     const expectedUpperTicks = Math.round(targetRangeUpper * ticksPerPercent);
     const expectedLowerTicks = Math.round(targetRangeLower * ticksPerPercent);
-    
+
     // For symmetric ranges, the original tick is the midpoint
     if (targetRangeUpper === targetRangeLower) {
       const midpoint = (position.tickLower + position.tickUpper) / 2;
       return Math.round(midpoint);
     }
-    
+
     // For asymmetric ranges, calculate based on the proportion
     // The original tick divides the range proportionally to the target percentages
     const totalRange = expectedUpperTicks + expectedLowerTicks;
     const actualRange = position.tickUpper - position.tickLower;
-    
+
     // Account for tick spacing alignment
     // The actual range might be slightly different due to tick spacing rounding
     // We estimate the original tick based on the proportional split
@@ -1393,7 +1393,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const originalTick = Math.round(
       position.tickLower + (lowerProportion * actualRange)
     );
-    
+
     return originalTick;
   }
 
@@ -1950,15 +1950,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       const [slot0, liquidity] = poolData;
 
-      if (liquidity > 0) {
-        pools.push({
-          address: poolAddress,
-          fee,
-          liquidity: liquidity.toString(),
-          sqrtPriceX96: slot0.sqrtPriceX96.toString(),
-          tick: slot0.tick
-        });
-      }
+      pools.push({
+        address: poolAddress,
+        fee,
+        liquidity: liquidity.toString(),
+        sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+        tick: slot0.tick
+      });
     }
 
     return pools;
@@ -3005,14 +3003,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} params - Parameters for getting best swap quote
    * @param {string} params.tokenInAddress - Address of input token
    * @param {string} params.tokenOutAddress - Address of output token
-   * @param {number} [params.maxFeeTier] - Maximum fee tier to consider (optional, defaults to highest available)
    * @param {string} params.amountIn - Amount of input tokens (in wei string)
    * @param {Object} params.provider - Ethers provider instance
    * @returns {Promise<Object>} Best quote with { amountOut: string, optimalFeeTier: number }
    * @throws {Error} If no valid quotes can be obtained
    */
   async getBestSwapQuote(params) {
-    const { tokenInAddress, tokenOutAddress, maxFeeTier, amountIn, provider } = params;
+    const { tokenInAddress, tokenOutAddress, amountIn, provider } = params;
 
     // Validate parameters (reuse same validation as getSwapQuote)
     if (!tokenInAddress) {
@@ -3046,27 +3043,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("AmountIn cannot be zero");
     }
 
-    // Validate maxFeeTier if provided
-    if (maxFeeTier !== undefined && maxFeeTier !== null) {
-      if (typeof maxFeeTier !== 'number' || !Number.isFinite(maxFeeTier)) {
-        throw new Error("maxFeeTier must be a valid number");
-      }
-      if (maxFeeTier <= 0) {
-        throw new Error("maxFeeTier must be greater than 0");
-      }
-    }
-
     await this._validateProviderChain(provider);
 
-    // Filter fee tiers based on maxFeeTier
-    const validFeeTiers = this.feeTiers.filter(tier => !maxFeeTier || tier <= maxFeeTier);
-
-    if (validFeeTiers.length === 0) {
-      throw new Error(`No valid fee tiers found. maxFeeTier: ${maxFeeTier}, available tiers: ${this.feeTiers.join(', ')}`);
-    }
-
     // Get quotes for all valid fee tiers in parallel
-    const quotePromises = validFeeTiers.map(async (feeTier) => {
+    const quotePromises = this.feeTiers.map(async (feeTier) => {
       try {
         const amountOut = await this.getSwapQuote({
           tokenInAddress,
@@ -3086,7 +3066,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const validQuotes = quotes.filter(quote => quote !== null);
 
     if (validQuotes.length === 0) {
-      throw new Error(`No pools exist for token pair ${tokenInAddress}/${tokenOutAddress} with fee tiers: ${validFeeTiers.join(', ')}`);
+      throw new Error(`No pools exist for token pair ${tokenInAddress}/${tokenOutAddress} with fee tiers: ${this.feeTiers.join(', ')}`);
     }
 
     // Sort by amountOut descending (highest first)

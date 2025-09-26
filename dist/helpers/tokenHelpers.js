@@ -201,6 +201,97 @@ export function getTokensByChain(chainId) {
 }
 
 /**
+ * Check if a token is a stablecoin
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} symbol - Token symbol (case-sensitive)
+ * @returns {boolean} True if the token is a stablecoin, false otherwise
+ * @throws {Error} If symbol parameter is invalid or token is not found
+ * @example
+ * // Check if USDC is a stablecoin
+ * const isStable = isStablecoin('USDC');
+ * // Returns: true
+ *
+ * @example
+ * // Check if WETH is a stablecoin
+ * const isStable = isStablecoin('WETH');
+ * // Returns: false
+ *
+ * @example
+ * // Use in strategy logic
+ * if (isStablecoin(tokenSymbol)) {
+ *   // Apply tighter slippage for stablecoins
+ *   slippage = 0.1;
+ * } else {
+ *   // Use higher slippage for volatile assets
+ *   slippage = 0.5;
+ * }
+ * @since 1.0.0
+ */
+export function isStablecoin(symbol) {
+  validateTokenSymbol(symbol);
+
+  const token = tokens[symbol];
+  if (!token) {
+    throw new Error(`Token ${symbol} not found`);
+  }
+
+  return token.isStablecoin;
+}
+
+/**
+ * Detect if a token pair is a stable pair (both tokens are stablecoins)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} tokenAddressA - First token address
+ * @param {string} tokenAddressB - Second token address
+ * @param {number} chainId - Chain ID where the tokens exist
+ * @returns {boolean} True if both tokens are stablecoins, false otherwise
+ * @example
+ * // Check if USDC-USDT is a stable pair
+ * const isStable = detectStablePair(
+ *   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+ *   '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+ *   1 // Ethereum mainnet
+ * );
+ * // Returns: true
+ *
+ * @example
+ * // Check if WETH-USDC is a stable pair
+ * const isStable = detectStablePair(
+ *   '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+ *   '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+ *   1
+ * );
+ * // Returns: false (mixed pair)
+ *
+ * @example
+ * // Unknown tokens return false
+ * const isStable = detectStablePair(
+ *   '0x1234567890123456789012345678901234567890',
+ *   '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+ *   1
+ * );
+ * // Returns: false
+ * @since 1.0.0
+ */
+export function detectStablePair(tokenAddressA, tokenAddressB, chainId) {
+  validateEthereumAddress(tokenAddressA);
+  validateEthereumAddress(tokenAddressB);
+  validateChainId(chainId);
+
+  try {
+    // Look up both tokens by their addresses
+    const tokenA = getTokenByAddress(tokenAddressA, chainId);
+    const tokenB = getTokenByAddress(tokenAddressB, chainId);
+
+    // Check if both are stablecoins
+    return isStablecoin(tokenA.symbol) && isStablecoin(tokenB.symbol);
+  } catch (error) {
+    // If we can't identify one or both tokens, treat as non-stable pair
+    return false;
+  }
+}
+
+/**
  * Get token by symbol
  * @memberof module:helpers/tokenHelpers
  * @param {string} symbol - Token symbol (case-sensitive)

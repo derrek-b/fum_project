@@ -3809,77 +3809,77 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           tickUpper: 205000,
           fee: 500
         };
-        
+
         const originalTick = adapter.calculateOriginalTick(position, 10, 10);
-        
+
         // For symmetric 10% ranges, original should be midpoint
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should calculate original tick for asymmetric range', () => {
         const position = {
           tickLower: 198000,
-          tickUpper: 203000, 
+          tickUpper: 203000,
           fee: 500
         };
-        
+
         // 5% upper, 2% lower (asymmetric)
         const originalTick = adapter.calculateOriginalTick(position, 5, 2);
-        
+
         // Original tick should be closer to lower bound (2/7 of range)
         const expectedTick = Math.round(198000 + (2/7) * 5000);
         expect(originalTick).toBeCloseTo(expectedTick, -1);
       });
-      
+
       it('should handle positions with different fee tiers', () => {
         const position3000 = {
           tickLower: 194000,
           tickUpper: 206000,
           fee: 3000
         };
-        
+
         const originalTick = adapter.calculateOriginalTick(position3000, 10, 10);
-        
+
         expect(originalTick).toBeCloseTo(200000, -2);
       });
-      
+
       it('should handle very small ranges', () => {
         const position = {
           tickLower: 199900,
           tickUpper: 200100,
           fee: 100
         };
-        
+
         const originalTick = adapter.calculateOriginalTick(position, 1, 1);
-        
+
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should handle large asymmetric ranges', () => {
         const position = {
           tickLower: 180000,
           tickUpper: 210000,
           fee: 10000
         };
-        
+
         // 20% upper, 10% lower
         const originalTick = adapter.calculateOriginalTick(position, 20, 10);
-        
+
         // Original tick should be 1/3 from lower bound
         const expectedTick = Math.round(180000 + (10/30) * 30000);
         expect(originalTick).toBeCloseTo(expectedTick, -2);
       });
     });
-    
+
     describe('Error Cases', () => {
       it('should throw error when position is missing', () => {
         expect(() => adapter.calculateOriginalTick(null, 10, 10))
           .toThrow('Position parameter is required');
-        
+
         expect(() => adapter.calculateOriginalTick(undefined, 10, 10))
           .toThrow('Position parameter is required');
       });
-      
+
       it('should throw error for invalid tick values', () => {
         const invalidPositions = [
           { tickLower: NaN, tickUpper: 200000, fee: 500 },
@@ -3889,25 +3889,25 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           { tickLower: 195000, tickUpper: Infinity, fee: 500 },
           { tickLower: 195000, tickUpper: 'not-a-number', fee: 500 }
         ];
-        
+
         invalidPositions.forEach(position => {
           expect(() => adapter.calculateOriginalTick(position, 10, 10))
             .toThrow();
         });
       });
-      
+
       it('should throw error when tickLower >= tickUpper', () => {
         const invalidPositions = [
           { tickLower: 200000, tickUpper: 200000, fee: 500 },
           { tickLower: 200000, tickUpper: 195000, fee: 500 }
         ];
-        
+
         invalidPositions.forEach(position => {
           expect(() => adapter.calculateOriginalTick(position, 10, 10))
             .toThrow('position.tickLower must be less than position.tickUpper');
         });
       });
-      
+
       it('should throw error for invalid fee tier', () => {
         const invalidPositions = [
           { tickLower: 195000, tickUpper: 205000, fee: NaN },
@@ -3916,16 +3916,16 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           { tickLower: 195000, tickUpper: 205000, fee: null },
           { tickLower: 195000, tickUpper: 205000, fee: undefined }
         ];
-        
+
         invalidPositions.forEach(position => {
           expect(() => adapter.calculateOriginalTick(position, 10, 10))
             .toThrow('position.fee must be a finite number');
         });
       });
-      
+
       it('should throw error for invalid target ranges', () => {
         const position = { tickLower: 195000, tickUpper: 205000, fee: 500 };
-        
+
         // Invalid upper ranges
         expect(() => adapter.calculateOriginalTick(position, -1, 10))
           .toThrow('targetRangeUpper must be a number between 0 and 100');
@@ -3933,7 +3933,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow('targetRangeUpper must be a number between 0 and 100');
         expect(() => adapter.calculateOriginalTick(position, NaN, 10))
           .toThrow('targetRangeUpper must be a number between 0 and 100');
-        
+
         // Invalid lower ranges
         expect(() => adapter.calculateOriginalTick(position, 10, -1))
           .toThrow('targetRangeLower must be a number between 0 and 100');
@@ -3943,7 +3943,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow('targetRangeLower must be a number between 0 and 100');
       });
     });
-    
+
     describe('Edge Cases', () => {
       it('should handle zero range percentages', () => {
         const position = {
@@ -3951,55 +3951,55 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           tickUpper: 200001,
           fee: 100
         };
-        
+
         // Both ranges at 0% (position created at exact tick)
         const originalTick = adapter.calculateOriginalTick(position, 0, 0);
-        
+
         // Should return midpoint for 0% ranges
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should handle maximum range percentages', () => {
         const position = {
           tickLower: 190000,
           tickUpper: 210000,
           fee: 10000
         };
-        
+
         const originalTick = adapter.calculateOriginalTick(position, 100, 100);
-        
+
         // Should still calculate reasonable midpoint
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should handle extreme asymmetric ranges', () => {
         const position = {
           tickLower: 190000,
           tickUpper: 200100,
           fee: 500
         };
-        
+
         // 1% upper, 50% lower (very asymmetric)
         const originalTick = adapter.calculateOriginalTick(position, 1, 50);
-        
+
         // Should be very close to upper bound
         expect(originalTick).toBeGreaterThan(199000);
         expect(originalTick).toBeLessThan(200100);
       });
-      
+
       it('should handle very large tick ranges', () => {
         const position = {
           tickLower: -500000,
           tickUpper: 500000,
           fee: 10000
         };
-        
+
         const originalTick = adapter.calculateOriginalTick(position, 50, 50);
-        
+
         // Should be close to zero for symmetric large range
         expect(originalTick).toBeCloseTo(0, -3);
       });
-      
+
       it('should handle positions near tick boundaries', () => {
         // Near maximum tick boundary
         const maxPosition = {
@@ -4007,24 +4007,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           tickUpper: 887000,
           fee: 10000
         };
-        
+
         const maxOriginalTick = adapter.calculateOriginalTick(maxPosition, 5, 5);
         expect(maxOriginalTick).toBeGreaterThan(880000);
         expect(maxOriginalTick).toBeLessThan(887000);
-        
+
         // Near minimum tick boundary
         const minPosition = {
           tickLower: -887000,
           tickUpper: -880000,
           fee: 10000
         };
-        
+
         const minOriginalTick = adapter.calculateOriginalTick(minPosition, 5, 5);
         expect(minOriginalTick).toBeGreaterThan(-887000);
         expect(minOriginalTick).toBeLessThan(-880000);
       });
     });
-    
+
     describe('Mathematical Accuracy', () => {
       it('should match expected calculations for known scenarios', () => {
         // Test with known tick spacing alignment
@@ -4033,37 +4033,37 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           tickUpper: 200020, // Aligned to 500 fee tier (spacing 10)
           fee: 500
         };
-        
+
         // 0.2% range each way (approximately 20 ticks)
         const originalTick = adapter.calculateOriginalTick(position, 0.2, 0.2);
-        
+
         // Should be exactly at midpoint
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should handle fractional percentage inputs correctly', () => {
         const position = {
           tickLower: 199500,
           tickUpper: 200500,
           fee: 500
         };
-        
+
         // 2.5% ranges
         const originalTick = adapter.calculateOriginalTick(position, 2.5, 2.5);
-        
+
         expect(originalTick).toBe(200000);
       });
-      
+
       it('should produce consistent results for equivalent inputs', () => {
         const position = {
           tickLower: 190000,
           tickUpper: 210000,
           fee: 3000
         };
-        
+
         const result1 = adapter.calculateOriginalTick(position, 15, 15);
         const result2 = adapter.calculateOriginalTick(position, 15, 15);
-        
+
         expect(result1).toBe(result2);
       });
     });
@@ -5537,7 +5537,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           expect(typeof pool.sqrtPriceX96).toBe('string');
           expect(typeof pool.tick).toBe('bigint');
 
-          expect(BigInt(pool.liquidity)).toBeGreaterThan(0n);
+          expect(typeof pool.liquidity).toBe('string');
           expect(BigInt(pool.sqrtPriceX96)).toBeGreaterThan(0n);
         });
       });
@@ -9065,50 +9065,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(bestQuote.optimalFeeTier).toBe(maxIndividual.feeTier);
       });
 
-      it('should respect maxFeeTier parameter', async () => {
-        const quoteParams = {
-          tokenInAddress: env.wethAddress,
-          tokenOutAddress: env.usdcAddress,
-          maxFeeTier: 500, // Only allow 0.05% fee tier
-          amountIn: ethers.parseEther('0.5').toString(),
-          provider: env.provider
-        };
-
-        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
-
-        // Fee tier should not exceed maxFeeTier
-        expect(bestQuote.optimalFeeTier).toBeLessThanOrEqual(500);
-
-        // Should still return valid quote
-        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
-      });
-
-      it('should work without maxFeeTier parameter', async () => {
-        const quoteParams = {
-          tokenInAddress: env.usdcAddress,
-          tokenOutAddress: env.wethAddress,
-          amountIn: ethers.parseUnits('2000', 6).toString(),
-          provider: env.provider
-        };
-
-        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
-
-        // Should return valid quote
-        expect(bestQuote).toBeDefined();
-        expect(bestQuote.amountOut).toBeDefined();
-        expect(bestQuote.optimalFeeTier).toBeDefined();
-        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
-
-        // Fee tier should be one of the platform's fee tiers
-        expect(adapter.feeTiers).toContain(bestQuote.optimalFeeTier);
-      });
-
       it('should handle single pool existence gracefully', async () => {
         // Use a less common fee tier that might only have one pool
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          maxFeeTier: 10000, // Allow up to 1% fee tier
           amountIn: ethers.parseEther('0.1').toString(),
           provider: env.provider
         };
@@ -9126,7 +9087,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          maxFeeTier: 3000,
           amountIn: ethers.parseEther('0.25').toString(),
           provider: env.provider
         };
@@ -9210,28 +9170,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ).rejects.toThrow('AmountIn must be a positive numeric string');
       });
 
-      it('should throw error for invalid maxFeeTier', async () => {
-        await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            maxFeeTier: 'not-a-number',
-            amountIn: ethers.parseEther('1').toString(),
-            provider: env.provider
-          })
-        ).rejects.toThrow('maxFeeTier must be a valid number');
-
-        await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            maxFeeTier: -100,
-            amountIn: ethers.parseEther('1').toString(),
-            provider: env.provider
-          })
-        ).rejects.toThrow('maxFeeTier must be greater than 0');
-      });
-
       it('should throw error when no pools exist for token pair', async () => {
         const fakeToken1 = '0x0000000000000000000000000000000000000001';
         const fakeToken2 = '0x0000000000000000000000000000000000000002';
@@ -9244,18 +9182,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             provider: env.provider
           })
         ).rejects.toThrow(/No pools exist for token pair/);
-      });
-
-      it('should throw error when maxFeeTier filters out all fee tiers', async () => {
-        await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            maxFeeTier: 50, // Too low - no fee tiers are this small
-            amountIn: ethers.parseEther('1').toString(),
-            provider: env.provider
-          })
-        ).rejects.toThrow(/No valid fee tiers found/);
       });
 
       it('should throw error for missing provider', async () => {

@@ -196,12 +196,11 @@ describe('Strategy Helpers', () => {
       expect(result.color).toBe('gold');
       expect(result.minTokens).toBe(2);
       expect(result.maxTokens).toBe(2);
-      
+
       // Test strategyProperties specific values for bob strategy
       expect(result.strategyProperties).toMatchObject({
         minTVL: 1000000,
         minPoolAge: 90,
-        maxFeeTier: 3000,
         tvlAveragingPeriod: 14,
         transactionDeadlineSeconds: 60
       });
@@ -399,7 +398,7 @@ describe('Strategy Helpers', () => {
         expect(result.maxSlippage).toBe(0.3);
         expect(result.emergencyExitTrigger).toBe(20);
         expect(result.feeReinvestment).toBe(false);
-        expect(result.reinvestmentTrigger).toBe(50);
+        expect(result.reinvestmentTrigger).toBe(5000);
         expect(result.reinvestmentRatio).toBe(80);
       });
 
@@ -564,7 +563,7 @@ describe('Strategy Helpers', () => {
         expect(result.rebalanceThresholdUpper).toBe(1.5);
         expect(result.rebalanceThresholdLower).toBe(1.5);
         expect(result.feeReinvestment).toBe(true);
-        expect(result.reinvestmentTrigger).toBe(50);
+        expect(result.reinvestmentTrigger).toBe(5000);
         expect(result.reinvestmentRatio).toBe(80);
         expect(result.maxSlippage).toBe(0.5);
         expect(result.emergencyExitTrigger).toBe(15);
@@ -1091,7 +1090,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -1114,7 +1113,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true, // Condition parameter
-          reinvestmentTrigger: 100, // Conditional parameter - should be validated
+          reinvestmentTrigger: 1000, // Conditional parameter - should be validated
           reinvestmentRatio: 90, // Conditional parameter - should be validated
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -1170,7 +1169,7 @@ describe('Strategy Helpers', () => {
           minPositionSize: 100,
           targetUtilization: 20,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           platformSelectionCriteria: "2", // Valid select option
           minPoolLiquidity: 100000
@@ -1218,7 +1217,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -1238,7 +1237,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -1268,7 +1267,7 @@ describe('Strategy Helpers', () => {
           minPositionSize: 100,
           targetUtilization: 20,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           platformSelectionCriteria: "999", // Invalid select option
           minPoolLiquidity: 100000
@@ -1288,7 +1287,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true, // Condition met
-          reinvestmentTrigger: 2000, // Out of range (max 1000)
+          reinvestmentTrigger: 20000, // Out of range (max 10000)
           reinvestmentRatio: 150, // Out of range (max 100)
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -1298,7 +1297,7 @@ describe('Strategy Helpers', () => {
         const result = validateStrategyParams('bob', params);
 
         expect(result.isValid).toBe(false);
-        expect(result.errors.reinvestmentTrigger).toContain('must be at most 1000');
+        expect(result.errors.reinvestmentTrigger).toContain('must be at most 10000');
         expect(result.errors.reinvestmentRatio).toContain('must be at most 100%');
       });
 
@@ -1309,7 +1308,7 @@ describe('Strategy Helpers', () => {
           rebalanceThresholdUpper: "",
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 50,
+          reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,

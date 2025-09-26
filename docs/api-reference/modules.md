@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-09-17T13:57:46.371Z
+Generated on: 2025-09-26T21:19:39.267Z
 
 ## Table of Contents
 
@@ -271,13 +271,13 @@ Token configuration with addresses on multiple chains
 - `getPlatformName` (function)
 - `getPlatformColor` (function)
 - `getPlatformLogo` (function)
+- `lookupSupportedPlatformIds` (function)
+- `getMinLiquidityAmount` (function)
 - `getPlatformFeeTiers` (function)
 - `getPlatformTickSpacing` (function)
 - `getPlatformTickBounds` (function)
 - `getAvailablePlatforms` (function)
 - `lookupPlatformById` (function)
-- `lookupSupportedPlatformIds` (function)
-- `getMinLiquidityAmount` (function)
 
 ---
 
@@ -329,6 +329,8 @@ Token configuration with addresses on multiple chains
 - `getAllTokens` (function)
 - `getStablecoins` (function)
 - `getTokensByChain` (function)
+- `isStablecoin` (function)
+- `detectStablePair` (function)
 - `getTokenBySymbol` (function)
 - `getTokensBySymbol` (function)
 - `getTokenByAddress` (function)
