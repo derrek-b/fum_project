@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ethers } from 'ethers';
 import { quickTestSetup } from '../../test-env.js';
-import { createBrowserProvider, createJsonRpcProvider, getConnectedAccounts, requestWalletConnection, getChainId, switchChain } from '../../../src/blockchain/wallet.js';
+import { createWeb3Provider, createJsonRpcProvider, getConnectedAccounts, requestWalletConnection, getChainId, switchChain } from '../../../src/blockchain/wallet.js';
 
 describe('Wallet - Unit Tests', () => {
   let env;
@@ -20,6 +20,12 @@ describe('Wallet - Unit Tests', () => {
 
     // Store original window object
     originalWindow = global.window;
+
+    // Take ONE snapshot after setup for all tests to revert to
+    if (env && env.snapshot) {
+      snapshotId = await env.snapshot();
+      console.log('Initial snapshot taken:', snapshotId);
+    }
   }, 120000); // 2 minute timeout
 
   afterAll(async () => {
@@ -32,27 +38,27 @@ describe('Wallet - Unit Tests', () => {
   });
 
   beforeEach(async () => {
-    // Take snapshot before each test
-    if (env && env.snapshot) {
-      snapshotId = await env.snapshot();
-    }
-
     // Clear window mocks before each test
     delete global.window;
   });
 
   afterEach(async () => {
-    // Revert to snapshot after each test
+    // Revert to the ONE snapshot taken in beforeAll
     if (env && env.revert && snapshotId) {
-      await env.revert(snapshotId);
+      try {
+        await env.revert(snapshotId);
+        // DO NOT take a new snapshot - we reuse the SAME one
+        // DO NOT clear snapshotId - we need it for the next test
+      } catch (error) {
+        console.warn('Failed to revert snapshot:', error.message);
+      }
     }
-    snapshotId = null;
 
     // Clean up window mocks after each test
     delete global.window;
   });
 
-  describe('createBrowserProvider', () => {
+  describe('createWeb3Provider', () => {
     describe('Success Cases', () => {
       it('should create a valid BrowserProvider when window.ethereum exists', async () => {
         // Mock window.ethereum
@@ -65,36 +71,36 @@ describe('Wallet - Unit Tests', () => {
           }
         };
 
-        const provider = await createBrowserProvider();
+        const provider = await createWeb3Provider();
 
-        expect(provider).toBeInstanceOf(ethers.BrowserProvider);
-        expect(provider).toBeInstanceOf(ethers.AbstractProvider);
+        expect(provider).toBeInstanceOf(ethers.providers.Web3Provider);
+        expect(provider).toBeInstanceOf(ethers.providers.Provider);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error when window is undefined', async () => {
         // No window object
-        await expect(createBrowserProvider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
+        await expect(createWeb3Provider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
       });
 
       it('should throw error when window.ethereum is undefined', async () => {
         global.window = {};
 
-        await expect(createBrowserProvider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
+        await expect(createWeb3Provider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
       });
 
       it('should throw error when window.ethereum is null', async () => {
         global.window = { ethereum: null };
 
-        await expect(createBrowserProvider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
+        await expect(createWeb3Provider()).rejects.toThrow('No Ethereum provider found (e.g., MetaMask) in browser');
       });
 
       it('should throw error when window.ethereum is invalid object', async () => {
         // Test with various invalid ethereum objects that might cause BrowserProvider constructor to fail
         global.window = { ethereum: {} }; // Empty object
 
-        await expect(createBrowserProvider()).rejects.toThrow();
+        await expect(createWeb3Provider()).rejects.toThrow();
       });
 
       it('should throw error when window.ethereum has no request method', async () => {
@@ -106,7 +112,7 @@ describe('Wallet - Unit Tests', () => {
           }
         };
 
-        await expect(createBrowserProvider()).rejects.toThrow();
+        await expect(createWeb3Provider()).rejects.toThrow();
       });
     });
   });
@@ -116,8 +122,8 @@ describe('Wallet - Unit Tests', () => {
       it('should create a valid JsonRpcProvider', async () => {
         const provider = await createJsonRpcProvider('http://localhost:8545');
 
-        expect(provider).toBeInstanceOf(ethers.JsonRpcProvider);
-        expect(provider).toBeInstanceOf(ethers.AbstractProvider);
+        expect(provider).toBeInstanceOf(ethers.providers.JsonRpcProvider);
+        expect(provider).toBeInstanceOf(ethers.providers.Provider);
       });
 
       it('should work with ganache test environment', async () => {
@@ -125,12 +131,12 @@ describe('Wallet - Unit Tests', () => {
 
         // Test that we can get network info (connectivity test already passed)
         const network = await provider.getNetwork();
-        expect(network.chainId).toBe(1337n);
+        expect(network.chainId).toBe(1337);
       });
 
       it('should accept HTTP URL and validate connectivity', async () => {
         const httpProvider = await createJsonRpcProvider('http://localhost:8545');
-        expect(httpProvider).toBeInstanceOf(ethers.JsonRpcProvider);
+        expect(httpProvider).toBeInstanceOf(ethers.providers.JsonRpcProvider);
       });
     });
 
@@ -201,7 +207,7 @@ describe('Wallet - Unit Tests', () => {
           listAccounts: vi.fn().mockRejectedValue(new Error('Network error'))
         };
 
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
 
         await expect(getConnectedAccounts(mockProvider)).rejects.toThrow('Failed to get connected accounts: Network error');
       });
@@ -216,7 +222,7 @@ describe('Wallet - Unit Tests', () => {
           send: vi.fn().mockResolvedValue(mockAccounts)
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         const accounts = await requestWalletConnection(mockProvider);
         
@@ -249,7 +255,7 @@ describe('Wallet - Unit Tests', () => {
           send: vi.fn().mockRejectedValue(new Error('User rejected request'))
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         await expect(requestWalletConnection(mockProvider)).rejects.toThrow('Failed to connect to wallet: User rejected request');
       });
@@ -259,7 +265,7 @@ describe('Wallet - Unit Tests', () => {
           send: vi.fn().mockRejectedValue({ code: 4001 }) // User rejection code without message
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         await expect(requestWalletConnection(mockProvider)).rejects.toThrow('Failed to connect to wallet: Unknown error');
       });
@@ -300,7 +306,7 @@ describe('Wallet - Unit Tests', () => {
           send: vi.fn().mockResolvedValue(true)
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         const result = await switchChain(mockProvider, 137);
         
@@ -316,7 +322,7 @@ describe('Wallet - Unit Tests', () => {
             .mockResolvedValueOnce(true) // Switch chain succeeds
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         const result = await switchChain(mockProvider, 42161); // Use Arbitrum which is in our configs
         
@@ -356,7 +362,7 @@ describe('Wallet - Unit Tests', () => {
 
       it('should throw error if chainId is not a number', async () => {
         const mockProvider = { send: vi.fn() };
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         await expect(switchChain(mockProvider, '137')).rejects.toThrow('Chain ID must be a number');
         await expect(switchChain(mockProvider, '0x89')).rejects.toThrow('Chain ID must be a number');
@@ -367,7 +373,7 @@ describe('Wallet - Unit Tests', () => {
         const mockProvider = {
           send: vi.fn().mockRejectedValue({ code: 4902, message: 'Unrecognized chain ID' })
         };
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         await expect(switchChain(mockProvider, 999)).rejects.toThrow('Chain 999 is not supported');
       });
@@ -377,7 +383,7 @@ describe('Wallet - Unit Tests', () => {
           send: vi.fn().mockRejectedValue({ code: 4001, message: 'User rejected request' })
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         const result = await switchChain(mockProvider, 137);
         
@@ -391,7 +397,7 @@ describe('Wallet - Unit Tests', () => {
             .mockRejectedValueOnce({ code: 4001, message: 'User rejected adding chain' }) // Add chain fails
         };
         
-        Object.setPrototypeOf(mockProvider, ethers.AbstractProvider.prototype);
+        Object.setPrototypeOf(mockProvider, ethers.providers.Provider.prototype);
         
         const result = await switchChain(mockProvider, 42161); // Use Arbitrum config but fail on add
         

@@ -5,6 +5,31 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2025-09-28
+
+### Added
+- **Ethers v5 compatibility** - Complete migration from ethers v6 to v5 for broader ecosystem compatibility
+
+### Changed
+- **UniswapV3Adapter test suite improvements**:
+  - Enhanced test cleanup processes using vault.execute() pattern
+  - Fixed position count validation tests
+  - Improved tolerance handling for token amount calculations
+  - Extended test timeouts for complex cleanup operations
+- **Vault discovery optimization**:
+  - Removed liquidity filtering from `discoverAvailableVaults()` for broader vault discovery
+  - Simplified vault detection logic
+
+### Fixed
+- **Test stability improvements**:
+  - Fixed position NFT cleanup in cache tests using proper vault execution pattern
+  - Resolved ethers v5/v6 compatibility issues in test suite
+  - Fixed function overload handling for NFT transfers
+  - Corrected BigNumber handling across ethers version migration
+
+### Removed
+- **Debugging artifacts**: Cleaned up all temporary debugging logs from test suite
+
 ## [0.19.1] - 2025-09-26
 
 ### Added

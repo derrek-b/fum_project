@@ -10,26 +10,26 @@ import { getChainConfig } from "../helpers/chainHelpers.js";
 /**
  * Creates an ethers provider using the browser's Ethereum wallet
  *
- * @function createBrowserProvider
+ * @function createWeb3Provider
  * @memberof module:blockchain/wallet
  *
- * @returns {Promise<ethers.BrowserProvider>} Configured ethers provider
+ * @returns {Promise<ethers.providers.Web3Provider>} Configured ethers provider
  *
  * @throws {Error} If no browser wallet is available
  *
  * @example
  * // Connect to MetaMask
- * const provider = await createBrowserProvider();
+ * const provider = await createWeb3Provider();
  *
  * @since 1.0.0
  */
-export async function createBrowserProvider() {
+export async function createWeb3Provider() {
   if (typeof window !== "undefined" && window.ethereum) {
-    const provider = new ethers.BrowserProvider(window.ethereum);
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
 
     // Validate provider instance
-    if (!(provider instanceof ethers.BrowserProvider)) {
-      throw new Error('Failed to create valid BrowserProvider instance');
+    if (!(provider instanceof ethers.providers.Web3Provider)) {
+      throw new Error('Failed to create valid Web3Provider instance');
     }
 
     return provider;
@@ -45,7 +45,7 @@ export async function createBrowserProvider() {
  *
  * @param {string} rpcUrl - The RPC endpoint URL
  *
- * @returns {Promise<ethers.JsonRpcProvider>} Configured ethers provider
+ * @returns {Promise<ethers.providers.JsonRpcProvider>} Configured ethers provider
  *
  * @throws {Error} If RPC URL is not provided
  *
@@ -65,10 +65,10 @@ export async function createJsonRpcProvider(rpcUrl) {
     throw new Error(`Invalid RPC URL format: ${rpcUrl}. Must be a valid HTTP/HTTPS/WS/WSS URL.`);
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
   // Validate provider instance
-  if (!(provider instanceof ethers.JsonRpcProvider)) {
+  if (!(provider instanceof ethers.providers.JsonRpcProvider)) {
     throw new Error('Failed to create valid JsonRpcProvider instance');
   }
 
@@ -97,12 +97,12 @@ export async function createJsonRpcProvider(rpcUrl) {
  * @function getConnectedAccounts
  * @memberof module:blockchain/wallet
  *
- * @param {ethers.BrowserProvider} provider - The ethers provider
+ * @param {ethers.providers.Web3Provider} provider - The ethers provider
  *
  * @returns {Promise<string[]>} Array of connected account addresses
  *
  * @example
- * const provider = await createBrowserProvider();
+ * const provider = await createWeb3Provider();
  * const accounts = await getConnectedAccounts(provider);
  * console.log('Connected accounts:', accounts);
  *
@@ -114,14 +114,13 @@ export async function getConnectedAccounts(provider) {
   }
 
   // Validate provider instance
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
   try {
-    return await provider.listAccounts().then(accounts =>
-      accounts.map(account => account.address)
-    );
+    // In ethers v5, listAccounts returns addresses directly
+    return await provider.listAccounts();
   } catch (err) {
     // Don't hide wallet errors - they're critical for user experience
     throw new Error(`Failed to get connected accounts: ${err.message}`);
@@ -134,25 +133,25 @@ export async function getConnectedAccounts(provider) {
  * @function requestWalletConnection
  * @memberof module:blockchain/wallet
  *
- * @param {ethers.BrowserProvider} provider - The ethers provider
+ * @param {ethers.providers.Web3Provider} provider - The ethers provider
  *
  * @returns {Promise<string[]>} Array of connected account addresses
  *
  * @throws {Error} If wallet connection fails
  *
  * @example
- * const provider = await createBrowserProvider();
+ * const provider = await createWeb3Provider();
  * const accounts = await requestWalletConnection(provider);
  *
  * @since 1.0.0
  */
 export async function requestWalletConnection(provider) {
-  if (!provider || provider instanceof ethers.JsonRpcProvider) {
+  if (!provider || provider instanceof ethers.providers.JsonRpcProvider) {
     throw new Error("A browser provider is required to request wallet connection");
   }
 
   // Validate provider instance
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
@@ -187,7 +186,7 @@ export async function getChainId(provider) {
   }
 
   // Validate provider instance
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
@@ -206,12 +205,12 @@ export async function getChainId(provider) {
  * @function switchChain
  * @memberof module:blockchain/wallet
  *
- * @param {ethers.BrowserProvider} provider - The browser provider
+ * @param {ethers.providers.Web3Provider} provider - The web3 provider
  * @param {number} chainId - The chain ID to switch to (must be a number)
  *
  * @returns {Promise<boolean>} Whether the switch was successful
  *
- * @throws {Error} If provider is not a BrowserProvider
+ * @throws {Error} If provider is not a Web3Provider
  * @throws {Error} If chainId is not a number
  *
  * @example
@@ -221,12 +220,12 @@ export async function getChainId(provider) {
  * @since 1.0.0
  */
 export async function switchChain(provider, chainId) {
-  if (!provider || provider instanceof ethers.JsonRpcProvider) {
+  if (!provider || provider instanceof ethers.providers.JsonRpcProvider) {
     throw new Error("A browser provider is required to switch chains");
   }
 
   // Validate provider instance
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 

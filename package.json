@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -46,7 +46,7 @@
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
-    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.19.1.tgz",
+    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.19.2.tgz",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -54,23 +54,18 @@
     "test:unit": "vitest run unit"
   },
   "dependencies": {
-    "@uniswap/sdk-core": "^7.7.2",
-    "@uniswap/v3-sdk": "^3.25.2",
-    "claude": "^0.1.2"
-  },
-  "peerDependencies": {
     "@openzeppelin/contracts": "^5.0.0",
-    "@uniswap/v3-core": "^1.0.1",
-    "@uniswap/v3-periphery": "^1.4.3",
-    "ethers": "^6.13.5"
-  },
-  "devDependencies": {
-    "@openzeppelin/contracts": "^5.3.0",
+    "@uniswap/sdk-core": "^5.9.0",
+    "@uniswap/smart-order-router": "^4.7.7",
     "@uniswap/v3-core": "^1.0.1",
     "@uniswap/v3-periphery": "^1.4.4",
+    "@uniswap/v3-sdk": "^3.18.2",
+    "ethers": "^5.7.2",
+    "jsbi": "^3.2.5"
+  },
+  "devDependencies": {
     "chai": "^5.2.0",
     "dotenv": "^16.5.0",
-    "ethers": "^6.13.5",
     "ganache": "^7.9.2",
     "sinon": "^20.0.0",
     "vitest": "^3.1.3"

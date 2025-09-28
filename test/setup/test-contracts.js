@@ -60,11 +60,11 @@ async function deployContract(deployer, contractName, args = []) {
   const factory = new ethers.ContractFactory(abi, bytecode, deployer);
   const contract = await factory.deploy(...args, {
     gasLimit: 5000000,
-    gasPrice: ethers.parseUnits("0.1", "gwei"),
+    gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
   });
-  await contract.waitForDeployment();
+  await contract.deployed();
 
-  const address = await contract.getAddress();
+  const address = contract.address;
   console.log(`${contractName} deployed at: ${address}`);
 
   return contract;
@@ -77,7 +77,6 @@ async function deployContract(deployer, contractName, args = []) {
  * @param {Object} actualAddresses - The actual deployed contract addresses
  */
 async function validateDeterministicAddresses(actualAddresses) {
-  console.log('\n🔍 Validating contract addresses against stored values...');
 
   // Get expected addresses from the contracts file
   const expectedAddresses = {
@@ -151,7 +150,7 @@ export async function deployFUMContracts(deployer, config = {}) {
     contracts.batchExecutor = await deployContract(deployer, 'BatchExecutor');
 
     // Deploy VaultFactory with owner address
-    contracts.vaultFactory = await deployContract(deployer, 'VaultFactory', [await deployer.getAddress()]);
+    contracts.vaultFactory = await deployContract(deployer, 'VaultFactory', [deployer.address]);
 
     // Deploy strategies (no constructor args)
     contracts.parrisIsland = await deployContract(deployer, 'ParrisIslandStrategy');
@@ -160,10 +159,10 @@ export async function deployFUMContracts(deployer, config = {}) {
 
     // Get addresses
     const addresses = {
-      BatchExecutor: await contracts.batchExecutor.getAddress(),
-      VaultFactory: await contracts.vaultFactory.getAddress(),
-      ParrisIslandStrategy: await contracts.parrisIsland.getAddress(),
-      BabyStepsStrategy: await contracts.babySteps.getAddress(),
+      BatchExecutor: contracts.batchExecutor.address,
+      VaultFactory: contracts.vaultFactory.address,
+      ParrisIslandStrategy: contracts.parrisIsland.address,
+      BabyStepsStrategy: contracts.babySteps.address,
     };
 
     // Validate deterministic addresses - fail fast if they don't match expected values

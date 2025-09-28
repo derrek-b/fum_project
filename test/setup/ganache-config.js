@@ -121,8 +121,8 @@ export async function startGanache(options = {}) {
   const rpcUrl = `http://localhost:${config.port}`;
   const wsUrl = `ws://localhost:${config.port}`;
   
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const wsProvider = new ethers.WebSocketProvider(wsUrl);
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const wsProvider = new ethers.providers.WebSocketProvider(wsUrl);
   
   // Create signers for test accounts
   const signers = TEST_ACCOUNTS.slice(0, config.accountCount).map(
@@ -169,7 +169,7 @@ export async function impersonateAccount(provider, address) {
   await provider.send('eth_sendTransaction', [{
     from: funder,
     to: address,
-    value: ethers.toHex(ethers.parseEther('10')),
+    value: ethers.toHex(ethers.utils.parseEther('10')),
   }]);
   
   // Return impersonated signer

@@ -84,11 +84,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.erc20ABI = ERC20ABI;
 
     // Pre-create contract interfaces for better performance
-    this.swapRouterInterface = new ethers.Interface(this.swapRouterABI);
-    this.positionManagerInterface = new ethers.Interface(this.nonfungiblePositionManagerABI);
-    this.poolInterface = new ethers.Interface(this.uniswapV3PoolABI);
-    this.quoterInterface = new ethers.Interface(this.quoterABI);
-    this.erc20Interface = new ethers.Interface(this.erc20ABI);
+    this.swapRouterInterface = new ethers.utils.Interface(this.swapRouterABI);
+    this.positionManagerInterface = new ethers.utils.Interface(this.nonfungiblePositionManagerABI);
+    this.poolInterface = new ethers.utils.Interface(this.uniswapV3PoolABI);
+    this.quoterInterface = new ethers.utils.Interface(this.quoterABI);
+    this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
 
   }
 
@@ -147,7 +147,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Method must be a non-empty string');
     }
 
-    if (!contract[method] || typeof contract[method].estimateGas !== 'function') {
+    if (!contract[method]) {
       throw new Error(`Method '${method}' does not exist or cannot estimate gas`);
     }
 
@@ -160,7 +160,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     try {
-      const estimatedGas = await contract[method].estimateGas(...args, overrides);
+      const estimatedGas = await contract.estimateGas[method](...args, overrides);
       return Number(estimatedGas);
     } catch (error) {
       // In DeFi, gas estimation failure usually means transaction will revert
@@ -202,7 +202,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Validate 'to' address format
     try {
-      ethers.getAddress(txData.to); // This will throw if invalid
+      ethers.utils.getAddress(txData.to); // This will throw if invalid
     } catch (error) {
       throw new Error(`Invalid 'to' address: ${txData.to}`);
     }
@@ -346,7 +346,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    */
   async _validateProviderChain(provider) {
     // Validate provider using ethers v6 pattern
-    if (!(provider instanceof ethers.AbstractProvider)) {
+    if (!(provider instanceof ethers.providers.Provider)) {
       throw new Error('Invalid provider. Must be an ethers provider instance.');
     }
 
@@ -385,7 +385,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address parameter is required");
     }
     try {
-      ethers.getAddress(token0Address);
+      ethers.utils.getAddress(token0Address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Address}`);
     }
@@ -395,7 +395,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address parameter is required");
     }
     try {
-      ethers.getAddress(token1Address);
+      ethers.utils.getAddress(token1Address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Address}`);
     }
@@ -444,7 +444,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address is required");
     }
     try {
-      ethers.getAddress(token0.address);
+      ethers.utils.getAddress(token0.address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0.address}`);
     }
@@ -463,7 +463,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address is required");
     }
     try {
-      ethers.getAddress(token1.address);
+      ethers.utils.getAddress(token1.address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1.address}`);
     }
@@ -542,7 +542,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Validate address format
     try {
-      ethers.getAddress(address); // This will throw if invalid
+      ethers.utils.getAddress(address); // This will throw if invalid
     } catch (error) {
       throw new Error("Invalid Ethereum address");
     }
@@ -583,7 +583,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address parameter is required");
     }
     try {
-      ethers.getAddress(token0Address);
+      ethers.utils.getAddress(token0Address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Address}`);
     }
@@ -593,7 +593,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address parameter is required");
     }
     try {
-      ethers.getAddress(token1Address);
+      ethers.utils.getAddress(token1Address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Address}`);
     }
@@ -721,13 +721,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     let normalizedAddress;
     try {
-      normalizedAddress = ethers.getAddress(poolAddress);
+      normalizedAddress = ethers.utils.getAddress(poolAddress);
     } catch (error) {
       throw new Error(`Invalid pool address: ${poolAddress}`);
     }
 
     // Validate provider
-    if (!provider || !(provider instanceof ethers.AbstractProvider)) {
+    if (!provider || !(provider instanceof ethers.providers.Provider)) {
       throw new Error("Provider parameter is required");
     }
 
@@ -815,7 +815,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Pool address parameter is required");
     }
     try {
-      ethers.getAddress(poolAddress);
+      ethers.utils.getAddress(poolAddress);
     } catch (error) {
       throw new Error(`Invalid pool address: ${poolAddress}`);
     }
@@ -888,7 +888,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     try {
-      ethers.getAddress(poolAddress);
+      ethers.utils.getAddress(poolAddress);
     } catch (error) {
       throw new Error(`Invalid pool address: ${poolAddress}`);
     }
@@ -972,7 +972,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Address parameter is required");
     }
     try {
-      ethers.getAddress(address);
+      ethers.utils.getAddress(address);
     } catch (error) {
       throw new Error(`Invalid address: ${address}`);
     }
@@ -1057,7 +1057,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Address parameter is required");
     }
     try {
-      ethers.getAddress(address);
+      ethers.utils.getAddress(address);
     } catch (error) {
       throw new Error(`Invalid address: ${address}`);
     }
@@ -1176,13 +1176,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     let validatedBaseAddress, validatedQuoteAddress;
     try {
-      validatedBaseAddress = ethers.getAddress(baseToken.address);
+      validatedBaseAddress = ethers.utils.getAddress(baseToken.address);
     } catch (error) {
       throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
     }
 
     try {
-      validatedQuoteAddress = ethers.getAddress(quoteToken.address);
+      validatedQuoteAddress = ethers.utils.getAddress(quoteToken.address);
     } catch (error) {
       throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
     }
@@ -1265,13 +1265,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     let validatedBaseAddress, validatedQuoteAddress;
     try {
-      validatedBaseAddress = ethers.getAddress(baseToken.address);
+      validatedBaseAddress = ethers.utils.getAddress(baseToken.address);
     } catch (error) {
       throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
     }
 
     try {
-      validatedQuoteAddress = ethers.getAddress(quoteToken.address);
+      validatedQuoteAddress = ethers.utils.getAddress(quoteToken.address);
     } catch (error) {
       throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
     }
@@ -1806,7 +1806,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("token0Data.address is required");
     }
     try {
-      ethers.getAddress(token0Data.address);
+      ethers.utils.getAddress(token0Data.address);
     } catch (error) {
       throw new Error(`Invalid token0Data.address: ${token0Data.address}`);
     }
@@ -1825,7 +1825,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("token1Data.address is required");
     }
     try {
-      ethers.getAddress(token1Data.address);
+      ethers.utils.getAddress(token1Data.address);
     } catch (error) {
       throw new Error(`Invalid token1Data.address: ${token1Data.address}`);
     }
@@ -1896,7 +1896,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address parameter is required");
     }
     try {
-      ethers.getAddress(token0Address);
+      ethers.utils.getAddress(token0Address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Address}`);
     }
@@ -1906,7 +1906,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address parameter is required");
     }
     try {
-      ethers.getAddress(token1Address);
+      ethers.utils.getAddress(token1Address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Address}`);
     }
@@ -1920,7 +1920,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     for (const fee of feeTiers) {
       const poolAddress = await this.getPoolAddress(token0Address, token1Address, fee, provider);
 
-      if (poolAddress === ethers.ZeroAddress) {
+      if (poolAddress === ethers.constants.AddressZero) {
         continue; // Expected - no pool for this fee tier
       }
 
@@ -1996,7 +1996,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address parameter is required");
     }
     try {
-      ethers.getAddress(token0Address);
+      ethers.utils.getAddress(token0Address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Address}`);
     }
@@ -2006,7 +2006,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address parameter is required");
     }
     try {
-      ethers.getAddress(token1Address);
+      ethers.utils.getAddress(token1Address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Address}`);
     }
@@ -2016,7 +2016,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Wallet address parameter is required");
     }
     try {
-      ethers.getAddress(walletAddress);
+      ethers.utils.getAddress(walletAddress);
     } catch (error) {
       throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
@@ -2183,7 +2183,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Wallet address must be a string");
     }
     try {
-      ethers.getAddress(walletAddress);
+      ethers.utils.getAddress(walletAddress);
     } catch (error) {
       throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
@@ -2238,7 +2238,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address must be a string");
     }
     try {
-      ethers.getAddress(token0Data.address);
+      ethers.utils.getAddress(token0Data.address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Data.address}`);
     }
@@ -2262,7 +2262,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address must be a string");
     }
     try {
-      ethers.getAddress(token1Data.address);
+      ethers.utils.getAddress(token1Data.address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Data.address}`);
     }
@@ -2549,7 +2549,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address must be a string");
     }
     try {
-      ethers.getAddress(token0Data.address);
+      ethers.utils.getAddress(token0Data.address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Data.address}`);
     }
@@ -2573,7 +2573,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address must be a string");
     }
     try {
-      ethers.getAddress(token1Data.address);
+      ethers.utils.getAddress(token1Data.address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Data.address}`);
     }
@@ -2789,7 +2789,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address must be a string");
     }
     try {
-      ethers.getAddress(token0Data.address);
+      ethers.utils.getAddress(token0Data.address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Data.address}`);
     }
@@ -2813,7 +2813,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address must be a string");
     }
     try {
-      ethers.getAddress(token1Data.address);
+      ethers.utils.getAddress(token1Data.address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Data.address}`);
     }
@@ -2929,7 +2929,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenIn address parameter is required");
     }
     try {
-      ethers.getAddress(tokenInAddress);
+      ethers.utils.getAddress(tokenInAddress);
     } catch (error) {
       throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
     }
@@ -2939,7 +2939,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenOut address parameter is required");
     }
     try {
-      ethers.getAddress(tokenOutAddress);
+      ethers.utils.getAddress(tokenOutAddress);
     } catch (error) {
       throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
     }
@@ -2989,7 +2989,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         sqrtPriceLimitX96: 0 // No price limit
       };
 
-      const result = await quoterContract.quoteExactInputSingle.staticCall(params);
+      const result = await quoterContract.callStatic.quoteExactInputSingle(params);
 
       // QuoterV2 returns [amountOut, sqrtPriceX96After]
       return result[0].toString();
@@ -3016,7 +3016,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenIn address parameter is required");
     }
     try {
-      ethers.getAddress(tokenInAddress);
+      ethers.utils.getAddress(tokenInAddress);
     } catch (error) {
       throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
     }
@@ -3025,7 +3025,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenOut address parameter is required");
     }
     try {
-      ethers.getAddress(tokenOutAddress);
+      ethers.utils.getAddress(tokenOutAddress);
     } catch (error) {
       throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
     }
@@ -3119,7 +3119,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenIn address parameter is required");
     }
     try {
-      ethers.getAddress(tokenIn);
+      ethers.utils.getAddress(tokenIn);
     } catch (error) {
       throw new Error(`Invalid tokenIn address: ${tokenIn}`);
     }
@@ -3129,7 +3129,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("TokenOut address parameter is required");
     }
     try {
-      ethers.getAddress(tokenOut);
+      ethers.utils.getAddress(tokenOut);
     } catch (error) {
       throw new Error(`Invalid tokenOut address: ${tokenOut}`);
     }
@@ -3150,7 +3150,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Recipient address parameter is required");
     }
     try {
-      ethers.getAddress(recipient);
+      ethers.utils.getAddress(recipient);
     } catch (error) {
       throw new Error(`Invalid recipient address: ${recipient}`);
     }
@@ -3347,7 +3347,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Wallet address must be a string");
     }
     try {
-      ethers.getAddress(walletAddress);
+      ethers.utils.getAddress(walletAddress);
     } catch (error) {
       throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
@@ -3402,7 +3402,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token0 address must be a string");
     }
     try {
-      ethers.getAddress(token0Data.address);
+      ethers.utils.getAddress(token0Data.address);
     } catch (error) {
       throw new Error(`Invalid token0 address: ${token0Data.address}`);
     }
@@ -3426,7 +3426,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Token1 address must be a string");
     }
     try {
-      ethers.getAddress(token1Data.address);
+      ethers.utils.getAddress(token1Data.address);
     } catch (error) {
       throw new Error(`Invalid token1 address: ${token1Data.address}`);
     }

@@ -41,12 +41,14 @@ export async function getContract(contractName, provider) {
   }
 
   // Validate provider
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
   // Get network information
+  console.time('🔍 provider.getNetwork');
   const network = await provider.getNetwork();
+  console.timeEnd('🔍 provider.getNetwork');
   if (!network || !network.chainId) {
     throw new Error('Provider network not available. Cannot determine which contracts to use.');
   }
@@ -66,11 +68,14 @@ export async function getContract(contractName, provider) {
     throw new Error(`No ${contractName} deployment found for network ${chainId}`);
   }
 
-  return new ethers.Contract(
+  console.time('🔍 new ethers.Contract');
+  const contract = new ethers.Contract(
     address,
     contractInfo.abi,
     provider
   );
+  console.timeEnd('🔍 new ethers.Contract');
+  return contract;
 }
 
 /**
@@ -81,7 +86,7 @@ export async function getContract(contractName, provider) {
  */
 export async function getVaultFactory(provider) {
   // Validate provider
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
@@ -125,6 +130,7 @@ export function getVaultFactoryAddress(chainId) {
  * @since 1.0.0
  */
 export async function createVault(name, signer) {
+  console.log('🔍 createVault START - name:', name);
   // Validate name parameter
   if (typeof name !== 'string') {
     throw new Error('Name must be a string');
@@ -136,19 +142,29 @@ export async function createVault(name, signer) {
   }
 
   // Validate signer parameter
-  if (!(signer instanceof ethers.AbstractSigner)) {
+  if (!signer || !signer.provider || typeof signer.getAddress !== 'function') {
     throw new Error('Invalid signer. Must be an ethers signer instance.');
   }
 
+  console.time('🔍 getVaultFactory');
   const factory = await getVaultFactory(signer.provider);
+  console.timeEnd('🔍 getVaultFactory');
+
+  console.time('🔍 factory.connect');
   const factoryWithSigner = factory.connect(signer);
+  console.timeEnd('🔍 factory.connect');
 
   try {
+    console.time('🔍 createVault tx');
     const tx = await factoryWithSigner.createVault(name);
-    const receipt = await tx.wait();
+    console.timeEnd('🔍 createVault tx');
 
-    // Extract vault address from event logs using topic-based filtering
-    const vaultCreatedTopic = factoryWithSigner.interface.getEvent('VaultCreated').topicHash;
+    console.time('🔍 tx.wait');
+    const receipt = await tx.wait();
+    console.timeEnd('🔍 tx.wait');
+
+    // Extract vault address from event logs
+    const vaultCreatedTopic = factoryWithSigner.interface.getEventTopic('VaultCreated');
     const vaultCreatedEvent = receipt.logs.find(log => log.topics[0] === vaultCreatedTopic);
 
     if (!vaultCreatedEvent) {
@@ -156,7 +172,7 @@ export async function createVault(name, signer) {
     }
 
     const parsedEvent = factoryWithSigner.interface.parseLog(vaultCreatedEvent);
-    return parsedEvent.args[1]; // Second arg is vault address
+    return parsedEvent.args.vault || parsedEvent.args[1]; // vault address (named or positional)
   } catch (error) {
     // Handle contract revert errors
     if (error.code === 'CALL_EXCEPTION') {
@@ -202,13 +218,13 @@ export function getVaultContract(vaultAddress, provider) {
     throw new Error('Vault address parameter is required');
   }
   try {
-    ethers.getAddress(vaultAddress);
+    ethers.utils.getAddress(vaultAddress);
   } catch (error) {
     throw new Error(`Invalid vault address: ${vaultAddress}`);
   }
 
   // Validate provider
-  if (!(provider instanceof ethers.AbstractProvider)) {
+  if (!(provider instanceof ethers.providers.Provider)) {
     throw new Error('Invalid provider. Must be an ethers provider instance.');
   }
 
@@ -241,7 +257,7 @@ export async function getUserVaults(userAddress, provider) {
     throw new Error('User address parameter is required');
   }
   try {
-    ethers.getAddress(userAddress);
+    ethers.utils.getAddress(userAddress);
   } catch (error) {
     throw new Error(`Invalid user address: ${userAddress}`);
   }
@@ -270,7 +286,7 @@ export async function getAuthorizedVaults(executorAddress, provider) {
     throw new Error('Executor address parameter is required');
   }
   try {
-    ethers.getAddress(executorAddress);
+    ethers.utils.getAddress(executorAddress);
   } catch (error) {
     throw new Error(`Invalid executor address: ${executorAddress}`);
   }
@@ -317,7 +333,7 @@ export async function getVaultInfo(vaultAddress, provider) {
     throw new Error('Vault address parameter is required');
   }
   try {
-    ethers.getAddress(vaultAddress);
+    ethers.utils.getAddress(vaultAddress);
   } catch (error) {
     throw new Error(`Invalid vault address: ${vaultAddress}`);
   }
@@ -355,7 +371,7 @@ export function getContractInfoByAddress(address) {
     throw new Error('Address parameter is required');
   }
   try {
-    ethers.getAddress(address);
+    ethers.utils.getAddress(address);
   } catch (error) {
     throw new Error(`Invalid address: ${address}`);
   }
@@ -406,7 +422,7 @@ export async function executeVaultTransactions(vaultAddress, transactions, signe
     throw new Error('Vault address parameter is required');
   }
   try {
-    ethers.getAddress(vaultAddress);
+    ethers.utils.getAddress(vaultAddress);
   } catch (error) {
     throw new Error(`Invalid vault address: ${vaultAddress}`);
   }
@@ -431,7 +447,7 @@ export async function executeVaultTransactions(vaultAddress, transactions, signe
       throw new Error(`Transaction at index ${index} is missing data`);
     }
     try {
-      ethers.getAddress(tx.target);
+      ethers.utils.getAddress(tx.target);
     } catch (error) {
       throw new Error(`Invalid target address at index ${index}: ${tx.target}`);
     }
@@ -444,7 +460,7 @@ export async function executeVaultTransactions(vaultAddress, transactions, signe
   });
 
   // Validate signer parameter
-  if (!(signer instanceof ethers.AbstractSigner)) {
+  if (!signer || !signer.provider || typeof signer.getAddress !== 'function') {
     throw new Error('Invalid signer. Must be an ethers signer instance.');
   }
 

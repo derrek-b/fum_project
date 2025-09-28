@@ -113,7 +113,7 @@ export async function setupTestEnvironment(options = {}) {
     wethAddress = tokens.WETH.addresses[1337];
     const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
 
-    const wrapTx = await weth.deposit({ value: ethers.parseEther('10') });
+    const wrapTx = await weth.deposit({ value: ethers.utils.parseEther('10') });
     await wrapTx.wait();
     console.log('  - WETH wrapped successfully');
 
@@ -121,7 +121,7 @@ export async function setupTestEnvironment(options = {}) {
     console.log('  - Swapping 2 WETH for USDC...');
 
     // First approve router to spend WETH
-    const approveTx = await weth.approve(uniswapV3.routerAddress, ethers.parseEther('2'));
+    const approveTx = await weth.approve(uniswapV3.routerAddress, ethers.utils.parseEther('2'));
     await approveTx.wait();
 
     // Get USDC address from tokens config
@@ -133,7 +133,7 @@ export async function setupTestEnvironment(options = {}) {
       tokenOut: usdcAddress,
       fee: 500, // 0.05% fee pool
       recipient: owner.address,
-      amountIn: ethers.parseEther('2').toString(),
+      amountIn: ethers.utils.parseEther('2').toString(),
       slippageTolerance: 1, // 1% slippage
       sqrtPriceLimitX96: "0",
       provider: ganache.provider,
@@ -154,19 +154,19 @@ export async function setupTestEnvironment(options = {}) {
     const wethBalance = await weth.balanceOf(owner.address);
     const usdcBalance = await usdc.balanceOf(owner.address);
 
-    console.log(`  - WETH balance: ${ethers.formatEther(wethBalance)} WETH`);
-    console.log(`  - USDC balance: ${ethers.formatUnits(usdcBalance, 6)} USDC`);
+    console.log(`  - WETH balance: ${ethers.utils.formatEther(wethBalance)} WETH`);
+    console.log(`  - USDC balance: ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
 
     // Calculate USDC per ETH price from our 2 ETH swap
-    usdcPerEth = (parseFloat(ethers.formatUnits(usdcBalance, 6)) / 2).toString();
+    usdcPerEth = (parseFloat(ethers.utils.formatUnits(usdcBalance, 6)) / 2).toString();
     console.log(`  - Current price: 1 ETH = ${usdcPerEth} USDC`);
 
     // 4. Create a position using 20% of assets
     console.log('  - Creating Uniswap V3 position...');
 
     // Approve position manager to spend tokens
-    const wethAmount = wethBalance / 5n; // 20% of WETH
-    const usdcAmount = usdcBalance / 5n; // 20% of USDC
+    const wethAmount = wethBalance.div(5); // 20% of WETH
+    const usdcAmount = usdcBalance.div(5); // 20% of USDC
 
     await (await weth.approve(uniswapV3.positionManagerAddress, wethAmount)).wait();
     await (await usdc.approve(uniswapV3.positionManagerAddress, usdcAmount)).wait();
@@ -207,7 +207,7 @@ export async function setupTestEnvironment(options = {}) {
     };
 
     // Get tokenId and amounts directly from mint function return values
-    const mintResult = await positionManager.mint.staticCall(mintParams);
+    const mintResult = await positionManager.callStatic.mint(mintParams);
     const [tokenId, liquidity, amount0, amount1] = mintResult;
     positionTokenId = tokenId;
     console.log(`  - Position will have ID: ${positionTokenId}`);
@@ -225,15 +225,15 @@ export async function setupTestEnvironment(options = {}) {
 
     // Transfer 60% of remaining WETH to vault, keep 40% in owner wallet
     const remainingWeth = await weth.balanceOf(owner.address);
-    if (remainingWeth > 0n) {
-      const wethToTransfer = (remainingWeth * 60n) / 100n;
+    if (remainingWeth.gt(0)) {
+      const wethToTransfer = remainingWeth.mul(60).div(100);
       await (await weth.transfer(vaultAddress, wethToTransfer)).wait();
     }
 
     // Transfer 60% of remaining USDC to vault, keep 40% in owner wallet
     const remainingUsdc = await usdc.balanceOf(owner.address);
-    if (remainingUsdc > 0n) {
-      const usdcToTransfer = (remainingUsdc * 60n) / 100n;
+    if (remainingUsdc.gt(0)) {
+      const usdcToTransfer = remainingUsdc.mul(60).div(100);
       await (await usdc.transfer(vaultAddress, usdcToTransfer)).wait();
     }
 
@@ -262,7 +262,7 @@ export async function setupTestEnvironment(options = {}) {
   for (let i = 1; i < Math.min(5, ganache.signers.length); i++) {
     const tx = await ganache.signers[0].sendTransaction({
       to: ganache.signers[i].address,
-      value: ethers.parseEther('10')
+      value: ethers.utils.parseEther('10')
     });
     await tx.wait();
     console.log(`  - Funded account ${i} (${ganache.signers[i].address}) with 10 ETH`);
@@ -325,7 +325,7 @@ export async function setupTestEnvironment(options = {}) {
       const funder = ganache.signers[0];
       const tx = await funder.sendTransaction({
         to: address,
-        value: ethers.parseEther(amountETH),
+        value: ethers.utils.parseEther(amountETH),
       });
       await tx.wait();
       return tx;

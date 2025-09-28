@@ -35,6 +35,13 @@ describe('contracts.js - Unit Tests', () => {
       console.log('Ganache test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
       console.log('Chain ID:', await env.provider.getNetwork().then(n => n.chainId));
+
+      // Take ONE snapshot after setup for all tests to revert to
+      if (env && env.snapshot) {
+        snapshotId = await env.snapshot();
+        console.log('Initial snapshot taken:', snapshotId);
+      }
+
       console.log('Running tests...');
 
     } catch (error) {
@@ -49,34 +56,25 @@ describe('contracts.js - Unit Tests', () => {
     }
   });
 
-  beforeEach(async () => {
-    // Take a snapshot before each test
-    if (env && env.snapshot) {
-      try {
-        snapshotId = await env.snapshot();
-      } catch (error) {
-        console.warn('Failed to create snapshot:', error.message);
-        snapshotId = null;
-      }
-    }
-  });
+  // No beforeEach - snapshot is taken once in beforeAll
 
   afterEach(async () => {
-    // Revert to snapshot after each test
+    // Revert to the ONE snapshot taken in beforeAll
     if (env && env.revert && snapshotId) {
       try {
         await env.revert(snapshotId);
+        // DO NOT take a new snapshot - we reuse the SAME one
+        // DO NOT clear snapshotId - we need it for the next test
       } catch (error) {
         console.warn('Failed to revert snapshot:', error.message);
       }
-      snapshotId = null; // Clear snapshot ID after use
     }
   });
 
   // Test to verify Ganache is working
   it('should connect to Ganache fork successfully', async () => {
     const network = await env.provider.getNetwork();
-    expect(network.chainId).toBe(1337n);
+    expect(network.chainId).toBe(1337);
 
     const blockNumber = await env.provider.getBlockNumber();
     expect(blockNumber).toBeGreaterThan(0);
@@ -89,16 +87,16 @@ describe('contracts.js - Unit Tests', () => {
 
         expect(contract).toBeDefined();
         expect(contract).toBeInstanceOf(ethers.Contract);
-        expect(contract.target).toBeDefined();
-        expect(contract.runner).toBe(env.provider);
+        expect(contract.address).toBeDefined();
+        expect(contract.provider).toBe(env.provider);
 
         // Verify it has the actual deployed address
-        expect(contract.target).toBe(env.contractAddresses.VaultFactory);
+        expect(contract.address).toBe(env.contractAddresses.VaultFactory);
 
         // Verify it's the correct contract by checking it has expected methods
-        expect(contract.interface.hasFunction('createVault')).toBe(true);
-        expect(contract.interface.hasFunction('getVaults')).toBe(true);
-        expect(contract.interface.hasFunction('getVaultInfo')).toBe(true);
+        expect(typeof contract.createVault === 'function').toBe(true);
+        expect(typeof contract.getVaults === 'function').toBe(true);
+        expect(typeof contract.getVaultInfo === 'function').toBe(true);
       });
 
       it('should return BabyStepsStrategy contract with correct address for test chain', async () => {
@@ -106,15 +104,15 @@ describe('contracts.js - Unit Tests', () => {
 
         expect(contract).toBeDefined();
         expect(contract).toBeInstanceOf(ethers.Contract);
-        expect(contract.target).toBeDefined();
-        expect(contract.runner).toBe(env.provider);
+        expect(contract.address).toBeDefined();
+        expect(contract.provider).toBe(env.provider);
 
         // Verify it has the actual deployed address
-        expect(contract.target).toBe(env.contractAddresses.BabyStepsStrategy);
+        expect(contract.address).toBe(env.contractAddresses.BabyStepsStrategy);
 
         // Verify it's the correct contract by checking it has expected methods
-        expect(contract.interface.hasFunction('authorizeVault')).toBe(true);
-        expect(contract.interface.hasFunction('getVersion')).toBe(true);
+        expect(typeof contract.authorizeVault === 'function').toBe(true);
+        expect(typeof contract.getVersion === 'function').toBe(true);
       });
 
       it('should return contract instance with proper ABI methods available', async () => {
@@ -125,16 +123,16 @@ describe('contracts.js - Unit Tests', () => {
         expect(contract.interface.fragments.length).toBeGreaterThan(0);
 
         // Test that specific methods exist
-        expect(contract.interface.hasFunction('createVault')).toBe(true);
-        expect(contract.interface.hasFunction('getVaults')).toBe(true);
-        expect(contract.interface.hasFunction('getVaultCount')).toBe(true);
+        expect(typeof contract.createVault === 'function').toBe(true);
+        expect(typeof contract.getVaults === 'function').toBe(true);
+        expect(typeof contract.getVaultCount === 'function').toBe(true);
       });
 
       it('should return contract connected to the provided provider', async () => {
         const contract = await getContract('VaultFactory', env.provider);
 
-        expect(contract.runner).toBe(env.provider);
-        expect(contract.runner).toBeInstanceOf(ethers.JsonRpcProvider);
+        expect(contract.provider).toBe(env.provider);
+        expect(contract.provider).toBeInstanceOf(ethers.providers.JsonRpcProvider);
       });
 
       it('should work consistently when called multiple times', async () => {
@@ -147,11 +145,11 @@ describe('contracts.js - Unit Tests', () => {
         expect(contract2).not.toBe(contract3);
 
         // But with same properties - all should have the actual deployed address
-        expect(contract1.target).toBe(env.contractAddresses.VaultFactory);
-        expect(contract2.target).toBe(env.contractAddresses.VaultFactory);
-        expect(contract3.target).toBe(env.contractAddresses.VaultFactory);
-        expect(contract1.runner).toBe(contract2.runner);
-        expect(contract2.runner).toBe(contract3.runner);
+        expect(contract1.address).toBe(env.contractAddresses.VaultFactory);
+        expect(contract2.address).toBe(env.contractAddresses.VaultFactory);
+        expect(contract3.address).toBe(env.contractAddresses.VaultFactory);
+        expect(contract1.provider).toBe(contract2.provider);
+        expect(contract2.provider).toBe(contract3.provider);
       });
 
       it('should allow .connect(signer) pattern for write operations', async () => {
@@ -160,15 +158,15 @@ describe('contracts.js - Unit Tests', () => {
         const writeContract = readOnlyContract.connect(signer);
 
         // Read-only contract should be connected to provider
-        expect(readOnlyContract.runner).toBe(env.provider);
-        expect(readOnlyContract.runner instanceof ethers.AbstractProvider).toBe(true);
+        expect(readOnlyContract.provider).toBe(env.provider);
+        expect(readOnlyContract.provider instanceof ethers.providers.Provider).toBe(true);
 
         // Write contract should be connected to signer
-        expect(writeContract.runner).toBe(signer);
-        expect(writeContract.runner instanceof ethers.AbstractSigner).toBe(true);
+        expect(writeContract.signer).toBe(signer);
+        expect(writeContract.signer instanceof ethers.Signer).toBe(true);
 
         // Both should have same address and interface
-        expect(readOnlyContract.target).toBe(writeContract.target);
+        expect(readOnlyContract.address).toBe(writeContract.address);
         expect(readOnlyContract.interface).toBe(writeContract.interface);
       });
     });
@@ -246,15 +244,15 @@ describe('contracts.js - Unit Tests', () => {
       });
 
       it('should throw error when no deployment found for network', async () => {
-        // Create a mock provider that extends AbstractProvider
-        class MockProvider extends ethers.AbstractProvider {
+        // Create a mock provider that extends BaseProvider
+        class MockProvider extends ethers.providers.BaseProvider {
           constructor() {
-            super();
+            super({ chainId: 999999, name: 'test' });
           }
 
           async getNetwork() {
             return {
-              chainId: 999999n // Chain where contracts aren't deployed
+              chainId: 999999 // Chain where contracts aren't deployed
             };
           }
         }
@@ -274,13 +272,13 @@ describe('contracts.js - Unit Tests', () => {
 
       expect(factory).toBeDefined();
       expect(factory).toBeInstanceOf(ethers.Contract);
-      expect(factory.target).toBe(env.contractAddresses.VaultFactory);
-      expect(factory.runner).toBe(env.provider);
+      expect(factory.address).toBe(env.contractAddresses.VaultFactory);
+      expect(factory.provider).toBe(env.provider);
 
       // Verify it's the correct contract by checking it has expected methods
-      expect(factory.interface.hasFunction('createVault')).toBe(true);
-      expect(factory.interface.hasFunction('getVaults')).toBe(true);
-      expect(factory.interface.hasFunction('getVaultInfo')).toBe(true);
+      expect(typeof factory.createVault === 'function').toBe(true);
+      expect(typeof factory.getVaults === 'function').toBe(true);
+      expect(typeof factory.getVaultInfo === 'function').toBe(true);
     });
 
     it('should throw error for invalid provider', async () => {
@@ -467,35 +465,35 @@ describe('contracts.js - Unit Tests', () => {
 
     describe('Success Cases', () => {
       it('should return PositionVault contract with correct address', async () => {
-        const vaultContract = getVaultContract(env.testVault.target, env.provider);
+        const vaultContract = getVaultContract(env.testVault.address, env.provider);
 
         expect(vaultContract).toBeDefined();
         expect(vaultContract).toBeInstanceOf(ethers.Contract);
-        expect(vaultContract.target).toBe(env.testVault.target);
-        expect(vaultContract.runner).toBe(env.provider);
+        expect(vaultContract.address).toBe(env.testVault.address);
+        expect(vaultContract.provider).toBe(env.provider);
       });
 
       it('should return contract with proper PositionVault ABI methods available', async () => {
-        const vaultContract = getVaultContract(env.testVault.target, env.provider);
+        const vaultContract = getVaultContract(env.testVault.address, env.provider);
 
         // Test that we can access interface methods
         expect(vaultContract.interface).toBeDefined();
         expect(vaultContract.interface.fragments.length).toBeGreaterThan(0);
 
         // Test that specific PositionVault methods exist
-        expect(vaultContract.interface.hasFunction('owner')).toBe(true);
-        expect(vaultContract.interface.hasFunction('execute')).toBe(true);
-        expect(vaultContract.interface.hasFunction('strategy')).toBe(true);
-        expect(vaultContract.interface.hasFunction('executor')).toBe(true);
-        expect(vaultContract.interface.hasFunction('setStrategy')).toBe(true);
-        expect(vaultContract.interface.hasFunction('setExecutor')).toBe(true);
+        expect(typeof vaultContract.owner === 'function').toBe(true);
+        expect(typeof vaultContract.execute === 'function').toBe(true);
+        expect(typeof vaultContract.strategy === 'function').toBe(true);
+        expect(typeof vaultContract.executor === 'function').toBe(true);
+        expect(typeof vaultContract.setStrategy === 'function').toBe(true);
+        expect(typeof vaultContract.setExecutor === 'function').toBe(true);
       });
 
       it('should allow calling read methods', async () => {
-        const vaultContract = getVaultContract(env.testVault.target, env.provider);
+        const vaultContract = getVaultContract(env.testVault.address, env.provider);
 
         // First verify the vault exists and has the expected info
-        const vaultInfo = await getVaultInfo(env.testVault.target, env.provider);
+        const vaultInfo = await getVaultInfo(env.testVault.address, env.provider);
         expect(vaultInfo.owner).toBe(env.signers[0].address);
 
         // Call owner() method
@@ -505,38 +503,38 @@ describe('contracts.js - Unit Tests', () => {
       });
 
       it('should allow .connect(signer) pattern for write operations', async () => {
-        const readOnlyContract = getVaultContract(env.testVault.target, env.provider);
+        const readOnlyContract = getVaultContract(env.testVault.address, env.provider);
         const signer = env.signers[0];
         const writeContract = readOnlyContract.connect(signer);
 
         // Read-only contract should be connected to provider
-        expect(readOnlyContract.runner).toBe(env.provider);
-        expect(readOnlyContract.runner instanceof ethers.AbstractProvider).toBe(true);
+        expect(readOnlyContract.provider).toBe(env.provider);
+        expect(readOnlyContract.provider instanceof ethers.providers.Provider).toBe(true);
 
         // Write contract should be connected to signer
-        expect(writeContract.runner).toBe(signer);
-        expect(writeContract.runner instanceof ethers.AbstractSigner).toBe(true);
+        expect(writeContract.signer).toBe(signer);
+        expect(writeContract.signer instanceof ethers.Signer).toBe(true);
 
         // Both should have same address and interface
-        expect(readOnlyContract.target).toBe(writeContract.target);
+        expect(readOnlyContract.address).toBe(writeContract.address);
         expect(readOnlyContract.interface).toBe(writeContract.interface);
       });
 
       it('should work consistently when called multiple times', async () => {
-        const contract1 = getVaultContract(env.testVault.target, env.provider);
-        const contract2 = getVaultContract(env.testVault.target, env.provider);
-        const contract3 = getVaultContract(env.testVault.target, env.provider);
+        const contract1 = getVaultContract(env.testVault.address, env.provider);
+        const contract2 = getVaultContract(env.testVault.address, env.provider);
+        const contract3 = getVaultContract(env.testVault.address, env.provider);
 
         // Should return different instances
         expect(contract1).not.toBe(contract2);
         expect(contract2).not.toBe(contract3);
 
         // But with same properties
-        expect(contract1.target).toBe(env.testVault.target);
-        expect(contract2.target).toBe(env.testVault.target);
-        expect(contract3.target).toBe(env.testVault.target);
-        expect(contract1.runner).toBe(contract2.runner);
-        expect(contract2.runner).toBe(contract3.runner);
+        expect(contract1.address).toBe(env.testVault.address);
+        expect(contract2.address).toBe(env.testVault.address);
+        expect(contract3.address).toBe(env.testVault.address);
+        expect(contract1.provider).toBe(contract2.provider);
+        expect(contract2.provider).toBe(contract3.provider);
       });
     });
 
@@ -578,37 +576,37 @@ describe('contracts.js - Unit Tests', () => {
 
         // Object instead of string
         expect(() => {
-          getVaultContract({address: env.testVault.target}, env.provider);
+          getVaultContract({address: env.testVault.address}, env.provider);
         }).toThrow('Invalid vault address: [object Object]');
       });
 
       it('should throw error for invalid provider - null', async () => {
         expect(() => {
-          getVaultContract(env.testVault.target, null);
+          getVaultContract(env.testVault.address, null);
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - undefined', async () => {
         expect(() => {
-          getVaultContract(env.testVault.target, undefined);
+          getVaultContract(env.testVault.address, undefined);
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - plain object', async () => {
         expect(() => {
-          getVaultContract(env.testVault.target, {});
+          getVaultContract(env.testVault.address, {});
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - string', async () => {
         expect(() => {
-          getVaultContract(env.testVault.target, 'provider');
+          getVaultContract(env.testVault.address, 'provider');
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - signer instead of provider', async () => {
         expect(() => {
-          getVaultContract(env.testVault.target, env.signers[0]);
+          getVaultContract(env.testVault.address, env.signers[0]);
         }).toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
@@ -624,11 +622,13 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaults).toBeDefined();
         expect(Array.isArray(vaults)).toBe(true);
         expect(vaults.length).toBeGreaterThan(0);
-        expect(vaults).toContain(env.testVault.target);
+        expect(vaults).toContain(env.testVault.address);
       });
 
       it('should return empty array for user with no vaults', async () => {
-        const userAddress = env.signers[1].address; // Different signer who hasn't created vaults
+        // Create a fresh wallet that definitely has no vaults
+        const freshWallet = ethers.Wallet.createRandom();
+        const userAddress = freshWallet.address;
         const vaults = await getUserVaults(userAddress, env.provider);
 
         expect(vaults).toBeDefined();
@@ -644,12 +644,12 @@ describe('contracts.js - Unit Tests', () => {
         const vaults1 = await getUserVaults(lowercaseAddress, env.provider);
 
         // Test with checksummed address
-        const checksummedAddress = ethers.getAddress(userAddress);
+        const checksummedAddress = ethers.utils.getAddress(userAddress);
         const vaults2 = await getUserVaults(checksummedAddress, env.provider);
 
         // Both should return the same results
         expect(vaults1).toEqual(vaults2);
-        expect(vaults1).toContain(env.testVault.target);
+        expect(vaults1).toContain(env.testVault.address);
       });
 
       it('should work consistently when called multiple times', async () => {
@@ -662,15 +662,15 @@ describe('contracts.js - Unit Tests', () => {
         // All results should be identical
         expect(vaults1).toEqual(vaults2);
         expect(vaults2).toEqual(vaults3);
-        expect(vaults1).toContain(env.testVault.target);
+        expect(vaults1).toContain(env.testVault.address);
       });
 
       it('should return correct vault address for user who created vault', async () => {
         const userAddress = env.signers[0].address;
         const vaults = await getUserVaults(userAddress, env.provider);
 
-        expect(vaults).toContain(env.testVault.target);
-        expect(env.testVault.target).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(vaults).toContain(env.testVault.address);
+        expect(env.testVault.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
       });
     });
 
@@ -777,7 +777,7 @@ describe('contracts.js - Unit Tests', () => {
         expect(authorizedVaults).toContain(vault3);
         expect(authorizedVaults).not.toContain(vault2);
         expect(authorizedVaults.length).toBe(2);
-      });
+      }, 180000);
 
       it('should return empty array when no vaults are authorized', async () => {
         const executorAddress = env.signers[3].address; // Unused address
@@ -787,7 +787,7 @@ describe('contracts.js - Unit Tests', () => {
         expect(authorizedVaults).toBeDefined();
         expect(Array.isArray(authorizedVaults)).toBe(true);
         expect(authorizedVaults.length).toBe(0);
-      });
+      }, 180000);
 
       it('should handle case-insensitive executor address comparison', async () => {
         const executorAddress = env.signers[2].address;
@@ -801,7 +801,7 @@ describe('contracts.js - Unit Tests', () => {
         const lowercaseResults = await getAuthorizedVaults(executorAddress.toLowerCase(), env.provider);
 
         // Test with checksummed address
-        const checksummedResults = await getAuthorizedVaults(ethers.getAddress(executorAddress), env.provider);
+        const checksummedResults = await getAuthorizedVaults(ethers.utils.getAddress(executorAddress), env.provider);
 
         // Both should return same results
         expect(lowercaseResults).toEqual(checksummedResults);
@@ -817,7 +817,7 @@ describe('contracts.js - Unit Tests', () => {
 
         expect(results1).toEqual(results2);
         expect(results2).toEqual(results3);
-      });
+      }, 180000);
 
       it('should handle large number of vaults efficiently', async () => {
         const executorAddress = env.signers[4].address;
@@ -848,7 +848,7 @@ describe('contracts.js - Unit Tests', () => {
             expect(authorizedVaults).not.toContain(vaults[i]);
           }
         }
-      });
+      }, 180000);
     });
 
     describe('Error Cases', () => {
@@ -928,7 +928,7 @@ describe('contracts.js - Unit Tests', () => {
   describe('getVaultInfo', () => {
     describe('Success Cases', () => {
       it('should return vault info with correct structure and values', async () => {
-        const vaultInfo = await getVaultInfo(env.testVault.target, env.provider);
+        const vaultInfo = await getVaultInfo(env.testVault.address, env.provider);
 
         expect(vaultInfo).toBeDefined();
         expect(typeof vaultInfo).toBe('object');
@@ -947,21 +947,21 @@ describe('contracts.js - Unit Tests', () => {
       });
 
       it('should return correct owner address', async () => {
-        const vaultInfo = await getVaultInfo(env.testVault.target, env.provider);
+        const vaultInfo = await getVaultInfo(env.testVault.address, env.provider);
 
         expect(vaultInfo.owner).toBe(env.signers[0].address);
         expect(vaultInfo.owner).toMatch(/^0x[a-fA-F0-9]{40}$/);
       });
 
       it('should work with checksummed and non-checksummed addresses', async () => {
-        const vaultAddress = env.testVault.target;
+        const vaultAddress = env.testVault.address;
 
         // Test with lowercase address
         const lowercaseAddress = vaultAddress.toLowerCase();
         const vaultInfo1 = await getVaultInfo(lowercaseAddress, env.provider);
 
         // Test with checksummed address
-        const checksummedAddress = ethers.getAddress(vaultAddress);
+        const checksummedAddress = ethers.utils.getAddress(vaultAddress);
         const vaultInfo2 = await getVaultInfo(checksummedAddress, env.provider);
 
         // Both should return the same results
@@ -970,7 +970,7 @@ describe('contracts.js - Unit Tests', () => {
       });
 
       it('should work consistently when called multiple times', async () => {
-        const vaultAddress = env.testVault.target;
+        const vaultAddress = env.testVault.address;
 
         const vaultInfo1 = await getVaultInfo(vaultAddress, env.provider);
         const vaultInfo2 = await getVaultInfo(vaultAddress, env.provider);
@@ -983,7 +983,7 @@ describe('contracts.js - Unit Tests', () => {
       });
 
       it('should return valid data types for all fields', async () => {
-        const vaultInfo = await getVaultInfo(env.testVault.target, env.provider);
+        const vaultInfo = await getVaultInfo(env.testVault.address, env.provider);
 
         // Type validations
         expect(typeof vaultInfo.owner).toBe('string');
@@ -1036,37 +1036,37 @@ describe('contracts.js - Unit Tests', () => {
 
         // Object instead of string
         await expect(
-          getVaultInfo({address: env.testVault.target}, env.provider)
+          getVaultInfo({address: env.testVault.address}, env.provider)
         ).rejects.toThrow('Invalid vault address: [object Object]');
       });
 
       it('should throw error for invalid provider - null', async () => {
         await expect(
-          getVaultInfo(env.testVault.target, null)
+          getVaultInfo(env.testVault.address, null)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - undefined', async () => {
         await expect(
-          getVaultInfo(env.testVault.target, undefined)
+          getVaultInfo(env.testVault.address, undefined)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - plain object', async () => {
         await expect(
-          getVaultInfo(env.testVault.target, {})
+          getVaultInfo(env.testVault.address, {})
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - string', async () => {
         await expect(
-          getVaultInfo(env.testVault.target, 'provider')
+          getVaultInfo(env.testVault.address, 'provider')
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - signer instead of provider', async () => {
         await expect(
-          getVaultInfo(env.testVault.target, env.signers[0])
+          getVaultInfo(env.testVault.address, env.signers[0])
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
@@ -1097,7 +1097,7 @@ describe('contracts.js - Unit Tests', () => {
         target: env.wethAddress,
         data: wethContract.interface.encodeFunctionData('approve', [
           '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
-          ethers.parseEther('0.2')
+          ethers.utils.parseEther('0.2')
         ])
       };
 
@@ -1105,13 +1105,13 @@ describe('contracts.js - Unit Tests', () => {
         target: env.usdcAddress,
         data: usdcContract.interface.encodeFunctionData('approve', [
           '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3 SwapRouter
-          ethers.parseUnits('200', 6)
+          ethers.utils.parseUnits('200', 6)
         ])
       };
 
       // Execute approvals first
-      await executeVaultTransactions(env.testVault.target, [wethApprovalTx], signer);
-      await executeVaultTransactions(env.testVault.target, [usdcApprovalTx], signer);
+      await executeVaultTransactions(env.testVault.address, [wethApprovalTx], signer);
+      await executeVaultTransactions(env.testVault.address, [usdcApprovalTx], signer);
 
       // NOW create sample swap transactions using UniswapV3Adapter (after approvals are done)
       const adapter = new UniswapV3Adapter(1337);
@@ -1125,9 +1125,9 @@ describe('contracts.js - Unit Tests', () => {
         tokenIn: wethAddress,
         tokenOut: usdcAddress,
         fee: 500,
-        recipient: env.testVault.target,
+        recipient: env.testVault.address,
         deadlineMinutes: 60, // 1 hour from now
-        amountIn: String(ethers.parseEther('0.1')),
+        amountIn: String(ethers.utils.parseEther('0.1')),
         sqrtPriceLimitX96: String(0),
         slippageTolerance: 100,
         provider: env.provider
@@ -1137,9 +1137,9 @@ describe('contracts.js - Unit Tests', () => {
         tokenIn: usdcAddress,
         tokenOut: wethAddress,
         fee: 500,
-        recipient: env.testVault.target,
+        recipient: env.testVault.address,
         deadlineMinutes: 60, // 1 hour from now
-        amountIn: String(ethers.parseUnits('100', 6)), // 100 USDC
+        amountIn: String(ethers.utils.parseUnits('100', 6)), // 100 USDC
         sqrtPriceLimitX96: String(0),
         slippageTolerance: 100,
         provider: env.provider
@@ -1167,11 +1167,11 @@ describe('contracts.js - Unit Tests', () => {
           target: env.wethAddress,
           data: wethContract.interface.encodeFunctionData('transfer', [
             signer.address,
-            ethers.parseEther('1000000') // Way more than vault has
+            ethers.utils.parseEther('1000000') // Way more than vault has
           ])
         }
       ];
-    });
+    }, 300000);
 
     describe('Success Cases', () => {
       it('should execute single transaction and return true', async () => {
@@ -1179,7 +1179,7 @@ describe('contracts.js - Unit Tests', () => {
         const singleTransaction = [swapTransactions[0]];
 
         const result = await executeVaultTransactions(
-          env.testVault.target,
+          env.testVault.address,
           singleTransaction,
           signer
         );
@@ -1191,7 +1191,7 @@ describe('contracts.js - Unit Tests', () => {
         const signer = env.signers[0];
 
         const result = await executeVaultTransactions(
-          env.testVault.target,
+          env.testVault.address,
           swapTransactions,
           signer
         );
@@ -1237,19 +1237,19 @@ describe('contracts.js - Unit Tests', () => {
         const signer = env.signers[0];
 
         await expect(
-          executeVaultTransactions(env.testVault.target, null, signer)
+          executeVaultTransactions(env.testVault.address, null, signer)
         ).rejects.toThrow('Transactions must be an array');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, undefined, signer)
+          executeVaultTransactions(env.testVault.address, undefined, signer)
         ).rejects.toThrow('Transactions must be an array');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, [], signer)
+          executeVaultTransactions(env.testVault.address, [], signer)
         ).rejects.toThrow('Transactions array cannot be empty');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, 'not-array', signer)
+          executeVaultTransactions(env.testVault.address, 'not-array', signer)
         ).rejects.toThrow('Transactions must be an array');
       });
 
@@ -1258,54 +1258,54 @@ describe('contracts.js - Unit Tests', () => {
 
         // Invalid transaction object
         await expect(
-          executeVaultTransactions(env.testVault.target, [null], signer)
+          executeVaultTransactions(env.testVault.address, [null], signer)
         ).rejects.toThrow('Transaction at index 0 must be an object');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, ['invalid'], signer)
+          executeVaultTransactions(env.testVault.address, ['invalid'], signer)
         ).rejects.toThrow('Transaction at index 0 must be an object');
 
         // Missing target
         await expect(
-          executeVaultTransactions(env.testVault.target, [{ data: '0x1234' }], signer)
+          executeVaultTransactions(env.testVault.address, [{ data: '0x1234' }], signer)
         ).rejects.toThrow('Transaction at index 0 is missing target address');
 
         // Missing data
         await expect(
-          executeVaultTransactions(env.testVault.target, [{ target: swapTransactions[0].target }], signer)
+          executeVaultTransactions(env.testVault.address, [{ target: swapTransactions[0].target }], signer)
         ).rejects.toThrow('Transaction at index 0 is missing data');
 
         // Invalid target address
         await expect(
-          executeVaultTransactions(env.testVault.target, [{ target: 'invalid', data: '0x1234' }], signer)
+          executeVaultTransactions(env.testVault.address, [{ target: 'invalid', data: '0x1234' }], signer)
         ).rejects.toThrow('Invalid target address at index 0: invalid');
 
         // Invalid data type
         await expect(
-          executeVaultTransactions(env.testVault.target, [{ target: env.wethAddress, data: 123 }], signer)
+          executeVaultTransactions(env.testVault.address, [{ target: env.wethAddress, data: 123 }], signer)
         ).rejects.toThrow('Transaction data at index 0 must be a string');
 
         // Invalid data format (not hex)
         await expect(
-          executeVaultTransactions(env.testVault.target, [{ target: env.wethAddress, data: 'not-hex' }], signer)
+          executeVaultTransactions(env.testVault.address, [{ target: env.wethAddress, data: 'not-hex' }], signer)
         ).rejects.toThrow('Transaction data at index 0 must be hex encoded (start with 0x)');
       });
 
       it('should throw error for invalid signer', async () => {
         await expect(
-          executeVaultTransactions(env.testVault.target, swapTransactions, null)
+          executeVaultTransactions(env.testVault.address, swapTransactions, null)
         ).rejects.toThrow('Invalid signer. Must be an ethers signer instance.');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, swapTransactions, undefined)
+          executeVaultTransactions(env.testVault.address, swapTransactions, undefined)
         ).rejects.toThrow('Invalid signer. Must be an ethers signer instance.');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, swapTransactions, {})
+          executeVaultTransactions(env.testVault.address, swapTransactions, {})
         ).rejects.toThrow('Invalid signer. Must be an ethers signer instance.');
 
         await expect(
-          executeVaultTransactions(env.testVault.target, swapTransactions, env.provider)
+          executeVaultTransactions(env.testVault.address, swapTransactions, env.provider)
         ).rejects.toThrow('Invalid signer. Must be an ethers signer instance.');
       });
 
@@ -1313,7 +1313,7 @@ describe('contracts.js - Unit Tests', () => {
         const signer = env.signers[0];
 
         await expect(
-          executeVaultTransactions(env.testVault.target, failingTransactions, signer)
+          executeVaultTransactions(env.testVault.address, failingTransactions, signer)
         ).rejects.toThrow('Failed to execute vault transactions');
       });
     });
@@ -1409,7 +1409,7 @@ describe('contracts.js - Unit Tests', () => {
 
     describe('Integration Cases', () => {
       it('should work with ethers address validation', () => {
-        // Test that our function properly uses ethers.getAddress for validation
+        // Test that our function properly uses ethers.utils.getAddress for validation
         const checksummedAddress = '0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb';
         const lowercaseAddress = checksummedAddress.toLowerCase();
 

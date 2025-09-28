@@ -994,7 +994,7 @@ export function mapStrategyParameters(strategyId, params) {
 
         // Fee Settings
         feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
+        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
         reinvestmentRatio: parseInt(params[6]) / 100,
 
         // Risk Management
@@ -1035,7 +1035,7 @@ export function mapStrategyParameters(strategyId, params) {
 
         // Fee Settings
         feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.formatUnits(params[5], 2),
+        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
         reinvestmentRatio: parseInt(params[6]) / 100,
 
         // Risk Management
@@ -1060,12 +1060,12 @@ export function mapStrategyParameters(strategyId, params) {
 
         // Position Sizing
         maxPositionSizePercent: parseInt(params[21]) / 100,
-        minPositionSize: ethers.formatUnits(params[22], 2),
+        minPositionSize: ethers.utils.formatUnits(params[22], 2),
         targetUtilization: parseInt(params[23]) / 100,
 
         // Platform Settings
         platformSelectionCriteria: parseInt(params[24]),
-        minPoolLiquidity: ethers.formatUnits(params[25], 2)
+        minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
       };
     }
     else if (strategyIdLower === 'fed') {
