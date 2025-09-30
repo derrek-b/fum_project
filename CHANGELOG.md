@@ -1,5 +1,46 @@
 # F.U.M. Project Changelog
 
+## [0.10.0] Permit2 Integration - 2025-09-30
+
+### Permit2 Universal Approval System
+
+This release integrates Uniswap's Permit2 approval system to enable gasless operations and reduce transaction costs for vault operations. All vaults now automatically set up Permit2 approvals for all tokens during initialization.
+
+#### **Permit2 Integration**
+- **ADDED**: Permit2 approval setup during vault initialization
+- **ADDED**: `setupPermit2Approvals()` method to manage universal approvals for all vault tokens
+- **ADDED**: `checkPermit2Approval()` method to verify existing Permit2 allowances
+- **ADDED**: `executePermit2Approval()` method to execute approval transactions via vault.execute()
+- **ENHANCED**: Token approval detection to include vault balance tokens, target tokens, and position tokens
+- **DEPENDENCY**: Added `@uniswap/permit2-sdk` (^1.4.0) for Permit2 constants and utilities
+- **DEPENDENCY**: Added `@uniswap/universal-router-sdk` (^4.19.7) for future gasless swap integration
+- **DEPENDENCY**: Added `tslib` (^2.8.1) as required peer dependency for Permit2 SDK
+
+#### **Approval Management**
+- **ENHANCED**: Automatically extracts tokens from vault positions via poolData for comprehensive approval coverage
+- **LOGIC**: Approvals set to MaxUint256 for one-time universal approval per token
+- **VALIDATION**: Checks existing allowances before executing approval transactions (≥ MaxUint256/2 threshold)
+- **FAILURE**: Vault setup now fails if Permit2 approvals cannot be established
+- **ORDER**: Permit2 approvals execute BEFORE vault strategy initialization (before any swaps/liquidity adds)
+
+#### **Test Coverage**
+- **ADDED**: Permit2 approval assertions to service-init 1111 test (USDC, WBTC, WETH)
+- **ADDED**: Permit2 approval assertions to service-init 2020 test (USDC, WETH)
+- **ADDED**: Permit2 approval assertions to service-init 0202 test (WBTC, USD₮0, WETH)
+- **ADDED**: Permit2 approval assertions to vault-auth 1111 test (USDC, WBTC, WETH)
+- **VERIFIED**: All tests validate Permit2 approvals for ALL tokens vault starts with (not just target tokens)
+
+#### **Architecture Updates**
+- **REFACTORED**: `setupVault()` method to include Permit2 setup as Step 2 (before Step 3: vault initialization)
+- **RETURNS**: `setupPermit2Approvals()` returns boolean for success/failure validation
+- **ERROR HANDLING**: Permit2 setup failures now throw errors and prevent vault initialization
+- **POSITION TOKENS**: Approval logic now accounts for tokens locked in vault positions via `poolData` metadata
+
+**Status**: ✅ All tests passing - Permit2 integration complete and ready for gasless operations
+**Breaking Changes**: None - backwards compatible, all vaults now use Permit2
+**Impact**: Enables future gasless swap operations, reduces gas costs from 2 transactions to 1 per swap
+**Future Work**: Implement EIP-712 signature-based swaps using Permit2 approvals via Universal Router
+
 ## [0.9.0] Ethers v5 Migration - 2025-09-30
 
 ### Complete Migration from Ethers v6 to v5
