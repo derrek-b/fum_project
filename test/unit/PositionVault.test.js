@@ -283,7 +283,141 @@ describe("PositionVault - 0.3.2", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("0.3.2");
+      expect(await vault.getVersion()).to.equal("0.3.3");
+    });
+  });
+
+  // Test for EIP-1271 signature validation
+  describe("EIP-1271 Signature Validation", function() {
+    const MAGICVALUE = "0x1626ba7e";
+    let testMessage;
+    let testMessageHash;
+
+    beforeEach(async function() {
+      // Create a test message
+      testMessage = "Test message for EIP-1271";
+      testMessageHash = ethers.hashMessage(testMessage);
+    });
+
+    it("should validate signature from owner", async function() {
+      // Sign the message (not the hash) - signMessage will hash it internally
+      const signature = await owner.signMessage(testMessage);
+
+      // Verify signature through vault using the hash
+      const result = await vault.isValidSignature(testMessageHash, signature);
+      expect(result).to.equal(MAGICVALUE);
+    });
+
+    it("should validate signature from executor", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      // Sign the message with executor's private key
+      const signature = await executorWallet.signMessage(testMessage);
+
+      // Verify signature through vault
+      const result = await vault.isValidSignature(testMessageHash, signature);
+      expect(result).to.equal(MAGICVALUE);
+    });
+
+    it("should reject signature from unauthorized address", async function() {
+      // Sign with unauthorized user
+      const signature = await user1.signMessage(testMessage);
+
+      // Should revert with error
+      await expect(
+        vault.isValidSignature(testMessageHash, signature)
+      ).to.be.revertedWith("PositionVault: invalid signer");
+    });
+
+    it("should reject invalid signature", async function() {
+      // Create a fake signature (just random bytes)
+      const fakeSignature = ethers.hexlify(ethers.randomBytes(65));
+
+      // Should revert - ECDSA will revert with custom error for invalid signature
+      await expect(
+        vault.isValidSignature(testMessageHash, fakeSignature)
+      ).to.be.reverted;
+    });
+
+    it("should return correct magic value on success", async function() {
+      const signature = await owner.signMessage(testMessage);
+      const result = await vault.isValidSignature(testMessageHash, signature);
+
+      // Verify it's exactly the EIP-1271 magic value
+      expect(result).to.equal("0x1626ba7e");
+    });
+
+    it("should work with different message hashes", async function() {
+      // Test with multiple different messages
+      const messages = [
+        "First test message",
+        "Second test message",
+        "0x1234567890abcdef"
+      ];
+
+      for (const msg of messages) {
+        const msgHash = ethers.hashMessage(msg);
+        const signature = await owner.signMessage(msg);
+        const result = await vault.isValidSignature(msgHash, signature);
+        expect(result).to.equal(MAGICVALUE);
+      }
+    });
+
+    it("should reject signature after executor is removed", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      // Sign with executor
+      const signature = await executorWallet.signMessage(testMessage);
+
+      // Verify it works
+      let result = await vault.isValidSignature(testMessageHash, signature);
+      expect(result).to.equal(MAGICVALUE);
+
+      // Remove executor
+      await vault.removeExecutor();
+
+      // Same signature should now be rejected
+      await expect(
+        vault.isValidSignature(testMessageHash, signature)
+      ).to.be.revertedWith("PositionVault: invalid signer");
+    });
+
+    it("should validate complex EIP-712 typed data signatures (Permit2 simulation)", async function() {
+      // Simulate Permit2-style EIP-712 signature
+      const domain = {
+        name: "Permit2",
+        version: "1",
+        chainId: 31337, // Hardhat default chain ID
+        verifyingContract: await vault.getAddress()
+      };
+
+      const types = {
+        PermitTransferFrom: [
+          { name: "token", type: "address" },
+          { name: "amount", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" }
+        ]
+      };
+
+      const value = {
+        token: await token.getAddress(),
+        amount: ethers.parseEther("100"),
+        nonce: 0,
+        deadline: Math.floor(Date.now() / 1000) + 3600
+      };
+
+      // Owner signs the typed data
+      const signature = await owner.signTypedData(domain, types, value);
+
+      // Compute the EIP-712 hash
+      const digest = ethers.TypedDataEncoder.hash(domain, types, value);
+
+      // Verify signature through vault
+      const result = await vault.isValidSignature(digest, signature);
+      expect(result).to.equal(MAGICVALUE);
     });
   });
 });

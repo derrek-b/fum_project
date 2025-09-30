@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.3.3] - 2025-09-30
+### Added
+- EIP-1271 signature validation support in PositionVault contract
+  - Implements `isValidSignature(bytes32 hash, bytes calldata signature)` function
+  - Validates signatures from vault owner or authorized executor
+  - Returns EIP-1271 magic value `0x1626ba7e` for valid signatures
+  - Enables gasless approvals via Permit2 and other signature-based protocols
+- Comprehensive test suite for EIP-1271 functionality
+  - Owner and executor signature validation
+  - Unauthorized signer rejection
+  - Invalid signature handling
+  - EIP-712 typed data signature support (Permit2 simulation)
+  - Executor removal edge case testing
+
+### Changed
+- PositionVault contract version updated from 0.3.2 to 0.3.3
+- Added IERC1271 interface and ECDSA library imports
+
 ## [0.3.2] - 2025-08-27
 ### Changed
 - Enhanced ExecutorChanged event in PositionVault contract

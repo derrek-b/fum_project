@@ -6,14 +6,20 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/interfaces/IERC1271.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
  * @title PositionVault
  * @notice User-controlled vault for managing DeFi positions across platforms
  * @dev Holds tokens and NFT positions, executing transactions approved by the owner
  */
-contract PositionVault is IERC721Receiver, ReentrancyGuard {
+contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     using SafeERC20 for IERC20;
+    using ECDSA for bytes32;
+
+    // EIP-1271 magic value for valid signatures
+    bytes4 constant internal MAGICVALUE = 0x1626ba7e;
 
     // Vault owner with full control
     address public owner;
@@ -267,11 +273,34 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard {
     }
 
     /**
+     * @notice Validates signatures for Permit2 and other protocols (EIP-1271)
+     * @dev Allows owner or executor to sign on behalf of the vault
+     * @param hash Hash of the data that was signed
+     * @param signature Signature to validate
+     * @return magicValue Returns 0x1626ba7e if valid, reverts otherwise
+     */
+    function isValidSignature(
+        bytes32 hash,
+        bytes calldata signature
+    ) external view override returns (bytes4 magicValue) {
+        // Recover the signer from the signature
+        address signer = hash.recover(signature);
+
+        // Accept signatures from owner or executor
+        require(
+            signer == owner || signer == executor,
+            "PositionVault: invalid signer"
+        );
+
+        return MAGICVALUE;
+    }
+
+    /**
      * @notice Allows the vault to receive ETH
      */
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.3.2";
+        return "0.3.3";
     }
 }
