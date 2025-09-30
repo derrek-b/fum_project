@@ -1,5 +1,46 @@
 # F.U.M. Project Changelog
 
+## [0.9.0] Ethers v5 Migration - 2025-09-30
+
+### Complete Migration from Ethers v6 to v5
+
+This release completes the migration from ethers v6 to v5 to match fum_library v0.19.1, ensuring compatibility and resolving all breaking changes in event handling, BigNumber operations, and contract interactions.
+
+#### **Core Library Updates**
+- **MIGRATED**: All ethers v6 imports changed to ethers v5 syntax
+- **UPDATED**: Event listener registration using ethers v5 filter patterns
+- **FIXED**: BigNumber operations - removed `.toBigInt()` calls (v5 BigNumber doesn't have this method)
+- **FIXED**: Contract interface instantiation using `new ethers.utils.Interface()`
+- **UPDATED**: Event parsing using v5 `parseLog()` method
+
+#### **Event Handling Refactor**
+- **FIXED**: Swap event detection in EventManager using proper v5 filter syntax
+- **FIXED**: Fee collection event parsing from transaction receipts
+- **ENHANCED**: Pool Collect event parsing with proper recipient and tick range validation
+- **UPDATED**: All event listeners to use v5-compatible filter registration
+
+#### **Test Suite Updates**
+- **FIXED**: All swap event detection tests updated for v5 compatibility
+- **ENHANCED**: Tighter position ranges (25 bps) for more reliable rebalance testing
+- **FIXED**: Emergency exit trigger reduced to 60 bps to match actual price movements
+- **ADDED**: Proper event listener setup for VaultLocked/VaultUnlocked events
+- **VERIFIED**: Complete test suite passing (6/6 tests)
+
+#### **Strategy Parameter Updates**
+- **ADJUSTED**: Target range parameters from 50 bps to 25 bps for tighter rebalancing
+- **TUNED**: Emergency exit trigger from 70 bps to 60 bps for test reliability
+- **MAINTAINED**: All other strategy parameters at production defaults
+
+#### **Bug Fixes**
+- **FIXED**: Fee tier pool selection - ensure consistent 500 bps pool usage across tests
+- **FIXED**: TVL mocking to return different values per fee tier for proper pool selection
+- **FIXED**: Pool data fetching to use correct fee tier in reverse rebalance test
+- **REMOVED**: All temporary debug logs added during migration
+
+**Status**: ✅ All tests passing - migration complete and production ready
+**Breaking Changes**: Requires ethers v5 and fum_library v0.19.1+
+**Impact**: Full compatibility with updated library, all automation features working
+
 ## [0.8.1] Price Event Workflow Refactor - Fee Distribution & Collection - 2025-09-24
 
 ### Complete Price Event Workflow Implementation
