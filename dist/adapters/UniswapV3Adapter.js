@@ -13,10 +13,12 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
-import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
+import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
-import { Percent, Token, CurrencyAmount, Price } from '@uniswap/sdk-core';
+import { Percent, Token, CurrencyAmount, Price, TradeType } from '@uniswap/sdk-core';
+import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
+import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import JSBI from "jsbi";
 
 // Import ABIs from Uniswap and OpenZeppelin libraries
@@ -24,12 +26,14 @@ import NonfungiblePositionManagerARTIFACT from '@uniswap/v3-periphery/artifacts/
 import IUniswapV3PoolARTIFACT from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json' with { type: 'json' };
 import SwapRouterARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json' with { type: 'json' };
 import QuoterARTIFACT from '@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json' with { type: 'json' };
+import UniversalRouterARTIFACT from '@uniswap/universal-router/artifacts/contracts/UniversalRouter.sol/UniversalRouter.json' with { type: 'json' };
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 
 const NonfungiblePositionManagerABI = NonfungiblePositionManagerARTIFACT.abi;
 const IUniswapV3PoolABI = IUniswapV3PoolARTIFACT.abi;
 const SwapRouterABI = SwapRouterARTIFACT.abi;
 const QuoterABI = QuoterARTIFACT.abi;
+const UniversalRouterABI = UniversalRouterARTIFACT.abi;
 const ERC20ABI = ERC20ARTIFACT.abi;
 
 // Define MaxUint128 constant (2^128 - 1) as JSBI for Uniswap SDK compatibility
@@ -50,7 +54,7 @@ const MaxUint128 = JSBI.subtract(JSBI.exponentiate(JSBI.BigInt(2), JSBI.BigInt(1
  *
  * @example
  * // Create adapter for Arbitrum
- * const adapter = new UniswapV3Adapter(42161);
+ * const adapter = new UniswapV3Adapter(42161, provider);
  *
  * // Get pool address (from factory contract)
  * const poolAddress = await adapter.getPoolAddress(token0Address, token1Address, 500, provider);
@@ -62,8 +66,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Constructor
    * @param {number} chainId - Chain ID for the adapter
+   * @param {Object} provider - Ethers provider instance
    */
-  constructor(chainId) {
+  constructor(chainId, provider) {
     super(chainId, "uniswapV3", "Uniswap V3");
 
     // Cache platform addresses
@@ -81,6 +86,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.uniswapV3PoolABI = IUniswapV3PoolABI;
     this.swapRouterABI = SwapRouterABI;
     this.quoterABI = QuoterABI;
+    this.universalRouterABI = UniversalRouterABI;
     this.erc20ABI = ERC20ABI;
 
     // Pre-create contract interfaces for better performance
@@ -88,8 +94,44 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.positionManagerInterface = new ethers.utils.Interface(this.nonfungiblePositionManagerABI);
     this.poolInterface = new ethers.utils.Interface(this.uniswapV3PoolABI);
     this.quoterInterface = new ethers.utils.Interface(this.quoterABI);
+    this.universalRouterInterface = new ethers.utils.Interface(this.universalRouterABI);
     this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
 
+    // Store provider and initialize AlphaRouter for optimal swap routing
+    this.provider = provider;
+
+    // For test chain (1337), use real Arbitrum provider and chainId for AlphaRouter
+    // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
+    this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
+
+    if (chainId === 1337) {
+      const arbitrumRpcUrls = getChainRpcUrls(42161);
+      const arbitrumProvider = new ethers.providers.JsonRpcProvider(arbitrumRpcUrls[0]);
+      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: arbitrumProvider });
+    } else {
+      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider });
+    }
+
+  }
+
+  /**
+   * Create SDK Token instance from address using cached config
+   * @param {string} tokenAddress - Token address
+   * @returns {Token} SDK Token instance
+   * @private
+   */
+  _createTokenInstance(tokenAddress) {
+    const tokenConfig = getTokenByAddress(tokenAddress, this.chainId);
+    if (!tokenConfig) {
+      throw new Error(`Token ${tokenAddress} not found in config for chain ${this.chainId}`);
+    }
+    return new Token(
+      this.alphaRouterChainId,
+      tokenAddress,
+      tokenConfig.decimals,
+      tokenConfig.symbol,
+      tokenConfig.name
+    );
   }
 
   /**
@@ -2999,20 +3041,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get best swap quote by comparing multiple fee tiers
+   * Get best swap quote using AlphaRouter for optimal routing
    * @param {Object} params - Parameters for getting best swap quote
    * @param {string} params.tokenInAddress - Address of input token
    * @param {string} params.tokenOutAddress - Address of output token
    * @param {string} params.amountIn - Amount of input tokens (in wei string)
-   * @param {Object} params.provider - Ethers provider instance
-   * @returns {Promise<Object>} Best quote with { amountOut: string, optimalFeeTier: number }
-   * @throws {Error} If no valid quotes can be obtained
+   * @returns {Promise<Object>} Quote with { amountOut: string, route: SwapRoute, methodParameters?: MethodParameters }
+   * @throws {Error} If no valid route can be found
    */
   async getBestSwapQuote(params) {
-    const { tokenInAddress, tokenOutAddress, amountIn, provider } = params;
+    const { tokenInAddress, tokenOutAddress, amountIn } = params;
 
-    // Validate parameters (reuse same validation as getSwapQuote)
-    if (!tokenInAddress) {
+    // Validate parameters
+    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
       throw new Error("TokenIn address parameter is required");
     }
     try {
@@ -3021,7 +3062,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
     }
 
-    if (!tokenOutAddress) {
+    if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
       throw new Error("TokenOut address parameter is required");
     }
     try {
@@ -3043,47 +3084,357 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("AmountIn cannot be zero");
     }
 
-    await this._validateProviderChain(provider);
+    // Create Token instances
+    const tokenIn = this._createTokenInstance(tokenInAddress);
+    const tokenOut = this._createTokenInstance(tokenOutAddress);
 
-    // Get quotes for all valid fee tiers in parallel
-    const quotePromises = this.feeTiers.map(async (feeTier) => {
-      try {
-        const amountOut = await this.getSwapQuote({
-          tokenInAddress,
-          tokenOutAddress,
-          fee: feeTier,
-          amountIn,
-          provider
-        });
-        return { amountOut, feeTier };
-      } catch (error) {
-        // Pool doesn't exist for this fee tier, skip it
-        return null;
-      }
-    });
+    // Create CurrencyAmount from amountIn string
+    const currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amountIn);
 
-    const quotes = await Promise.all(quotePromises);
-    const validQuotes = quotes.filter(quote => quote !== null);
+    // Call AlphaRouter to find optimal route
+    const route = await this.alphaRouter.route(
+      currencyAmount,
+      tokenOut,
+      TradeType.EXACT_INPUT,
+      undefined, // swapConfig - not needed for quotes only
+      undefined  // partialRoutingConfig - use defaults
+    );
 
-    if (validQuotes.length === 0) {
-      throw new Error(`No pools exist for token pair ${tokenInAddress}/${tokenOutAddress} with fee tiers: ${this.feeTiers.join(', ')}`);
+    if (!route) {
+      throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
     }
 
-    // Sort by amountOut descending (highest first)
-    validQuotes.sort((a, b) => {
-      const amountA = BigInt(a.amountOut);
-      const amountB = BigInt(b.amountOut);
-      if (amountA > amountB) return -1;
-      if (amountA < amountB) return 1;
-      return 0;
-    });
+    // Extract amountOut from route.quote (CurrencyAmount)
+    const amountOut = route.quote.quotient.toString();
 
-    // Return the best quote
-    const bestQuote = validQuotes[0];
     return {
-      amountOut: bestQuote.amountOut,
-      optimalFeeTier: bestQuote.feeTier
+      amountOut,
+      route,
+      methodParameters: route.methodParameters
     };
+  }
+
+  /**
+   * Get swap route with execution-ready transaction data using AlphaRouter
+   * @param {Object} params - Parameters for getting swap route
+   * @param {string} params.tokenInAddress - Address of input token
+   * @param {string} params.tokenOutAddress - Address of output token
+   * @param {string} params.amountIn - Amount of input tokens (in wei string)
+   * @param {string} params.recipient - Address to receive output tokens
+   * @param {number} [params.slippageTolerance=0.5] - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
+   * @param {number} [params.deadlineMinutes=30] - Transaction deadline in minutes from now
+   * @returns {Promise<Object>} Route with { amountOut: string, route: SwapRoute, methodParameters: MethodParameters }
+   * @throws {Error} If no valid route can be found or if parameters are invalid
+   */
+  async getSwapRoute(params) {
+    const {
+      tokenInAddress,
+      tokenOutAddress,
+      amountIn,
+      recipient,
+      slippageTolerance = 0.5,
+      deadlineMinutes = 30
+    } = params;
+
+    // Validate parameters
+    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+      throw new Error("TokenIn address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(tokenInAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    }
+
+    if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+      throw new Error("TokenOut address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(tokenOutAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+    }
+
+    if (!amountIn) {
+      throw new Error("AmountIn parameter is required");
+    }
+    if (typeof amountIn !== 'string') {
+      throw new Error("AmountIn must be a string");
+    }
+    if (!/^\d+$/.test(amountIn)) {
+      throw new Error("AmountIn must be a positive numeric string");
+    }
+    if (amountIn === '0') {
+      throw new Error("AmountIn cannot be zero");
+    }
+
+    if (!recipient || typeof recipient !== 'string') {
+      throw new Error("Recipient address parameter is required for swap route");
+    }
+    try {
+      ethers.utils.getAddress(recipient);
+    } catch (error) {
+      throw new Error(`Invalid recipient address: ${recipient}`);
+    }
+
+    // Validate slippage tolerance
+    if (typeof slippageTolerance !== 'number' || isNaN(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    // Validate deadline
+    if (typeof deadlineMinutes !== 'number' || isNaN(deadlineMinutes)) {
+      throw new Error("Deadline must be a number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline must be greater than 0");
+    }
+
+    // Create Token instances
+    const tokenIn = this._createTokenInstance(tokenInAddress);
+    const tokenOut = this._createTokenInstance(tokenOutAddress);
+
+    // Create CurrencyAmount from amountIn string
+    const currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amountIn);
+
+    // Build swapConfig for execution-ready transaction data using Universal Router
+    const swapConfig = {
+      type: SwapType.UNIVERSAL_ROUTER,
+      version: UniversalRouterVersion.V1_2,
+      recipient,
+      slippageTolerance: new Percent(Math.floor(slippageTolerance * 100), 10_000),
+      deadline: Math.floor(Date.now() / 1000 + deadlineMinutes * 60)
+    };
+
+    // Call AlphaRouter to find optimal route with transaction data
+    const route = await this.alphaRouter.route(
+      currencyAmount,
+      tokenOut,
+      TradeType.EXACT_INPUT,
+      swapConfig,
+      undefined  // partialRoutingConfig - use defaults
+    );
+
+    if (!route) {
+      throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+    }
+
+    // Extract amountOut from route.quote (CurrencyAmount)
+    const amountOut = route.quote.quotient.toString();
+
+    return {
+      amountOut,
+      route,
+      methodParameters: route.methodParameters
+    };
+  }
+
+  /**
+   * Generate swap transaction data using AlphaRouter route + Universal Router + Permit2
+   * @param {Object} params - Parameters for swap
+   * @param {Object} params.route - Route object from getSwapRoute() with methodParameters
+   * @param {string} params.tokenInAddress - Address of input token (for Permit2 struct)
+   * @param {string} params.amountIn - Amount of input tokens in wei string (for Permit2 struct)
+   * @param {string} params.recipient - Address to receive output tokens
+   * @param {string} params.walletAddress - Address of the wallet/vault executing the swap
+   * @param {string} params.permit2Signature - Permit2 signature for gasless approval (hex string)
+   * @param {number} params.permit2Nonce - Nonce for the Permit2 signature (non-negative integer)
+   * @param {number} params.permit2Deadline - Deadline timestamp for Permit2 permit (Unix timestamp)
+   * @returns {Promise<Object>} Transaction data with {to, data, value}
+   * @throws {Error} If parameters are invalid
+   */
+  async generateAlphaSwapData(params) {
+    const {
+      route,
+      tokenInAddress,
+      amountIn,
+      recipient,
+      walletAddress,
+      permit2Signature,
+      permit2Nonce,
+      permit2Deadline
+    } = params;
+
+    // Validate route object
+    if (!route || typeof route !== 'object' || Array.isArray(route)) {
+      throw new Error('Route parameter is required and must be an object');
+    }
+    if (!route.methodParameters) {
+      throw new Error('Route must include methodParameters from getSwapRoute()');
+    }
+    if (!route.methodParameters.calldata || typeof route.methodParameters.calldata !== 'string') {
+      throw new Error('Route methodParameters must include calldata');
+    }
+
+    // Validate tokenInAddress
+    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+      throw new Error('TokenIn address parameter is required');
+    }
+    try {
+      ethers.utils.getAddress(tokenInAddress);
+    } catch (error) {
+      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    }
+
+    // Validate amountIn
+    if (!amountIn) {
+      throw new Error('AmountIn parameter is required');
+    }
+    if (typeof amountIn !== 'string') {
+      throw new Error('AmountIn must be a string');
+    }
+    if (!/^\d+$/.test(amountIn)) {
+      throw new Error('AmountIn must be a positive numeric string');
+    }
+    if (amountIn === '0') {
+      throw new Error('AmountIn cannot be zero');
+    }
+    // Validate amountIn fits in uint160 (Permit2 requirement)
+    const maxUint160 = ethers.BigNumber.from(2).pow(160).sub(1);
+    if (ethers.BigNumber.from(amountIn).gt(maxUint160)) {
+      throw new Error('AmountIn exceeds uint160 maximum value');
+    }
+
+    // Validate recipient
+    if (!recipient || typeof recipient !== 'string') {
+      throw new Error('Recipient address parameter is required');
+    }
+    try {
+      ethers.utils.getAddress(recipient);
+    } catch (error) {
+      throw new Error(`Invalid recipient address: ${recipient}`);
+    }
+
+    // Validate walletAddress
+    if (!walletAddress || typeof walletAddress !== 'string') {
+      throw new Error('Wallet address parameter is required');
+    }
+    try {
+      ethers.utils.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    // Validate Permit2 signature
+    if (!permit2Signature || typeof permit2Signature !== 'string') {
+      throw new Error('Permit2 signature is required');
+    }
+    if (!/^0x[0-9a-fA-F]+$/.test(permit2Signature)) {
+      throw new Error('Permit2 signature must be a valid hex string');
+    }
+
+    // Validate Permit2 nonce
+    if (typeof permit2Nonce !== 'number' || !Number.isInteger(permit2Nonce) || permit2Nonce < 0) {
+      throw new Error('Permit2 nonce must be a non-negative integer');
+    }
+
+    // Validate Permit2 deadline
+    if (typeof permit2Deadline !== 'number' || !Number.isInteger(permit2Deadline) || permit2Deadline <= 0) {
+      throw new Error('Permit2 deadline must be a positive integer timestamp');
+    }
+    const now = Math.floor(Date.now() / 1000);
+    if (permit2Deadline < now) {
+      throw new Error('Permit2 deadline has already passed');
+    }
+
+    // Validate Universal Router address
+    if (!this.addresses?.universalRouterAddress) {
+      throw new Error(`No Universal Router address found for chainId: ${this.chainId}`);
+    }
+
+    // Build Permit2 permit data structure
+    const permit2Data = {
+      details: {
+        token: tokenInAddress,
+        amount: amountIn,
+        expiration: permit2Deadline,
+        nonce: permit2Nonce
+      },
+      spender: this.addresses.universalRouterAddress,
+      sigDeadline: permit2Deadline
+    };
+
+    // Wrap the swap calldata with Permit2 permit
+    const wrappedCalldata = this._wrapWithPermit2(
+      route.methodParameters.calldata,
+      permit2Data,
+      permit2Signature
+    );
+
+    return {
+      to: this.addresses.universalRouterAddress,
+      data: wrappedCalldata,
+      value: route.methodParameters.value
+    };
+  }
+
+  /**
+   * Encode PermitSingle and signature for Universal Router PERMIT2_PERMIT command
+   * @param {Object} permit2Data - Permit2 permit structure
+   * @param {string} permit2Signature - Permit2 signature hex string
+   * @returns {string} ABI-encoded permit input
+   * @private
+   */
+  _encodePermit2Input(permit2Data, permit2Signature) {
+    // PermitSingle structure for ABI encoding
+    // CRITICAL: Must match exact Solidity types including uint160, uint48
+    const permitSingleTuple = {
+      details: {
+        token: permit2Data.details.token,
+        amount: permit2Data.details.amount,        // Must be uint160
+        expiration: permit2Data.details.expiration, // Must be uint48
+        nonce: permit2Data.details.nonce           // Must be uint48
+      },
+      spender: permit2Data.spender,
+      sigDeadline: permit2Data.sigDeadline
+    };
+
+    // ABI encode PermitSingle + signature
+    // Type signature must exactly match Solidity: (PermitSingle, bytes)
+    const encoded = ethers.utils.defaultAbiCoder.encode(
+      [
+        'tuple(tuple(address token, uint160 amount, uint48 expiration, uint48 nonce) details, address spender, uint256 sigDeadline)',
+        'bytes'
+      ],
+      [permitSingleTuple, permit2Signature]
+    );
+
+    return encoded;
+  }
+
+  /**
+   * Wrap swap calldata with Permit2 permit command for Universal Router
+   * @param {string} swapCalldata - Original swap calldata from AlphaRouter
+   * @param {Object} permit2Data - Permit2 permit structure
+   * @param {string} permit2Signature - Permit2 signature hex string
+   * @returns {string} Wrapped calldata for Universal Router execute()
+   * @private
+   */
+  _wrapWithPermit2(swapCalldata, permit2Data, permit2Signature) {
+    // Step 1: Decode the existing Universal Router execute() call
+    // Use full signature because Universal Router has multiple execute() overloads
+    // AlphaRouter generates execute(bytes,bytes[]) - the 2-parameter version without deadline
+    const decoded = this.universalRouterInterface.decodeFunctionData('execute(bytes,bytes[])', swapCalldata);
+    const existingCommands = decoded.commands;
+    const existingInputs = decoded.inputs;
+
+    // Step 2: Encode Permit2 permit input
+    const permitInput = this._encodePermit2Input(permit2Data, permit2Signature);
+
+    // Step 3: Prepend PERMIT2_PERMIT command (0x0a) to existing commands
+    const commands = '0x0a' + existingCommands.slice(2);
+
+    // Step 4: Prepend permit input to existing inputs array
+    const inputs = [permitInput, ...existingInputs];
+
+    // Step 5: Re-encode execute() with new commands + inputs (2-parameter version)
+    return this.universalRouterInterface.encodeFunctionData('execute(bytes,bytes[])', [
+      commands,
+      inputs
+    ]);
   }
 
   /**

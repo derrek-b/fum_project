@@ -81,6 +81,16 @@ function validateNativeCurrency(chainId, nativeCurrency) {
 }
 
 /**
+ * Platform-specific required addresses
+ * Each platform may have different contract requirements
+ */
+const REQUIRED_PLATFORM_ADDRESSES = {
+  uniswapV3: ['factoryAddress', 'positionManagerAddress', 'routerAddress', 'universalRouterAddress', 'quoterAddress'],
+  // Add more platforms as they are implemented:
+  // sushiswap: ['factoryAddress', 'positionManagerAddress', 'routerAddress'],
+};
+
+/**
  * Validate platform addresses structure
  * @param {string} chainId - Chain ID for error reporting
  * @param {Object} platformAddresses - Platform addresses object to validate
@@ -97,8 +107,13 @@ function validatePlatformAddresses(chainId, platformAddresses) {
       throw new Error(`Chain ${chainId} platformAddresses.${platformId} must be an object`);
     }
 
-    // Validate required address properties
-    const requiredAddresses = ['factoryAddress', 'positionManagerAddress', 'routerAddress', 'quoterAddress'];
+    // Get platform-specific required addresses
+    const requiredAddresses = REQUIRED_PLATFORM_ADDRESSES[platformId];
+    if (!requiredAddresses) {
+      throw new Error(`Chain ${chainId} references platform ${platformId} which has no defined address requirements`);
+    }
+
+    // Validate required address properties for this platform
     requiredAddresses.forEach(addressProp => {
       if (!platformConfig[addressProp] || !validateEthereumAddress(platformConfig[addressProp])) {
         throw new Error(`Chain ${chainId} platformAddresses.${platformId}.${addressProp} must be a valid Ethereum address`);
@@ -210,7 +225,7 @@ describe('Chain Configuration Validation', () => {
   it('should reference only existing platforms in platformAddresses', () => {
     const platformKeys = Object.keys(platforms);
     const errors = [];
-    
+
     Object.entries(chains).forEach(([chainId, chain]) => {
       if (chain.platformAddresses && typeof chain.platformAddresses === 'object') {
         Object.keys(chain.platformAddresses).forEach(platformId => {
@@ -220,11 +235,29 @@ describe('Chain Configuration Validation', () => {
         });
       }
     });
-    
+
     if (errors.length > 0) {
       throw new Error(`Platform reference errors:\n${errors.join('\n')}`);
     }
-    
+
+    expect(errors).toHaveLength(0);
+  });
+
+  it('should have all platforms in REQUIRED_PLATFORM_ADDRESSES defined in platforms config', () => {
+    const platformKeys = Object.keys(platforms);
+    const requiredPlatformKeys = Object.keys(REQUIRED_PLATFORM_ADDRESSES);
+    const errors = [];
+
+    requiredPlatformKeys.forEach(platformId => {
+      if (!platformKeys.includes(platformId)) {
+        errors.push(`Platform ${platformId} is defined in REQUIRED_PLATFORM_ADDRESSES but not in platforms config`);
+      }
+    });
+
+    if (errors.length > 0) {
+      throw new Error(`Platform configuration errors:\n${errors.join('\n')}`);
+    }
+
     expect(errors).toHaveLength(0);
   });
 });

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-09-28T21:07:42.416Z
+Generated on: 2025-10-01T17:59:26.599Z
 
 ## Table of Contents
 
@@ -76,6 +76,9 @@ UniswapV3Adapter - Uniswap V3 Protocol Integration
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
 - from `@uniswap/sdk-core`
+- from `@uniswap/smart-order-router`
+- from `@uniswap/universal-router-sdk`
+- from `@uniswap/universal-router/artifacts/contracts/UniversalRouter.sol/UniversalRouter.json`
 - from `@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json`
 - from `@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json`
 - from `@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json`

@@ -23,9 +23,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         deployContracts: true, // Need deployed contracts for gas estimation tests
       });
 
-      // Create adapter instance using chainId from provider
+      // Create adapter instance using chainId and provider
       const network = await env.provider.getNetwork();
-      adapter = new UniswapV3Adapter(Number(network.chainId));
+      adapter = new UniswapV3Adapter(Number(network.chainId), env.provider);
 
       console.log('Ganache test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
@@ -144,6 +144,16 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof adapter.positionManagerInterface.encodeFunctionData).toBe('function');
         expect(typeof adapter.poolInterface.encodeFunctionData).toBe('function');
         expect(typeof adapter.erc20Interface.encodeFunctionData).toBe('function');
+      });
+
+      it('should initialize AlphaRouter with correct chainId and provider', () => {
+        expect(adapter.provider).toBeDefined();
+        expect(adapter.provider).toBe(env.provider);
+
+        expect(adapter.alphaRouter).toBeDefined();
+        expect(adapter.alphaRouter).toBeTypeOf('object');
+        // For test chain (1337), AlphaRouter uses real Arbitrum (42161)
+        expect(adapter.alphaRouter.chainId).toBe(42161);
       });
     });
 
@@ -9064,66 +9074,43 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getBestSwapQuote', () => {
     describe('Success Cases', () => {
-      it('should return best quote from multiple fee tiers', async () => {
+      it('should return best quote using AlphaRouter', async () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(), // 1 ETH
-          provider: env.provider
+          amountIn: ethers.utils.parseEther('1').toString() // 1 ETH
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
 
-        // Should return an object with amountOut and optimalFeeTier
+        // Should return an object with amountOut, route, and methodParameters
         expect(bestQuote).toBeDefined();
         expect(bestQuote).toHaveProperty('amountOut');
-        expect(bestQuote).toHaveProperty('optimalFeeTier');
+        expect(bestQuote).toHaveProperty('route');
 
         // Amount out should be positive
         expect(typeof bestQuote.amountOut).toBe('string');
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
 
-        // Fee tier should be one of the valid tiers
-        expect(adapter.feeTiers).toContain(bestQuote.optimalFeeTier);
-
-        // Compare with individual fee tier quotes to verify it's the best
-        const individualQuotes = [];
-        for (const feeTier of adapter.feeTiers) {
-          try {
-            const quote = await adapter.getSwapQuote({
-              ...quoteParams,
-              fee: feeTier
-            });
-            individualQuotes.push({ amountOut: quote, feeTier });
-          } catch (error) {
-            // Pool doesn't exist for this fee tier
-          }
-        }
-
-        // Best quote should have the highest amount out
-        const maxIndividual = individualQuotes.reduce((max, current) => {
-          return BigInt(current.amountOut) > BigInt(max.amountOut) ? current : max;
-        });
-
-        expect(bestQuote.amountOut).toBe(maxIndividual.amountOut);
-        expect(bestQuote.optimalFeeTier).toBe(maxIndividual.feeTier);
+        // Route should be defined and have expected properties
+        expect(bestQuote.route).toBeDefined();
+        expect(bestQuote.route.quote).toBeDefined();
+        expect(bestQuote.route.route).toBeDefined();
       });
 
-      it('should handle single pool existence gracefully', async () => {
-        // Use a less common fee tier that might only have one pool
+      it('should return valid quote for different amounts', async () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('0.1').toString(),
-          provider: env.provider
+          amountIn: ethers.utils.parseEther('0.1').toString()
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
 
-        // Should still return a valid quote even if only one pool exists
+        // Should still return a valid quote
         expect(bestQuote).toBeDefined();
         expect(bestQuote.amountOut).toBeDefined();
-        expect(bestQuote.optimalFeeTier).toBeDefined();
+        expect(bestQuote.route).toBeDefined();
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
       });
 
@@ -9131,90 +9118,116 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('0.25').toString(),
-          provider: env.provider
+          amountIn: ethers.utils.parseEther('0.25').toString()
         };
 
         const quote1 = await adapter.getBestSwapQuote(quoteParams);
         const quote2 = await adapter.getBestSwapQuote(quoteParams);
 
-        // Results should be consistent
-        expect(quote1.amountOut).toBe(quote2.amountOut);
-        expect(quote1.optimalFeeTier).toBe(quote2.optimalFeeTier);
+        // Results should be very close (allow for minor price fluctuations in live pools)
+        // Within 0.1% tolerance
+        const amount1 = BigInt(quote1.amountOut);
+        const amount2 = BigInt(quote2.amountOut);
+        const diff = amount1 > amount2 ? amount1 - amount2 : amount2 - amount1;
+        const tolerance = amount1 / 1000n; // 0.1%
+
+        expect(diff).toBeLessThanOrEqual(tolerance);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for invalid tokenInAddress', async () => {
+        const baseParams = {
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString()
+        };
+
+        // Missing
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: null,
-            tokenOutAddress: env.usdcAddress,
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: null })
         ).rejects.toThrow('TokenIn address parameter is required');
 
+        // Invalid address
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: 'invalid-address',
-            tokenOutAddress: env.usdcAddress,
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: 'invalid-address' })
         ).rejects.toThrow('Invalid tokenIn address');
+
+        // Array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: [] })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: {} })
+        ).rejects.toThrow('TokenIn address parameter is required');
       });
 
       it('should throw error for invalid tokenOutAddress', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString()
+        };
+
+        // Missing
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: null,
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: null })
         ).rejects.toThrow('TokenOut address parameter is required');
 
+        // Invalid address
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: 'invalid-address',
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: 'Claude is awesome!' })
         ).rejects.toThrow('Invalid tokenOut address');
+
+        // Array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: [] })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: {} })
+        ).rejects.toThrow('TokenOut address parameter is required');
       });
 
       it('should throw error for invalid amountIn', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress
+        };
+
+        // Missing
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            amountIn: null,
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: null })
         ).rejects.toThrow('AmountIn parameter is required');
 
+        // Not a string
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            amountIn: '0',
-            provider: env.provider
-          })
-        ).rejects.toThrow('AmountIn cannot be zero');
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: 123 })
+        ).rejects.toThrow('AmountIn must be a string');
 
+        // Array
         await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            amountIn: 'not-a-number',
-            provider: env.provider
-          })
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: [] })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: {} })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Invalid string
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: 'Claude is awesome!' })
         ).rejects.toThrow('AmountIn must be a positive numeric string');
+
+        // Zero
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amountIn: '0' })
+        ).rejects.toThrow('AmountIn cannot be zero');
       });
 
-      it('should throw error when no pools exist for token pair', async () => {
+      it('should throw error when token not found in config', async () => {
         const fakeToken1 = '0x0000000000000000000000000000000000000001';
         const fakeToken2 = '0x0000000000000000000000000000000000000002';
 
@@ -9222,44 +9235,668 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.getBestSwapQuote({
             tokenInAddress: fakeToken1,
             tokenOutAddress: fakeToken2,
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: env.provider
+            amountIn: ethers.utils.parseEther('1').toString()
           })
-        ).rejects.toThrow(/No pools exist for token pair/);
-      });
-
-      it('should throw error for missing provider', async () => {
-        await expect(
-          adapter.getBestSwapQuote({
-            tokenInAddress: env.wethAddress,
-            tokenOutAddress: env.usdcAddress,
-            amountIn: ethers.utils.parseEther('1').toString(),
-            provider: null
-          })
-        ).rejects.toThrow();
+        ).rejects.toThrow(/No token found at address/);
       });
     });
 
     describe('Performance', () => {
-      it('should execute parallel quotes efficiently', async () => {
+      it('should execute AlphaRouter routing efficiently', async () => {
         const startTime = Date.now();
 
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          provider: env.provider
+          amountIn: ethers.utils.parseEther('1').toString()
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
         const endTime = Date.now();
 
-        // Should complete in reasonable time (parallel execution)
-        expect(endTime - startTime).toBeLessThan(5000); // 5 seconds max
+        // Should complete in reasonable time
+        expect(endTime - startTime).toBeLessThan(10000); // 10 seconds max (AlphaRouter may be slower)
 
         // Should still return valid result
         expect(bestQuote).toBeDefined();
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+    });
+  });
+
+  describe('getSwapRoute', () => {
+    describe('Success Cases', () => {
+      it('should return swap route with execution data', async () => {
+        const routeParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+
+        const swapRoute = await adapter.getSwapRoute(routeParams);
+
+        // Should return an object with amountOut, route, and methodParameters
+        expect(swapRoute).toBeDefined();
+        expect(swapRoute).toHaveProperty('amountOut');
+        expect(swapRoute).toHaveProperty('route');
+        expect(swapRoute).toHaveProperty('methodParameters');
+
+        // Amount out should be positive
+        expect(typeof swapRoute.amountOut).toBe('string');
+        expect(BigInt(swapRoute.amountOut)).toBeGreaterThan(0n);
+
+        // Route and methodParameters should be defined (execution-ready)
+        expect(swapRoute.route).toBeDefined();
+        expect(swapRoute.methodParameters).toBeDefined();
+        expect(swapRoute.methodParameters.calldata).toBeDefined();
+        expect(swapRoute.methodParameters.value).toBeDefined();
+      });
+
+      it('should use default slippage and deadline when not provided', async () => {
+        const routeParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('0.5').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        const swapRoute = await adapter.getSwapRoute(routeParams);
+
+        expect(swapRoute).toBeDefined();
+        expect(swapRoute.amountOut).toBeDefined();
+        expect(BigInt(swapRoute.amountOut)).toBeGreaterThan(0n);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid tokenInAddress', async () => {
+        const baseParams = {
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Missing
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenInAddress: null })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenInAddress: 'invalid-address' })
+        ).rejects.toThrow('Invalid tokenIn address');
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenInAddress: [] })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenInAddress: {} })
+        ).rejects.toThrow('TokenIn address parameter is required');
+      });
+
+      it('should throw error for invalid tokenOutAddress', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Missing
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenOutAddress: null })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenOutAddress: 'Claude is awesome!' })
+        ).rejects.toThrow('Invalid tokenOut address');
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenOutAddress: [] })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, tokenOutAddress: {} })
+        ).rejects.toThrow('TokenOut address parameter is required');
+      });
+
+      it('should throw error for invalid amountIn', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Missing
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: null })
+        ).rejects.toThrow('AmountIn parameter is required');
+
+        // Not a string
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: 123 })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: [] })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: {} })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Invalid string
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: 'Claude is awesome!' })
+        ).rejects.toThrow('AmountIn must be a positive numeric string');
+
+        // Zero
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, amountIn: '0' })
+        ).rejects.toThrow('AmountIn cannot be zero');
+      });
+
+      it('should throw error for invalid recipient', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString()
+        };
+
+        // Missing
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, recipient: null })
+        ).rejects.toThrow('Recipient address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, recipient: 'invalid-recipient' })
+        ).rejects.toThrow('Invalid recipient address');
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, recipient: [] })
+        ).rejects.toThrow('Recipient address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, recipient: {} })
+        ).rejects.toThrow('Recipient address parameter is required');
+
+        // String that's not an address
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, recipient: 'Claude is awesome!' })
+        ).rejects.toThrow('Invalid recipient address');
+      });
+
+      it('should throw error for invalid slippage tolerance types', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, slippageTolerance: [] })
+        ).rejects.toThrow('Slippage tolerance must be a number');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, slippageTolerance: {} })
+        ).rejects.toThrow('Slippage tolerance must be a number');
+
+        // String
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, slippageTolerance: 'Claude is awesome!' })
+        ).rejects.toThrow('Slippage tolerance must be a number');
+
+        // Out of range - negative
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, slippageTolerance: -1 })
+        ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
+
+        // Out of range - too high
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, slippageTolerance: 101 })
+        ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
+      });
+
+      it('should throw error for invalid deadline types', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, deadlineMinutes: [] })
+        ).rejects.toThrow('Deadline must be a number');
+
+        // Object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, deadlineMinutes: {} })
+        ).rejects.toThrow('Deadline must be a number');
+
+        // String
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, deadlineMinutes: 'Claude is awesome!' })
+        ).rejects.toThrow('Deadline must be a number');
+
+        // Zero
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, deadlineMinutes: 0 })
+        ).rejects.toThrow('Deadline must be greater than 0');
+
+        // Negative
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, deadlineMinutes: -30 })
+        ).rejects.toThrow('Deadline must be greater than 0');
+      });
+    });
+  });
+
+  describe('generateAlphaSwapData', () => {
+    // Helper to create a mock route object
+    const createMockRoute = () => ({
+      quote: { quotient: { toString: () => '1000000000' } },
+      route: [{ type: 'v3-pool', address: '0x...' }],
+      methodParameters: {
+        calldata: '0x1234567890abcdef',
+        value: '0x00'
+      }
+    });
+
+    const futureDeadline = Math.floor(Date.now() / 1000) + 1800; // 30 min future
+
+    describe('Success Cases', () => {
+      it('should generate transaction data with Permit2 wrapping', async () => {
+        // Get a real route from getSwapRoute
+        const route = await adapter.getSwapRoute({
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        });
+
+        const validParams = {
+          route,
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        const result = await adapter.generateAlphaSwapData(validParams);
+
+        // Verify structure
+        expect(result).toBeDefined();
+        expect(result).toBeTypeOf('object');
+        expect(result.to).toBe(adapter.addresses.universalRouterAddress);
+        expect(result.data).toBeTypeOf('string');
+        expect(result.data.startsWith('0x')).toBe(true);
+        expect(result.value).toBeDefined();
+
+        // Verify the calldata is different from original (Permit2 was prepended)
+        expect(result.data).not.toBe(route.methodParameters.calldata);
+        expect(result.data.length).toBeGreaterThan(route.methodParameters.calldata.length);
+      });
+
+      it('should generate transaction data with different token amounts', async () => {
+        // Get a real route with USDC
+        const route = await adapter.getSwapRoute({
+          tokenInAddress: env.usdcAddress,
+          tokenOutAddress: env.wethAddress,
+          amountIn: ethers.utils.parseUnits('1000', 6).toString(),
+          recipient: env.signers[0].address,
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        });
+
+        const validParams = {
+          route,
+          tokenInAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseUnits('1000', 6).toString(),
+          recipient: env.signers[0].address,
+          walletAddress: env.signers[1].address,
+          permit2Signature: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+          permit2Nonce: 999,
+          permit2Deadline: futureDeadline
+        };
+
+        const result = await adapter.generateAlphaSwapData(validParams);
+
+        // Verify structure
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.universalRouterAddress);
+        expect(result.data).toBeTypeOf('string');
+        expect(result.data.startsWith('0x')).toBe(true);
+        expect(result.value).toBeDefined();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid route object', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing route
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, route: null })
+        ).rejects.toThrow('Route parameter is required');
+
+        // Array instead of object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, route: [] })
+        ).rejects.toThrow('Route parameter is required');
+
+        // Missing methodParameters
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, route: { quote: {} } })
+        ).rejects.toThrow('Route must include methodParameters');
+
+        // Missing calldata
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, route: { methodParameters: {} } })
+        ).rejects.toThrow('Route methodParameters must include calldata');
+      });
+
+      it('should throw error for invalid tokenInAddress', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenOutAddress: env.usdcAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: null })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: 'invalid' })
+        ).rejects.toThrow('Invalid tokenIn address');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: [] })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: {} })
+        ).rejects.toThrow('TokenIn address parameter is required');
+      });
+
+      it('should throw error for invalid amountIn', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: null })
+        ).rejects.toThrow('AmountIn parameter is required');
+
+        // Not a string
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: 123 })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: [] })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: {} })
+        ).rejects.toThrow('AmountIn must be a string');
+
+        // Invalid string
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: 'Claude is awesome!' })
+        ).rejects.toThrow('AmountIn must be a positive numeric string');
+
+        // Zero
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: '0' })
+        ).rejects.toThrow('AmountIn cannot be zero');
+
+        // Exceeds uint160 maximum
+        const maxUint160Plus1 = ethers.BigNumber.from(2).pow(160).toString();
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, amountIn: maxUint160Plus1 })
+        ).rejects.toThrow('AmountIn exceeds uint160 maximum value');
+      });
+
+      it('should throw error for invalid recipient', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, recipient: null })
+        ).rejects.toThrow('Recipient address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, recipient: 'invalid' })
+        ).rejects.toThrow('Invalid recipient address');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, recipient: [] })
+        ).rejects.toThrow('Recipient address parameter is required');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, recipient: {} })
+        ).rejects.toThrow('Recipient address parameter is required');
+      });
+
+      it('should throw error for invalid walletAddress', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: null })
+        ).rejects.toThrow('Wallet address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: 'Claude is awesome!' })
+        ).rejects.toThrow('Invalid wallet address');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: [] })
+        ).rejects.toThrow('Wallet address parameter is required');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: {} })
+        ).rejects.toThrow('Wallet address parameter is required');
+      });
+
+      it('should throw error for invalid permit2Signature', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Nonce: 0,
+          permit2Deadline: futureDeadline
+        };
+
+        // Missing
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: null })
+        ).rejects.toThrow('Permit2 signature is required');
+
+        // Not a string
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: 123 })
+        ).rejects.toThrow('Permit2 signature is required');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: [] })
+        ).rejects.toThrow('Permit2 signature is required');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: {} })
+        ).rejects.toThrow('Permit2 signature is required');
+
+        // Invalid hex string (no 0x prefix)
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: '1234abcd' })
+        ).rejects.toThrow('Permit2 signature must be a valid hex string');
+
+        // Invalid hex string (wrong characters)
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: '0xClaude' })
+        ).rejects.toThrow('Permit2 signature must be a valid hex string');
+      });
+
+      it('should throw error for invalid permit2Nonce', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Deadline: futureDeadline
+        };
+
+        // String
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: 'Claude is awesome!' })
+        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: [] })
+        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: {} })
+        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
+
+        // Negative
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: -1 })
+        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
+
+        // Float
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: 1.5 })
+        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
+      });
+
+      it('should throw error for invalid permit2Deadline', async () => {
+        const baseParams = {
+          route: createMockRoute(),
+          tokenInAddress: env.wethAddress,
+          amountIn: ethers.utils.parseEther('1').toString(),
+          recipient: env.testVault.address,
+          walletAddress: env.testVault.address,
+          permit2Signature: '0x' + '00'.repeat(65),
+          permit2Nonce: 0
+        };
+
+        // String
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 'Claude is awesome!' })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Array
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: [] })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Object
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: {} })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Zero
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 0 })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Negative
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: -1 })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Float
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 1.5 })
+        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
+
+        // Expired deadline
+        const pastDeadline = Math.floor(Date.now() / 1000) - 1000;
+        await expect(
+          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: pastDeadline })
+        ).rejects.toThrow('Permit2 deadline has already passed');
       });
     });
   });

@@ -5,6 +5,41 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2025-10-01
+
+### Added
+- **AlphaRouter integration** - Smart routing for optimal swap paths:
+  - `getBestSwapQuote()`: Quote-only method for price discovery using Uniswap's AlphaRouter
+  - `getSwapRoute()`: Execution-ready routes with Universal Router integration
+  - `generateAlphaSwapData()`: Transaction builder with Permit2 signature wrapping
+  - Supports multi-hop routing, split routes, and V2/V3 pool mixing for optimal pricing
+  - Test chain (1337) automatically uses Arbitrum fork for AlphaRouter quotes
+
+- **Universal Router support**:
+  - Added Universal Router address to chain configurations for all networks
+  - Integrated Universal Router ABI and interface for transaction encoding
+  - Support for command-based execution pattern (PERMIT2_PERMIT + V3_SWAP_EXACT_IN)
+
+- **Permit2 integration** - Gasless token approvals:
+  - `_encodePermit2Input()`: Helper to encode PermitSingle struct with signature
+  - `_wrapWithPermit2()`: Wraps Universal Router calldata with PERMIT2_PERMIT command
+  - Validates amounts fit in uint160 (Permit2 requirement)
+  - Supports nonce-based replay protection and deadline expiration
+
+### Changed
+- **UniswapV3Adapter enhancements**:
+  - Added AlphaRouter instance with optimized configuration for test chains
+  - Created `_createTokenInstance()` helper for consistent Token creation across methods
+  - Enhanced validation for address, amount, and Permit2 parameters
+  - Improved error messages for invalid inputs
+
+### Technical Details
+- AlphaRouter initialized with chainId-aware provider (uses Arbitrum 42161 for test chain 1337)
+- Universal Router uses `execute(bytes,bytes[])` 2-parameter function signature
+- Permit2 encoding uses proper tuple structure: `((address,uint160,uint48,uint48),address,uint256)`
+- Command prepending: `0x0a` (PERMIT2_PERMIT) + existing commands
+- Comprehensive test coverage: 595 tests passing including new AlphaRouter methods
+
 ## [0.19.2] - 2025-09-28
 
 ### Added
