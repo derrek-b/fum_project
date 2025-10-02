@@ -1,5 +1,47 @@
 # F.U.M. Project Changelog
 
+## [0.11.0] Complete Permit2 Swap Integration - 2025-02-02
+
+### Gasless Swaps via Permit2 + UniversalRouter
+
+This release completes the Permit2 integration by implementing signature-based gasless swaps for all swap operations in the BabySteps strategy. Both deficit covering swaps and 50/50 buffer swaps now use Permit2 signatures with UniversalRouter, eliminating the need for separate approval transactions.
+
+#### **Swap Operations Refactored**
+- **REFACTORED**: `prepareTokensForPosition()` - Deficit swaps now use Permit2 + UniversalRouter
+- **REFACTORED**: `swapRemainingTokens5050()` - Buffer swaps now use Permit2 + UniversalRouter (already implemented)
+- **ADDED**: `generateSwapTransaction()` method in UniswapV3BabyStepsStrategy for generic Permit2 swaps
+- **UPDATED**: `handleTokenSwap()` to use platform handler's `generateSwapTransaction()` with Permit2
+- **REMOVED**: Approval transaction generation from `prepareTokensForPosition()` (no longer needed)
+- **ENHANCED**: Per-token nonce tracking to prevent nonce collisions in batch swaps
+
+#### **Nonce Management**
+- **LOGIC**: Local nonce cache per token address to handle multiple swaps of same token in one batch
+- **FETCH**: Base nonce fetched once per token from Permit2 contract's `allowance()` function
+- **INCREMENT**: Nonce incremented locally after each swap for same token
+- **ISOLATION**: Different tokens have independent nonce counters (as per Permit2 spec)
+
+#### **Helper Updates**
+- **ENHANCED**: `generatePermit2Signature()` in helpers.js now accepts optional `nonce` parameter
+- **FALLBACK**: Helper fetches nonce from chain if not provided (backwards compatible)
+- **SIGNATURE**: EIP-712 signatures include nonce for replay protection
+
+#### **Test Updates**
+- **UPDATED**: BS-1vault-1111.test.js - Expects UniversalRouter, no approval transactions for deficit swaps
+- **UPDATED**: BS-1vault-2020.test.js - Expects UniversalRouter, no approval transactions for deficit swaps
+- **VERIFIED**: BS-1vault-0202.test.js - No changes needed, passes with Permit2 swaps
+- **REMOVED**: Approval batch event assertions from all tests (Permit2 doesn't need separate approvals)
+
+#### **Gas Savings**
+- **BEFORE**: Deficit swaps required 2 transactions per token (1 approval + 1 swap)
+- **AFTER**: Deficit swaps require 1 transaction per swap (approval via signature)
+- **IMPACT**: ~50% reduction in transactions for token preparation operations
+- **EXAMPLE**: 2 deficit swaps now use 2 transactions instead of 4
+
+**Status**: ✅ All tests passing - Complete Permit2 swap integration functional
+**Breaking Changes**: None - all swaps now gasless via Permit2
+**Impact**: Significant gas cost reduction, faster vault operations, better UX
+**Dependencies**: Requires vaults to have Permit2 approvals set up (from v0.10.0)
+
 ## [0.10.0] Permit2 Integration - 2025-09-30
 
 ### Permit2 Universal Approval System
