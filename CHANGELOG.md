@@ -5,6 +5,31 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2025-10-02
+
+### Changed - BREAKING CHANGES
+- **Refactored swap quoting API for EXACT_OUTPUT support**:
+  - `getBestSwapQuote()`: Changed signature to support both EXACT_INPUT and EXACT_OUTPUT modes
+    - Removed: `amountIn` parameter
+    - Added: `amount` parameter (input for EXACT_INPUT, output for EXACT_OUTPUT)
+    - Added: `isAmountIn` boolean parameter (true = EXACT_INPUT, false = EXACT_OUTPUT)
+    - Now returns both `amountIn` and `amountOut` in all modes
+  - `getSwapRoute()`: Same signature changes as getBestSwapQuote
+    - Enables asking "how much input do I need for X output?" (EXACT_OUTPUT mode)
+    - Maintains existing "how much output for X input?" (EXACT_INPUT mode)
+
+### Improved
+- **Swap optimization**: Reduced redundant AlphaRouter calls
+  - Strategy code now uses EXACT_OUTPUT quoting for deficit covering
+  - Eliminates proportional calculation and redundant re-quote when sufficient tokens available
+  - Reduces AlphaRouter calls from 3 to 2 (or 1 in best case) per swap operation
+
+### Technical Details
+- Platform-agnostic architecture maintained: Core strategies use boolean `isAmountIn` parameter
+- Platform handlers translate to platform-specific types (e.g., Uniswap's `TradeType.EXACT_INPUT/OUTPUT`)
+- All test cases updated with comprehensive coverage for both quote modes
+- Validation added for `isAmountIn` parameter type safety
+
 ## [0.20.0] - 2025-10-01
 
 ### Added

@@ -3045,12 +3045,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} params - Parameters for getting best swap quote
    * @param {string} params.tokenInAddress - Address of input token
    * @param {string} params.tokenOutAddress - Address of output token
-   * @param {string} params.amountIn - Amount of input tokens (in wei string)
-   * @returns {Promise<Object>} Quote with { amountOut: string, route: SwapRoute, methodParameters?: MethodParameters }
+   * @param {string} params.amount - Amount to trade (interpretation depends on isAmountIn)
+   * @param {boolean} params.isAmountIn - True if amount is input (EXACT_INPUT), false if amount is output (EXACT_OUTPUT)
+   * @returns {Promise<Object>} Quote with { amountIn: string, amountOut: string, route: SwapRoute, methodParameters?: MethodParameters }
    * @throws {Error} If no valid route can be found
    */
   async getBestSwapQuote(params) {
-    const { tokenInAddress, tokenOutAddress, amountIn } = params;
+    const { tokenInAddress, tokenOutAddress, amount, isAmountIn } = params;
 
     // Validate parameters
     if (!tokenInAddress || typeof tokenInAddress !== 'string') {
@@ -3071,47 +3072,81 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
     }
 
-    if (!amountIn) {
-      throw new Error("AmountIn parameter is required");
+    if (!amount) {
+      throw new Error("Amount parameter is required");
     }
-    if (typeof amountIn !== 'string') {
-      throw new Error("AmountIn must be a string");
+    if (typeof amount !== 'string') {
+      throw new Error("Amount must be a string");
     }
-    if (!/^\d+$/.test(amountIn)) {
-      throw new Error("AmountIn must be a positive numeric string");
+    if (!/^\d+$/.test(amount)) {
+      throw new Error("Amount must be a positive numeric string");
     }
-    if (amountIn === '0') {
-      throw new Error("AmountIn cannot be zero");
+    if (amount === '0') {
+      throw new Error("Amount cannot be zero");
+    }
+
+    if (typeof isAmountIn !== 'boolean') {
+      throw new Error("isAmountIn parameter is required and must be a boolean");
     }
 
     // Create Token instances
     const tokenIn = this._createTokenInstance(tokenInAddress);
     const tokenOut = this._createTokenInstance(tokenOutAddress);
 
-    // Create CurrencyAmount from amountIn string
-    const currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amountIn);
+    // Create CurrencyAmount and call AlphaRouter based on amount type
+    let currencyAmount, quoteCurrency, route;
 
-    // Call AlphaRouter to find optimal route
-    const route = await this.alphaRouter.route(
-      currencyAmount,
-      tokenOut,
-      TradeType.EXACT_INPUT,
-      undefined, // swapConfig - not needed for quotes only
-      undefined  // partialRoutingConfig - use defaults
-    );
+    if (!isAmountIn) {
+      // Amount is desired output (EXACT_OUTPUT), find required input
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenOut, amount);
+      quoteCurrency = tokenIn;
 
-    if (!route) {
-      throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_OUTPUT,
+        undefined, // swapConfig - not needed for quotes only
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_OUTPUT: quote is the required input amount
+      const amountIn = route.quote.quotient.toString();
+      return {
+        amountIn,
+        amountOut: amount,
+        route,
+        methodParameters: route.methodParameters
+      };
+    } else {
+      // Amount is input (EXACT_INPUT), find expected output
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amount);
+      quoteCurrency = tokenOut;
+
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_INPUT,
+        undefined, // swapConfig - not needed for quotes only
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_INPUT: quote is the expected output amount
+      const amountOut = route.quote.quotient.toString();
+      return {
+        amountIn: amount,
+        amountOut,
+        route,
+        methodParameters: route.methodParameters
+      };
     }
-
-    // Extract amountOut from route.quote (CurrencyAmount)
-    const amountOut = route.quote.quotient.toString();
-
-    return {
-      amountOut,
-      route,
-      methodParameters: route.methodParameters
-    };
   }
 
   /**
@@ -3119,18 +3154,20 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} params - Parameters for getting swap route
    * @param {string} params.tokenInAddress - Address of input token
    * @param {string} params.tokenOutAddress - Address of output token
-   * @param {string} params.amountIn - Amount of input tokens (in wei string)
+   * @param {string} params.amount - Amount to trade (interpretation depends on isAmountIn)
+   * @param {boolean} params.isAmountIn - True if amount is input (EXACT_INPUT), false if amount is output (EXACT_OUTPUT)
    * @param {string} params.recipient - Address to receive output tokens
    * @param {number} [params.slippageTolerance=0.5] - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
    * @param {number} [params.deadlineMinutes=30] - Transaction deadline in minutes from now
-   * @returns {Promise<Object>} Route with { amountOut: string, route: SwapRoute, methodParameters: MethodParameters }
+   * @returns {Promise<Object>} Route with { amountIn: string, amountOut: string, route: SwapRoute, methodParameters: MethodParameters }
    * @throws {Error} If no valid route can be found or if parameters are invalid
    */
   async getSwapRoute(params) {
     const {
       tokenInAddress,
       tokenOutAddress,
-      amountIn,
+      amount,
+      isAmountIn,
       recipient,
       slippageTolerance = 0.5,
       deadlineMinutes = 30
@@ -3155,17 +3192,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
     }
 
-    if (!amountIn) {
-      throw new Error("AmountIn parameter is required");
+    if (!amount) {
+      throw new Error("Amount parameter is required");
     }
-    if (typeof amountIn !== 'string') {
-      throw new Error("AmountIn must be a string");
+    if (typeof amount !== 'string') {
+      throw new Error("Amount must be a string");
     }
-    if (!/^\d+$/.test(amountIn)) {
-      throw new Error("AmountIn must be a positive numeric string");
+    if (!/^\d+$/.test(amount)) {
+      throw new Error("Amount must be a positive numeric string");
     }
-    if (amountIn === '0') {
-      throw new Error("AmountIn cannot be zero");
+    if (amount === '0') {
+      throw new Error("Amount cannot be zero");
+    }
+
+    if (typeof isAmountIn !== 'boolean') {
+      throw new Error("isAmountIn parameter is required and must be a boolean");
     }
 
     if (!recipient || typeof recipient !== 'string') {
@@ -3197,9 +3238,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const tokenIn = this._createTokenInstance(tokenInAddress);
     const tokenOut = this._createTokenInstance(tokenOutAddress);
 
-    // Create CurrencyAmount from amountIn string
-    const currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amountIn);
-
     // Build swapConfig for execution-ready transaction data using Universal Router
     const swapConfig = {
       type: SwapType.UNIVERSAL_ROUTER,
@@ -3209,27 +3247,60 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       deadline: Math.floor(Date.now() / 1000 + deadlineMinutes * 60)
     };
 
-    // Call AlphaRouter to find optimal route with transaction data
-    const route = await this.alphaRouter.route(
-      currencyAmount,
-      tokenOut,
-      TradeType.EXACT_INPUT,
-      swapConfig,
-      undefined  // partialRoutingConfig - use defaults
-    );
+    // Create CurrencyAmount and call AlphaRouter based on amount type
+    let currencyAmount, quoteCurrency, route;
 
-    if (!route) {
-      throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+    if (!isAmountIn) {
+      // Amount is desired output (EXACT_OUTPUT), find required input
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenOut, amount);
+      quoteCurrency = tokenIn;
+
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_OUTPUT,
+        swapConfig,
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_OUTPUT: quote is the required input amount
+      const amountIn = route.quote.quotient.toString();
+      return {
+        amountIn,
+        amountOut: amount,
+        route,
+        methodParameters: route.methodParameters
+      };
+    } else {
+      // Amount is input (EXACT_INPUT), find expected output
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amount);
+      quoteCurrency = tokenOut;
+
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_INPUT,
+        swapConfig,
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_INPUT: quote is the expected output amount
+      const amountOut = route.quote.quotient.toString();
+      return {
+        amountIn: amount,
+        amountOut,
+        route,
+        methodParameters: route.methodParameters
+      };
     }
-
-    // Extract amountOut from route.quote (CurrencyAmount)
-    const amountOut = route.quote.quotient.toString();
-
-    return {
-      amountOut,
-      route,
-      methodParameters: route.methodParameters
-    };
   }
 
   /**

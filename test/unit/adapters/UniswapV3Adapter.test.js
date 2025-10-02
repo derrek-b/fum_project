@@ -9074,19 +9074,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getBestSwapQuote', () => {
     describe('Success Cases', () => {
-      it('should return best quote using AlphaRouter', async () => {
+      it('should return best quote using AlphaRouter with EXACT_INPUT', async () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString() // 1 ETH
+          amount: ethers.utils.parseEther('1').toString(), // 1 ETH
+          isAmountIn: true
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
 
-        // Should return an object with amountOut, route, and methodParameters
+        // Should return an object with amountIn, amountOut, route, and methodParameters
         expect(bestQuote).toBeDefined();
+        expect(bestQuote).toHaveProperty('amountIn');
         expect(bestQuote).toHaveProperty('amountOut');
         expect(bestQuote).toHaveProperty('route');
+
+        // Amount in should match input
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
 
         // Amount out should be positive
         expect(typeof bestQuote.amountOut).toBe('string');
@@ -9098,27 +9103,30 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(bestQuote.route.route).toBeDefined();
       });
 
-      it('should return valid quote for different amounts', async () => {
+      it('should return valid quote for different amounts with EXACT_INPUT', async () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('0.1').toString()
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
 
         // Should still return a valid quote
         expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
         expect(bestQuote.amountOut).toBeDefined();
         expect(bestQuote.route).toBeDefined();
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
       });
 
-      it('should return consistent results across multiple calls', async () => {
+      it('should return consistent results across multiple calls with EXACT_INPUT', async () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('0.25').toString()
+          amount: ethers.utils.parseEther('0.25').toString(),
+          isAmountIn: true
         };
 
         const quote1 = await adapter.getBestSwapQuote(quoteParams);
@@ -9133,13 +9141,43 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         expect(diff).toBeLessThanOrEqual(tolerance);
       });
+
+      it('should return best quote using AlphaRouter with EXACT_OUTPUT', async () => {
+        const quoteParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseUnits('2000', 6).toString(), // 2000 USDC
+          isAmountIn: false
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should return an object with amountIn, amountOut, route, and methodParameters
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote).toHaveProperty('amountIn');
+        expect(bestQuote).toHaveProperty('amountOut');
+        expect(bestQuote).toHaveProperty('route');
+
+        // Amount out should match input (EXACT_OUTPUT mode)
+        expect(bestQuote.amountOut).toBe(quoteParams.amount);
+
+        // Amount in should be positive
+        expect(typeof bestQuote.amountIn).toBe('string');
+        expect(BigInt(bestQuote.amountIn)).toBeGreaterThan(0n);
+
+        // Route should be defined and have expected properties
+        expect(bestQuote.route).toBeDefined();
+        expect(bestQuote.route.quote).toBeDefined();
+        expect(bestQuote.route.route).toBeDefined();
+      });
     });
 
     describe('Error Cases', () => {
       it('should throw error for invalid tokenInAddress', async () => {
         const baseParams = {
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString()
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
         };
 
         // Missing
@@ -9166,7 +9204,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for invalid tokenOutAddress', async () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString()
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
         };
 
         // Missing
@@ -9190,41 +9229,75 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ).rejects.toThrow('TokenOut address parameter is required');
       });
 
-      it('should throw error for invalid amountIn', async () => {
+      it('should throw error for invalid amount', async () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
-          tokenOutAddress: env.usdcAddress
+          tokenOutAddress: env.usdcAddress,
+          isAmountIn: true
         };
 
         // Missing
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: null })
-        ).rejects.toThrow('AmountIn parameter is required');
+          adapter.getBestSwapQuote({ ...baseParams, amount: null })
+        ).rejects.toThrow('Amount parameter is required');
 
         // Not a string
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: 123 })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getBestSwapQuote({ ...baseParams, amount: 123 })
+        ).rejects.toThrow('Amount must be a string');
 
         // Array
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: [] })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getBestSwapQuote({ ...baseParams, amount: [] })
+        ).rejects.toThrow('Amount must be a string');
 
         // Object
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: {} })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getBestSwapQuote({ ...baseParams, amount: {} })
+        ).rejects.toThrow('Amount must be a string');
 
         // Invalid string
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: 'Claude is awesome!' })
-        ).rejects.toThrow('AmountIn must be a positive numeric string');
+          adapter.getBestSwapQuote({ ...baseParams, amount: 'Claude is awesome!' })
+        ).rejects.toThrow('Amount must be a positive numeric string');
 
         // Zero
         await expect(
-          adapter.getBestSwapQuote({ ...baseParams, amountIn: '0' })
-        ).rejects.toThrow('AmountIn cannot be zero');
+          adapter.getBestSwapQuote({ ...baseParams, amount: '0' })
+        ).rejects.toThrow('Amount cannot be zero');
+      });
+
+      it('should throw error for invalid isAmountIn', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString()
+        };
+
+        // Missing
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: null })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - string
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: 'true' })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - number
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: 1 })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: [] })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: {} })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
       });
 
       it('should throw error when token not found in config', async () => {
@@ -9235,7 +9308,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter.getBestSwapQuote({
             tokenInAddress: fakeToken1,
             tokenOutAddress: fakeToken2,
-            amountIn: ethers.utils.parseEther('1').toString()
+            amount: ethers.utils.parseEther('1').toString(),
+            isAmountIn: true
           })
         ).rejects.toThrow(/No token found at address/);
       });
@@ -9248,7 +9322,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const quoteParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString()
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
         };
 
         const bestQuote = await adapter.getBestSwapQuote(quoteParams);
@@ -9266,11 +9341,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getSwapRoute', () => {
     describe('Success Cases', () => {
-      it('should return swap route with execution data', async () => {
+      it('should return swap route with execution data for EXACT_INPUT', async () => {
         const routeParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890',
           slippageTolerance: 0.5,
           deadlineMinutes: 30
@@ -9278,11 +9354,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         const swapRoute = await adapter.getSwapRoute(routeParams);
 
-        // Should return an object with amountOut, route, and methodParameters
+        // Should return an object with amountIn, amountOut, route, and methodParameters
         expect(swapRoute).toBeDefined();
+        expect(swapRoute).toHaveProperty('amountIn');
         expect(swapRoute).toHaveProperty('amountOut');
         expect(swapRoute).toHaveProperty('route');
         expect(swapRoute).toHaveProperty('methodParameters');
+
+        // Amount in should match input
+        expect(swapRoute.amountIn).toBe(routeParams.amount);
 
         // Amount out should be positive
         expect(typeof swapRoute.amountOut).toBe('string');
@@ -9295,19 +9375,55 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(swapRoute.methodParameters.value).toBeDefined();
       });
 
-      it('should use default slippage and deadline when not provided', async () => {
+      it('should use default slippage and deadline when not provided for EXACT_INPUT', async () => {
         const routeParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('0.5').toString(),
+          amount: ethers.utils.parseEther('0.5').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
         const swapRoute = await adapter.getSwapRoute(routeParams);
 
         expect(swapRoute).toBeDefined();
+        expect(swapRoute.amountIn).toBe(routeParams.amount);
         expect(swapRoute.amountOut).toBeDefined();
         expect(BigInt(swapRoute.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should return swap route with execution data for EXACT_OUTPUT', async () => {
+        const routeParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseUnits('2000', 6).toString(), // 2000 USDC
+          isAmountIn: false,
+          recipient: '0x1234567890123456789012345678901234567890',
+          slippageTolerance: 0.5,
+          deadlineMinutes: 30
+        };
+
+        const swapRoute = await adapter.getSwapRoute(routeParams);
+
+        // Should return an object with amountIn, amountOut, route, and methodParameters
+        expect(swapRoute).toBeDefined();
+        expect(swapRoute).toHaveProperty('amountIn');
+        expect(swapRoute).toHaveProperty('amountOut');
+        expect(swapRoute).toHaveProperty('route');
+        expect(swapRoute).toHaveProperty('methodParameters');
+
+        // Amount out should match input (EXACT_OUTPUT mode)
+        expect(swapRoute.amountOut).toBe(routeParams.amount);
+
+        // Amount in should be positive
+        expect(typeof swapRoute.amountIn).toBe('string');
+        expect(BigInt(swapRoute.amountIn)).toBeGreaterThan(0n);
+
+        // Route and methodParameters should be defined (execution-ready)
+        expect(swapRoute.route).toBeDefined();
+        expect(swapRoute.methodParameters).toBeDefined();
+        expect(swapRoute.methodParameters.calldata).toBeDefined();
+        expect(swapRoute.methodParameters.value).toBeDefined();
       });
     });
 
@@ -9315,7 +9431,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for invalid tokenInAddress', async () => {
         const baseParams = {
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
@@ -9343,7 +9460,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error for invalid tokenOutAddress', async () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
@@ -9368,49 +9486,85 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ).rejects.toThrow('TokenOut address parameter is required');
       });
 
-      it('should throw error for invalid amountIn', async () => {
+      it('should throw error for invalid amount', async () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
         // Missing
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: null })
-        ).rejects.toThrow('AmountIn parameter is required');
+          adapter.getSwapRoute({ ...baseParams, amount: null })
+        ).rejects.toThrow('Amount parameter is required');
 
         // Not a string
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: 123 })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getSwapRoute({ ...baseParams, amount: 123 })
+        ).rejects.toThrow('Amount must be a string');
 
         // Array
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: [] })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getSwapRoute({ ...baseParams, amount: [] })
+        ).rejects.toThrow('Amount must be a string');
 
         // Object
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: {} })
-        ).rejects.toThrow('AmountIn must be a string');
+          adapter.getSwapRoute({ ...baseParams, amount: {} })
+        ).rejects.toThrow('Amount must be a string');
 
         // Invalid string
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: 'Claude is awesome!' })
-        ).rejects.toThrow('AmountIn must be a positive numeric string');
+          adapter.getSwapRoute({ ...baseParams, amount: 'Claude is awesome!' })
+        ).rejects.toThrow('Amount must be a positive numeric string');
 
         // Zero
         await expect(
-          adapter.getSwapRoute({ ...baseParams, amountIn: '0' })
-        ).rejects.toThrow('AmountIn cannot be zero');
+          adapter.getSwapRoute({ ...baseParams, amount: '0' })
+        ).rejects.toThrow('Amount cannot be zero');
+      });
+
+      it('should throw error for invalid isAmountIn', async () => {
+        const baseParams = {
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+        };
+
+        // Missing
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, isAmountIn: null })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - string
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, isAmountIn: 'true' })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - number
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, isAmountIn: 1 })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - array
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, isAmountIn: [] })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - object
+        await expect(
+          adapter.getSwapRoute({ ...baseParams, isAmountIn: {} })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
       });
 
       it('should throw error for invalid recipient', async () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString()
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
         };
 
         // Missing
@@ -9443,7 +9597,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
@@ -9477,7 +9632,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const baseParams = {
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: '0x1234567890123456789012345678901234567890'
         };
 
@@ -9528,7 +9684,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const route = await adapter.getSwapRoute({
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
           recipient: env.testVault.address,
           slippageTolerance: 0.5,
           deadlineMinutes: 30
@@ -9565,7 +9722,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const route = await adapter.getSwapRoute({
           tokenInAddress: env.usdcAddress,
           tokenOutAddress: env.wethAddress,
-          amountIn: ethers.utils.parseUnits('1000', 6).toString(),
+          amount: ethers.utils.parseUnits('1000', 6).toString(),
+          isAmountIn: true,
           recipient: env.signers[0].address,
           slippageTolerance: 0.5,
           deadlineMinutes: 30
