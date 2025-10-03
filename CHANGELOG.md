@@ -1,5 +1,31 @@
 # F.U.M. Project Changelog
 
+## [0.11.1] Library Upgrade - EXACT_OUTPUT Quoting Support - 2025-10-02
+
+### Dependency Update: fum_library v0.20.0 → v0.21.0
+
+This patch release updates the automation to be compatible with fum_library v0.21.0, which introduces BREAKING API changes for swap quoting methods.
+
+#### **Library API Changes (BREAKING)**
+- **REFACTORED**: `getBestSwapQuote()` now uses `amount` + `isAmountIn` boolean instead of `amountIn`
+- **REFACTORED**: `getSwapRoute()` now uses `amount` + `isAmountIn` boolean instead of `amountIn`
+- **ADDED**: Support for EXACT_OUTPUT quoting (isAmountIn: false) - specify desired output, get required input
+- **MAINTAINED**: EXACT_INPUT quoting (isAmountIn: true) - specify input amount, get expected output
+
+#### **Automation Code Updates**
+- **UPDATED**: `BabyStepsStrategy.handleTokenSwap()` - Now uses EXACT_OUTPUT quoting for deficit calculation
+- **UPDATED**: `UniswapV3BabyStepsStrategy.generateSwapTransaction()` - Accepts `isAmountIn` parameter
+- **UPDATED**: `UniswapV3BabyStepsStrategy.generateBufferSwapTransactions()` - Passes `isAmountIn: true` for buffer swaps
+
+#### **Performance Improvements (from library)**
+- **OPTIMIZATION**: Reduced AlphaRouter calls from 3 to 2 per deficit swap (or 1 in best case)
+- **LOGIC**: Uses EXACT_OUTPUT to directly determine required input for target deficit
+- **ELIMINATED**: Redundant proportional calculation and re-quote when sufficient tokens available
+
+**Status**: ✅ All swap operations updated for library compatibility
+**Breaking Changes**: Internal only - no changes to automation behavior or external API
+**Impact**: Better swap efficiency through library optimizations
+
 ## [0.11.0] Complete Permit2 Swap Integration - 2025-02-02
 
 ### Gasless Swaps via Permit2 + UniversalRouter
