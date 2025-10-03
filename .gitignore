@@ -7,4 +7,12 @@ node_modules
 /bytecode/
 /dist/
 
+# Production data files (keep directory structure with .gitkeep)
+/data/*
+!/data/.gitkeep
+!/data/vaults/
+/data/vaults/*
+!/data/vaults/.gitkeep
+
+# Test data files
 /test/data/.vault-blacklist.json
