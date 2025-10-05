@@ -1,5 +1,54 @@
 # F.U.M. Project Changelog
 
+## [0.12.0] Complete Data Tracking & Performance Analytics - 2025-10-05
+
+### Comprehensive Event Tracking and Data Persistence
+
+This release completes the data tracking refactor, implementing comprehensive event tracking and data persistence for all vault operations. The system now tracks quoted vs. actual amounts, gas costs, slippage, and performance metrics for positions, swaps, and fee collections.
+
+#### **Phase 1: Gas Tracking Infrastructure**
+- **ADDED**: Gas cost tracking (ETH and USD) for all transaction types
+- **ADDED**: `calculateGasUSD()` method in Tracker.js using real-time ETH price
+- **UPDATED**: All event handlers to calculate and store gas costs
+- **TRACKING**: Gas estimates, actual gas used, and USD conversion per transaction
+
+#### **Phase 2: Swap Event Tracking**
+- **ADDED**: `handleTokensSwapped()` event handler in Tracker.js
+- **ENHANCED**: Swap tracking with per-swap USD enrichment and slippage calculation
+- **TRACKING**: Quoted vs. actual amounts, price impact, USD values for all swaps
+- **METADATA**: Cumulative swap counts and gas costs in metadata.json
+
+#### **Phase 3: Position Creation & Liquidity Addition Events**
+- **ADDED**: `extractPositionAmountsFromReceipt()` method in BabyStepsStrategy.js
+- **PARSING**: IncreaseLiquidity and Mint events from transaction receipts
+- **ADDED**: `handleNewPositionCreated()` event handler in Tracker.js
+- **ADDED**: `handleLiquidityAddedToPosition()` event handler in Tracker.js
+- **TRACKING**: Quoted vs. actual token amounts from Uniswap quotes and receipts
+- **CALCULATION**: Position creation slippage and USD variance tracking
+- **ENHANCED**: Event emissions include both expected (quoted) and consumed (actual) amounts
+
+#### **Data Structure Enhancements**
+- **transactions.jsonl**: Append-only log with enriched transaction data
+  - Quoted and actual amounts for all position operations
+  - USD values for all token amounts using real-time prices
+  - Slippage/difference calculations (USD and percentage)
+  - Gas costs in ETH and USD per transaction
+  - Complete swap details with price impact analysis
+- **metadata.json**: Aggregated performance metrics
+  - Cumulative gas costs (ETH and USD)
+  - Transaction, swap, rebalance, and fee collection counters
+  - Baseline and snapshot tracking for ROI calculation
+
+#### **Test Coverage**
+- **UPDATED**: BS-1vault-1111.test.js - Liquidity addition scenario validation
+- **UPDATED**: BS-1vault-0202.test.js - New position creation scenario validation
+- **UPDATED**: BS-1vault-2020.test.js - Existing position liquidity validation
+- **VERIFIED**: All tracking data matches transaction logs with mathematical precision
+
+**Status**: ✅ Complete data tracking for gas, swaps, positions, and fees
+**Impact**: Comprehensive performance analytics and ROI tracking for all vault operations
+**Breaking Changes**: Event structure changes (internal only - renamed fields for clarity)
+
 ## [0.11.1] Library Upgrade - EXACT_OUTPUT Quoting Support - 2025-10-02
 
 ### Dependency Update: fum_library v0.20.0 → v0.21.0
