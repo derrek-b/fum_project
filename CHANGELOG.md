@@ -1,5 +1,27 @@
 # F.U.M. Project Changelog
 
+## [0.12.1] Emergency Exit Position Closure Bug Fix - 2025-10-07
+
+### Bug Fixes
+
+This patch release fixes a critical bug in the emergency exit workflow where closed positions were not being properly tracked and logged.
+
+#### **Emergency Exit Position Tracking**
+- **FIXED**: Emergency exit position closure now properly tracks and logs closed positions
+- **ROOT CAUSE**: `executeEmergencyExit()` passed reference to `vault.positions` instead of shallow copy
+- **ISSUE**: When `closePositions()` deleted keys from `vault.positions`, it also deleted from the same object being used to build the `PositionsClosed` event
+- **RESULT**: Event showed `closedCount: 0` and `closedPositions: []` despite position being successfully closed
+- **SOLUTION**: Changed line 3657 in BabyStepsStrategy.js to create shallow copy: `const allPositions = { ...(vault.positions) }`
+- **CONSISTENCY**: Fix matches pattern used in other call sites (rebalance, initialization)
+
+#### **Test Coverage**
+- **UPDATED**: BS-0000.test.js emergency exit test now validates proper position closure tracking
+- **VERIFIED**: All 6 swap event detection tests passing with fix in place
+- **VALIDATED**: Emergency exit properly logs closed position count and details
+
+**Status**: ✅ All tests passing - emergency exit tracking now working correctly
+**Impact**: Emergency exit events now accurately reflect positions closed during safety threshold triggers
+
 ## [0.12.0] Complete Data Tracking & Performance Analytics - 2025-10-05
 
 ### Comprehensive Event Tracking and Data Persistence
