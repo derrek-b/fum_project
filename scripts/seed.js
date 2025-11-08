@@ -77,8 +77,8 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   console.log('Approving router to spend WETH...');
   const approveTx1 = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('5000'),
-    { nonce: currentNonce++, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 100000 }
+    ethers.utils.parseEther('5000'),
+    { nonce: currentNonce++, gasPrice: ethers.utils.parseUnits("0.1", "gwei"), gasLimit: 100000 }
   );
   await approveTx1.wait();
   console.log('WETH approval confirmed');
@@ -86,8 +86,8 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
   console.log('Approving router to spend USDC...');
   const approveTx2 = await usdcContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseUnits('5000000', 6),
-    { nonce: currentNonce++, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 100000 }
+    ethers.utils.parseUnits('5000000', 6),
+    { nonce: currentNonce++, gasPrice: ethers.utils.parseUnits("0.1", "gwei"), gasLimit: 100000 }
   );
   await approveTx2.wait();
   console.log('USDC approval confirmed');
@@ -103,8 +103,8 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
       const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
       const amountIn = isWethToUsdc ?
-        ethers.parseEther('0.1') : // 0.1 WETH
-        ethers.parseUnits('200', 6); // 200 USDC
+        ethers.utils.parseEther('0.1') : // 0.1 WETH
+        ethers.utils.parseUnits('200', 6); // 200 USDC
 
       console.log(`Swap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
 
@@ -123,7 +123,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       // Execute swap
       const tx = await router.exactInputSingle(
         params,
-        { nonce: currentNonce, gasPrice: ethers.parseUnits("0.1", "gwei"), gasLimit: 300000 }
+        { nonce: currentNonce, gasPrice: ethers.utils.parseUnits("0.1", "gwei"), gasLimit: 300000 }
       );
 
       console.log(`  Swap transaction sent: ${tx.hash}`);
@@ -478,7 +478,7 @@ async function main() {
   console.log('Starting seed script to create Uniswap V3 test position...');
 
   // Setup provider and signer
-  const provider = new ethers.JsonRpcProvider(config.chains.arbitrum.rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(config.chains.arbitrum.rpcUrl);
 
   // WARNING: Never hardcode private keys in production code!
   // This is just for development/testing purposes using a Hardhat generated test private key
@@ -489,7 +489,7 @@ async function main() {
 
   // Check ETH balance
   const ethBalance = await provider.getBalance(wallet.address);
-  console.log(`ETH balance: ${ethers.formatEther(ethBalance)} ETH`);
+  console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
 
   // Define token addresses for Arbitrum
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
@@ -520,8 +520,8 @@ async function main() {
   const initialWethBalance = await wethContract.balanceOf(wallet.address);
   const initialUsdcBalance = await usdcContract.balanceOf(wallet.address);
 
-  console.log(`Initial WETH balance: ${ethers.formatUnits(initialWethBalance, 18)} WETH`);
-  console.log(`Initial USDC balance: ${ethers.formatUnits(initialUsdcBalance, 6)} USDC`);
+  console.log(`Initial WETH balance: ${ethers.utils.formatUnits(initialWethBalance, 18)} WETH`);
+  console.log(`Initial USDC balance: ${ethers.utils.formatUnits(initialUsdcBalance, 6)} USDC`);
 
   // To swap ETH for USDC on Uniswap, we'll need to:
   // 1. Wrap some ETH to WETH
@@ -548,7 +548,7 @@ async function main() {
 
   // Deposit 5 ETH to get WETH
   const wrapTx = await wethContractWithABI.deposit({
-    value: ethers.parseEther('20'),
+    value: ethers.utils.parseEther('20'),
     nonce: currentNonce++
   });
 
@@ -564,7 +564,7 @@ async function main() {
   console.log(`Approving Uniswap Router to spend WETH...`);
   const approveTx = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.parseEther('500'),
+    ethers.utils.parseEther('500'),
     {
       nonce: currentNonce++
     }
@@ -596,7 +596,7 @@ async function main() {
     fee: 500, // 0.3% fee tier
     recipient: wallet.address,
     deadline: deadline,
-    amountIn: ethers.parseEther('10'),
+    amountIn: ethers.utils.parseEther('10'),
     amountOutMinimum: 0, // For testing, we accept any amount out (in production, set a min)
     sqrtPriceLimitX96: 0,
     nonce: currentNonce++
@@ -610,9 +610,9 @@ async function main() {
   const finalWethBalance = await wethContract.balanceOf(wallet.address);
   const finalUsdcBalance = await usdcContract.balanceOf(wallet.address);
 
-  console.log(`Final WETH balance: ${ethers.formatUnits(finalWethBalance, 18)} WETH`);
-  console.log(`Final USDC balance: ${ethers.formatUnits(finalUsdcBalance, 6)} USDC`);
-  console.log(`Acquired ${ethers.formatUnits(finalUsdcBalance - initialUsdcBalance, 6)} USDC`);
+  console.log(`Final WETH balance: ${ethers.utils.formatUnits(finalWethBalance, 18)} WETH`);
+  console.log(`Final USDC balance: ${ethers.utils.formatUnits(finalUsdcBalance, 6)} USDC`);
+  console.log(`Acquired ${ethers.utils.formatUnits(finalUsdcBalance - initialUsdcBalance, 6)} USDC`);
 
   console.log('ETH to USDC swap completed successfully.');
 
@@ -734,8 +734,8 @@ async function main() {
   console.log('Creating Position instance with centered price range...');
 
   // Amounts we want to use for the position
-  const wethAmount = ethers.parseEther('3');
-  console.log(`WETH amount for position: ${ethers.formatEther(wethAmount)} WETH`);
+  const wethAmount = ethers.utils.parseEther('3');
+  console.log(`WETH amount for position: ${ethers.utils.formatEther(wethAmount)} WETH`);
 
   // Convert WETH to CurrencyAmount
   const tokenAmount0 = CurrencyAmount.fromRawAmount(
@@ -745,9 +745,9 @@ async function main() {
 
   // Also create a USDC amount (approx. WETH value worth of USDC)
   // Price is in USDC per WETH, so wethAmount * price gives us the USDC value
-  const usdcValue = Math.floor(Number(ethers.formatEther(wethAmount)) * price * 10**6);
-  const usdcAmount = ethers.parseUnits(usdcValue.toString(), 6);
-  console.log(`USDC amount for position: ${ethers.formatUnits(usdcValue, 6)} USDC`);
+  const usdcValue = Math.floor(Number(ethers.utils.formatEther(wethAmount)) * price * 10**6);
+  const usdcAmount = ethers.utils.parseUnits(usdcValue.toString(), 6);
+  console.log(`USDC amount for position: ${ethers.utils.formatUnits(usdcValue, 6)} USDC`);
 
   const tokenAmount1 = CurrencyAmount.fromRawAmount(
     USDC,
@@ -781,8 +781,8 @@ async function main() {
     console.log(`- Tick Lower: ${position.tickLower}`);
     console.log(`- Tick Upper: ${position.tickUpper}`);
     console.log(`- Liquidity: ${position.liquidity.toString()}`);
-    console.log(`- WETH Amount: ${ethers.formatEther(position.amount0.quotient.toString())} WETH`);
-    console.log(`- USDC Amount: ${ethers.formatUnits(position.amount1.quotient.toString(), 6)} USDC`);
+    console.log(`- WETH Amount: ${ethers.utils.formatEther(position.amount0.quotient.toString())} WETH`);
+    console.log(`- USDC Amount: ${ethers.utils.formatUnits(position.amount1.quotient.toString(), 6)} USDC`);
 
     // Check if amounts are zero and warn
     if (position.amount0.quotient.toString() === '0' || position.amount1.quotient.toString() === '0') {
@@ -815,8 +815,8 @@ async function main() {
 
     // Log approval details
     console.log('\nApproval Details:');
-    console.log(`- WETH Approval Required: ${ethers.formatEther(position.amount0.quotient.toString())} WETH`);
-    console.log(`- USDC Approval Required: ${ethers.formatUnits(position.amount1.quotient.toString(), 6)} USDC`);
+    console.log(`- WETH Approval Required: ${ethers.utils.formatEther(position.amount0.quotient.toString())} WETH`);
+    console.log(`- USDC Approval Required: ${ethers.utils.formatUnits(position.amount1.quotient.toString(), 6)} USDC`);
     console.log(`- Position Manager Address: ${positionManagerAddress}`);
 
     // Prepare mint parameters
@@ -898,9 +898,9 @@ async function main() {
       try {
         // A Transfer event has 3 topics: event signature + from + to
         return log.topics.length === 4 &&
-               log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-               log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32) &&
-               log.topics[2] === ethers.zeroPadValue(wallet.address.toLowerCase(), 32);
+               log.topics[0] === ethers.utils.id("Transfer(address,address,uint256)") &&
+               log.topics[1] === ethers.utils.hexZeroPad("0x0000000000000000000000000000000000000000", 32) &&
+               log.topics[2] === ethers.utils.hexZeroPad(wallet.address.toLowerCase(), 32);
       } catch (e) {
         return false;
       }
@@ -911,7 +911,7 @@ async function main() {
     }
 
     // Extract tokenId from the event
-    const tokenId = ethers.toBigInt(transferEvent.topics[3]);
+    const tokenId = ethers.BigNumber.from(transferEvent.topics[3]);
     console.log(`\n🎉 Successfully minted position with ID: ${tokenId}`);
 
     // STEP 6: Get the position details to confirm

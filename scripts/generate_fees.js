@@ -41,7 +41,7 @@ async function performSwaps(numSwaps = 1) {
 
   // Setup provider
   const rpcUrl = process.env.NEXT_PUBLIC_ARBITRUM_RPC || "http://localhost:8545";
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
   console.log(`Connected to RPC: ${rpcUrl}`);
 
   // Setup signer (wallet)
@@ -53,7 +53,7 @@ async function performSwaps(numSwaps = 1) {
 
   // Check ETH balance
   const ethBalance = await provider.getBalance(wallet.address);
-  console.log(`ETH balance: ${ethers.formatEther(ethBalance)} ETH`);
+  console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
 
   // Setup contract instances
   const wethContract = new ethers.Contract(TOKENS.WETH.address, WETH_ABI, wallet);
@@ -64,32 +64,32 @@ async function performSwaps(numSwaps = 1) {
   // Get initial token balances
   const initialWethBalance = await wethContract.balanceOf(wallet.address);
   const initialUsdcBalance = await usdcContract.balanceOf(wallet.address);
-  console.log(`Initial WETH balance: ${ethers.formatUnits(initialWethBalance, TOKENS.WETH.decimals)} WETH`);
-  console.log(`Initial USDC balance: ${ethers.formatUnits(initialUsdcBalance, TOKENS.USDC.decimals)} USDC`);
+  console.log(`Initial WETH balance: ${ethers.utils.formatUnits(initialWethBalance, TOKENS.WETH.decimals)} WETH`);
+  console.log(`Initial USDC balance: ${ethers.utils.formatUnits(initialUsdcBalance, TOKENS.USDC.decimals)} USDC`);
 
   // Ensure we have some WETH
-  if (initialWethBalance < ethers.parseEther("0.5")) {
+  if (initialWethBalance < ethers.utils.parseEther("0.5")) {
     console.log("\nWrapping 1 ETH to WETH for swaps...");
-    const wrapTx = await wethContract.deposit({ value: ethers.parseEther("1") });
+    const wrapTx = await wethContract.deposit({ value: ethers.utils.parseEther("1") });
     await wrapTx.wait();
     console.log("ETH wrapped to WETH successfully");
 
     const newWethBalance = await wethContract.balanceOf(wallet.address);
-    console.log(`Updated WETH balance: ${ethers.formatUnits(newWethBalance, TOKENS.WETH.decimals)} WETH`);
+    console.log(`Updated WETH balance: ${ethers.utils.formatUnits(newWethBalance, TOKENS.WETH.decimals)} WETH`);
   }
 
   // Approve router to spend tokens (one-time)
   console.log("\nApproving Uniswap Router to spend tokens...");
 
-  const wethAllowance = ethers.parseEther("1"); // 1 WETH
+  const wethAllowance = ethers.utils.parseEther("1"); // 1 WETH
   const wethApproveTx = await wethContract.approve(ROUTER_ADDRESS, wethAllowance);
   await wethApproveTx.wait();
-  console.log(`Approved Uniswap Router to spend up to ${ethers.formatEther(wethAllowance)} WETH`);
+  console.log(`Approved Uniswap Router to spend up to ${ethers.utils.formatEther(wethAllowance)} WETH`);
 
-  const usdcAllowance = ethers.parseUnits("1000", TOKENS.USDC.decimals); // 1000 USDC
+  const usdcAllowance = ethers.utils.parseUnits("1000", TOKENS.USDC.decimals); // 1000 USDC
   const usdcApproveTx = await usdcContract.approve(ROUTER_ADDRESS, usdcAllowance);
   await usdcApproveTx.wait();
-  console.log(`Approved Uniswap Router to spend up to ${ethers.formatUnits(usdcAllowance, TOKENS.USDC.decimals)} USDC`);
+  console.log(`Approved Uniswap Router to spend up to ${ethers.utils.formatUnits(usdcAllowance, TOKENS.USDC.decimals)} USDC`);
 
   // Perform swaps
   console.log("\n=== Performing swaps to generate fees ===");
@@ -110,8 +110,8 @@ async function performSwaps(numSwaps = 1) {
 
       // Determine appropriate amount for the swap
       const amountIn = isWethToUsdc ?
-        ethers.parseEther("0.05") : // 0.05 WETH
-        ethers.parseUnits("100", TOKENS.USDC.decimals); // 100 USDC
+        ethers.utils.parseEther("0.05") : // 0.05 WETH
+        ethers.utils.parseUnits("100", TOKENS.USDC.decimals); // 100 USDC
 
       console.log(`\nSwap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
 
@@ -151,13 +151,13 @@ async function performSwaps(numSwaps = 1) {
   const finalUsdcBalance = await usdcContract.balanceOf(wallet.address);
 
   console.log("\n=== Swap Summary ===");
-  console.log(`Starting WETH: ${ethers.formatUnits(initialWethBalance, TOKENS.WETH.decimals)}`);
-  console.log(`Final WETH:    ${ethers.formatUnits(finalWethBalance, TOKENS.WETH.decimals)}`);
-  console.log(`WETH Change:   ${ethers.formatUnits(finalWethBalance - initialWethBalance, TOKENS.WETH.decimals)}`);
+  console.log(`Starting WETH: ${ethers.utils.formatUnits(initialWethBalance, TOKENS.WETH.decimals)}`);
+  console.log(`Final WETH:    ${ethers.utils.formatUnits(finalWethBalance, TOKENS.WETH.decimals)}`);
+  console.log(`WETH Change:   ${ethers.utils.formatUnits(finalWethBalance - initialWethBalance, TOKENS.WETH.decimals)}`);
 
-  console.log(`Starting USDC: ${ethers.formatUnits(initialUsdcBalance, TOKENS.USDC.decimals)}`);
-  console.log(`Final USDC:    ${ethers.formatUnits(finalUsdcBalance, TOKENS.USDC.decimals)}`);
-  console.log(`USDC Change:   ${ethers.formatUnits(finalUsdcBalance - initialUsdcBalance, TOKENS.USDC.decimals)}`);
+  console.log(`Starting USDC: ${ethers.utils.formatUnits(initialUsdcBalance, TOKENS.USDC.decimals)}`);
+  console.log(`Final USDC:    ${ethers.utils.formatUnits(finalUsdcBalance, TOKENS.USDC.decimals)}`);
+  console.log(`USDC Change:   ${ethers.utils.formatUnits(finalUsdcBalance - initialUsdcBalance, TOKENS.USDC.decimals)}`);
 
   console.log("\n=== Fee generation swaps completed ===");
   console.log("Your liquidity positions should now have accrued fees.");

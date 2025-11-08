@@ -18,9 +18,8 @@
     "hardhat-node": "bash -c 'cd ~/code/fum_testing && npx hardhat node'",
     "contracts:sync": "tsx scripts/sync-contracts-to-ecosystem.js",
     "deployment-setup": "npm run contracts:sync",
-    "seed-hardhat-localhost": "bash -c 'npm run script scripts/deploy.js --network=localhost && npm run script scripts/create-test-vault.js --network=localhost && npm run script scripts/seed.js --network=localhost'",
+    "seed-localhost": "bash -c 'npm run script scripts/deploy.js --network=localhost && npm run script scripts/create-test-vault.js --network=localhost && npm run script scripts/seed.js --network=localhost'",
     "ganache": "node scripts/start-ganache.js",
-    "seed-localhost": "bash -c 'npm run script scripts/create-test-vault.js --network=localhost && npm run script scripts/seed.js --network=localhost'",
     "test-automation": "node scripts/test-automation.js"
   },
   "dependencies": {
@@ -28,7 +27,7 @@
     "@uniswap/v3-sdk": "^3.24.1",
     "@web3modal/ethereum": "^2.7.1",
     "bootstrap": "^5.3.3",
-    "ethers": "^6.13.5",
+    "ethers": "^5.7.2",
     "fum_library": "file:../fum_library",
     "next": "15.1.7",
     "react": "^19.0.0",

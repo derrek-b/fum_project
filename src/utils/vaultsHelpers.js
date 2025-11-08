@@ -9,8 +9,9 @@ import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesS
 import { ethers } from 'ethers';
 import { AdapterFactory } from 'fum_library/adapters';
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain';
-import { fetchTokenPrices, calculateUsdValue, prefetchTokenPrices, calculateUsdValueSync } from 'fum_library/services';
-import { getAvailableStrategies, getStrategyParameters } from 'fum_library/helpers';
+import { fetchTokenPrices } from 'fum_library/services';
+import { lookupAvailableStrategies, getStrategyParameters } from 'fum_library/helpers';
+import { prefetchTokenPrices, calculateUsdValueSync } from './priceHelpers';
 import { getAllTokens } from 'fum_library/helpers';
 import contractData from 'fum_library/artifacts/contracts';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
@@ -63,7 +64,7 @@ const mapStrategyParameters = (strategyId, params) => {
 
         // Fee Settings
         feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
+        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
         reinvestmentRatio: parseInt(params[6]) / 100,
 
         // Risk Management
@@ -82,7 +83,7 @@ const mapStrategyParameters = (strategyId, params) => {
 
         // Fee Settings
         feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.formatUnits(params[5], 2),
+        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
         reinvestmentRatio: parseInt(params[6]) / 100,
 
         // Risk Management
@@ -107,12 +108,12 @@ const mapStrategyParameters = (strategyId, params) => {
 
         // Position Sizing
         maxPositionSizePercent: parseInt(params[21]) / 100,
-        minPositionSize: ethers.formatUnits(params[22], 2),
+        minPositionSize: ethers.utils.formatUnits(params[22], 2),
         targetUtilization: parseInt(params[23]) / 100,
 
         // Platform Settings
         platformSelectionCriteria: parseInt(params[24]),
-        minPoolLiquidity: ethers.formatUnits(params[25], 2)
+        minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
       };
     }
     else if (strategyId.toLowerCase() === 'fed') {
@@ -176,7 +177,7 @@ const fetchStrategyParameters = async (strategyAddress, strategyId, vaultAddress
     let selectedTemplate = 'custom';
 
     // Use the templateEnumMap from strategy config to map enum value to template ID
-    const availableStrategies = getAvailableStrategies();
+    const availableStrategies = lookupAvailableStrategies();
     const strategy = availableStrategies.find(s => s.id === strategyId);
 
     if (strategy?.templateEnumMap) {
@@ -214,7 +215,7 @@ export const loadVaultStrategies = async (provider, chainId, dispatch, options =
 
   try {
     // Get strategy information
-    const availableStrategies = getAvailableStrategies();
+    const availableStrategies = lookupAvailableStrategies();
 
     // Create a mapping from contract addresses to strategy IDs
     const addressToStrategyMap = {};
@@ -337,7 +338,7 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
       ]);
 
       // Check if strategy is set and active
-      if (strategyAddress && strategyAddress !== ethers.ZeroAddress) {
+      if (strategyAddress && strategyAddress !== ethers.constants.AddressZero) {
         try {
           // Get target tokens and platforms from vault
           [targetTokens, targetPlatforms] = await Promise.all([
@@ -389,7 +390,7 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
 
     // Create strategy object if strategy address is set
     // Maintaining the EXACT same structure for frontend compatibility
-    const strategy = strategyAddress && strategyAddress !== ethers.ZeroAddress ? {
+    const strategy = strategyAddress && strategyAddress !== ethers.constants.AddressZero ? {
       strategyId: strategyId || 'unknown',
       strategyAddress,
       isActive: true,
@@ -406,7 +407,7 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
       ...vaultInfo,
       executor: executor || null,
       strategyAddress: strategyAddress || null,
-      hasActiveStrategy: strategyAddress && strategyAddress !== ethers.ZeroAddress,
+      hasActiveStrategy: strategyAddress && strategyAddress !== ethers.constants.AddressZero,
       strategy: strategy,
       positions: [] // Initialize empty positions array
     };
@@ -461,7 +462,7 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
         try {
           const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
           const balance = await tokenContract.balanceOf(vaultAddress);
-          const formattedBalance = ethers.formatUnits(balance, token.decimals);
+          const formattedBalance = ethers.utils.formatUnits(balance, token.decimals);
           const numericalBalance = parseFloat(formattedBalance);
 
           // Skip tokens with 0 balance
@@ -556,7 +557,10 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
 
   try {
     // Get adapters for the current chain
-    const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+    const { adapters, failures } = AdapterFactory.getAdaptersForChain(chainId, provider);
+    if (failures.length > 0) {
+      console.warn(`Failed to create some adapters:`, failures);
+    }
     if (adapters.length === 0) {
       const error = `No adapters available for chain ID ${chainId}`;
       if (showError) showError(error);
@@ -766,7 +770,7 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
 
       for (const data of positionData) {
         try {
-          const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+          const adapter = AdapterFactory.getAdapter(data.position.platform, chainId, provider);
           if (!adapter) continue;
 
           const tokenBalances = await adapter.calculateTokenAmounts(
@@ -907,7 +911,7 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
 
         for (const data of positionData) {
           try {
-            const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+            const adapter = AdapterFactory.getAdapter(data.position.platform, chainId, provider);
             if (!adapter) continue;
 
             const tokenBalances = await adapter.calculateTokenAmounts(
@@ -1053,9 +1057,12 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
     // 4. Get all user positions that aren't in vaults
     const vaultPositionIds = new Set(allPositions.map(p => p.id));
-    const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+    const { adapters: userAdapters, failures: userAdapterFailures } = AdapterFactory.getAdaptersForChain(chainId, provider);
+    if (userAdapterFailures.length > 0) {
+      console.warn(`Failed to create some adapters for user positions:`, userAdapterFailures);
+    }
 
-    for (const adapter of adapters) {
+    for (const adapter of userAdapters) {
       try {
         // Get all user positions
         const result = await adapter.getPositions(userAddress, chainId);
@@ -1160,7 +1167,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         // Calculate position TVL
         for (const data of positionData) {
           try {
-            const adapter = AdapterFactory.getAdapter(data.position.platform, provider);
+            const adapter = AdapterFactory.getAdapter(data.position.platform, chainId, provider);
             if (!adapter) {
               hasPartialData = true;
               continue;

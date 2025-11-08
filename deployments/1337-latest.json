@@ -1,15 +1,15 @@
 {
   "version": "0.2.1",
-  "timestamp": "2025-07-25T12-18-53",
+  "timestamp": "2025-11-08T19-35-00",
   "network": {
-    "name": "arbitrum",
+    "name": "Forked Arbitrum",
     "chainId": 1337
   },
   "contracts": {
-    "BatchExecutor": "0x55730859Aa4204834E132c704090057924DB4b2C",
-    "VaultFactory": "0x8a8C8FB21F3099e787b5ad1221310663d73b1d81",
-    "ParrisIslandStrategy": "0x1F99d085050C4763f1C1fB4494897bbd333cE5bc",
-    "BabyStepsStrategy": "0x6d4923d4873aaBCcF23d4585b127a0eFF1381C91"
+    "BatchExecutor": "0x145D362808e8665D75A020f5169D537523F6d2dd",
+    "VaultFactory": "0x3C9Dc3ceDFe58A970Fa77E3F7C39BA3F37b6283C",
+    "ParrisIslandStrategy": "0x53D6167f8c8d1A4685c61EA9A643fEEAD6161345",
+    "BabyStepsStrategy": "0x447362cCE2a90c6CFD6Bf5A957F96b16B94735AB"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }

@@ -57,7 +57,7 @@ export default function ClaimFeesModal({
   // Function to claim fees using the adapter
   const claimFees = async () => {
     // Get the appropriate adapter
-    const adapter = AdapterFactory.getAdapter(position.platform, provider);
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");

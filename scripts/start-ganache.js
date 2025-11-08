@@ -112,10 +112,10 @@ async function main() {
 
       // Deploy contracts
       console.log("\nDeploying contracts to Ganache...");
-      const ethProvider = new ethers.JsonRpcProvider(`http://localhost:${port}`);
+      const ethProvider = new ethers.providers.JsonRpcProvider(`http://localhost:${port}`);
       const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; // Matches Hardhat/Ganache account #0
       const wallet = new ethers.Wallet(privateKey, ethProvider);
-      console.log(`Deploying with account: ${wallet.address}: ${ethers.formatEther(await ethProvider.getBalance(wallet.address))} ETH`);
+      console.log(`Deploying with account: ${wallet.address}: ${ethers.utils.formatEther(await ethProvider.getBalance(wallet.address))} ETH`);
 
       // Create a deep copy of contractData to avoid modifying the imported object
       const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
@@ -136,7 +136,7 @@ async function main() {
 
         const batchExecutor = await BatchExecutor.deploy({
           gasLimit: 5000000,
-          gasPrice: ethers.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
+          gasPrice: ethers.utils.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
         });
         console.log(`Transaction hash: ${batchExecutor.deploymentTransaction().hash}`);
         console.log("Waiting for deployment to be confirmed...");
@@ -160,7 +160,7 @@ async function main() {
 
         const vaultFactory = await VaultFactory.deploy(wallet.address, {
           gasLimit: 5000000,
-          gasPrice: ethers.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
+          gasPrice: ethers.utils.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
         });
         console.log(`Transaction hash: ${vaultFactory.deploymentTransaction().hash}`);
         console.log("Waiting for deployment to be confirmed...");
@@ -184,7 +184,7 @@ async function main() {
 
         const strategy = await ParrisIslandStrategy.deploy({
           gasLimit: 5000000,
-          gasPrice: ethers.parseUnits("0.1", "gwei"),
+          gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
         });
         console.log(`Transaction hash: ${strategy.deploymentTransaction().hash}`);
         console.log("Waiting for deployment to be confirmed...");
@@ -214,7 +214,7 @@ async function main() {
 
             const babyStepsStrategy = await BabyStepsStrategy.deploy({
               gasLimit: 5000000,
-              gasPrice: ethers.parseUnits("0.1", "gwei"),
+              gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
             });
             console.log(`Transaction hash: ${babyStepsStrategy.deploymentTransaction().hash}`);
             console.log("Waiting for deployment to be confirmed...");

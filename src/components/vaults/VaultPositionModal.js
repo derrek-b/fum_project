@@ -8,7 +8,7 @@ import '../../redux/updateSlice.js';
 import '../../redux/vaultsSlice.js';
 import { AdapterFactory, getAdapter } from 'fum_library/adapters';
 import { formatPrice, formatUnits } from 'fum_library/helpers/formatHelpers';
-import { calculateUsdValueSync, prefetchTokenPrices } from 'fum_library/services/coingecko';
+import { calculateUsdValueSync, prefetchTokenPrices } from '../../utils/priceHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { Pool } from '@uniswap/v3-sdk';
@@ -92,15 +92,15 @@ export default function VaultPositionModal({
 
   // Get adapter for the selected platform
   const adapter = useMemo(() => {
-    if (!provider || !selectedPlatform) return null;
+    if (!provider || !selectedPlatform || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(selectedPlatform, provider);
+      return AdapterFactory.getAdapter(selectedPlatform, chainId, provider);
     } catch (error) {
       console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
       showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);
       return null;
     }
-  }, [selectedPlatform, provider, showError]);
+  }, [selectedPlatform, chainId, provider, showError]);
 
   // Calculate USD values if token prices are available
   const token0UsdValue = useMemo(() => {
@@ -417,8 +417,8 @@ export default function VaultPositionModal({
       }
 
       // Format balances with proper decimals
-      const formattedBalance0 = ethers.formatUnits(balance0, token0Detail.decimals);
-      const formattedBalance1 = ethers.formatUnits(balance1, token1Detail.decimals);
+      const formattedBalance0 = ethers.utils.formatUnits(balance0, token0Detail.decimals);
+      const formattedBalance1 = ethers.utils.formatUnits(balance1, token1Detail.decimals);
 
       // Update state
       setToken0Balance(formattedBalance0);
@@ -752,7 +752,7 @@ export default function VaultPositionModal({
       const vaultContract = getVaultContract(vaultAddress, provider, await provider.getSigner());
 
       // 2. Create ERC20 interfaces for approvals
-      const erc20Interface = new ethers.Interface([
+      const erc20Interface = new ethers.utils.Interface([
         'function approve(address spender, uint256 amount) returns (bool)'
       ]);
 
@@ -763,12 +763,12 @@ export default function VaultPositionModal({
       // 4. Generate transaction data for token approvals
       const approvalData0 = erc20Interface.encodeFunctionData('approve', [
         positionManagerAddress,
-        ethers.MaxUint256
+        ethers.constants.MaxUint256
       ]);
 
       const approvalData1 = erc20Interface.encodeFunctionData('approve', [
         positionManagerAddress,
-        ethers.MaxUint256
+        ethers.constants.MaxUint256
       ]);
 
       // 5. Generate transaction data for position creation
@@ -819,15 +819,15 @@ export default function VaultPositionModal({
             // A Transfer event has 3 topics: event signature + from + to
             return log.address.toLowerCase() === positionManagerAddress.toLowerCase() &&
                   log.topics.length === 4 &&
-                  log.topics[0] === ethers.id("Transfer(address,address,uint256)") &&
-                  log.topics[1] === ethers.zeroPadValue("0x0000000000000000000000000000000000000000", 32);
+                  log.topics[0] === ethers.utils.id("Transfer(address,address,uint256)") &&
+                  log.topics[1] === ethers.utils.hexZeroPad("0x0000000000000000000000000000000000000000", 32);
           } catch (e) {
             return false;
           }
         });
 
         if (transferEvent) {
-          positionId = ethers.getBigInt(transferEvent.topics[3]).toString();
+          positionId = ethers.BigNumber.from(transferEvent.topics[3]).toString();
 
           if (positionId) {
             // 1. Update vault positions in Redux

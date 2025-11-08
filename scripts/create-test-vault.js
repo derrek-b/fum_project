@@ -87,7 +87,7 @@ async function main() {
   console.log(`Creating test vault with sample position on ${networkConfig.name}...`);
 
   // Set up provider and signer
-  const provider = new ethers.JsonRpcProvider(networkConfig.rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
 
   let signer;
   if (networkName === 'localhost') {
@@ -182,11 +182,11 @@ async function main() {
 
   // Check ETH balance
   const ethBalance = await provider.getBalance(signer.address);
-  console.log(`ETH balance: ${ethers.formatEther(ethBalance)} ETH`);
+  console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
 
   // Wrap some ETH to get WETH
   console.log("\nWrapping 5 ETH to WETH...");
-  const wrapTx = await wethContract.deposit({ value: ethers.parseEther("5") });
+  const wrapTx = await wethContract.deposit({ value: ethers.utils.parseEther("5") });
   await wrapTx.wait();
   console.log("ETH wrapped to WETH successfully");
 
@@ -195,7 +195,7 @@ async function main() {
   const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, FALLBACK_ABIS.UniswapV3Router, signer);
 
   // Approve the router to spend WETH
-  const approveWethTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.parseEther("2"));
+  const approveWethTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.utils.parseEther("2"));
   await approveWethTx.wait();
   console.log("Router approved to spend WETH");
 
@@ -207,7 +207,7 @@ async function main() {
     fee: 500, // 0.05% fee pool
     recipient: signer.address,
     deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
-    amountIn: ethers.parseEther("2"), // Swap 2 WETH
+    amountIn: ethers.utils.parseEther("2"), // Swap 2 WETH
     amountOutMinimum: 0, // No minimum for testing
     sqrtPriceLimitX96: 0 // No price limit
   };
@@ -223,33 +223,33 @@ async function main() {
   const currentWethBalance = await wethContract.balanceOf(signer.address);
   const currentUsdcBalance = await usdcContract.balanceOf(signer.address);
 
-  console.log(`Current WETH balance: ${ethers.formatEther(currentWethBalance)} WETH`);
-  console.log(`Current USDC balance: ${ethers.formatUnits(currentUsdcBalance, 6)} USDC`);
+  console.log(`Current WETH balance: ${ethers.utils.formatEther(currentWethBalance)} WETH`);
+  console.log(`Current USDC balance: ${ethers.utils.formatUnits(currentUsdcBalance, 6)} USDC`);
 
   // Amount to transfer: 3 WETH
-  const wethTransferAmount = ethers.parseEther("3");
+  const wethTransferAmount = ethers.utils.parseEther("3");
 
   // Amount to transfer: 1000 USDC
-  const usdcTransferAmount = ethers.parseUnits("1000", 6);
+  const usdcTransferAmount = ethers.utils.parseUnits("1000", 6);
 
   // Transfer WETH to the vault
   console.log("\nTransferring 3 WETH to the vault...");
   const transferWethTx = await wethContract.transfer(vaultAddress, wethTransferAmount);
   await transferWethTx.wait();
-  console.log(`Successfully transferred ${ethers.formatEther(wethTransferAmount)} WETH to vault`);
+  console.log(`Successfully transferred ${ethers.utils.formatEther(wethTransferAmount)} WETH to vault`);
 
   // Transfer USDC to the vault
   console.log("\nTransferring 1000 USDC to the vault...");
   const transferUsdcTx = await usdcContract.transfer(vaultAddress, usdcTransferAmount);
   await transferUsdcTx.wait();
-  console.log(`Successfully transferred ${ethers.formatUnits(usdcTransferAmount, 6)} USDC to vault`);
+  console.log(`Successfully transferred ${ethers.utils.formatUnits(usdcTransferAmount, 6)} USDC to vault`);
 
   // Verify token balances in the vault
   const vaultWethBalance = await wethContract.balanceOf(vaultAddress);
   const vaultUsdcBalance = await usdcContract.balanceOf(vaultAddress);
   console.log("\nVault token balances:");
-  console.log(`WETH: ${ethers.formatEther(vaultWethBalance)} WETH`);
-  console.log(`USDC: ${ethers.formatUnits(vaultUsdcBalance, 6)} USDC`);
+  console.log(`WETH: ${ethers.utils.formatEther(vaultWethBalance)} WETH`);
+  console.log(`USDC: ${ethers.utils.formatUnits(vaultUsdcBalance, 6)} USDC`);
 
   console.log("\nTest vault setup complete!");
   console.log("====================");

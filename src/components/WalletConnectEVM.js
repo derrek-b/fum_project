@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
 import { setWallet, disconnectWallet, setProvider } from "../redux/walletSlice";
-import { createBrowserProvider } from "fum_library/blockchain/wallet";
+import { createWeb3Provider } from "fum_library/blockchain/wallet";
 import { getChainName } from "fum_library/helpers/chainHelpers";
 import { useToast } from "../context/ToastContext"; // Import the toast hook
 
@@ -18,7 +18,7 @@ export default function WalletConnectEVM() {
     if (isConnecting) return; // Prevent multiple clicks while connecting
     setIsConnecting(true);
     try {
-      const newProvider = await createBrowserProvider(); // Create provider only on connect
+      const newProvider = await createWeb3Provider(); // Create provider only on connect
 
       if (!newProvider) {
         throw new Error("No Ethereum wallet detected. Please install MetaMask or another wallet.");

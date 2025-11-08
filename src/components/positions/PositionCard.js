@@ -41,14 +41,14 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
-    if (!position.platform || !provider) return null;
+    if (!position.platform || !provider || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(position.platform, provider);
+      return AdapterFactory.getAdapter(position.platform, chainId, provider);
     } catch (error) {
       console.error(`Failed to get adapter for position ${position.id}:`, error);
       return null;
     }
-  }, [position.platform, provider]);
+  }, [position.platform, chainId, provider]);
 
   // Use adapter for position-specific calculations
   const isActive = useMemo(() => {

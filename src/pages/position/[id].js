@@ -18,7 +18,7 @@ import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
 import { useToast } from "../../context/ToastContext";import { AdapterFactory } from "fum_library/adapters";
 import { formatPrice, formatFeeDisplay } from "fum_library/helpers";
-import { fetchTokenPrices, calculateUsdValue } from "fum_library/services";
+import { fetchTokenPrices } from "fum_library/services";
 import { getPlatformColor, getPlatformLogo } from "../../dist/helpers/platformHelpers.js";
 
 // Fallback component to show when an error occurs
@@ -118,15 +118,15 @@ export default function PositionDetailPage() {
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
-    if (!position?.platform || !provider) return null;
+    if (!position?.platform || !provider || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(position.platform, provider);
+      return AdapterFactory.getAdapter(position.platform, chainId, provider);
     } catch (error) {
       console.error(`Failed to get adapter for position ${id}:`, error);
       showError(`Failed to get ${position.platform} adapter. Some features may be limited.`);
       return null;
     }
-  }, [position?.platform, provider, id, showError]);
+  }, [position?.platform, chainId, provider, id, showError]);
 
   // Use adapter for position-specific calculations
   const isActive = useMemo(() => {
@@ -506,7 +506,11 @@ export default function PositionDetailPage() {
 
     try {
       const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-      return calculateUsdValue(amount, price);
+      if (!price) return null;
+
+      // Calculate USD value inline
+      const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+      return numAmount * price;
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;

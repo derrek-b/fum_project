@@ -8,7 +8,7 @@ import { Token } from '@uniswap/sdk-core';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatPrice } from 'fum_library/helpers/formatHelpers';
-import { calculateUsdValue, calculateUsdValueSync } from 'fum_library/services/coingecko';
+import { calculateUsdValueSync } from 'fum_library/services/coingecko';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
@@ -113,21 +113,23 @@ export default function AddLiquidityModal({
 
   // Get adapter for the selected platform
   const adapter = useMemo(() => {
-    if (!provider || !selectedPlatform) return null;
+    if (!provider || !selectedPlatform || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(selectedPlatform, provider);
+      return AdapterFactory.getAdapter(selectedPlatform, chainId, provider);
     } catch (error) {
       console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
       showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);
       return null;
     }
-  }, [selectedPlatform, provider, showError]);
+  }, [selectedPlatform, chainId, provider, showError]);
 
   // Calculate USD values if token prices are available
   const token0UsdValue = useMemo(() => {
     if (!token0Amount || !tokenPrices?.token0) return null;
     try {
-      return calculateUsdValue(token0Amount, tokenPrices.token0);
+      // Calculate USD value inline
+      const numAmount = typeof token0Amount === 'string' ? parseFloat(token0Amount) : token0Amount;
+      return numAmount * tokenPrices.token0;
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
@@ -137,7 +139,9 @@ export default function AddLiquidityModal({
   const token1UsdValue = useMemo(() => {
     if (!token1Amount || !tokenPrices?.token1) return null;
     try {
-      return calculateUsdValue(token1Amount, tokenPrices.token1);
+      // Calculate USD value inline
+      const numAmount = typeof token1Amount === 'string' ? parseFloat(token1Amount) : token1Amount;
+      return numAmount * tokenPrices.token1;
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
@@ -436,8 +440,8 @@ export default function AddLiquidityModal({
       }
 
       // Format balances with proper decimals
-      const formattedBalance0 = ethers.formatUnits(balance0, token0Detail.decimals);
-      const formattedBalance1 = ethers.formatUnits(balance1, token1Detail.decimals);
+      const formattedBalance0 = ethers.utils.formatUnits(balance0, token0Detail.decimals);
+      const formattedBalance1 = ethers.utils.formatUnits(balance1, token1Detail.decimals);
 
       // Update state
       setToken0Balance(formattedBalance0);

@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { getChainConfig } from 'fum_library/configs/chains';
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import contractData from 'fum_library/artifacts/contracts';
 
 // Load environment variables
@@ -21,6 +21,9 @@ const networkArg = args.find(arg => arg.startsWith('--network='));
 const networkName = networkArg ? networkArg.split('=')[1] : 'localhost';
 const contractArg = args.find(arg => arg.startsWith('--contract='));
 const contractName = contractArg ? contractArg.split('=')[1] : 'all'; // Default to deploying all contracts
+
+// Library path for updating deployment addresses
+const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
 
 // Get chainId from network name
 function getChainId(networkName) {
@@ -62,6 +65,98 @@ function getPrivateKey(chainId) {
   return privateKey;
 }
 
+/**
+ * Update the library's contracts.js files with new deployment addresses
+ * @param {Object} deploymentResults - Object mapping contract names to addresses
+ * @param {number} chainId - The chain ID for the deployment
+ */
+function updateLibraryAddresses(deploymentResults, chainId) {
+  try {
+    console.log('\nUpdating library with new deployment addresses...');
+
+    // Define paths for both src and dist versions
+    const srcContractsPath = path.join(LIBRARY_PATH, 'src/artifacts/contracts.js');
+    const distContractsPath = path.join(LIBRARY_PATH, 'dist/artifacts/contracts.js');
+
+    // Check if the src file exists and read it
+    if (!fs.existsSync(srcContractsPath)) {
+      console.warn(`Library contracts file not found at ${srcContractsPath}, skipping address update`);
+      return false;
+    }
+
+    // Read and parse the existing contracts
+    const fileContent = fs.readFileSync(srcContractsPath, 'utf8');
+    const contractsMatch = fileContent.match(/const contracts = ([\s\S]*?);[\s\S]*export default contracts/);
+
+    if (!contractsMatch || !contractsMatch[1]) {
+      console.warn('Could not parse existing contracts file, skipping address update');
+      return false;
+    }
+
+    let existingContracts;
+    try {
+      existingContracts = eval(`(${contractsMatch[1]})`);
+    } catch (e) {
+      console.warn(`Could not evaluate contracts object: ${e.message}`);
+      return false;
+    }
+
+    // Map deployment result names to library contract names
+    const contractNameMapping = {
+      'ParrisIslandStrategy': 'parris',
+      'BabyStepsStrategy': 'bob',
+      'VaultFactory': 'VaultFactory',
+      'BatchExecutor': 'BatchExecutor',
+      'PositionVault': 'PositionVault'
+    };
+
+    // Update addresses for deployed contracts
+    let updatedCount = 0;
+    for (const [deployedName, address] of Object.entries(deploymentResults)) {
+      const libraryName = contractNameMapping[deployedName] || deployedName;
+
+      if (existingContracts[libraryName]) {
+        // Initialize addresses object if it doesn't exist
+        if (!existingContracts[libraryName].addresses) {
+          existingContracts[libraryName].addresses = {};
+        }
+
+        // Update the address for this chain
+        existingContracts[libraryName].addresses[chainId.toString()] = address;
+        console.log(`  ✅ Updated ${libraryName} address for chain ${chainId}: ${address}`);
+        updatedCount++;
+      } else {
+        console.warn(`  ⚠️ Contract ${libraryName} not found in library, skipping`);
+      }
+    }
+
+    // Generate the updated file content
+    const contractsContent = `// artifacts/contracts.js
+      /**
+       * Contract ABIs and addresses for the F.U.M. project
+       * This file is auto-generated and should not be edited directly
+       */
+
+      // Contract ABIs and addresses
+      const contracts = ${JSON.stringify(existingContracts, null, 2)};
+
+      export default contracts;`;
+
+    // Write to both src and dist
+    fs.writeFileSync(srcContractsPath, contractsContent);
+    console.log(`  📝 Updated ${srcContractsPath}`);
+
+    fs.writeFileSync(distContractsPath, contractsContent);
+    console.log(`  📝 Updated ${distContractsPath}`);
+
+    console.log(`✅ Library addresses updated (${updatedCount} contracts)\n`);
+    return true;
+  } catch (error) {
+    console.warn(`⚠️ Could not update library addresses: ${error.message}`);
+    return false;
+  }
+}
+
 async function deploy() {
   // Get network details
   const chainId = getChainId(networkName);
@@ -74,7 +169,7 @@ async function deploy() {
   console.log(`Deploying to ${networkConfig.name} (${chainId})...`);
 
   // Connect to provider
-  const provider = new ethers.JsonRpcProvider(networkConfig.rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
 
   // Get private key and create wallet
   const privateKey = getPrivateKey(chainId);
@@ -83,7 +178,7 @@ async function deploy() {
 
   // Check wallet balance
   const balance = await provider.getBalance(wallet.address);
-  console.log(`Account balance: ${ethers.formatEther(balance)} ETH`);
+  console.log(`Account balance: ${ethers.utils.formatEther(balance)} ETH`);
 
   // Make a local copy of the contract data to avoid modifying the imported version
   const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
@@ -131,13 +226,13 @@ async function deploy() {
       contract = await factory.deploy();
     }
 
-    console.log(`Transaction hash: ${contract.deploymentTransaction().hash}`);
+    console.log(`Transaction hash: ${contract.deployTransaction.hash}`);
 
     // Wait for deployment to complete
     console.log('Waiting for deployment to be confirmed...');
-    await contract.deploymentTransaction().wait();
+    await contract.deployTransaction.wait();
 
-    const contractAddress = await contract.getAddress();
+    const contractAddress = contract.address;
     console.log(`${contractName} deployed to: ${contractAddress}`);
 
     // Save results for deployment info
@@ -192,6 +287,9 @@ async function deploy() {
     fs.writeFileSync(latestPath, JSON.stringify(deploymentInfo, null, 2));
     console.log(`Deployment info saved to deployments/${chainId}-latest.json`);
   }
+
+  // Update library with new deployment addresses
+  updateLibraryAddresses(deploymentResults, chainId);
 
   console.log('Deployment completed successfully!');
 }

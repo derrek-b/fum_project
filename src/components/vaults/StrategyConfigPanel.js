@@ -11,7 +11,7 @@ import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
 import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
-import { getAvailableStrategies, getStrategyParameters, getTemplateDefaults } from 'fum_library/helpers/strategyHelpers';
+import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults } from 'fum_library/helpers/strategyHelpers';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import { config } from 'dotenv';
 
@@ -418,7 +418,7 @@ const StrategyConfigPanel = ({
       const signer = await provider.getSigner();
 
       // Get the selected strategy details from the config
-      const strategyConfig = getAvailableStrategies().find(s => s.id === selectedStrategy);
+      const strategyConfig = lookupAvailableStrategies().find(s => s.id === selectedStrategy);
       if (!strategyConfig) {
         throw new Error(`Strategy configuration not found for ${selectedStrategy}`);
       }

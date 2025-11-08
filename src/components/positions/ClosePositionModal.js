@@ -87,7 +87,7 @@ export default function ClosePositionModal({
   // Function to close position using the adapter
   const closePosition = async (shouldBurn, slippageTolerance) => {
     // Get the appropriate adapter
-    const adapter = AdapterFactory.getAdapter(position.platform, provider);
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");

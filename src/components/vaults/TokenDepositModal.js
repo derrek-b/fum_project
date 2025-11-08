@@ -57,7 +57,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
         const tokenAddress = selectedToken.addresses[chainId];
         const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
         const balance = await tokenContract.balanceOf(userAddress);
-        const formattedBalance = ethers.formatUnits(balance, selectedToken.decimals);
+        const formattedBalance = ethers.utils.formatUnits(balance, selectedToken.decimals);
         setUserBalance(formattedBalance);
         setError("");
       } catch (err) {
@@ -111,7 +111,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
 
       // Convert amount to token units
-      const amountInUnits = ethers.parseUnits(amount, selectedToken.decimals);
+      const amountInUnits = ethers.utils.parseUnits(amount, selectedToken.decimals);
 
       // Use standard ERC-20 transfer
       const tx = await tokenContract.transfer(vaultAddress, amountInUnits);
