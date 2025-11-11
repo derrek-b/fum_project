@@ -7,6 +7,7 @@ import { AdapterFactory } from 'fum_library/adapters';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
+import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function RemoveLiquidityModal({
@@ -22,7 +23,8 @@ export default function RemoveLiquidityModal({
 }) {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
-  const { address, chainId, provider } = useSelector(state => state.wallet);
+  const { address, chainId } = useSelector(state => state.wallet);
+  const { provider } = useProvider();
 
   // State for the percentage slider
   const [percentage, setPercentage] = useState(100);

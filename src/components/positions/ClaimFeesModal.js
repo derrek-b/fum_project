@@ -9,6 +9,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
+import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function ClaimFeesModal({
@@ -23,7 +24,8 @@ export default function ClaimFeesModal({
 }) {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
-  const { address, chainId, provider } = useSelector(state => state.wallet);
+  const { address, chainId } = useSelector(state => state.wallet);
+  const { provider } = useProvider();
 
   // State for operation status
   const [isClaiming, setIsClaiming] = useState(false);

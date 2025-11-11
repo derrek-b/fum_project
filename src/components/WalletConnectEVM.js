@@ -3,15 +3,17 @@
 import React, { useState } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
-import { setWallet, disconnectWallet, setProvider } from "../redux/walletSlice";
+import { setWallet, disconnectWallet } from "../redux/walletSlice";
 import { createWeb3Provider } from "fum_library/blockchain/wallet";
 import { getChainName } from "fum_library/helpers/chainHelpers";
 import { useToast } from "../context/ToastContext"; // Import the toast hook
+import { useProvider } from "../contexts/ProviderContext";
 
 export default function WalletConnectEVM() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast(); // Use our toast hook
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { setProvider, clearProvider } = useProvider(); // Get provider setters from context
   const [isConnecting, setIsConnecting] = useState(false); // Track connection attempt
 
   const connect = async () => {
@@ -24,7 +26,7 @@ export default function WalletConnectEVM() {
         throw new Error("No Ethereum wallet detected. Please install MetaMask or another wallet.");
       }
 
-      dispatch(setProvider(newProvider)); // Store provider in Redux
+      setProvider(newProvider); // Store provider in context
 
       await newProvider.send("eth_requestAccounts", []); // Request accounts from MetaMask
       const signer = await newProvider.getSigner();
@@ -35,8 +37,7 @@ export default function WalletConnectEVM() {
 
       dispatch(setWallet({
         address: account,
-        chainId,
-        provider: newProvider
+        chainId
       }));
 
       // Show success notification
@@ -60,6 +61,7 @@ export default function WalletConnectEVM() {
   };
 
   const disconnect = () => {
+    clearProvider(); // Clear provider from context
     dispatch(disconnectWallet());
     showSuccess("Wallet disconnected");
   };

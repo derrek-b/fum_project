@@ -4,6 +4,7 @@ import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-boo
 import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
+import { useProvider } from '../../contexts/ProviderContext';
 import { platforms } from 'fum_library/configs';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
@@ -26,7 +27,8 @@ export default function PositionSelectionModal({
   // Get data from Redux store
   const { positions } = useSelector((state) => state.positions);
   //const { provider } = useSelector((state) => state.wallet.provider);
-  const { address, provider } = useSelector((state) => state.wallet);
+  const { address } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   // const { pools = {} } = useSelector((state) => state.pools);
   // const { tokens = {} } = useSelector((state) => state.tokens);
 

@@ -3,6 +3,7 @@ import { Provider } from "react-redux";
 import { store } from "../redux/store";
 import { ErrorBoundary } from 'react-error-boundary';
 import { ToastProvider } from '../context/ToastContext';
+import { ProviderProvider } from '../contexts/ProviderContext';
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
@@ -67,15 +68,17 @@ export default function MyApp({ Component, pageProps }) {
   // Wrap the entire app in an error boundary
   return (
     <Provider store={store}>
-      <ErrorBoundary
-        FallbackComponent={ErrorFallback}
-        onError={(error, info) => console.error("Caught an error:", error, info)}
-        onReset={() => window.location.reload()}
-      >
-        <ToastProvider>
-          <Component {...pageProps} />
-        </ToastProvider>
-      </ErrorBoundary>
+      <ProviderProvider>
+        <ErrorBoundary
+          FallbackComponent={ErrorFallback}
+          onError={(error, info) => console.error("Caught an error:", error, info)}
+          onReset={() => window.location.reload()}
+        >
+          <ToastProvider>
+            <Component {...pageProps} />
+          </ToastProvider>
+        </ErrorBoundary>
+      </ProviderProvider>
     </Provider>
   );
 }

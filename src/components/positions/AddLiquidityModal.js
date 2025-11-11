@@ -12,6 +12,7 @@ import { calculateUsdValueSync } from 'fum_library/services/coingecko';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
+import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice.js';
 
 export default function AddLiquidityModal({
@@ -29,7 +30,8 @@ export default function AddLiquidityModal({
   const { showError, showSuccess } = useToast();
 
   // Get wallet and chain data from Redux
-  const { address, chainId, provider } = useSelector(state => state.wallet);
+  const { address, chainId } = useSelector(state => state.wallet);
+  const { provider } = useProvider();
 
   // Get auto-refresh state to manage pausing during liquidity addition
   const { autoRefresh } = useSelector(state => state.updates);

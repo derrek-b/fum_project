@@ -575,7 +575,7 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
 
     for (const adapter of adapters) {
       try {
-        const result = await adapter.getPositions(vaultAddress, chainId);
+        const result = await adapter.getPositions(vaultAddress, provider);
 
         if (result?.positions?.length > 0) {
           // Mark positions as being in vault and collect IDs
@@ -1065,7 +1065,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     for (const adapter of userAdapters) {
       try {
         // Get all user positions
-        const result = await adapter.getPositions(userAddress, chainId);
+        const result = await adapter.getPositions(userAddress, provider);
 
         if (result?.positions?.length > 0) {
           // Filter out positions already in vaults

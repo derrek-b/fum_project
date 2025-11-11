@@ -17,6 +17,7 @@ import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
 import { useToast } from "../../context/ToastContext";import { AdapterFactory } from "fum_library/adapters";
+import { useProvider } from '../../contexts/ProviderContext';
 import { formatPrice, formatFeeDisplay } from "fum_library/helpers";
 import { fetchTokenPrices } from "fum_library/services";
 import { getPlatformColor, getPlatformLogo } from "../../dist/helpers/platformHelpers.js";
@@ -65,7 +66,8 @@ export default function PositionDetailPage() {
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
 
   const timerRef = useRef(null);

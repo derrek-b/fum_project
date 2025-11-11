@@ -4,6 +4,7 @@ import { Modal, Button, Form, Row, Col, Alert, Spinner, Badge, InputGroup } from
 import { useSelector, useDispatch } from 'react-redux';
 import { ethers } from 'ethers';
 import { useToast } from '../../context/ToastContext.js';
+import { useProvider } from '../../contexts/ProviderContext';
 import '../../redux/updateSlice.js';
 import '../../redux/vaultsSlice.js';
 import { AdapterFactory, getAdapter } from 'fum_library/adapters';
@@ -26,7 +27,8 @@ export default function VaultPositionModal({
   const { showError, showSuccess } = useToast();
 
   // Get wallet and chain data from Redux
-  const { address, chainId, provider } = useSelector(state => state.wallet);
+  const { address, chainId } = useSelector(state => state.wallet);
+  const { provider } = useProvider();
 
   // Get auto-refresh state to manage pausing during position creation
   const { autoRefresh } = useSelector(state => state.updates);

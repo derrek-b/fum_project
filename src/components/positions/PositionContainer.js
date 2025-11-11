@@ -20,11 +20,13 @@ import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
 import { useToast } from "../../context/ToastContext";
+import { useProvider } from '../../contexts/ProviderContext';
 
 export default function PositionContainer() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
-  const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
   const { userVaults } = useSelector((state) => state.vaults);

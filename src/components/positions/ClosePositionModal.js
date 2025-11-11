@@ -8,6 +8,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
+import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function ClosePositionModal({
@@ -24,7 +25,8 @@ export default function ClosePositionModal({
 }) {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
-  const { address, chainId, provider } = useSelector(state => state.wallet);
+  const { address, chainId } = useSelector(state => state.wallet);
+  const { provider } = useProvider();
 
   // State for burn option
   const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended

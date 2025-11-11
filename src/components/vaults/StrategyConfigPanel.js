@@ -7,6 +7,7 @@ import StrategyDetailsSection from './StrategyDetailsSection';
 import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
 import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
+import { useProvider } from '../../contexts/ProviderContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
 import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
@@ -22,7 +23,7 @@ const StrategyConfigPanel = ({
   onStrategyToggle
 }) => {
   const dispatch = useDispatch();
-  const provider = useSelector(state => state.wallet.provider);
+  const { provider } = useProvider();
   const chainId = useSelector(state => state.wallet.chainId);
   const availableStrategies = useSelector(state => state.strategies.availableStrategies);
 

@@ -5,6 +5,7 @@ import { useSelector } from "react-redux";
 import { ethers } from "ethers";
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
+import { useProvider } from "../../contexts/ProviderContext";
 import Image from "next/image";
 
 // Minimal ERC20 ABI with just the functions we need
@@ -31,8 +32,8 @@ const ERC20_ABI = [
 ];
 
 const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
-  const { address: userAddress, provider } = useSelector((state) => state.wallet);
-  const { chainId } = useSelector((state) => state.wallet);
+  const { address: userAddress, chainId } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const { showSuccess, showError } = useToast();
 
   // State

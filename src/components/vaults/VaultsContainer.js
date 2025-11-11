@@ -1,6 +1,7 @@
 // src/components/VaultsContainer.js
 import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
+import { useProvider } from '../../contexts/ProviderContext';
 import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-bootstrap";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
@@ -14,7 +15,8 @@ export default function VaultsContainer() {
   const dispatch = useDispatch();
 
   // Redux state
-  const { isConnected, address, chainId, provider } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const { userVaults } = useSelector((state) => state.vaults);
   const { lastUpdate } = useSelector((state) => state.updates);
 
@@ -88,10 +90,10 @@ export default function VaultsContainer() {
       });
   }
 
-  // Load data effect
+  // Load data effect - runs when wallet connection state changes
   useEffect(() => {
     loadData();
-  }, []);
+  }, [isConnected, address, provider, chainId]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {

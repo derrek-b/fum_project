@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { Modal, Button, Form, Spinner, Alert } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
+import { useProvider } from '../../contexts/ProviderContext';
 import { createVault } from 'fum_library/blockchain/contracts';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { useRouter } from "next/router";
@@ -16,7 +17,8 @@ export default function CreateVaultModal({
   const router = useRouter();
 
   // Get data from Redux store
-  const { provider, address } = useSelector((state) => state.wallet);
+  const { address } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
 
   // Form state for vault info
   const [vaultName, setVaultName] = useState("");

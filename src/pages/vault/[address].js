@@ -15,6 +15,7 @@ import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
 import AutomationModal from '../../components/vaults/AutomationModal';
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
+import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVault } from "../../redux/vaultsSlice";
 import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
@@ -72,7 +73,8 @@ export default function VaultDetailPage() {
   const { address: vaultAddress } = router.query;
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const { chainId, provider, address: userAddress } = useSelector((state) => state.wallet);
+  const { chainId, address: userAddress } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const lastUpdate = useSelector((state) => state.updates.lastUpdate);
   const vaultFromRedux = useSelector((state) =>
     state.vaults.userVaults.find(v => v.address === vaultAddress)
@@ -161,7 +163,7 @@ export default function VaultDetailPage() {
     if (vaultAddress) {
       loadData();
     }
-  }, [vaultAddress, userAddress, refreshTrigger]);
+  }, [vaultAddress, userAddress, provider, chainId, refreshTrigger]);
 
   // Add a forced refresh function
   const forceRefresh = useCallback(() => {

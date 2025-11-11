@@ -4,6 +4,7 @@ import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-boots
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
 import Image from "next/image";
+import { useProvider } from "../../contexts/ProviderContext";
 
 // FUM Library imports
 import { AdapterFactory } from "fum_library/adapters";
@@ -22,7 +23,8 @@ import Logo from "../../../public/Logo.svg"
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
   const router = useRouter();
-  const { address, chainId, provider } = useSelector((state) => state.wallet);
+  const { address, chainId } = useSelector((state) => state.wallet);
+  const { provider } = useProvider();
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const poolData = pools[position.poolAddress];

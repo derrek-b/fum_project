@@ -26,7 +26,6 @@ export const store = configureStore({
         // Add strategy-related actions to ignored actions
         ignoredActions: [
           "wallet/setWallet",
-          "wallet/setProvider",
           "positions/setPositions",
           "pools/setPools",
           "tokens/setTokens",
@@ -40,7 +39,6 @@ export const store = configureStore({
         // Add strategies to ignored paths
         ignoredPaths: [
           "wallet.chainId",
-          "wallet.provider",
           "positions.positions",
           "pools",
           "tokens",
