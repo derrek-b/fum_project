@@ -32,9 +32,10 @@ export default function Navbar() {
 
         <BSNavbar.Collapse id="main-navbar-nav">
           <Nav className="me-auto">
-            <Link href="/positions" passHref legacyBehavior>
+            {/* <Link href="/positions" passHref legacyBehavior>
               <Nav.Link active={isActive('/positions')}>Positions</Nav.Link>
-            </Link>
+            </Link> */}
+            <Nav.Link disabled>Positions</Nav.Link>
             <Link href="/vaults" passHref legacyBehavior>
               <Nav.Link active={isActive('/vaults') || isActive('/vault')}>Vaults</Nav.Link>
             </Link>

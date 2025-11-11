@@ -11,6 +11,7 @@ import { ethers } from "ethers";
 import Navbar from "../../components/Navbar";
 import PositionCard from "../../components/positions/PositionCard";
 import TokenDepositModal from "../../components/vaults/TokenDepositModal";
+import TokenWithdrawModal from "../../components/vaults/TokenWithdrawModal";
 import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
 import AutomationModal from '../../components/vaults/AutomationModal';
 import RefreshControls from "../../components/RefreshControls";
@@ -103,6 +104,8 @@ export default function VaultDetailPage() {
   const [pendingExecutorAddress, setPendingExecutorAddress] = useState('');
   const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
   const [validationMessages, setValidationMessages] = useState([]);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
 
   // Get strategy data from Redux
   const strategyConfig = strategyConfigs?.[vaultAddress];
@@ -198,9 +201,8 @@ export default function VaultDetailPage() {
       return;
     }
 
-    // Implementation would need to call a contract function on the vault
-    // to withdraw tokens to the owner's address
-    showError("Token withdrawal functionality not yet implemented");
+    setSelectedWithdrawToken(token);
+    setShowWithdrawModal(true);
   };
 
   // Handle the automation toggle
@@ -764,6 +766,19 @@ export default function VaultDetailPage() {
           show={showDepositModal}
           onHide={() => setShowDepositModal(false)}
           vaultAddress={vaultAddress}
+          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
+        />
+
+        {/* Token Withdraw Modal */}
+        <TokenWithdrawModal
+          show={showWithdrawModal}
+          onHide={() => {
+            setShowWithdrawModal(false);
+            setSelectedWithdrawToken(null);
+          }}
+          vaultAddress={vaultAddress}
+          token={selectedWithdrawToken}
+          ownerAddress={vaultFromRedux?.owner}
           onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
         />
 
