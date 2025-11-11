@@ -268,8 +268,8 @@ export default function VaultDetailPage() {
       // Get signer
       const signer = await provider.getSigner();
 
-      // Get vault contract
-      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+      // Get vault contract with signer
+      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
 
       // Check if the vault has a strategy set before enabling automation
       if (vaultFromRedux.strategyAddress === "0x0000000000000000000000000000000000000000") {

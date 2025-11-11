@@ -750,8 +750,9 @@ export default function VaultPositionModal({
     setOperationError(null);
 
     try {
-      // 1. Get the vault contract
-      const vaultContract = getVaultContract(vaultAddress, provider, await provider.getSigner());
+      // 1. Get the vault contract with signer
+      const signer = await provider.getSigner();
+      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
 
       // 2. Create ERC20 interfaces for approvals
       const erc20Interface = new ethers.utils.Interface([

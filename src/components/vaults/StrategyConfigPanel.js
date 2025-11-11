@@ -170,8 +170,8 @@ const StrategyConfigPanel = ({
       // Get signer
       const signer = await provider.getSigner();
 
-      // Get vault contract instance
-      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+      // Get vault contract instance with signer
+      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
 
       // First remove executor if one exists
       if (vault.executor !== '0x0000000000000000000000000000000000000000') {
@@ -312,7 +312,8 @@ const StrategyConfigPanel = ({
       setStrategyParams(newParams);
 
       // Check if parameters have changed using deep comparison
-      setParamsChanged(checkParametersChanged(newParams, initialParams));
+      const hasChanged = checkParametersChanged(newParams, initialParams);
+      setParamsChanged(hasChanged);
     }
 
     // Handle token selection with proper array comparison
@@ -418,37 +419,27 @@ const StrategyConfigPanel = ({
       // Get signer with await
       const signer = await provider.getSigner();
 
-      // Get the selected strategy details from the config
-      const strategyConfig = lookupAvailableStrategies().find(s => s.id === selectedStrategy);
+      // Get the selected strategy details from Redux store (has contractKey)
+      const strategyConfig = availableStrategies.find(s => s.id === selectedStrategy);
       if (!strategyConfig) {
         throw new Error(`Strategy configuration not found for ${selectedStrategy}`);
       }
 
-      // Get the contract address for the selected strategy
-      let strategyAddress;
-      Object.keys(contractData).forEach(contractKey => {
-        // Skip non-strategy contracts
-        if (['VaultFactory', 'PositionVault', 'BatchExecutor', 'ParrisIslandStrategy'].includes(contractKey)) {
-          return;
-        }
-
-        const addresses = contractData[contractKey].addresses || {};
-        if (addresses[chainId]) {
-          strategyAddress = addresses[chainId];
-        }
-      });
+      // Get the contract key and address for the selected strategy
+      const contractKey = strategyConfig.contractKey;
+      const strategyAddress = contractData[contractKey]?.addresses?.[chainId];
 
       if (!strategyAddress) {
         throw new Error(`Strategy ${selectedStrategy} not deployed on this network (Chain ID: ${chainId})`);
       }
 
-      // Get PositionVault contract instance
-      const vaultContract = getVaultContract(vaultAddress, provider, signer);
+      // Get PositionVault contract instance with signer
+      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
 
-      // Get strategy contract interface from config
+      // Get strategy contract interface from config using correct contract key
       const strategyContract = new ethers.Contract(
         strategyAddress,
-        contractData[selectedStrategy].abi,
+        contractData[contractKey].abi,
         signer
       );
 
@@ -547,7 +538,9 @@ const StrategyConfigPanel = ({
           const availableParams = groupParamIds.filter(paramId => strategyParams[paramId] !== undefined);
 
           // Skip if no parameters in this group or not all required parameters are available
-          if (availableParams.length === 0 || availableParams.length !== groupParamIds.length) continue;
+          if (availableParams.length === 0 || availableParams.length !== groupParamIds.length) {
+            continue;
+          }
 
           // Format parameters according to their types
           const formattedParams = groupParamIds.map(paramId => {

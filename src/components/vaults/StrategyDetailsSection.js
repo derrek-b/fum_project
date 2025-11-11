@@ -15,13 +15,11 @@ import {
 } from 'react-bootstrap';
 import { GearFill, InfoCircle, BookmarkStar, Wallet, Bank } from 'react-bootstrap-icons';
 import { useToast } from '../../context/ToastContext';
-import CustomParameterLayout from './CustomParameterLayout';
 import {
   getStrategyDetails,
   getStrategyParameters,
-  getStrategyLayouts,
   validateStrategyParams,
-  getDefaultParams,
+  getParamDefaultValues,
   getStrategyTemplates,
   getTemplateDefaults,
   shouldShowParameter,
@@ -85,7 +83,13 @@ const StrategyDetailsSection = ({
   // Get parameter groups
   const parameterGroups = useMemo(() => {
     if (!strategyDetails) return [];
-    return strategyDetails.parameterGroups || [];
+    const groups = strategyDetails.parameterGroups;
+    if (!groups) return [];
+    // Convert object with numeric keys to array
+    if (Array.isArray(groups)) return groups;
+    return Object.keys(groups)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(key => groups[key]);
   }, [strategyDetails]);
 
   // Get strategy templates/presets
@@ -113,24 +117,6 @@ const StrategyDetailsSection = ({
     return getAvailablePlatforms(chainId);
   }, [chainId]);
 
-  // Get layout configurations
-  const layouts = useMemo(() => {
-    if (!strategyId || strategyId === 'none') return {};
-
-    // Combine layouts from all steps into one object
-    const allLayouts = {};
-    const steps = strategyDetails?.totalParameterSteps || 0;
-
-    for (let step = 1; step <= steps; step++) {
-      const stepLayouts = getStrategyLayouts(strategyId, step + 2);
-      if (stepLayouts) {
-        Object.assign(allLayouts, stepLayouts);
-      }
-    }
-
-    return allLayouts;
-  }, [strategyId, strategyDetails]);
-
   // Initialize from current strategy config or defaults
   useEffect(() => {
     if (!strategyId || strategyId === 'none') {
@@ -157,7 +143,7 @@ const StrategyDetailsSection = ({
       }
     } else {
       // Otherwise use default parameters for the strategy
-      setParams(getDefaultParams(strategyId));
+      setParams(getParamDefaultValues(strategyId));
       setActivePreset('custom');
 
       // Reset tokens and platforms
@@ -606,65 +592,38 @@ const StrategyDetailsSection = ({
     );
   };
 
-  // Render group parameters using CustomParameterLayout
+  // Render group parameters
   const renderParameterGroup = (groupId) => {
-    // Filter layouts that belong to this group
-    const groupLayouts = Object.entries(layouts)
-      .filter(([key, layout]) => layout.groupId === groupId)
-      .map(([key, layout]) => ({
-        key,
-        ...layout
-      }));
+    // Get all parameters for this group
+    const groupParameters = Object.entries(parameterDefinitions)
+      .filter(([paramId, config]) => config.group === groupId)
+      .reduce((acc, [paramId, config]) => {
+        acc[paramId] = config;
+        return acc;
+      }, {});
 
-    if (groupLayouts.length === 0) {
-      // Fallback when no layout is defined - create a simple one
-      const groupParameters = Object.entries(parameterDefinitions)
-        .filter(([paramId, config]) => config.group === groupId)
-        .reduce((acc, [paramId, config]) => {
-          acc[paramId] = config;
-          return acc;
-        }, {});
-
-      if (Object.keys(groupParameters).length === 0) {
-        return null;
-      }
-
-      // Create a fallback layout
-      return (
-        <Card className="mb-3">
-          <Card.Body>
-            <Form>
-              {Object.entries(groupParameters).map(([paramId, config]) => {
-                // Use centralized conditional logic
-                if (!shouldShowParameter(config, params)) {
-                  return null;
-                }
-
-                return renderParameter(paramId, config);
-              })}
-            </Form>
-          </Card.Body>
-        </Card>
-      );
+    if (Object.keys(groupParameters).length === 0) {
+      return null;
     }
 
-    // Use custom layouts
-    return groupLayouts.map(layout => (
-      <CustomParameterLayout
-        key={layout.key}
-        layout={layout}
-        params={{
-          ...params,
-          _paramConfigs: parameterDefinitions  // Pass parameter configs for reference
-        }}
-        onParamChange={handleParamChange}
-        disabled={!editMode}
-        validationErrors={errors}
-      />
-    ));
+    return (
+      <Card className="mb-3">
+        <Card.Body>
+          <Form>
+            {Object.entries(groupParameters).map(([paramId, config]) => {
+              if (!shouldShowParameter(config, params)) {
+                return null;
+              }
+
+              return renderParameter(paramId, config);
+            })}
+          </Form>
+        </Card.Body>
+      </Card>
+    );
   };
 
-  // Render individual parameter (used in fallback mode)
+  // Render individual parameter
   const renderParameter = (paramId, config) => {
     const value = params[paramId] !== undefined ? params[paramId] : config.defaultValue;
 

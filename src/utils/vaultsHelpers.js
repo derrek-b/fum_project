@@ -10,7 +10,7 @@ import { ethers } from 'ethers';
 import { AdapterFactory } from 'fum_library/adapters';
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain';
 import { fetchTokenPrices } from 'fum_library/services';
-import { lookupAvailableStrategies, getStrategyParameters } from 'fum_library/helpers';
+import { lookupAvailableStrategies, getStrategyParameters, getStrategyParametersByContractGroup, getParameterSetterMethod } from 'fum_library/helpers';
 import { prefetchTokenPrices, calculateUsdValueSync } from './priceHelpers';
 import { getAllTokens } from 'fum_library/helpers';
 import contractData from 'fum_library/artifacts/contracts';
@@ -254,6 +254,25 @@ export const loadVaultStrategies = async (provider, chainId, dispatch, options =
       const addresses = strategyContractKey ?
         (contractData[strategyContractKey].addresses || {}) : {};
 
+      // Build contractParametersGroups with parameter lists
+      const contractParametersGroups = [];
+      if (strategy.contractParametersGroups) {
+        Object.keys(strategy.contractParametersGroups).forEach(groupId => {
+          // Get parameters for this contract group using library function
+          const groupParams = getStrategyParametersByContractGroup(strategy.id, groupId);
+          const paramIds = Object.keys(groupParams);
+
+          // Only include groups that have parameters
+          if (paramIds.length > 0) {
+            contractParametersGroups.push({
+              id: groupId,
+              setterMethod: getParameterSetterMethod(strategy.id, groupId),
+              parameters: paramIds
+            });
+          }
+        });
+      }
+
       // Return simplified strategy with addresses
       return {
         id: strategy.id,
@@ -265,7 +284,9 @@ export const loadVaultStrategies = async (provider, chainId, dispatch, options =
         supportsTemplates: !!strategy.templateEnumMap,
         templateEnumMap: strategy.templateEnumMap ? {...strategy.templateEnumMap} : null,
         hasGetAllParameters: true,
-        parameters: strategy.parameters || []
+        parameters: strategy.parameters || [],
+        contractParametersGroups: contractParametersGroups,
+        comingSoon: strategy.id !== 'bob' && strategy.id !== 'none' // Only Baby Steps and none are ready
       };
     });
 
