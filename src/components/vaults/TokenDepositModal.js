@@ -48,10 +48,21 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const tokens = getAllTokens();
   const tokenList = Object.values(tokens).filter(token => token.addresses[chainId]);
 
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!show) {
+      setSelectedToken(null);
+      setAmount("");
+      setUserBalance("0");
+      setError("");
+      setIsLoading(false);
+    }
+  }, [show]);
+
   // Fetch user's balance for selected token
   useEffect(() => {
     const fetchUserBalance = async () => {
-      if (!selectedToken || !userAddress || !provider) return;
+      if (!selectedToken || !userAddress || !provider || !show) return;
 
       setIsLoading(true);
       try {
@@ -71,7 +82,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     };
 
     fetchUserBalance();
-  }, [selectedToken, userAddress, provider, chainId]);
+  }, [selectedToken, userAddress, provider, chainId, show]);
 
   // Handle token selection
   const handleTokenSelect = (token) => {
@@ -121,14 +132,24 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
 
       showSuccess(`Successfully deposited ${amount} ${selectedToken.symbol} to vault`);
       setAmount("");
+      setIsSubmitting(false);
       if (onTokensUpdated) onTokensUpdated();
       onHide();
     } catch (err) {
-      console.error("Deposit error:", err);
-      setError(`Transaction failed: ${err.message}`);
-      showError("Token deposit failed");
-    } finally {
+      // Always set submitting to false first to prevent state update issues
       setIsSubmitting(false);
+
+      // Check if user cancelled the transaction
+      if (err.code === 'ACTION_REJECTED' || err.code === 4001 || err.message?.includes('user rejected')) {
+        // User cancelled - silently ignore, modal stays open
+        // Don't log to console to avoid triggering error boundaries
+        return;
+      }
+
+      // Real error - log and show user-friendly message
+      console.error("Deposit error:", err);
+      setError("Transaction failed. Please try again.");
+      showError("Token deposit failed");
     }
   };
 
