@@ -9,9 +9,9 @@ import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesS
 import { ethers } from 'ethers';
 import { AdapterFactory } from 'fum_library/adapters';
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain';
-import { fetchTokenPrices } from 'fum_library/services';
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services';
 import { lookupAvailableStrategies, getStrategyParameters, getStrategyParametersByContractGroup, getParameterSetterMethod } from 'fum_library/helpers';
-import { prefetchTokenPrices, calculateUsdValueSync } from './priceHelpers';
+import { calculateUsdValueSync } from './priceHelpers';
 import { getAllTokens } from 'fum_library/helpers';
 import contractData from 'fum_library/artifacts/contracts';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
@@ -474,8 +474,8 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
     // First, get all token symbols for prefetching prices
     const allSymbols = tokenAddresses.map(token => token.symbol);
 
-    // Prefetch all token prices at once to populate the cache
-    await prefetchTokenPrices(Array.from(new Set(allSymbols)));
+    // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
+    await fetchTokenPrices(Array.from(new Set(allSymbols)), CACHE_DURATIONS['30-SECONDS']);
     const tokenPricesLoaded = true;
 
     const tokenBalances = await Promise.all(
@@ -778,8 +778,8 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       let pricesFetchFailed = false;
 
       try {
-        // Prefetch all token prices at once to populate the cache
-        await prefetchTokenPrices(Array.from(tokenSymbols));
+        // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
+        await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
       } catch (error) {
         console.error(`Error prefetching token prices: ${error.message}`);
         pricesFetchFailed = true;
@@ -919,8 +919,8 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
         let pricesFetchFailed = false;
 
         try {
-          // Prefetch all token prices at once to populate the cache
-          await prefetchTokenPrices(Array.from(tokenSymbols));
+          // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
+          await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
         } catch (error) {
           console.error(`Error prefetching token prices: ${error.message}`);
           pricesFetchFailed = true;
@@ -1142,7 +1142,8 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     });
 
     try {
-      await prefetchTokenPrices(Array.from(allTokenSymbols));
+      // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
+      await fetchTokenPrices(Array.from(allTokenSymbols), CACHE_DURATIONS['30-SECONDS']);
     } catch (error) {
       console.warn("Error prefetching token prices:", error);
     }

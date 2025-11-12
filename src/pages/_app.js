@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { Provider } from "react-redux";
+import { Provider, useDispatch, useSelector } from "react-redux";
 import { store } from "../redux/store";
 import { ErrorBoundary } from 'react-error-boundary';
 import { ToastProvider } from '../context/ToastContext';
 import { ProviderProvider } from '../contexts/ProviderContext';
+import { triggerUpdate, markAutoRefresh } from '../redux/updateSlice';
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
@@ -28,6 +29,34 @@ function ErrorFallback({ error, resetErrorBoundary }) {
       </button>
     </div>
   );
+}
+
+// Auto-refresh hook - runs inside Redux Provider
+function AutoRefreshHandler() {
+  const dispatch = useDispatch();
+  const { autoRefresh } = useSelector((state) => state.updates);
+
+  useEffect(() => {
+    // Only set up interval if auto-refresh is enabled
+    if (!autoRefresh.enabled) {
+      return;
+    }
+
+    // Set up interval to trigger updates
+    const intervalId = setInterval(() => {
+      // Note: We don't clear cache here - let the 30s cache work naturally
+      // This reduces unnecessary API calls since CoinGecko caches for 30-60s anyway
+      dispatch(markAutoRefresh());
+      dispatch(triggerUpdate());
+    }, autoRefresh.interval);
+
+    // Cleanup interval on unmount or when settings change
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [autoRefresh.enabled, autoRefresh.interval, dispatch]);
+
+  return null; // This component doesn't render anything
 }
 
 export default function MyApp({ Component, pageProps }) {
@@ -75,6 +104,7 @@ export default function MyApp({ Component, pageProps }) {
           onReset={() => window.location.reload()}
         >
           <ToastProvider>
+            <AutoRefreshHandler />
             <Component {...pageProps} />
           </ToastProvider>
         </ErrorBoundary>

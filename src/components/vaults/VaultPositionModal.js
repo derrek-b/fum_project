@@ -9,7 +9,8 @@ import '../../redux/updateSlice.js';
 import '../../redux/vaultsSlice.js';
 import { AdapterFactory, getAdapter } from 'fum_library/adapters';
 import { formatPrice, formatUnits } from 'fum_library/helpers/formatHelpers';
-import { calculateUsdValueSync, prefetchTokenPrices } from '../../utils/priceHelpers';
+import { calculateUsdValueSync } from '../../utils/priceHelpers';
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { Pool } from '@uniswap/v3-sdk';
@@ -228,8 +229,10 @@ export default function VaultPositionModal({
   // Prefetch token prices
   useEffect(() => {
     if (token0Symbol && token1Symbol) {
-      // Prefetch prices for selected tokens
-      prefetchTokenPrices([token0Symbol, token1Symbol]);
+      // Fetch prices with 30s cache (aligns with CoinGecko's server cache)
+      fetchTokenPrices([token0Symbol, token1Symbol], CACHE_DURATIONS['30-SECONDS']).catch(err => {
+        console.error('Failed to fetch token prices:', err);
+      });
     }
   }, [token0Symbol, token1Symbol]);
 

@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Button, Form } from 'react-bootstrap';
 import { setAutoRefresh, triggerUpdate } from '../redux/updateSlice';
 import { useToast } from '../context/ToastContext';
+import { clearPriceCache } from 'fum_library/services';
 
 export default function RefreshControls() {
   const dispatch = useDispatch();
@@ -21,6 +22,8 @@ export default function RefreshControls() {
 
   const handleManualRefresh = () => {
     try {
+      // Clear price cache to force fresh prices on manual refresh
+      clearPriceCache();
       dispatch(triggerUpdate());
     } catch (error) {
       console.error("Error triggering manual refresh:", error);

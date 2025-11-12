@@ -92,7 +92,6 @@ export default function VaultDetailPage() {
   const [activeTab, setActiveTab] = useState('positions');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [isOwner, setIsOwner] = useState(false);
@@ -118,10 +117,9 @@ export default function VaultDetailPage() {
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
-
-    try {
+    // Only show loading spinner on initial load, not on refreshes
+    if (!vault) {
+      setIsLoading(true);
       // Use our loadVaultData utility function to load all the user's vault data
       const loadResult = await loadVaultData(userAddress, provider, chainId, dispatch, {
         showError,
@@ -131,15 +129,19 @@ export default function VaultDetailPage() {
       if (!loadResult.success) {
         setError(loadResult.err || "Failed to load user's vault data");
       }
+    }
 
-      // Use our getVaultData utility function to load vault data directly from chain
+    setError(null);
+
+    try {
+      // Load this specific vault's data
       const result = await getVaultData(vaultAddress, provider, chainId, dispatch, {
         showError,
         showSuccess
       });
 
       if (result.success) {
-        // Update vault info
+        // Update local vault info
         setVault(result.vault);
         setVaultPositions(result.positions || []);
 
@@ -166,33 +168,7 @@ export default function VaultDetailPage() {
     if (vaultAddress) {
       loadData();
     }
-  }, [vaultAddress, userAddress, provider, chainId, refreshTrigger]);
-
-  // Add a forced refresh function
-  const forceRefresh = useCallback(() => {
-    // Increment the refresh trigger to force a reload
-    setRefreshTrigger(prev => prev + 1);
-  }, []);
-
-  // Handle refresh
-  const handleRefresh = useCallback(() => {
-    // Show a loading message
-    showSuccess("Refreshing vault data...");
-
-    try {
-      // First force a Redux update
-      dispatch(triggerUpdate());
-
-      // Then force component refresh
-      forceRefresh();
-
-      // Also refresh token balances
-      loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch, { showError });
-    } catch (error) {
-      console.error("Error triggering refresh:", error);
-      showError("Failed to refresh data");
-    }
-  }, [dispatch, forceRefresh, loadVaultTokenBalances, showSuccess, showError]);
+  }, [vaultAddress, userAddress, provider, chainId, lastUpdate]);
 
   // Handle token withdrawal (for owner)
   const handleWithdrawToken = async (token) => {
@@ -417,7 +393,7 @@ export default function VaultDetailPage() {
         <ErrorBoundary
           FallbackComponent={ErrorFallback}
           onReset={() => {
-            handleRefresh();
+            window.location.reload();
           }}
         >
           <div className="d-flex justify-content-between align-items-center mb-3">

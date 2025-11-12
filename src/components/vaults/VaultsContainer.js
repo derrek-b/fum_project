@@ -90,10 +90,10 @@ export default function VaultsContainer() {
       });
   }
 
-  // Load data effect - runs when wallet connection state changes
+  // Load data effect - runs when wallet connection state changes or manual refresh
   useEffect(() => {
     loadData();
-  }, [isConnected, address, provider, chainId]);
+  }, [isConnected, address, provider, chainId, lastUpdate]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
