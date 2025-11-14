@@ -8,10 +8,9 @@ import { triggerUpdate } from '../redux/updateSlice';
 import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
 import { ethers } from 'ethers';
 import { AdapterFactory } from 'fum_library/adapters';
-import { getUserVaults, getVaultInfo } from 'fum_library/blockchain';
+import { getUserVaults, getVaultInfo, getVaultContract } from 'fum_library/blockchain';
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services';
-import { lookupAvailableStrategies, getStrategyParameters, getStrategyParametersByContractGroup, getParameterSetterMethod } from 'fum_library/helpers';
-import { calculateUsdValueSync } from './priceHelpers';
+import { lookupAvailableStrategies, mapStrategyParameters, getStrategyParametersByContractGroup, getParameterSetterMethod } from 'fum_library/helpers';
 import { getAllTokens } from 'fum_library/helpers';
 import contractData from 'fum_library/artifacts/contracts';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
@@ -51,89 +50,91 @@ const ERC20ABI = ERC20ARTIFACT.abi;
  * @param {Array} params - Parameters array from contract
  * @returns {object} Named parameters
  */
-const mapStrategyParameters = (strategyId, params) => {
-  try {
-    // Strategy-specific parameter mappings
-    if (strategyId.toLowerCase() === 'bob') {
-      return {
-        // Range Parameters
-        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
-        targetRangeLower: parseInt(params[1]) / 100,
-        rebalanceThresholdUpper: parseInt(params[2]) / 100,
-        rebalanceThresholdLower: parseInt(params[3]) / 100,
+// const mapStrategyParameters = (strategyId, params) => {
+//   try {
+//     // Strategy-specific parameter mappings
+//     if (strategyId.toLowerCase() === 'bob') {
+//       return {
+//         // Range Parameters
+//         targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+//         targetRangeLower: parseInt(params[1]) / 100,
+//         rebalanceThresholdUpper: parseInt(params[2]) / 100,
+//         rebalanceThresholdLower: parseInt(params[3]) / 100,
 
-        // Fee Settings
-        feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
-        reinvestmentRatio: parseInt(params[6]) / 100,
+//         // Fee Settings
+//         feeReinvestment: params[4],
+//         reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
+//         reinvestmentRatio: parseInt(params[6]) / 100,
 
-        // Risk Management
-        maxSlippage: parseInt(params[7]) / 100,
-        emergencyExitTrigger: parseInt(params[8]) / 100,
-        maxUtilization: parseInt(params[9]) / 100
-      };
-    }
-    else if (strategyId.toLowerCase() === 'parris') {
-      return {
-        // Range Parameters
-        targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
-        targetRangeLower: parseInt(params[1]) / 100,
-        rebalanceThresholdUpper: parseInt(params[2]) / 100,
-        rebalanceThresholdLower: parseInt(params[3]) / 100,
+//         // Risk Management
+//         maxSlippage: parseInt(params[7]) / 100,
+//         emergencyExitTrigger: parseInt(params[8]) / 100,
+//         maxUtilization: parseInt(params[9]) / 100
+//       };
+//     }
+//     else if (strategyId.toLowerCase() === 'parris') {
+//       return {
+//         // Range Parameters
+//         targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
+//         targetRangeLower: parseInt(params[1]) / 100,
+//         rebalanceThresholdUpper: parseInt(params[2]) / 100,
+//         rebalanceThresholdLower: parseInt(params[3]) / 100,
 
-        // Fee Settings
-        feeReinvestment: params[4],
-        reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
-        reinvestmentRatio: parseInt(params[6]) / 100,
+//         // Fee Settings
+//         feeReinvestment: params[4],
+//         reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
+//         reinvestmentRatio: parseInt(params[6]) / 100,
 
-        // Risk Management
-        maxSlippage: parseInt(params[7]) / 100,
-        emergencyExitTrigger: parseInt(params[8]) / 100,
-        maxVaultUtilization: parseInt(params[9]) / 100,
+//         // Risk Management
+//         maxSlippage: parseInt(params[7]) / 100,
+//         emergencyExitTrigger: parseInt(params[8]) / 100,
+//         maxVaultUtilization: parseInt(params[9]) / 100,
 
-        // Adaptive Settings
-        adaptiveRanges: params[10],
-        rebalanceCountThresholdHigh: parseInt(params[11]),
-        rebalanceCountThresholdLow: parseInt(params[12]),
-        adaptiveTimeframeHigh: parseInt(params[13]),
-        adaptiveTimeframeLow: parseInt(params[14]),
-        rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
-        thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
-        rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
-        thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
+//         // Adaptive Settings
+//         adaptiveRanges: params[10],
+//         rebalanceCountThresholdHigh: parseInt(params[11]),
+//         rebalanceCountThresholdLow: parseInt(params[12]),
+//         adaptiveTimeframeHigh: parseInt(params[13]),
+//         adaptiveTimeframeLow: parseInt(params[14]),
+//         rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
+//         thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
+//         rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
+//         thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
 
-        // Oracle Settings
-        oracleSource: parseInt(params[19]),
-        priceDeviationTolerance: parseInt(params[20]) / 100,
+//         // Oracle Settings
+//         oracleSource: parseInt(params[19]),
+//         priceDeviationTolerance: parseInt(params[20]) / 100,
 
-        // Position Sizing
-        maxPositionSizePercent: parseInt(params[21]) / 100,
-        minPositionSize: ethers.utils.formatUnits(params[22], 2),
-        targetUtilization: parseInt(params[23]) / 100,
+//         // Position Sizing
+//         maxPositionSizePercent: parseInt(params[21]) / 100,
+//         minPositionSize: ethers.utils.formatUnits(params[22], 2),
+//         targetUtilization: parseInt(params[23]) / 100,
 
-        // Platform Settings
-        platformSelectionCriteria: parseInt(params[24]),
-        minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
-      };
-    }
-    else if (strategyId.toLowerCase() === 'fed') {
-      return {
-        targetRange: parseInt(params[0]) / 100,
-        rebalanceThreshold: parseInt(params[1]) / 100,
-        feeReinvestment: params[2],
-        maxSlippage: parseInt(params[3]) / 100
-        // Add other Fed strategy parameters as needed
-      };
-    }
+//         // Platform Settings
+//         platformSelectionCriteria: parseInt(params[24]),
+//         minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
+//       };
+//     }
+//     else if (strategyId.toLowerCase() === 'fed') {
+//       return {
+//         targetRange: parseInt(params[0]) / 100,
+//         rebalanceThreshold: parseInt(params[1]) / 100,
+//         feeReinvestment: params[2],
+//         maxSlippage: parseInt(params[3]) / 100
+//         // Add other Fed strategy parameters as needed
+//       };
+//     }
 
-    // If we reach here, we don't know how to map this strategy
-    console.warn(`No parameter mapping defined for strategy ${strategyId}`);
-    return {};
-  } catch (error) {
-    console.error(`Error mapping strategy parameters for ${strategyId}:`, error);
-    return {};
-  }
-};
+//     // If we reach here, we don't know how to map this strategy
+//     console.warn(`No parameter mapping defined for strategy ${strategyId}`);
+//     return {};
+//   } catch (error) {
+//     console.error(`Error mapping strategy parameters for ${strategyId}:`, error);
+//     return {};
+//   }
+// };
+
+// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 /**
  * Fetch and map parameter values from a strategy contract
@@ -340,17 +341,8 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
     let strategyId = null;
 
     try {
-      // Enhanced vault contract with additional methods
-      const vaultContract = new ethers.Contract(
-        vaultAddress,
-        [
-          "function executor() view returns (address)",
-          "function strategy() view returns (address)",
-          "function getTargetTokens() view returns (string[])",
-          "function getTargetPlatforms() view returns (string[])"
-        ],
-        provider
-      );
+      // Get vault contract from library
+      const vaultContract = getVaultContract(vaultAddress, provider);
 
       // Get basic vault information
       [executor, strategyAddress] = await Promise.all([
@@ -475,7 +467,7 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
     const allSymbols = tokenAddresses.map(token => token.symbol);
 
     // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
-    await fetchTokenPrices(Array.from(new Set(allSymbols)), CACHE_DURATIONS['30-SECONDS']);
+    const prices = await fetchTokenPrices(Array.from(new Set(allSymbols)), CACHE_DURATIONS['30-SECONDS']);
     const tokenPricesLoaded = true;
 
     const tokenBalances = await Promise.all(
@@ -489,8 +481,9 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
           // Skip tokens with 0 balance
           if (numericalBalance === 0) return null;
 
-          // Get token price from our utility
-          const valueUsd = calculateUsdValueSync(formattedBalance, token.symbol);
+          // Calculate USD value
+          const price = prices[token.symbol];
+          const valueUsd = price ? numericalBalance * price : 0;
 
           return {
             ...token,
@@ -563,6 +556,8 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
     };
   }
 };
+
+// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 /**
  * Load positions for a vault from all adapters
@@ -671,6 +666,8 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
   }
 };
 
+// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 /**
  * Main function to load a specific vault's data and positions
  * @param {string} vaultAddress - The vault address
@@ -777,9 +774,10 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       // Fetch token prices
       let pricesFetchFailed = false;
 
+      let prices = {};
       try {
         // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
-        await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
+        prices = await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
       } catch (error) {
         console.error(`Error prefetching token prices: ${error.message}`);
         pricesFetchFailed = true;
@@ -804,16 +802,12 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
 
           if (!tokenBalances) continue;
 
-          // Use the sync version since we've already prefetched prices
-          const token0UsdValue = calculateUsdValueSync(
-            tokenBalances.token0.formatted,
-            data.token0Data.symbol
-          );
+          // Calculate USD values
+          const token0Price = prices[data.token0Data.symbol];
+          const token0UsdValue = token0Price ? parseFloat(tokenBalances.token0.formatted) * token0Price : null;
 
-          const token1UsdValue = calculateUsdValueSync(
-            tokenBalances.token1.formatted,
-            data.token1Data.symbol
-          );
+          const token1Price = prices[data.token1Data.symbol];
+          const token1UsdValue = token1Price ? parseFloat(tokenBalances.token1.formatted) * token1Price : null;
 
           if (token0UsdValue) totalTVL += token0UsdValue;
           if (token1UsdValue) totalTVL += token1UsdValue;
@@ -918,9 +912,10 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
         // Fetch token prices
         let pricesFetchFailed = false;
 
+        let prices = {};
         try {
           // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
-          await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
+          prices = await fetchTokenPrices(Array.from(tokenSymbols), CACHE_DURATIONS['30-SECONDS']);
         } catch (error) {
           console.error(`Error prefetching token prices: ${error.message}`);
           pricesFetchFailed = true;
@@ -945,16 +940,12 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
 
             if (!tokenBalances) continue;
 
-            // Use the sync version since we've already prefetched prices
-            const token0UsdValue = calculateUsdValueSync(
-              tokenBalances.token0.formatted,
-              data.token0Data.symbol
-            );
+            // Calculate USD values
+            const token0Price = prices[data.token0Data.symbol];
+            const token0UsdValue = token0Price ? parseFloat(tokenBalances.token0.formatted) * token0Price : null;
 
-            const token1UsdValue = calculateUsdValueSync(
-              tokenBalances.token1.formatted,
-              data.token1Data.symbol
-            );
+            const token1Price = prices[data.token1Data.symbol];
+            const token1UsdValue = token1Price ? parseFloat(tokenBalances.token1.formatted) * token1Price : null;
 
             if (token0UsdValue) totalTVL += token0UsdValue;
             if (token1UsdValue) totalTVL += token1UsdValue;
@@ -1141,9 +1132,10 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       }
     });
 
+    let prices = {};
     try {
       // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
-      await fetchTokenPrices(Array.from(allTokenSymbols), CACHE_DURATIONS['30-SECONDS']);
+      prices = await fetchTokenPrices(Array.from(allTokenSymbols), CACHE_DURATIONS['30-SECONDS']);
     } catch (error) {
       console.warn("Error prefetching token prices:", error);
     }
@@ -1208,16 +1200,12 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
               continue;
             }
 
-            // Use the sync version since we've already prefetched prices
-            const token0UsdValue = calculateUsdValueSync(
-              tokenBalances.token0.formatted,
-              data.token0Data.symbol
-            );
+            // Calculate USD values
+            const token0Price = prices[data.token0Data.symbol];
+            const token0UsdValue = token0Price ? parseFloat(tokenBalances.token0.formatted) * token0Price : null;
 
-            const token1UsdValue = calculateUsdValueSync(
-              tokenBalances.token1.formatted,
-              data.token1Data.symbol
-            );
+            const token1Price = prices[data.token1Data.symbol];
+            const token1UsdValue = token1Price ? parseFloat(tokenBalances.token1.formatted) * token1Price : null;
 
             if (token0UsdValue !== null) positionTVL += token0UsdValue;
             if (token1UsdValue !== null) positionTVL += token1UsdValue;

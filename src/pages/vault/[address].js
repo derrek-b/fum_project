@@ -22,7 +22,7 @@ import { updateVault } from "../../redux/vaultsSlice";
 import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
 import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
-import { fetchTokenPrices, prefetchTokenPrices, calculateUsdValueSync } from 'fum_library/services';
+import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
 import { validateTokensForStrategy } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';

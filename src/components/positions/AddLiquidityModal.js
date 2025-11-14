@@ -8,7 +8,6 @@ import { Token } from '@uniswap/sdk-core';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatPrice } from 'fum_library/helpers/formatHelpers';
-import { calculateUsdValueSync } from 'fum_library/services/coingecko';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
