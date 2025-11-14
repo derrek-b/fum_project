@@ -146,10 +146,10 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
         return;
       }
 
-      // Real error - log and show user-friendly message
+      // Real error - log and show user-friendly message in modal
       console.error("Deposit error:", err);
-      setError("Transaction failed. Please try again.");
-      showError("Token deposit failed");
+      const errorDetail = err.reason || err.message;
+      setError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 

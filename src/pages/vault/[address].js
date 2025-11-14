@@ -296,10 +296,23 @@ export default function VaultDetailPage() {
         showSuccess("Automation disabled successfully");
       }
     } catch (error) {
-      console.error("Error toggling automation:", error);
-      showError(`Failed to ${isEnablingAutomation ? 'enable' : 'disable'} automation: ${error.message}`);
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - silently revert UI state without logging or showing error
+        if (isEnablingAutomation) {
+          setAutomationEnabled(false);
+        } else {
+          setAutomationEnabled(true);
+        }
+        return;
+      }
 
-      // Revert the UI toggle state if there was an error
+      // Real error - log and show user-friendly message
+      console.error("Error toggling automation:", error);
+      const errorDetail = error.reason || error.message || "Unknown error";
+      showError(`Failed to ${isEnablingAutomation ? 'enable' : 'disable'} automation: ${errorDetail}`);
+
+      // Revert the UI toggle state
       if (isEnablingAutomation) {
         setAutomationEnabled(false);
       } else {

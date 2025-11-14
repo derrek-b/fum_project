@@ -38,7 +38,10 @@ export default function CreateVaultModal({
       const vaultAddress = await createVault(vaultName, signer);
       return vaultAddress;
     } catch (error) {
-      console.error("Error creating vault:", error);
+      // Only log if it's not a user rejection
+      if (error.code !== 'ACTION_REJECTED' && error.code !== 4001 && !error.message?.includes('user rejected')) {
+        console.error("Error creating vault:", error);
+      }
       throw error;
     }
   };
@@ -78,10 +81,20 @@ export default function CreateVaultModal({
       // Navigate to the vault details page
       router.push(`/vault/${vaultAddress}`);
     } catch (error) {
-      console.error("Error creating vault:", error);
-      setTxError(error.message || "Transaction failed");
-    } finally {
+      // Always set loading state to false first to prevent state update issues
       setIsCreatingVault(false);
+
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - silently ignore, modal stays open
+        // Don't log to console to avoid triggering error boundaries
+        return;
+      }
+
+      // Real error - log and show user-friendly message
+      console.error("Error creating vault:", error);
+      const errorDetail = error.reason || error.message;
+      setTxError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 

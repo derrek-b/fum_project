@@ -50,6 +50,7 @@ const StrategyConfigPanel = ({
   const [transactionSteps, setTransactionSteps] = useState([]);
   const [currentTransactionStep, setCurrentTransactionStep] = useState(0);
   const [transactionError, setTransactionError] = useState('');
+  const [transactionWarning, setTransactionWarning] = useState('');
   const [transactionLoading, setTransactionLoading] = useState(false);
 
   // Change tracking
@@ -159,82 +160,189 @@ const StrategyConfigPanel = ({
   const handleConfirmDeactivation = async () => {
     setShowDeactivationModal(false);
 
-    try {
-      // Set loading state
-      setIsLoading(true);
+    const hasExecutor = vault.executor !== '0x0000000000000000000000000000000000000000';
 
-      if (!provider) {
-        throw new Error("No provider available");
-      }
+    // Path A: Has executor (2 transactions) - use progress modal
+    if (hasExecutor) {
+      try {
+        setTransactionLoading(true);
 
-      // Get signer
-      const signer = await provider.getSigner();
-
-      // Get vault contract instance with signer
-      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
-
-      // First remove executor if one exists
-      if (vault.executor !== '0x0000000000000000000000000000000000000000') {
-        const removeExecutorTx = await vaultContract.removeExecutor();
-
-        // Wait for transaction to be mined
-        const executorReceipt = await removeExecutorTx.wait();
-
-        if (!executorReceipt.status) {
-          throw new Error("Failed to remove executor");
+        if (!provider) {
+          throw new Error("No provider available");
         }
+
+        // Get signer
+        const signer = await provider.getSigner();
+
+        // Get vault contract instance with signer
+        const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+
+        // Generate deactivation steps and show modal
+        const steps = generateDeactivationSteps(true);
+        setTransactionSteps(steps);
+        setCurrentTransactionStep(0);
+        setTransactionError('');
+        setTransactionWarning('');
+        setShowTransactionModal(true);
+
+        // TX 1: Remove executor
+        try {
+          setCurrentTransactionStep(0);
+          const removeExecutorTx = await vaultContract.removeExecutor();
+          await removeExecutorTx.wait();
+
+          // Update vault data in Redux
+          dispatch(updateVault({
+            vaultAddress,
+            vaultData: {
+              executor: '0x0000000000000000000000000000000000000000'
+            }
+          }));
+
+          setCurrentTransactionStep(1);
+        } catch (error) {
+          setTransactionLoading(false);
+
+          // Check if user cancelled
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            setTransactionWarning('Transaction cancelled. Strategy deactivation aborted.');
+            return;
+          }
+
+          // Real error - set specific message and throw
+          const errorMessage = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to remove executor: ${errorMessage}`);
+          throw error;
+        }
+
+        // TX 2: Remove strategy
+        try {
+          setCurrentTransactionStep(1);
+          const removeStrategyTx = await vaultContract.removeStrategy();
+          await removeStrategyTx.wait();
+          setCurrentTransactionStep(2);
+        } catch (error) {
+          setTransactionLoading(false);
+
+          // Check if user cancelled
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            setTransactionWarning('Executor removed but strategy deactivation cancelled. Strategy is still active. Please manually deactivate the strategy to complete the process.');
+            return;
+          }
+
+          // Real error - set specific message and throw
+          const errorMessage = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to remove strategy: ${errorMessage}`);
+          throw error;
+        }
+
+        // Success - clear strategy state
+        setSelectedStrategy('');
+        setEditMode(false);
 
         // Update vault data in Redux
         dispatch(updateVault({
           vaultAddress,
           vaultData: {
-            executor: '0x0000000000000000000000000000000000000000'
+            hasActiveStrategy: false,
+            strategyAddress: null
           }
         }));
-      }
 
-      // Now remove strategy
-      const removeStrategyTx = await vaultContract.removeStrategy();
+        // Update strategy state in Redux
+        dispatch(updateVaultStrategy({
+          vaultAddress,
+          strategy: {
+            isActive: false,
+            lastUpdated: Date.now()
+          }
+        }));
 
-      // Wait for transaction to be mined
-      const strategyReceipt = await removeStrategyTx.wait();
+        // Trigger data refresh
+        dispatch(triggerUpdate());
 
-      if (!strategyReceipt.status) {
-        throw new Error("Failed to remove strategy");
-      }
+        // Show success message
+        showSuccess("Strategy deactivated successfully");
+        setShowTransactionModal(false);
+        setTransactionLoading(false);
+      } catch (error) {
+        // Always set loading to false
+        setTransactionLoading(false);
 
-      // Clear strategy state
-      setSelectedStrategy('');
-      setEditMode(false);
-
-      // Update vault data in Redux
-      dispatch(updateVault({
-        vaultAddress,
-        vaultData: {
-          hasActiveStrategy: false,
-          strategyAddress: null
+        // Check if user cancelled (shouldn't reach here but defensive)
+        if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+          setTransactionWarning('Strategy deactivation cancelled.');
+          return;
         }
-      }));
 
-      // Update strategy state in Redux
-      dispatch(updateVaultStrategy({
-        vaultAddress,
-        strategy: {
-          isActive: false,
-          lastUpdated: Date.now()
+        // Real error - only set if not already set by nested catches
+        if (!transactionError) {
+          const errorMessage = error.reason || error.message || "Unknown error";
+          console.error("Strategy deactivation failed:", errorMessage);
+          setTransactionError(`Failed to deactivate strategy: ${errorMessage}`);
         }
-      }));
+        // Modal stays open to show which step failed
+      }
+    } else {
+      // Path B: No executor (1 transaction) - simple toast-based flow
+      try {
+        setIsLoading(true);
 
-      // Trigger data refresh
-      dispatch(triggerUpdate());
+        if (!provider) {
+          throw new Error("No provider available");
+        }
 
-      // Show success message
-      showSuccess("Strategy deactivated successfully");
-    } catch (error) {
-      console.error("Error deactivating strategy:", error);
-      showError(`Failed to deactivate strategy: ${error.message}`);
-    } finally {
-      setIsLoading(false);
+        // Get signer
+        const signer = await provider.getSigner();
+
+        // Get vault contract instance with signer
+        const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+
+        // Remove strategy
+        const removeStrategyTx = await vaultContract.removeStrategy();
+        await removeStrategyTx.wait();
+
+        // Clear strategy state
+        setSelectedStrategy('');
+        setEditMode(false);
+
+        // Update vault data in Redux
+        dispatch(updateVault({
+          vaultAddress,
+          vaultData: {
+            hasActiveStrategy: false,
+            strategyAddress: null
+          }
+        }));
+
+        // Update strategy state in Redux
+        dispatch(updateVaultStrategy({
+          vaultAddress,
+          strategy: {
+            isActive: false,
+            lastUpdated: Date.now()
+          }
+        }));
+
+        // Trigger data refresh
+        dispatch(triggerUpdate());
+
+        // Show success message
+        showSuccess("Strategy deactivated successfully");
+      } catch (error) {
+        // Check if user cancelled
+        if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+          // User cancelled - silently return
+          return;
+        }
+
+        // Real error - show toast with specific message
+        const errorMessage = error.reason || error.message || "Unknown error";
+        console.error("Error deactivating strategy:", errorMessage);
+        showError(`Failed to deactivate strategy: ${errorMessage}`);
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -346,16 +454,24 @@ const StrategyConfigPanel = ({
   };
 
   // Generate transaction steps based on what needs to be done
-  const generateTransactionSteps = () => {
+  const generateTransactionSteps = (needsAuthorization = false) => {
     const steps = [];
     const strategyConfig = availableStrategies.find(s => s.id === selectedStrategy);
     const strategyName = strategyConfig?.name || "Strategy";
+
+    // Step 0: Authorize vault in strategy contract if needed
+    if (needsAuthorization) {
+      steps.push({
+        title: `Authorize Vault`,
+        description: `Register this vault with the ${strategyName} strategy contract`,
+      });
+    }
 
     // Step 1: Set strategy if activating or changing
     if (!vault.strategyAddress || initialSelectedStrategy !== selectedStrategy) {
       steps.push({
         title: `Set Strategy Contract`,
-        description: `Authorize the ${strategyName} strategy for this vault`,
+        description: `Configure the vault to use the ${strategyName} strategy`,
       });
     }
 
@@ -375,21 +491,44 @@ const StrategyConfigPanel = ({
       });
     }
 
-    // Step 4: Select template if applicable
-    if (activePreset && templateChanged) {
+    // Step 4: Template & parameters (executed as single batched transaction)
+    const shouldShowParamStep = (activePreset && templateChanged) ||
+      ((activePreset === 'custom' || paramsChanged) && Object.keys(strategyParams).length > 0);
+
+    if (shouldShowParamStep) {
+      let description = `Configure the strategy parameters (preset: ${activePreset || 'none'})`;
+
+      // Add note about customizations if using preset with modifications
+      if (activePreset && activePreset !== 'custom' && paramsChanged) {
+        description += ' with custom modifications';
+      }
+
       steps.push({
-        title: `Select Strategy Template`,
-        description: `Apply the ${activePreset} template to set initial parameters`,
+        title: `Set Strategy Template & Parameters`,
+        description: description,
       });
     }
 
-    // Step 5: Set parameters if changed
-    if ((activePreset === 'custom' || paramsChanged) && Object.keys(strategyParams).length > 0) {
+    return steps;
+  };
+
+  // Generate deactivation steps based on whether executor needs to be removed
+  const generateDeactivationSteps = (hasExecutor) => {
+    const steps = [];
+
+    // Step 1: Remove executor if it exists
+    if (hasExecutor) {
       steps.push({
-        title: `Set Strategy Parameters`,
-        description: `Configure the detailed behavior of the strategy`,
+        title: 'Remove Executor',
+        description: 'Disable automation for this vault',
       });
     }
+
+    // Step 2: Remove strategy (always)
+    steps.push({
+      title: 'Remove Strategy',
+      description: 'Deactivate strategy contract',
+    });
 
     return steps;
   };
@@ -401,13 +540,6 @@ const StrategyConfigPanel = ({
       const isValid = validateFn();
       if (!isValid) return;
     }
-
-    // Generate transaction steps
-    const steps = generateTransactionSteps();
-    setTransactionSteps(steps);
-    setCurrentTransactionStep(0);
-    setTransactionError('');
-    setShowTransactionModal(true);
 
     try {
       setTransactionLoading(true);
@@ -451,48 +583,120 @@ const StrategyConfigPanel = ({
         console.warn("Strategy doesn't support vault authorization check:", authCheckError.message);
       }
 
+      // Generate transaction steps now that we know if authorization is needed
+      const steps = generateTransactionSteps(!isAuthorized);
+      setTransactionSteps(steps);
+      setCurrentTransactionStep(0);
+      setTransactionError('');
+      setTransactionWarning('');
+      setShowTransactionModal(true);
+
+      // Execute authorization if needed
       if (!isAuthorized) {
         try {
           // If not authorized, try to authorize it
+          setCurrentTransactionStep(0);
           const authTx = await strategyContract.authorizeVault(vaultAddress);
           await authTx.wait();
+          setCurrentTransactionStep(1);
         } catch (authError) {
-          console.warn("Strategy doesn't support vault authorization or failed:", authError.message);
+          // Always stop loading first
+          setTransactionLoading(false);
+
+          // Check if user cancelled the transaction
+          if (authError.code === 'ACTION_REJECTED' || authError.code === 4001 || authError.message?.includes('user rejected')) {
+            // User cancelled - set warning and keep modal open
+            setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+            return;
+          }
+
+          // Real error - set error message and throw to abort the entire process
+          const errorMessage = authError.reason || authError.message || "Unknown error";
+          setTransactionError(`Failed to authorize vault in strategy contract: ${errorMessage}`);
+          throw authError;
         }
       }
 
       // PART 1: Direct calls to PositionVault contract
 
-      // Step 1: Set strategy if needed
+      // Step: Set strategy if needed
       if (!vault.strategyAddress || !vault.hasActiveStrategy) {
-        setCurrentTransactionStep(0);
-        const setStrategyTx = await vaultContract.setStrategy(strategyAddress);
-        await setStrategyTx.wait();
-        setCurrentTransactionStep(1);
+        try {
+          // Find the correct step index
+          const stepIndex = steps.findIndex(step => step.title.includes('Set Strategy Contract'));
+          if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
+
+          const setStrategyTx = await vaultContract.setStrategy(strategyAddress);
+          await setStrategyTx.wait();
+          setCurrentTransactionStep(stepIndex + 1);
+        } catch (error) {
+          setTransactionLoading(false);
+
+          // Check if user cancelled
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+            return;
+          }
+
+          // Real error - set specific message and throw
+          const errorMessage = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to set strategy contract: ${errorMessage}`);
+          throw error;
+        }
       }
 
-      // Step 2: Set target tokens if needed
+      // Step: Set target tokens if needed
       if (selectedStrategy && selectedTokens.length > 0 && tokensChanged) {
-        // Find the correct step index
-        const stepIndex = steps.findIndex(step => step.title.includes('Target Tokens'));
-        if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
+        try {
+          // Find the correct step index
+          const stepIndex = steps.findIndex(step => step.title.includes('Target Tokens'));
+          if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
 
-        // Create a NEW array for tokens to avoid immutability issues
-        const setTokensTx = await vaultContract.setTargetTokens([...selectedTokens]);
-        await setTokensTx.wait();
-        setCurrentTransactionStep(stepIndex + 1);
+          // Create a NEW array for tokens to avoid immutability issues
+          const setTokensTx = await vaultContract.setTargetTokens([...selectedTokens]);
+          await setTokensTx.wait();
+          setCurrentTransactionStep(stepIndex + 1);
+        } catch (error) {
+          setTransactionLoading(false);
+
+          // Check if user cancelled
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+            return;
+          }
+
+          // Real error - set specific message and throw
+          const errorMessage = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to set target tokens: ${errorMessage}`);
+          throw error;
+        }
       }
 
-      // Step 3: Set target platforms if needed
+      // Step: Set target platforms if needed
       if (selectedStrategy && selectedPlatforms.length > 0 && platformsChanged) {
-        // Find the correct step index
-        const stepIndex = steps.findIndex(step => step.title.includes('Target Platforms'));
-        if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
+        try {
+          // Find the correct step index
+          const stepIndex = steps.findIndex(step => step.title.includes('Target Platforms'));
+          if (stepIndex >= 0) setCurrentTransactionStep(stepIndex);
 
-        // Create a NEW array for platforms to avoid immutability issues
-        const setPlatformsTx = await vaultContract.setTargetPlatforms([...selectedPlatforms]);
-        await setPlatformsTx.wait();
-        setCurrentTransactionStep(stepIndex + 1);
+          // Create a NEW array for platforms to avoid immutability issues
+          const setPlatformsTx = await vaultContract.setTargetPlatforms([...selectedPlatforms]);
+          await setPlatformsTx.wait();
+          setCurrentTransactionStep(stepIndex + 1);
+        } catch (error) {
+          setTransactionLoading(false);
+
+          // Check if user cancelled
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+            return;
+          }
+
+          // Real error - set specific message and throw
+          const errorMessage = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to set target platforms: ${errorMessage}`);
+          throw error;
+        }
       }
 
       // PART 2: Batch calls to Strategy contract through vault's execute function
@@ -593,8 +797,20 @@ const StrategyConfigPanel = ({
           // Set step to completed
           setCurrentTransactionStep(steps.length);
         } catch (error) {
-          console.error("Failed to execute strategy transactions:", error);
-          setTransactionError(`Failed to update strategy parameters: ${error.message}`);
+          // Always stop loading first
+          setTransactionLoading(false);
+
+          // Check if user cancelled the transaction
+          if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+            // User cancelled - set warning and keep modal open
+            setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+            return;
+          }
+
+          // Real error - parse meaningful message, keep modal open, and throw to main catch
+          const errorMessage = error.reason || error.message || "Unknown error";
+          console.error("Failed to execute strategy transactions:", errorMessage);
+          setTransactionError(`Failed to update strategy parameters: ${errorMessage}`);
           throw error;
         }
       } else {
@@ -645,10 +861,25 @@ const StrategyConfigPanel = ({
       setShowTransactionModal(false);
       setTransactionLoading(false);
     } catch (error) {
-      console.error("Error saving strategy configuration:", error);
-      setTransactionError(`Failed to save strategy: ${error.message}`);
-      showError(`Failed to save strategy: ${error.message}`);
+      // Always set loading to false first
       setTransactionLoading(false);
+
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - set warning and keep modal open
+        setTransactionWarning('Transaction cancelled. Strategy configuration incomplete. Automation cannot be enabled until all configuration steps are completed.');
+        return;
+      }
+
+      // Real error - parse meaningful message, log it, and keep modal open showing error
+      const errorMessage = error.reason || error.message || "Unknown error";
+      console.error("Strategy configuration failed:", errorMessage);
+
+      // Only set error if not already set by nested catches
+      if (!transactionError) {
+        setTransactionError(`Failed to save strategy: ${errorMessage}`);
+      }
+      // Modal stays open to show which step failed
     }
   };
 
@@ -677,6 +908,24 @@ const StrategyConfigPanel = ({
 
   // Close transaction modal
   const handleCloseTransactionModal = () => {
+    // Trigger data refresh to sync with blockchain state
+    dispatch(triggerUpdate());
+
+    // Reset all change tracking flags
+    setTemplateChanged(false);
+    setTokensChanged(false);
+    setPlatformsChanged(false);
+    setParamsChanged(false);
+    setHasUnsavedChanges(false);
+
+    // Exit edit mode
+    setEditMode(false);
+
+    // Clear error and warning messages
+    setTransactionError('');
+    setTransactionWarning('');
+
+    // Close the modal
     setShowTransactionModal(false);
   };
 
@@ -779,6 +1028,7 @@ const StrategyConfigPanel = ({
         onHide={() => setShowDeactivationModal(false)}
         onConfirm={handleConfirmDeactivation}
         strategyName={getStrategyName()}
+        hasExecutor={vault?.executor !== '0x0000000000000000000000000000000000000000'}
       />
 
       {/* Strategy Transaction Modal */}
@@ -787,13 +1037,14 @@ const StrategyConfigPanel = ({
         onHide={handleCloseTransactionModal}
         onCancel={() => {
           if (!transactionLoading) {
-            setShowTransactionModal(false);
+            handleCloseTransactionModal();
           }
         }}
         currentStep={currentTransactionStep}
         steps={transactionSteps}
         isLoading={transactionLoading}
         error={transactionError}
+        warning={transactionWarning}
         tokenSymbols={selectedTokens}
         strategyName={getStrategyName()}
       />

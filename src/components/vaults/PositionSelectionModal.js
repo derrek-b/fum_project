@@ -11,6 +11,7 @@ import { setPositionVaultStatus } from "../../redux/positionsSlice";
 import { addPositionToVault } from "../../redux/vaultsSlice";
 import { getPlatformById } from 'fum_library/helpers/platformHelpers';
 import { ethers } from "ethers";
+import StrategyTransactionModal from './StrategyTransactionModal';
 
 export default function PositionSelectionModal({
   show,
@@ -35,6 +36,14 @@ export default function PositionSelectionModal({
   // State for selected positions
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // State for progress modal
+  const [transactionSteps, setTransactionSteps] = useState([]);
+  const [currentTransactionStep, setCurrentTransactionStep] = useState(0);
+  const [transactionLoading, setTransactionLoading] = useState(false);
+  const [transactionError, setTransactionError] = useState("");
+  const [transactionWarning, setTransactionWarning] = useState("");
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
 
   // Check if we have the necessary data
   const poolsLoaded = Object.keys(pools).length > 0;
@@ -111,6 +120,27 @@ export default function PositionSelectionModal({
     });
   };
 
+  // Generate transaction steps for progress modal
+  const generateTransferSteps = (positionsToTransfer) => {
+    return positionsToTransfer.map(positionId => {
+      const position = positions.find(p => p.id === positionId);
+      if (!position) {
+        return {
+          title: `Transfer Position #${positionId}`,
+          description: 'Position data not found'
+        };
+      }
+
+      const tokenPair = position.tokenPair || 'Unknown pair';
+      const feeTier = position.fee ? `${position.fee / 10000}%` : 'Unknown fee';
+
+      return {
+        title: `Transfer Position #${positionId}`,
+        description: `${tokenPair} - ${feeTier}`
+      };
+    });
+  };
+
   // Handle position action (add or remove)
   const handleConfirm = async () => {
     if (selectedPositions.length === 0) {
@@ -118,101 +148,186 @@ export default function PositionSelectionModal({
       return;
     }
 
-    setIsProcessing(true);
+    // Conditional logic: single position = toast flow, multiple = progress modal flow
+    if (selectedPositions.length === 1) {
+      // Path A: Single position - simple toast-based flow
+      setIsProcessing(true);
 
-    try {
-      // Get the signer from the provider
-      const signer = await provider.getSigner();
+      try {
+        const positionId = selectedPositions[0];
+        const signer = await provider.getSigner();
 
-      // Process each selected position
-      const results = [];
+        // Find the position object from the positions array
+        const position = positions.find(p => p.id === positionId);
+        if (!position) {
+          throw new Error(`Position #${positionId} data not found`);
+        }
 
-      for (const positionId of selectedPositions) {
-        try {
-          // Find the position object from the positions array
-          const position = positions.find(p => p.id === positionId);
-          if (!position) {
-            throw new Error(`Position #${positionId} data not found`);
+        // Get the correct position manager address based on the position's platform
+        const platformInfo = getPlatformById(position.platform, chainId);
+        if (!platformInfo || !platformInfo.positionManagerAddress) {
+          throw new Error(`Position manager address not found for platform ${position.platform}`);
+        }
+
+        // Create contract instance for the NFT position manager
+        const nftPositionManager = new ethers.Contract(
+          platformInfo.positionManagerAddress,
+          [
+            'function safeTransferFrom(address from, address to, uint256 tokenId) external',
+            'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
+          ],
+          signer
+        );
+
+        // Use safeTransferFrom to transfer the position to the vault
+        const tx = await nftPositionManager.safeTransferFrom(
+          address,         // from (our wallet address)
+          vault.address,   // to (the vault)
+          positionId       // tokenId
+        );
+
+        await tx.wait();
+
+        // Update Redux store to mark this position as in vault
+        dispatch(setPositionVaultStatus({
+          positionId,
+          inVault: true,
+          vaultAddress: vault.address
+        }));
+
+        // Also update the vault's positions list
+        dispatch(addPositionToVault({
+          vaultAddress: vault.address,
+          positionId
+        }));
+
+        showSuccess(`Successfully added position #${positionId} to vault`);
+        dispatch(triggerUpdate(Date.now()));
+        onHide();
+      } catch (error) {
+        // Check if user cancelled the transaction
+        if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+          // User cancelled - silently ignore
+          return;
+        }
+
+        // Real error - log and show user-friendly message
+        console.error("Error adding position to vault:", error);
+        const errorDetail = error.reason || error.message || "Unknown error";
+        showError(`Failed to add position: ${errorDetail}`);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else {
+      // Path B: Multiple positions - progress modal flow
+      // Generate steps
+      const steps = generateTransferSteps(selectedPositions);
+      setTransactionSteps(steps);
+      setCurrentTransactionStep(0);
+      setTransactionLoading(true);
+      setTransactionError("");
+      setTransactionWarning("");
+      setShowTransactionModal(true);
+
+      try {
+        const signer = await provider.getSigner();
+
+        // Process each position with step tracking
+        for (let i = 0; i < selectedPositions.length; i++) {
+          const positionId = selectedPositions[i];
+          setCurrentTransactionStep(i);
+
+          try {
+            // Find the position object from the positions array
+            const position = positions.find(p => p.id === positionId);
+            if (!position) {
+              throw new Error(`Position #${positionId} data not found`);
+            }
+
+            // Get the correct position manager address based on the position's platform
+            const platformInfo = getPlatformById(position.platform, chainId);
+            if (!platformInfo || !platformInfo.positionManagerAddress) {
+              throw new Error(`Position manager address not found for platform ${position.platform}`);
+            }
+
+            // Create contract instance for the NFT position manager
+            const nftPositionManager = new ethers.Contract(
+              platformInfo.positionManagerAddress,
+              [
+                'function safeTransferFrom(address from, address to, uint256 tokenId) external',
+                'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
+              ],
+              signer
+            );
+
+            // Use safeTransferFrom to transfer the position to the vault
+            const tx = await nftPositionManager.safeTransferFrom(
+              address,         // from (our wallet address)
+              vault.address,   // to (the vault)
+              positionId       // tokenId
+            );
+
+            await tx.wait();
+
+            // Update Redux store to mark this position as in vault
+            dispatch(setPositionVaultStatus({
+              positionId,
+              inVault: true,
+              vaultAddress: vault.address
+            }));
+
+            // Also update the vault's positions list
+            dispatch(addPositionToVault({
+              vaultAddress: vault.address,
+              positionId
+            }));
+          } catch (posError) {
+            // Check if user cancelled
+            if (posError.code === 'ACTION_REJECTED' || posError.code === 4001 || posError.message?.includes('user rejected')) {
+              setTransactionLoading(false);
+              setTransactionWarning(`Transaction cancelled. ${i} of ${selectedPositions.length} position${selectedPositions.length !== 1 ? 's' : ''} transferred successfully. The remaining positions were not transferred.`);
+              return;
+            }
+
+            // Real error - set error and stop processing
+            setTransactionLoading(false);
+            const errorDetail = posError.reason || posError.message || "Unknown error";
+            setTransactionError(`Failed to transfer position #${positionId}: ${errorDetail}`);
+            throw posError;
           }
+        }
 
-          // Get the correct position manager address based on the position's platform
-          const platformInfo = getPlatformById(position.platform, chainId);
-          if (!platformInfo || !platformInfo.positionManagerAddress) {
-            throw new Error(`Position manager address not found for platform ${position.platform}`);
-          }
-
-          // Create contract instance for the NFT position manager
-          const nftPositionManager = new ethers.Contract(
-            platformInfo.positionManagerAddress,
-            [
-              'function safeTransferFrom(address from, address to, uint256 tokenId) external',
-              'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
-            ],
-            signer
-          );
-
-          // Use safeTransferFrom to transfer the position to the vault
-          const tx = await nftPositionManager.safeTransferFrom(
-            address,         // from (our wallet address)
-            vault.address,   // to (the vault)
-            positionId       // tokenId
-          );
-
-          const receipt = await tx.wait();
-
-          // Update Redux store to mark this position as in vault
-          dispatch(setPositionVaultStatus({
-            positionId,
-            inVault: true,
-            vaultAddress: vault.address
-          }));
-
-          // Also update the vault's positions list
-          dispatch(addPositionToVault({
-            vaultAddress: vault.address,
-            positionId
-          }));
-
-          results.push({
-            positionId,
-            platform: position.platform,
-            success: true,
-            txHash: receipt.hash
-          });
-        } catch (posError) {
-          console.error(`Error transferring position #${positionId}:`, posError);
-          results.push({
-            positionId,
-            success: false,
-            error: posError.message
-          });
+        // All transfers completed successfully
+        setTransactionLoading(false);
+        setCurrentTransactionStep(selectedPositions.length);
+        dispatch(triggerUpdate(Date.now()));
+      } catch (error) {
+        // Error already handled in per-position catch
+        // Only need to handle if not already set
+        if (!transactionError) {
+          setTransactionLoading(false);
+          const errorDetail = error.reason || error.message || "Unknown error";
+          setTransactionError(`Failed to transfer positions: ${errorDetail}`);
         }
       }
-
-      // Check results and show appropriate message
-      const successful = results.filter(r => r.success).length;
-      const failed = results.filter(r => !r.success).length;
-
-      if (successful > 0) {
-        showSuccess(`Successfully added ${successful} position${successful !== 1 ? 's' : ''} to vault`);
-
-        // Trigger a general update to refresh all data
-        dispatch(triggerUpdate(Date.now()));
-
-        // Close the modal
-        onHide();
-      }
-
-      if (failed > 0) {
-        const errorMsg = `Failed to add ${failed} position${failed !== 1 ? 's' : ''}`;
-        showError(errorMsg);
-      }
-    } catch (error) {
-      console.error("Error adding positions to vault:", error);
-      showError(`Failed to add positions: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
     }
+  };
+
+  // Handle closing the transaction modal
+  const handleCloseTransactionModal = () => {
+    // Reset all transaction state
+    setShowTransactionModal(false);
+    setTransactionSteps([]);
+    setCurrentTransactionStep(0);
+    setTransactionLoading(false);
+    setTransactionError("");
+    setTransactionWarning("");
+
+    // Trigger data refresh
+    dispatch(triggerUpdate(Date.now()));
+
+    // Close the parent modal
+    onHide();
   };
 
   // Get position details for display
@@ -362,6 +477,17 @@ export default function PositionSelectionModal({
           )}
         </Button>
       </Modal.Footer>
+
+      {/* Progress Modal for Multiple Position Transfers */}
+      <StrategyTransactionModal
+        show={showTransactionModal}
+        steps={transactionSteps}
+        currentStep={currentTransactionStep}
+        loading={transactionLoading}
+        error={transactionError}
+        warning={transactionWarning}
+        onClose={handleCloseTransactionModal}
+      />
     </Modal>
   );
 }

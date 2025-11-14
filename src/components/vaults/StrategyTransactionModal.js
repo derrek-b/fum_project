@@ -14,6 +14,7 @@ const StrategyTransactionModal = ({
   steps,
   isLoading,
   error,
+  warning,
   tokenSymbols = [],
   onCancel,
   strategyName
@@ -28,6 +29,13 @@ const StrategyTransactionModal = ({
           <Alert variant="danger" className="mb-3">
             <Alert.Heading>Error</Alert.Heading>
             <p>{error}</p>
+          </Alert>
+        )}
+
+        {warning && (
+          <Alert variant="warning" className="mb-3">
+            <Alert.Heading>Warning</Alert.Heading>
+            <p>{warning}</p>
           </Alert>
         )}
 

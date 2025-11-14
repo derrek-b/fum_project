@@ -87,10 +87,10 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
         return;
       }
 
-      // Real error - log and show user-friendly message
+      // Real error - log and show user-friendly message in modal
       console.error("Withdrawal error:", err);
-      setError("Transaction failed. Please try again.");
-      showError("Token withdrawal failed");
+      const errorDetail = err.reason || err.message;
+      setError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 
