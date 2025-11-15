@@ -3,13 +3,13 @@ import ReactDOM from 'react-dom';
 import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useRouter } from "next/router";
-import Image from "next/image";
+import { ethers } from "ethers";
 import { useProvider } from "../../contexts/ProviderContext";
 
 // FUM Library imports
 import { AdapterFactory } from "fum_library/adapters";
 import { formatPrice, formatFeeDisplay } from "fum_library/helpers/formatHelpers";
-import { fetchTokenPrices } from "fum_library/services/coingecko";
+import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingecko";
 import { getPlatformColor, getPlatformLogo, getPlatformName } from "fum_library/helpers/platformHelpers";
 
 // Local project imports
@@ -18,7 +18,6 @@ import RemoveLiquidityModal from "./RemoveLiquidityModal";
 import ClosePositionModal from "./ClosePositionModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { triggerUpdate } from "../../redux/updateSlice";
-import Logo from "../../../public/Logo.svg"
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const dispatch = useDispatch();
@@ -26,10 +25,11 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const { address, chainId } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
   const pools = useSelector((state) => state.pools);
-  const tokens = useSelector((state) => state.tokens);
-  const poolData = pools[position.poolAddress];
-  const token0Data = poolData?.token0 ? tokens[poolData.token0] : null;
-  const token1Data = poolData?.token1 ? tokens[poolData.token1] : null;
+  const poolData = pools[position.pool];
+
+  // Token data is embedded in pool data from the adapter
+  const token0Data = poolData?.token0 || null;
+  const token1Data = poolData?.token1 || null;
 
   // Reference for the card and dropdown state
   const cardRef = useRef(null);
@@ -54,8 +54,8 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
   // Use adapter for position-specific calculations
   const isActive = useMemo(() => {
-    if (!adapter) return false;
-    return adapter.isPositionInRange(position, poolData);
+    if (!adapter || !poolData || typeof poolData.tick !== 'number') return false;
+    return adapter.isPositionInRange(poolData.tick, position.tickLower, position.tickUpper);
   }, [adapter, position, poolData]);
 
   // State for price display direction
@@ -63,16 +63,42 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
   // Calculate price information using the adapter
   const priceInfo = useMemo(() => {
-    if (!adapter) return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
+    if (!adapter || !poolData || !token0Data || !token1Data) {
+      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
+    }
 
-    return adapter.calculatePrice(
-      position,
-      poolData,
-      token0Data,
-      token1Data,
-      invertPriceDisplay
-    );
-  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay]);
+    try {
+      const baseToken = invertPriceDisplay ? token0Data : token1Data;
+      const quoteToken = invertPriceDisplay ? token1Data : token0Data;
+
+      const currentPrice = adapter.calculatePriceFromSqrtPrice(
+        poolData.sqrtPriceX96,
+        baseToken,
+        quoteToken
+      );
+      const lowerPrice = adapter.tickToPrice(
+        position.tickLower,
+        baseToken,
+        quoteToken,
+        chainId
+      );
+      const upperPrice = adapter.tickToPrice(
+        position.tickUpper,
+        baseToken,
+        quoteToken,
+        chainId
+      );
+
+      return {
+        currentPrice: currentPrice?.toSignificant(6) || "N/A",
+        lowerPrice: lowerPrice?.toSignificant(6) || "N/A",
+        upperPrice: upperPrice?.toSignificant(6) || "N/A"
+      };
+    } catch (error) {
+      console.error("Error calculating prices:", error);
+      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
+    }
+  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay, chainId]);
 
   // Extract values from priceInfo
   const { currentPrice, lowerPrice, upperPrice } = priceInfo;
@@ -180,9 +206,9 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
       setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
 
       try {
-        // Use our utility function to fetch prices
+        // Use our utility function to fetch prices (2-minute cache for dashboard display)
         const tokenSymbols = [token0Data.symbol, token1Data.symbol];
-        const prices = await fetchTokenPrices(tokenSymbols);
+        const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['2-MINUTES']);
 
         setTokenPrices({
           token0: prices[token0Data.symbol],
@@ -260,12 +286,25 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
     const loadFees = async () => {
       try {
-        // Check if position's specific ticks exist in poolData
-        const fees = await adapter.calculateFees(position, poolData, token0Data, token1Data);
+        // Calculate raw fees (returns [bigint, bigint])
+        const [fees0Raw, fees1Raw] = adapter.calculateUncollectedFees(position, poolData);
+
+        // Format the fees using token decimals (ethers v5 uses utils.formatUnits)
+        const fees0Formatted = ethers.utils.formatUnits(fees0Raw.toString(), token0Data.decimals);
+        const fees1Formatted = ethers.utils.formatUnits(fees1Raw.toString(), token1Data.decimals);
 
         // Only update state if component is still mounted
         if (isMounted) {
-          setUncollectedFees(fees);
+          setUncollectedFees({
+            token0: {
+              formatted: fees0Formatted,
+              raw: fees0Raw.toString()
+            },
+            token1: {
+              formatted: fees1Formatted,
+              raw: fees1Raw.toString()
+            }
+          });
           setIsLoadingFees(false);
         }
       } catch (error) {
@@ -464,7 +503,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                   title="Position is in a vault"
                 >
                   <span>
-                    <Image width={18} height={18} alt="Vault indicator" src={Logo} />
+                    <img width={18} height={18} alt="Vault indicator" src="/Logo.svg" />
                   </span>
                 </div>
               )}
@@ -674,10 +713,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
             ) : uncollectedFees ? (
               <>
                 <Badge bg="light" text="dark" className="me-1">
-                  {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+                  {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data.symbol}
                 </Badge>
                 <Badge bg="light" text="dark">
-                  {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+                  {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data.symbol}
                 </Badge>
               </>
             ) : (

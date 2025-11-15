@@ -592,10 +592,11 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
     for (const adapter of adapters) {
       try {
         const result = await adapter.getPositions(vaultAddress, provider);
+        const positionsArray = result?.positions ? Object.values(result.positions) : [];
 
-        if (result?.positions?.length > 0) {
+        if (positionsArray.length > 0) {
           // Mark positions as being in vault and collect IDs
-          result.positions.forEach(position => {
+          positionsArray.forEach(position => {
             positionIds.push(position.id);
             vaultPositions.push({
               ...position,
@@ -1068,20 +1069,25 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 4. Get all user positions that aren't in vaults
+    console.log(`🔍 Loading user positions for address: ${userAddress}`);
     const vaultPositionIds = new Set(allPositions.map(p => p.id));
     const { adapters: userAdapters, failures: userAdapterFailures } = AdapterFactory.getAdaptersForChain(chainId, provider);
+    console.log(`📦 Found ${userAdapters.length} adapters for chain ${chainId}`);
     if (userAdapterFailures.length > 0) {
       console.warn(`Failed to create some adapters for user positions:`, userAdapterFailures);
     }
 
     for (const adapter of userAdapters) {
       try {
+        console.log(`🔎 Fetching positions from adapter: ${adapter.constructor.name}`);
         // Get all user positions
         const result = await adapter.getPositions(userAddress, provider);
+        const positionsArray = result?.positions ? Object.values(result.positions) : [];
+        console.log(`📊 Adapter ${adapter.constructor.name} returned:`, positionsArray.length, 'positions');
 
-        if (result?.positions?.length > 0) {
+        if (positionsArray.length > 0) {
           // Filter out positions already in vaults
-          const nonVaultPositions = result.positions
+          const nonVaultPositions = positionsArray
             .filter(position => !vaultPositionIds.has(position.id))
             .map(position => ({
               ...position,
@@ -1116,6 +1122,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 6. Update Redux with ALL positions (vault and non-vault)
+    console.log(`✅ Dispatching ${allPositions.length} total positions to Redux`);
+    console.log(`   - Vault positions: ${allPositions.filter(p => p.inVault).length}`);
+    console.log(`   - Wallet positions: ${allPositions.filter(p => !p.inVault).length}`);
     dispatch(setPositions(allPositions));
 
     // 7. Prefetch all token prices at once to make TVL calculations faster

@@ -8,8 +8,9 @@ import { useProvider } from '../../contexts/ProviderContext';
 import { platforms } from 'fum_library/configs';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
-import { addPositionToVault } from "../../redux/vaultsSlice";
-import { getPlatformById } from 'fum_library/helpers/platformHelpers';
+import { addPositionToVault, removePositionFromVault } from "../../redux/vaultsSlice";
+import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
+import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
 import StrategyTransactionModal from './StrategyTransactionModal';
 
@@ -164,44 +165,59 @@ export default function PositionSelectionModal({
         }
 
         // Get the correct position manager address based on the position's platform
-        const platformInfo = getPlatformById(position.platform, chainId);
+        const platformInfo = lookupPlatformById(position.platform, chainId);
         if (!platformInfo || !platformInfo.positionManagerAddress) {
           throw new Error(`Position manager address not found for platform ${position.platform}`);
         }
 
-        // Create contract instance for the NFT position manager
-        const nftPositionManager = new ethers.Contract(
-          platformInfo.positionManagerAddress,
-          [
-            'function safeTransferFrom(address from, address to, uint256 tokenId) external',
-            'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
-          ],
-          signer
-        );
-
-        // Use safeTransferFrom to transfer the position to the vault
-        const tx = await nftPositionManager.safeTransferFrom(
-          address,         // from (our wallet address)
-          vault.address,   // to (the vault)
-          positionId       // tokenId
-        );
+        let tx;
+        if (mode === 'add') {
+          // Add: Transfer position from user wallet to vault
+          const nftPositionManager = new ethers.Contract(
+            platformInfo.positionManagerAddress,
+            [
+              'function safeTransferFrom(address from, address to, uint256 tokenId) external'
+            ],
+            signer
+          );
+          tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
+        } else {
+          // Remove: Call vault's withdrawPosition method
+          const vaultContract = getVaultContract(vault.address, provider);
+          const vaultWithSigner = vaultContract.connect(signer);
+          tx = await vaultWithSigner.withdrawPosition(
+            platformInfo.positionManagerAddress,
+            positionId,
+            address
+          );
+        }
 
         await tx.wait();
 
-        // Update Redux store to mark this position as in vault
-        dispatch(setPositionVaultStatus({
-          positionId,
-          inVault: true,
-          vaultAddress: vault.address
-        }));
-
-        // Also update the vault's positions list
-        dispatch(addPositionToVault({
-          vaultAddress: vault.address,
-          positionId
-        }));
-
-        showSuccess(`Successfully added position #${positionId} to vault`);
+        // Update Redux store based on mode
+        if (mode === 'add') {
+          dispatch(setPositionVaultStatus({
+            positionId,
+            inVault: true,
+            vaultAddress: vault.address
+          }));
+          dispatch(addPositionToVault({
+            vaultAddress: vault.address,
+            positionId
+          }));
+          showSuccess(`Successfully added position #${positionId} to vault`);
+        } else {
+          dispatch(setPositionVaultStatus({
+            positionId,
+            inVault: false,
+            vaultAddress: null
+          }));
+          dispatch(removePositionFromVault({
+            vaultAddress: vault.address,
+            positionId
+          }));
+          showSuccess(`Successfully removed position #${positionId} from vault`);
+        }
         dispatch(triggerUpdate(Date.now()));
         onHide();
       } catch (error) {
@@ -212,9 +228,10 @@ export default function PositionSelectionModal({
         }
 
         // Real error - log and show user-friendly message
-        console.error("Error adding position to vault:", error);
+        const action = mode === 'add' ? 'adding position to' : 'removing position from';
+        console.error(`Error ${action} vault:`, error);
         const errorDetail = error.reason || error.message || "Unknown error";
-        showError(`Failed to add position: ${errorDetail}`);
+        showError(`Failed to ${mode} position: ${errorDetail}`);
       } finally {
         setIsProcessing(false);
       }
@@ -245,42 +262,57 @@ export default function PositionSelectionModal({
             }
 
             // Get the correct position manager address based on the position's platform
-            const platformInfo = getPlatformById(position.platform, chainId);
+            const platformInfo = lookupPlatformById(position.platform, chainId);
             if (!platformInfo || !platformInfo.positionManagerAddress) {
               throw new Error(`Position manager address not found for platform ${position.platform}`);
             }
 
-            // Create contract instance for the NFT position manager
-            const nftPositionManager = new ethers.Contract(
-              platformInfo.positionManagerAddress,
-              [
-                'function safeTransferFrom(address from, address to, uint256 tokenId) external',
-                'function safeTransferFrom(address from, address to, uint256 tokenId, bytes data) external'
-              ],
-              signer
-            );
-
-            // Use safeTransferFrom to transfer the position to the vault
-            const tx = await nftPositionManager.safeTransferFrom(
-              address,         // from (our wallet address)
-              vault.address,   // to (the vault)
-              positionId       // tokenId
-            );
+            let tx;
+            if (mode === 'add') {
+              // Add: Transfer position from user wallet to vault
+              const nftPositionManager = new ethers.Contract(
+                platformInfo.positionManagerAddress,
+                [
+                  'function safeTransferFrom(address from, address to, uint256 tokenId) external'
+                ],
+                signer
+              );
+              tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
+            } else {
+              // Remove: Call vault's withdrawPosition method
+              const vaultContract = getVaultContract(vault.address, provider);
+              const vaultWithSigner = vaultContract.connect(signer);
+              tx = await vaultWithSigner.withdrawPosition(
+                platformInfo.positionManagerAddress,
+                positionId,
+                address
+              );
+            }
 
             await tx.wait();
 
-            // Update Redux store to mark this position as in vault
-            dispatch(setPositionVaultStatus({
-              positionId,
-              inVault: true,
-              vaultAddress: vault.address
-            }));
-
-            // Also update the vault's positions list
-            dispatch(addPositionToVault({
-              vaultAddress: vault.address,
-              positionId
-            }));
+            // Update Redux store based on mode
+            if (mode === 'add') {
+              dispatch(setPositionVaultStatus({
+                positionId,
+                inVault: true,
+                vaultAddress: vault.address
+              }));
+              dispatch(addPositionToVault({
+                vaultAddress: vault.address,
+                positionId
+              }));
+            } else {
+              dispatch(setPositionVaultStatus({
+                positionId,
+                inVault: false,
+                vaultAddress: null
+              }));
+              dispatch(removePositionFromVault({
+                vaultAddress: vault.address,
+                positionId
+              }));
+            }
           } catch (posError) {
             // Check if user cancelled
             if (posError.code === 'ACTION_REJECTED' || posError.code === 4001 || posError.message?.includes('user rejected')) {

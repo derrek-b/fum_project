@@ -14,6 +14,7 @@ import TokenDepositModal from "../../components/vaults/TokenDepositModal";
 import TokenWithdrawModal from "../../components/vaults/TokenWithdrawModal";
 import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
 import AutomationModal from '../../components/vaults/AutomationModal';
+import PositionSelectionModal from "../../components/vaults/PositionSelectionModal";
 import RefreshControls from "../../components/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { useProvider } from '../../contexts/ProviderContext';
@@ -91,6 +92,8 @@ export default function VaultDetailPage() {
   const [vaultPositions, setVaultPositions] = useState([]);
   const [activeTab, setActiveTab] = useState('positions');
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showPositionModal, setShowPositionModal] = useState(false);
+  const [positionModalMode, setPositionModalMode] = useState('add');
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -605,6 +608,30 @@ export default function VaultDetailPage() {
             <Tab eventKey="positions" title="Positions">
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h5 className="mb-0">Vault Positions</h5>
+                {isOwner && (
+                  <div className="d-flex gap-2">
+                    <Button
+                      variant="outline-primary"
+                      onClick={() => {
+                        setPositionModalMode('add');
+                        setShowPositionModal(true);
+                      }}
+                      disabled={automationEnabled}
+                    >
+                      + Add Positions
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      onClick={() => {
+                        setPositionModalMode('remove');
+                        setShowPositionModal(true);
+                      }}
+                      disabled={automationEnabled || vaultPositions.length === 0}
+                    >
+                      - Remove Positions
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {vaultPositions.length === 0 ? (
@@ -779,6 +806,17 @@ export default function VaultDetailPage() {
           executorAddress={pendingExecutorAddress}
           onConfirm={handleConfirmAutomation}
           validationMessages={validationMessages}
+        />
+
+        {/* Position Selection Modal */}
+        <PositionSelectionModal
+          show={showPositionModal}
+          onHide={() => setShowPositionModal(false)}
+          vault={vault}
+          pools={pools}
+          tokens={tokens}
+          chainId={chainId}
+          mode={positionModalMode}
         />
       </Container>
     </>
