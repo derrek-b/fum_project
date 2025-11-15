@@ -251,82 +251,8 @@ async prefetchTokenPrices(symbols: string[]): Promise<void>
 await fetchTokenPrices(['ETH', 'USDC', 'DAI', 'WBTC'], '2-MINUTES');
 
 // Prices are now cached for fast access
-const usdcValue = calculateUsdValueSync(100, 'USDC'); // Uses cached price
-```
-
-## Value Calculations
-
-### calculateUsdValue
-
-Calculates USD value of a token amount (async, fetches price if needed).
-
-**⚠️ Note**: This function is currently broken in the codebase as it calls `fetchTokenPrices` without the required `cacheStrategy` parameter.
-
-#### Signature
-```javascript
-async calculateUsdValue(amount: string | number, symbol: string): Promise<number | null>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| amount | `string \| number` | Yes | Token amount |
-| symbol | `string` | Yes | Token symbol |
-
-#### Returns
-
-`Promise<number | null>` - USD value or null if price not available
-
-#### Example
-
-```javascript
-// Calculate value of 10 ETH
-const ethValue = await calculateUsdValue(10, 'ETH');
-// 23456.7 (10 * 2345.67)
-
-// Calculate value with string amount
-const usdcValue = await calculateUsdValue('1000.50', 'USDC');
-// 1000.5
-
-// Unknown token
-const unknownValue = await calculateUsdValue(100, 'UNKNOWN');
-// null
-```
-
-### calculateUsdValueSync
-
-Calculates USD value synchronously using only cached prices.
-
-#### Signature
-```javascript
-calculateUsdValueSync(amount: string | number, symbol: string): number | null
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| amount | `string \| number` | Yes | Token amount |
-| symbol | `string` | Yes | Token symbol |
-
-#### Returns
-
-`number | null` - USD value or null if price not in cache
-
-#### Example
-
-```javascript
-// Ensure prices are cached first
-await fetchTokenPrices(['ETH', 'USDC'], '1-MINUTE');
-
-// Calculate synchronously
-const ethValue = calculateUsdValueSync(5, 'ETH');
-// 11728.35 (5 * 2345.67)
-
-// Not in cache
-const btcValue = calculateUsdValueSync(1, 'BTC');
-// null (unless BTC was previously fetched)
+const prices = await fetchTokenPrices(['USDC'], '30-SECONDS');
+const usdcValue = prices['USDC'] ? 100 * prices['USDC'] : 0;
 ```
 
 ## Cache Management

@@ -46,9 +46,7 @@ export async function getContract(contractName, provider) {
   }
 
   // Get network information
-  console.time('🔍 provider.getNetwork');
   const network = await provider.getNetwork();
-  console.timeEnd('🔍 provider.getNetwork');
   if (!network || !network.chainId) {
     throw new Error('Provider network not available. Cannot determine which contracts to use.');
   }
@@ -68,13 +66,11 @@ export async function getContract(contractName, provider) {
     throw new Error(`No ${contractName} deployment found for network ${chainId}`);
   }
 
-  console.time('🔍 new ethers.Contract');
   const contract = new ethers.Contract(
     address,
     contractInfo.abi,
     provider
   );
-  console.timeEnd('🔍 new ethers.Contract');
   return contract;
 }
 
@@ -130,7 +126,6 @@ export function getVaultFactoryAddress(chainId) {
  * @since 1.0.0
  */
 export async function createVault(name, signer) {
-  console.log('🔍 createVault START - name:', name);
   // Validate name parameter
   if (typeof name !== 'string') {
     throw new Error('Name must be a string');

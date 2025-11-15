@@ -387,7 +387,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @throws {Error} If provider is invalid or on wrong chain
    */
   async _validateProviderChain(provider) {
-    // Validate provider using ethers v6 pattern
+    // Validate provider using ethers pattern
     if (!(provider instanceof ethers.providers.Provider)) {
       throw new Error('Invalid provider. Must be an ethers provider instance.');
     }

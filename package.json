@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -46,7 +46,7 @@
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
-    "pack": "npm run build && npm pack && cd ../fum_automation && npm uninstall fum_library && npm install file:../fum_library/fum_library-0.21.0.tgz",
+    "pack": "npm run build && npm pack && (cd ../fum_automation && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum_automation && npm install file:../fum_library/fum_library-0.21.1.tgz) && (cd ../fum && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum && npm install file:../fum_library/fum_library-0.21.1.tgz --legacy-peer-deps --force)",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -60,13 +60,16 @@
     "@uniswap/v3-core": "^1.0.1",
     "@uniswap/v3-periphery": "^1.4.4",
     "@uniswap/v3-sdk": "^3.18.2",
-    "ethers": "^5.7.2",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
+  },
+  "peerDependencies": {
+    "ethers": "^5.7.2"
   },
   "devDependencies": {
     "chai": "^5.2.0",
     "dotenv": "^16.5.0",
+    "ethers": "^5.7.2",
     "ganache": "^7.9.2",
     "sinon": "^20.0.0",
     "vitest": "^3.1.3"

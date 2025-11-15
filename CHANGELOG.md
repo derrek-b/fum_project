@@ -5,6 +5,18 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2025-11-15
+
+### Fixed
+- **Strategy parameter normalization**: Fixed fiat-currency parameters in strategy template defaults
+  - Template defaults now return dollar values (e.g., `50.00`) instead of cent values (e.g., `5000`)
+  - Ensures consistency with blockchain-loaded parameter values
+  - Affects `reinvestmentTrigger`, `minPositionSize`, and `minPoolLiquidity` parameters
+  - Updated all strategy templates (conservative, moderate, aggressive, stablecoin, custom) with normalized values
+
+### Changed
+- Removed debugging console.log statements from production code
+
 ## [0.21.0] - 2025-10-02
 
 ### Changed - BREAKING CHANGES

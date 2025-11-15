@@ -106,7 +106,7 @@ const strategies = {
           maxSlippage: 0.3,
           emergencyExitTrigger: 20,
           feeReinvestment: false,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80
         }
       },
@@ -122,7 +122,7 @@ const strategies = {
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
           feeReinvestment: true,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80
         }
       },
@@ -138,7 +138,7 @@ const strategies = {
           maxSlippage: 1.0,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
-          reinvestmentTrigger: 2500, // $25.00 (value in cents)
+          reinvestmentTrigger: 25.00,
           reinvestmentRatio: 100
         }
       },
@@ -154,7 +154,7 @@ const strategies = {
           maxSlippage: 0.1,
           emergencyExitTrigger: 2.0,
           feeReinvestment: true,
-          reinvestmentTrigger: 1000, // $10.00 (value in cents)
+          reinvestmentTrigger: 10.00,
           reinvestmentRatio: 100
         }
       },
@@ -167,7 +167,7 @@ const strategies = {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -238,10 +238,10 @@ const strategies = {
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
-        defaultValue: 5000,
-        min: 500,
-        max: 10000,
-        step: 500,
+        defaultValue: 50.00,
+        min: 5.00,
+        max: 10000.00,
+        step: 5.00,
         prefix: "$",
         group: 1,
         contractGroup: "fee",
@@ -384,7 +384,7 @@ const strategies = {
           minPositionSize: 200,
           targetUtilization: 15,
           feeReinvestment: false,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80,
           platformSelectionCriteria: "0",
           minPoolLiquidity: 200000
@@ -416,7 +416,7 @@ const strategies = {
           minPositionSize: 100,
           targetUtilization: 20,
           feeReinvestment: true,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80,
           platformSelectionCriteria: "0",
           minPoolLiquidity: 100000
@@ -448,7 +448,7 @@ const strategies = {
           minPositionSize: 50,
           targetUtilization: 30,
           feeReinvestment: true,
-          reinvestmentTrigger: 2500, // $25.00 (value in cents)
+          reinvestmentTrigger: 25.00,
           reinvestmentRatio: 100,
           platformSelectionCriteria: "3",
           minPoolLiquidity: 50000
@@ -480,7 +480,7 @@ const strategies = {
           minPositionSize: 100,
           targetUtilization: 25,
           feeReinvestment: true,
-          reinvestmentTrigger: 1000, // $10.00 (value in cents)
+          reinvestmentTrigger: 10.00,
           reinvestmentRatio: 100,
           platformSelectionCriteria: "2", // Lowest fees for stablecoins
           minPoolLiquidity: 500000 // Higher liquidity requirement for stablecoins
@@ -495,7 +495,7 @@ const strategies = {
           rebalanceThresholdUpper: 1.5,
           rebalanceThresholdLower: 1.5,
           feeReinvestment: true,
-          reinvestmentTrigger: 5000, // $50.00 (value in cents)
+          reinvestmentTrigger: 50.00,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
           emergencyExitTrigger: 15,
@@ -582,10 +582,10 @@ const strategies = {
       reinvestmentTrigger: {
         name: "Reinvestment Trigger",
         description: "Minimum USD value of fees before reinvesting",
-        defaultValue: 5000,
-        min: 500,
-        max: 10000,
-        step: 500,
+        defaultValue: 50.00,
+        min: 5.00,
+        max: 10000.00,
+        step: 5.00,
         prefix: "$",
         group: 1,
         contractGroup: "fee",

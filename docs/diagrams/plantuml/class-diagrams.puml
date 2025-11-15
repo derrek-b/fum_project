@@ -175,9 +175,7 @@ package "Services" {
         - buildApiUrl(endpoint, params): string
         - makeApiRequest(endpoint, params): Promise<Object>
         + fetchTokenPrices(tokenSymbols): Promise<Object>
-        + calculateUsdValue(amount, tokenSymbol, decimals): number
         + prefetchTokenPrices(tokenSymbols): Promise<void>
-        + calculateUsdValueSync(amount, tokenSymbol, decimals): number
         + clearPriceCache(): void
         + getPriceCache(): Object
         - executeBatch(): Promise<void>
