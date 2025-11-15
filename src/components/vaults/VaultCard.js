@@ -10,6 +10,10 @@ export default function VaultCard({ vault }) {
   const router = useRouter();
   const { activeStrategies, strategyPerformance } = useSelector((state) => state.strategies);
 
+  // Check if automation is enabled
+  const isAutomationEnabled = vault.executor &&
+    vault.executor !== "0x0000000000000000000000000000000000000000";
+
   // Get metrics from the vault object without fallbacks
   const metrics = vault.metrics;
 
@@ -71,22 +75,46 @@ export default function VaultCard({ vault }) {
                 const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
 
                 return (
-                  <Badge
-                    pill
-                    bg=""
-                    className="ms-2 d-inline-flex align-items-center"
-                    style={{
-                      backgroundColor: strategyDetails?.color || "#6c757d",
-                      borderColor: strategyDetails?.borderColor || strategyDetails?.color || "#6c757d",
-                      borderWidth: "1px",
-                      borderStyle: "solid",
-                      color: strategyDetails?.textColor || "#FFFFFF",
-                      padding: '0.25em 0.8em',
-                    }}
-                  >
-                    {IconComponent && <IconComponent size={14} className="me-1" />}
-                    {strategyDetails?.name || vaultStrategy.strategyId || "Unknown"}
-                  </Badge>
+                  <>
+                    <Badge
+                      pill
+                      bg=""
+                      className="ms-2 d-inline-flex align-items-center"
+                      style={{
+                        backgroundColor: strategyDetails?.color || "#6c757d",
+                        borderColor: strategyDetails?.borderColor || strategyDetails?.color || "#6c757d",
+                        borderWidth: "1px",
+                        borderStyle: "solid",
+                        color: strategyDetails?.textColor || "#FFFFFF",
+                        padding: '0.25em 0.8em',
+                      }}
+                    >
+                      {IconComponent && <IconComponent size={14} className="me-1" />}
+                      {strategyDetails?.name || vaultStrategy.strategyId || "Unknown"}
+                    </Badge>
+
+                    {/* Automation indicator */}
+                    {isAutomationEnabled && (
+                      <div className="ms-2 d-inline-flex align-items-center">
+                        {/* Pulsing green dot */}
+                        <div
+                          style={{
+                            width: '12px',
+                            height: '12px',
+                            borderRadius: '50%',
+                            backgroundColor: '#28a745',
+                            animation: 'pulse 2s ease-in-out infinite'
+                          }}
+                        />
+                        <style jsx>{`
+                          @keyframes pulse {
+                            0%, 100% { opacity: 1; transform: scale(1); }
+                            50% { opacity: 0.4; transform: scale(0.8); }
+                          }
+                        `}</style>
+                      </div>
+                    )}
+                  </>
                 );
               } else {
                 // "Not Configured" case - use the "none" strategy settings

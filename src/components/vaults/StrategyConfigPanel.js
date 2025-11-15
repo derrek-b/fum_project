@@ -158,8 +158,6 @@ const StrategyConfigPanel = ({
 
   // Handle confirmation of strategy deactivation
   const handleConfirmDeactivation = async () => {
-    setShowDeactivationModal(false);
-
     const hasExecutor = vault.executor !== '0x0000000000000000000000000000000000000000';
 
     // Path A: Has executor (2 transactions) - use progress modal
@@ -264,6 +262,7 @@ const StrategyConfigPanel = ({
         // Show success message
         showSuccess("Strategy deactivated successfully");
         setShowTransactionModal(false);
+        setShowDeactivationModal(false);
         setTransactionLoading(false);
       } catch (error) {
         // Always set loading to false
@@ -329,10 +328,11 @@ const StrategyConfigPanel = ({
 
         // Show success message
         showSuccess("Strategy deactivated successfully");
+        setShowDeactivationModal(false);
       } catch (error) {
         // Check if user cancelled
         if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
-          // User cancelled - silently return
+          // User cancelled - keep modal open so they know it didn't complete
           return;
         }
 
@@ -758,8 +758,8 @@ const StrategyConfigPanel = ({
                 return Math.round(parseFloat(value) * 100);
 
               case 'fiat-currency':
-                // Convert to pennies
-                return parseFloat(value).toFixed(2) * 100;
+                // Convert to pennies/cents (ensure integer, not float)
+                return Math.round(parseFloat(value) * 100);
 
               case 'boolean':
                 return !!value;

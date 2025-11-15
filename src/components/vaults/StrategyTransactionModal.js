@@ -52,6 +52,12 @@ const StrategyTransactionModal = ({
             const isCompletedStep = index < currentStep;
             const isUpcomingStep = index > currentStep;
 
+            // Determine if this step failed (current step with error/warning and not loading)
+            const isFailedStep = isCurrentStep && !isLoading && (error || warning);
+
+            // Determine if this step was cancelled (upcoming step but there's an error/warning)
+            const isCancelledStep = isUpcomingStep && (error || warning);
+
             // Determine step display details
             let stepTitle = step.title;
             if (step.tokenIndex !== undefined && tokenSymbols.length > step.tokenIndex) {
@@ -62,10 +68,13 @@ const StrategyTransactionModal = ({
               <div
                 key={index}
                 className={`transaction-step d-flex align-items-center p-3 mb-2 border rounded ${
-                  isCurrentStep ? 'bg-light border-primary' :
+                  isFailedStep ? 'bg-light border-danger' :
+                  isCurrentStep && !isFailedStep ? 'bg-light border-primary' :
                   isCompletedStep ? 'bg-light border-success' :
+                  isCancelledStep ? 'bg-white border-secondary' :
                   'bg-white'
                 }`}
+                style={isCancelledStep ? { opacity: 0.5 } : {}}
               >
                 <div className="step-status me-3">
                   {isCompletedStep && (
@@ -74,11 +83,17 @@ const StrategyTransactionModal = ({
                   {isPendingStep && (
                     <Spinner animation="border" size="sm" variant="primary" />
                   )}
-                  {isCurrentStep && !isPendingStep && (
+                  {isFailedStep && (
+                    <XCircle className="text-danger" size={24} />
+                  )}
+                  {isCurrentStep && !isPendingStep && !isFailedStep && (
                     <ArrowClockwise className="text-primary" size={24} />
                   )}
-                  {isUpcomingStep && (
+                  {isUpcomingStep && !isCancelledStep && (
                     <div className="step-number">{index + 1}</div>
+                  )}
+                  {isCancelledStep && (
+                    <div className="text-muted">—</div>
                   )}
                 </div>
                 <div className="step-content flex-grow-1">
@@ -88,8 +103,9 @@ const StrategyTransactionModal = ({
                 <div className="step-status text-end text-muted small">
                   {isCompletedStep && "Completed"}
                   {isPendingStep && "Processing..."}
-                  {isCurrentStep && !isPendingStep && "Waiting for confirmation"}
-                  {isUpcomingStep && "Upcoming"}
+                  {isFailedStep && (error ? "Failed" : "Cancelled")}
+                  {isCurrentStep && !isPendingStep && !isFailedStep && "Waiting for confirmation"}
+                  {!isCancelledStep && isUpcomingStep && "Upcoming"}
                 </div>
               </div>
             );

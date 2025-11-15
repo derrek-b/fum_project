@@ -420,12 +420,13 @@ export default function VaultDetailPage() {
                   const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
                   const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
 
-                  // Use grey colors when automation is off, strategy colors when on
-                  const bgColor = automationEnabled ? (strategyDetails?.color) : "#6c757d";
-                  const borderColor = automationEnabled
+                  // Use strategy colors when strategy is configured
+                  const hasActiveStrategy = vaultFromRedux?.hasActiveStrategy;
+                  const bgColor = hasActiveStrategy ? (strategyDetails?.color) : "#6c757d";
+                  const borderColor = hasActiveStrategy
                     ? (strategyDetails?.borderColor)
                     : "#6c757d";
-                  const textColor = automationEnabled
+                  const textColor = hasActiveStrategy
                     ? (strategyDetails?.textColor)
                     : "#FFFFFF";
 
@@ -479,7 +480,7 @@ export default function VaultDetailPage() {
               )}
 
               {/* Always show the Automation Toggle */}
-              <div className="ms-3 d-flex align-items-center">
+              <div className="d-flex align-items-center" style={{ marginLeft: '3.5rem' }}>
                 <OverlayTrigger
                   placement="top"
                   overlay={
@@ -512,6 +513,9 @@ export default function VaultDetailPage() {
                     />
                   </span>
                 </OverlayTrigger>
+                <small className="text-muted ms-2" style={{ fontSize: '0.4em' }}>
+                  Automation: {automationEnabled ? 'Enabled' : 'Disabled'}
+                </small>
               </div>
             </h1>
 
