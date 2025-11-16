@@ -149,10 +149,16 @@ export default function PositionContainer() {
 
       try {
         // Get all platform adapters for the current chain
-        const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+        const result = AdapterFactory.getAdaptersForChain(chainId, provider);
+        const adapters = result.adapters || [];
 
         if (adapters.length === 0) {
           throw new Error(`No supported platforms found for chainId: ${chainId}`);
+        }
+
+        // Log any adapter initialization failures
+        if (result.failures && result.failures.length > 0) {
+          console.warn('Some adapters failed to initialize:', result.failures);
         }
 
         // Store supported platform IDs
@@ -168,12 +174,12 @@ export default function PositionContainer() {
         const platformResults = await Promise.all(
           adapters.map(async adapter => {
             try {
-              return await adapter.getPositions(address, chainId);
+              return await adapter.getPositions(address, provider);
             } catch (adapterError) {
               console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
               showError(`Failed to fetch positions from ${adapter.platformName}. Some data may be missing.`);
               // Return empty result to avoid breaking the entire flow
-              return { positions: [], poolData: {}, tokenData: {} };
+              return { positions: {}, poolData: {}, tokenData: {} };
             }
           })
         );
@@ -185,8 +191,11 @@ export default function PositionContainer() {
         let activePlatforms = [];
 
         platformResults.forEach((result, index) => {
-          if (result && result.positions && result.positions.length > 0) {
-            allPositions = [...allPositions, ...result.positions];
+          // Convert positions object to array
+          const positionsArray = result.positions ? Object.values(result.positions) : [];
+
+          if (positionsArray.length > 0) {
+            allPositions = [...allPositions, ...positionsArray];
 
             // Track active platforms (those with positions)
             activePlatforms.push(adapters[index].platformId);
@@ -212,6 +221,9 @@ export default function PositionContainer() {
           inVault: false,
           vaultAddress: null
         }));
+
+        console.log(`📊 Fetched ${allPositions.length} wallet positions:`, allPositions);
+        console.log(`📊 Active platforms:`, activePlatforms);
 
         setLocalPositions(allPositions);
         dispatch(setPositions(allPositions));
@@ -243,6 +255,7 @@ export default function PositionContainer() {
     }
 
     const fetchVaultPositions = async () => {
+      console.log(`🏦 Starting vault positions fetch for ${userVaults.length} vaults:`, userVaults);
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: true }));
 
       // Get current pool and token data from the store
@@ -250,11 +263,18 @@ export default function PositionContainer() {
       const currentTokens = {...(tokens || {})};
 
       // Get adapters again (could be pulled from previous effect if stored)
-      const adapters = AdapterFactory.getAdaptersForChain(chainId, provider);
+      const result = AdapterFactory.getAdaptersForChain(chainId, provider);
+      const adapters = result.adapters || [];
+      console.log(`🔧 Found ${adapters.length} adapters for vault positions`);
 
       if (adapters.length === 0) {
         dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: false }));
         return;
+      }
+
+      // Log any adapter initialization failures
+      if (result.failures && result.failures.length > 0) {
+        console.warn('Some adapters failed to initialize for vault positions:', result.failures);
       }
 
       const vaultErrors = [];
@@ -266,14 +286,19 @@ export default function PositionContainer() {
           // For each vault, fetch positions from all platforms
           for (const adapter of adapters) {
             try {
-              const result = await adapter.getPositions(vault.address, chainId);
+              console.log(`🔎 Fetching positions for vault ${vault.address} from ${adapter.platformName}...`);
+              const result = await adapter.getPositions(vault.address, provider);
 
-              if (result && result.positions && result.positions.length > 0) {
-                vaultPositionsFound += result.positions.length;
+              // Convert positions object to array
+              const positionsArray = result.positions ? Object.values(result.positions) : [];
+              console.log(`📍 Vault ${vault.name || vault.address}: Found ${positionsArray.length} positions from ${adapter.platformName}`, result);
+
+              if (positionsArray.length > 0) {
+                vaultPositionsFound += positionsArray.length;
 
                 // Add these positions to Redux with vault flag
                 dispatch(addVaultPositions({
-                  positions: result.positions,
+                  positions: positionsArray,
                   vaultAddress: vault.address
                 }));
 
@@ -324,9 +349,11 @@ export default function PositionContainer() {
 
   // Filter active positions (with liquidity > 0)
   // Apply platform filter if selected
+  console.log(`🔍 Total positions in Redux:`, positions.length, positions);
   const activePositions = positions
     .filter((pos) => pos.liquidity > 0)
     .filter((pos) => platformFilter === null || pos.platform === platformFilter);
+  console.log(`✅ Active positions after filtering:`, activePositions.length, activePositions);
 
   // Get the refreshing state
   const isUpdatingPositions = resourcesUpdating?.positions || false;

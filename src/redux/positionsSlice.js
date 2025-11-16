@@ -8,31 +8,19 @@ const positionsSlice = createSlice({
   },
   reducers: {
     setPositions: (state, action) => {
-      // Ensure we maintain the inVault property for existing positions if present
-      if (state.positions.length > 0 && action.payload.length > 0) {
-        // Create a mapping of existing positions with inVault flags
-        const existingPositionMap = state.positions.reduce((map, pos) => {
-          if (pos.inVault) {
-            map[pos.id] = { inVault: pos.inVault, vaultAddress: pos.vaultAddress };
-          }
-          return map;
-        }, {});
+      // This sets wallet positions while preserving vault positions
+      // First, filter out any existing vault positions
+      const vaultPositions = state.positions.filter(pos => pos.inVault);
 
-        // Apply inVault flags to new positions if they existed before
-        state.positions = action.payload.map(position => {
-          if (existingPositionMap[position.id]) {
-            return {
-              ...position,
-              inVault: existingPositionMap[position.id].inVault,
-              vaultAddress: existingPositionMap[position.id].vaultAddress
-            };
-          }
-          return position;
-        });
-      } else {
-        // Just set the positions if we don't have existing data to preserve
-        state.positions = action.payload;
-      }
+      // Mark incoming positions as NOT in vault (these are wallet positions)
+      const walletPositions = action.payload.map(position => ({
+        ...position,
+        inVault: false,
+        vaultAddress: null
+      }));
+
+      // Combine wallet positions with existing vault positions
+      state.positions = [...walletPositions, ...vaultPositions];
     },
 
     // New reducer to specifically add vault positions

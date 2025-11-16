@@ -1,5 +1,6 @@
 import React from 'react';
 import { useToast } from '../context/ToastContext';
+import { formatPrice } from 'fum_library/helpers';
 
 const PriceRangeChart = ({
   lowerPrice,
@@ -78,9 +79,9 @@ const PriceRangeChart = ({
     let displayCurrent = "N/A";
 
     try {
-      displayLower = lower.toFixed(2);
-      displayUpper = upper.toFixed(2);
-      displayCurrent = current.toFixed(2);
+      displayLower = formatPrice(lower);
+      displayUpper = formatPrice(upper);
+      displayCurrent = formatPrice(current);
     } catch (formatError) {
       console.error("Error formatting price values:", formatError);
     }
@@ -88,9 +89,11 @@ const PriceRangeChart = ({
     // Generate token pair label with fallbacks
     const token0 = token0Symbol || "Token0";
     const token1 = token1Symbol || "Token1";
+    // When isInverted is true: baseToken=token0, quoteToken=token1, price shows token1 per token0
+    // When isInverted is false: baseToken=token1, quoteToken=token0, price shows token0 per token1
     const pairLabel = isInverted
-      ? `${token0} per ${token1}`
-      : `${token1} per ${token0}`;
+      ? `${token1} per ${token0}`
+      : `${token0} per ${token1}`;
 
     const activeColor = '#28a745'; // Success green
     const inactiveColor = '#dc3545'; // Danger red

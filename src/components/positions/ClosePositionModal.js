@@ -69,21 +69,21 @@ export default function ClosePositionModal({
   };
 
   // Total balance value
-  const totalBalanceUsd = tokenBalances ?
+  const totalBalanceUsd = (tokenBalances?.token0 && tokenBalances?.token1) ?
     calculateTotalUsdValue(tokenBalances.token0.formatted, tokenBalances.token1.formatted) : null;
 
   // Total fees value
-  const totalFeesUsd = uncollectedFees ?
+  const totalFeesUsd = (uncollectedFees?.token0 && uncollectedFees?.token1) ?
     calculateTotalUsdValue(uncollectedFees.token0.formatted, uncollectedFees.token1.formatted) : null;
 
   // Grand total (balances + fees)
   const grandTotalUsd = (totalBalanceUsd || 0) + (totalFeesUsd || 0);
 
   // Check if we have meaningful token amounts
-  const hasBalances = tokenBalances &&
+  const hasBalances = (tokenBalances?.token0 && tokenBalances?.token1) &&
     (parseFloat(tokenBalances.token0.formatted) > 0 || parseFloat(tokenBalances.token1.formatted) > 0);
 
-  const hasFees = uncollectedFees &&
+  const hasFees = (uncollectedFees?.token0 && uncollectedFees?.token1) &&
     (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
 
   // Function to close position using the adapter
@@ -185,7 +185,7 @@ export default function ClosePositionModal({
         {/* Token Balances Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Token Balances to Withdraw</h6>
-          {!tokenBalances ? (
+          {!tokenBalances?.token0 || !tokenBalances?.token1 ? (
             <Alert variant="warning">
               Token balance information is not available
             </Alert>
@@ -227,7 +227,7 @@ export default function ClosePositionModal({
         {/* Uncollected Fees Section */}
         <div className="mb-3">
           <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
-          {!uncollectedFees ? (
+          {!uncollectedFees?.token0 || !uncollectedFees?.token1 ? (
             <Alert variant="warning">
               Fee information is not available
             </Alert>

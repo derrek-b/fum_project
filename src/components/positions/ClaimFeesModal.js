@@ -47,13 +47,13 @@ export default function ClaimFeesModal({
   };
 
   // Calculate total USD value for the fees
-  const totalFeeValue = uncollectedFees ? (
+  const totalFeeValue = (uncollectedFees?.token0 && uncollectedFees?.token1) ? (
     (getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol) || 0) +
     (getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol) || 0)
   ) : null;
 
   // Check if we have meaningful token amounts
-  const hasFees = uncollectedFees &&
+  const hasFees = (uncollectedFees?.token0 && uncollectedFees?.token1) &&
     (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
 
   // Function to claim fees using the adapter
@@ -151,7 +151,7 @@ export default function ClaimFeesModal({
         {/* Uncollected Fees Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
-          {!uncollectedFees ? (
+          {!uncollectedFees?.token0 || !uncollectedFees?.token1 ? (
             <Alert variant="warning">
               Fee information is not available
             </Alert>

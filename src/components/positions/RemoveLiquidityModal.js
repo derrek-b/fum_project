@@ -37,15 +37,15 @@ export default function RemoveLiquidityModal({
 
   // Calculate estimated token amounts based on percentage
   useEffect(() => {
-    if (tokenBalances) {
+    if (tokenBalances?.token0 && tokenBalances?.token1) {
       try {
         setEstimatedBalances({
           token0: {
-            raw: tokenBalances.token0.raw * BigInt(percentage) / BigInt(100),
+            raw: BigInt(tokenBalances.token0.raw) * BigInt(percentage) / BigInt(100),
             formatted: (parseFloat(tokenBalances.token0.formatted) * percentage / 100).toFixed(6)
           },
           token1: {
-            raw: tokenBalances.token1.raw * BigInt(percentage) / BigInt(100),
+            raw: BigInt(tokenBalances.token1.raw) * BigInt(percentage) / BigInt(100),
             formatted: (parseFloat(tokenBalances.token1.formatted) * percentage / 100).toFixed(6)
           }
         });
@@ -53,6 +53,8 @@ export default function RemoveLiquidityModal({
         console.error("Error calculating estimated balances:", error);
         setEstimatedBalances(null);
       }
+    } else {
+      setEstimatedBalances(null);
     }
   }, [percentage, tokenBalances]);
 
@@ -188,7 +190,7 @@ export default function RemoveLiquidityModal({
         {/* Current Position Information */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Current Position</h6>
-          {!tokenBalances ? (
+          {!tokenBalances?.token0 || !tokenBalances?.token1 ? (
             <Alert variant="warning">
               Token balance information is not available
             </Alert>
@@ -267,7 +269,7 @@ export default function RemoveLiquidityModal({
         {/* Estimated Amounts to Receive */}
         <div className="mb-3">
           <h6 className="border-bottom pb-2">You Will Receive</h6>
-          {!estimatedBalances ? (
+          {!estimatedBalances?.token0 || !estimatedBalances?.token1 ? (
             <Alert variant="warning">
               Cannot estimate token amounts
             </Alert>

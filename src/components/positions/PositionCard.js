@@ -115,9 +115,13 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   }, [lowerPrice, upperPrice]);
 
   // Set price direction labels
+  // When invertPriceDisplay is false: baseToken = token1, quoteToken = token0
+  // Price = token1/token0, which means "how many token0 per token1"
+  // When invertPriceDisplay is true: baseToken = token0, quoteToken = token1
+  // Price = token0/token1, which means "how many token1 per token0"
   const priceLabel = invertPriceDisplay
-    ? `${token0Data?.symbol} per ${token1Data?.symbol}`
-    : `${token1Data?.symbol} per ${token0Data?.symbol}`;
+    ? `${token1Data?.symbol} per ${token0Data?.symbol}`
+    : `${token0Data?.symbol} per ${token1Data?.symbol}`;
 
   // State for fee calculation errors
   const [feeLoadingError, setFeeLoadingError] = useState(false);

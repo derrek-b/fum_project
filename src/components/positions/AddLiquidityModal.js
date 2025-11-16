@@ -263,11 +263,14 @@ export default function AddLiquidityModal({
         // Calculate current price for existing position
         if (poolData.sqrtPriceX96 && adapter) {
           try {
-            const calculatedPrice = adapter._calculatePriceFromSqrtPrice(
+            const baseToken = { address: token0Data.address, decimals: token0Data.decimals };
+            const quoteToken = { address: token1Data.address, decimals: token1Data.decimals };
+            const priceObj = adapter.calculatePriceFromSqrtPrice(
               poolData.sqrtPriceX96,
-              token0Data.decimals,
-              token1Data.decimals
+              baseToken,
+              quoteToken
             );
+            const calculatedPrice = parseFloat(priceObj.toSignificant(18));
             setCurrentPoolPrice(calculatedPrice);
             setIsLoadingPrice(false);
           } catch (error) {
@@ -556,11 +559,14 @@ export default function AddLiquidityModal({
         const tickValue = typeof slot0.tick === 'bigint' ? Number(slot0.tick) : Number(slot0.tick);
 
         // Use adapter to calculate price
-        const price = adapter._calculatePriceFromSqrtPrice(
-          slot0.sqrtPriceX96,
-          sortedToken0.decimals,
-          sortedToken1.decimals
+        const baseToken = { address: sortedToken0.address, decimals: sortedToken0.decimals };
+        const quoteToken = { address: sortedToken1.address, decimals: sortedToken1.decimals };
+        const priceObj = adapter.calculatePriceFromSqrtPrice(
+          slot0.sqrtPriceX96.toString(),
+          baseToken,
+          quoteToken
         );
+        const price = parseFloat(priceObj.toSignificant(18));
 
         // Update state with current price and tick
         setCurrentPoolPrice(price);
@@ -678,12 +684,19 @@ export default function AddLiquidityModal({
         const token1Info = commonTokens.find(t => t.address === token1Address);
 
         if (token0Info && token1Info) {
-          const decimals0 = tokensSwapped ? token1Info.decimals : token0Info.decimals;
-          const decimals1 = tokensSwapped ? token0Info.decimals : token1Info.decimals;
+          const baseToken = tokensSwapped ?
+            { address: token1Info.address, decimals: token1Info.decimals } :
+            { address: token0Info.address, decimals: token0Info.decimals };
+          const quoteToken = tokensSwapped ?
+            { address: token0Info.address, decimals: token0Info.decimals } :
+            { address: token1Info.address, decimals: token1Info.decimals };
 
           try {
-            const lowerPrice = adapter._tickToPrice(minTick, decimals0, decimals1);
-            const upperPrice = adapter._tickToPrice(maxTick, decimals0, decimals1);
+            const lowerPriceObj = adapter.tickToPrice(minTick, baseToken, quoteToken);
+            const upperPriceObj = adapter.tickToPrice(maxTick, baseToken, quoteToken);
+            // Prices calculated for verification only - not currently used
+            console.debug("Lower price:", lowerPriceObj.toSignificant(6));
+            console.debug("Upper price:", upperPriceObj.toSignificant(6));
           } catch (e) {
             console.error("Error verifying price range:", e);
           }
@@ -927,66 +940,71 @@ export default function AddLiquidityModal({
     }
 
     try {
-      const getTokenDecimals = () => {
+      // Get token data
+      const getTokens = () => {
         if (isExistingPosition) {
-          if (!token0Data?.decimals || !token1Data?.decimals) {
-            return { token0Decimals: null, token1Decimals: null };
+          if (!token0Data?.decimals || !token1Data?.decimals || !token0Data?.address || !token1Data?.address) {
+            return { token0: null, token1: null };
           }
           return {
-            token0Decimals: token0Data.decimals,
-            token1Decimals: token1Data.decimals
+            token0: { address: token0Data.address, decimals: token0Data.decimals },
+            token1: { address: token1Data.address, decimals: token1Data.decimals }
           };
         } else {
           const token0 = commonTokens.find(t => t.address === token0Address);
           const token1 = commonTokens.find(t => t.address === token1Address);
 
-          if (!token0?.decimals || !token1?.decimals) {
-            return { token0Decimals: null, token1Decimals: null };
+          if (!token0?.decimals || !token1?.decimals || !token0?.address || !token1?.address) {
+            return { token0: null, token1: null };
           }
 
-          return { token0Decimals: token0.decimals, token1Decimals: token1.decimals };
+          return {
+            token0: { address: token0.address, decimals: token0.decimals },
+            token1: { address: token1.address, decimals: token1.decimals }
+          };
         }
       };
 
-      // Get token decimals
-      const { token0Decimals, token1Decimals } = getTokenDecimals();
-      if (token0Decimals === null || token1Decimals === null) {
+      // Get token data
+      const { token0, token1 } = getTokens();
+      if (!token0 || !token1) {
         return 'N/A';
       }
 
       // Use adapter's tick to price function
-      // If tokens are swapped from user perspective, we need to swap the decimals
-      const decimals0 = tokensSwapped ? token1Decimals : token0Decimals;
-      const decimals1 = tokensSwapped ? token0Decimals : token1Decimals;
+      // If tokens are swapped from user perspective, we need to swap the tokens
+      const baseToken = tokensSwapped ? token1 : token0;
+      const quoteToken = tokensSwapped ? token0 : token1;
 
       // Get the base price
-      let price;
+      let priceObj;
       try {
-        price = adapter._tickToPrice(tick, decimals0, decimals1);
+        priceObj = adapter.tickToPrice(tick, baseToken, quoteToken);
       } catch (adapterError) {
-        console.error("Error in adapter._tickToPrice:", adapterError);
+        console.error("Error in adapter.tickToPrice:", adapterError);
         return 'N/A';
       }
 
+      // Convert Price object to number
+      let price = parseFloat(priceObj.toSignificant(18));
+
       // Invert if requested by user
       if (invertPriceDisplay) {
-        const numPrice = parseFloat(price);
-        if (numPrice > 0) {
-          price = (1 / numPrice).toString();
+        if (price > 0) {
+          price = 1 / price;
         }
       }
 
       // Format for display
-      const numPrice = parseFloat(price);
-      if (isNaN(numPrice)) {
+      if (isNaN(price)) {
         return 'N/A';
       }
 
-      if (numPrice < 0.0001 && numPrice > 0) {
-        return numPrice.toExponential(4);
+      if (price < 0.0001 && price > 0) {
+        return price.toExponential(4);
       }
 
-      return formatPrice(numPrice);
+      return formatPrice(price);
     } catch (error) {
       console.error("Error formatting tick to price:", error);
       return 'N/A';
