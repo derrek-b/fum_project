@@ -75,7 +75,7 @@ export default function VaultDetailPage() {
   const { address: vaultAddress } = router.query;
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const { chainId, address: userAddress } = useSelector((state) => state.wallet);
+  const { chainId, address: userAddress, isConnected, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
   const lastUpdate = useSelector((state) => state.updates.lastUpdate);
   const vaultFromRedux = useSelector((state) =>
@@ -351,7 +351,49 @@ export default function VaultDetailPage() {
   };
 
   // If still loading
-  if (isLoading && !vault) {
+  // Check if wallet is reconnecting FIRST (show spinner during auto-reconnect)
+  if (isReconnecting) {
+    return (
+      <>
+        <Navbar />
+        <Container className="py-4">
+          <Link href="/vaults" passHref>
+            <Button variant="outline-secondary" className="mb-4">
+              &larr; Back to Vaults
+            </Button>
+          </Link>
+          <div className="text-center py-5">
+            <Spinner animation="border" variant="primary" />
+            <p className="mt-3">Reconnecting wallet...</p>
+          </div>
+        </Container>
+      </>
+    );
+  }
+
+  // Check wallet connection before checking for vault data
+  if (!isConnected) {
+    return (
+      <>
+        <Navbar />
+        <Container className="py-4">
+          <Link href="/vaults" passHref>
+            <Button variant="outline-secondary" className="mb-4">
+              &larr; Back to Vaults
+            </Button>
+          </Link>
+          <Alert variant="warning" className="text-center">
+            <Alert.Heading>Wallet Not Connected</Alert.Heading>
+            <p className="mb-0">Please connect your wallet to view vault details.</p>
+          </Alert>
+        </Container>
+      </>
+    );
+  }
+
+  // If loading OR should be loading (connected but no vault data yet)
+  // This prevents flash during the gap between reconnect and data fetch
+  if (isLoading || (isConnected && !vault)) {
     return (
       <>
         <Navbar />

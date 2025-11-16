@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
-import { setWallet, disconnectWallet } from "../redux/walletSlice";
+import { setWallet, disconnectWallet, setReconnecting } from "../redux/walletSlice";
 import { createWeb3Provider } from "fum_library/blockchain/wallet";
 import { getChainName } from "fum_library/helpers/chainHelpers";
 import { useToast } from "../context/ToastContext"; // Import the toast hook
@@ -15,6 +15,7 @@ export default function WalletConnectEVM() {
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
   const { setProvider, clearProvider } = useProvider(); // Get provider setters from context
   const [isConnecting, setIsConnecting] = useState(false); // Track connection attempt
+  const [hasAttemptedReconnect, setHasAttemptedReconnect] = useState(false); // Track if we've tried to reconnect
 
   const connect = async () => {
     if (isConnecting) return; // Prevent multiple clicks while connecting
@@ -65,6 +66,71 @@ export default function WalletConnectEVM() {
     dispatch(disconnectWallet());
     showSuccess("Wallet disconnected");
   };
+
+  // Auto-reconnect on mount if wallet was previously connected
+  useEffect(() => {
+    const autoReconnect = async () => {
+      // Only attempt once, and only if we have stored wallet info but aren't connected yet
+      if (hasAttemptedReconnect || isConnected || !address || !chainId) {
+        return;
+      }
+
+      setHasAttemptedReconnect(true);
+      setIsConnecting(true);
+      dispatch(setReconnecting(true)); // Set reconnecting flag for UI
+
+      try {
+        const newProvider = await createWeb3Provider();
+
+        if (!newProvider) {
+          console.log("No Ethereum provider detected for auto-reconnect");
+          // Clear stored wallet since provider is not available
+          dispatch(disconnectWallet());
+          return;
+        }
+
+        setProvider(newProvider);
+
+        // Check if accounts are accessible (wallet might be locked)
+        const accounts = await newProvider.listAccounts();
+
+        if (accounts.length === 0) {
+          console.log("Wallet is locked, clearing stored connection");
+          dispatch(disconnectWallet());
+          return;
+        }
+
+        // Verify the stored address matches
+        const signer = await newProvider.getSigner();
+        const currentAccount = await signer.getAddress();
+        const network = await newProvider.getNetwork();
+        const currentChainId = Number(network.chainId);
+
+        if (currentAccount.toLowerCase() === address.toLowerCase()) {
+          // Successfully reconnected with same account
+          dispatch(setWallet({
+            address: currentAccount,
+            chainId: currentChainId
+          }));
+
+          console.log(`Auto-reconnected to ${getChainName(currentChainId)}`);
+        } else {
+          // Different account, clear stored connection
+          console.log("Different account detected, clearing stored connection");
+          dispatch(disconnectWallet());
+        }
+      } catch (error) {
+        console.error("Auto-reconnect failed:", error);
+        // Clear stored wallet on reconnection failure
+        dispatch(disconnectWallet()); // This also clears isReconnecting flag
+      } finally {
+        setIsConnecting(false);
+        dispatch(setReconnecting(false)); // Clear reconnecting flag
+      }
+    };
+
+    autoReconnect();
+  }, [hasAttemptedReconnect, isConnected, address, chainId, dispatch, setProvider]);
 
   const shortenAddress = (addr) => {
     if (!addr) return "";

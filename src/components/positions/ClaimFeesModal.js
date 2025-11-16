@@ -163,7 +163,7 @@ export default function ClaimFeesModal({
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data?.symbol}
+                  {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data?.symbol}
                 </Badge>
                 {tokenPrices?.token0 > 0 && (
                   <span className="text-muted">
@@ -173,7 +173,7 @@ export default function ClaimFeesModal({
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data?.symbol}
+                  {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data?.symbol}
                 </Badge>
                 {tokenPrices?.token1 > 0 && (
                   <span className="text-muted">

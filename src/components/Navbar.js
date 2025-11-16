@@ -36,7 +36,7 @@ export default function Navbar() {
               <Nav.Link active={isActive('/vaults') || isActive('/vault')}>Vaults</Nav.Link>
             </Link>
             <Link href="/positions" passHref legacyBehavior>
-              <Nav.Link active={isActive('/positions')}>Positions</Nav.Link>
+              <Nav.Link active={isActive('/positions') || isActive('/position')}>Positions</Nav.Link>
             </Link>
           </Nav>
 

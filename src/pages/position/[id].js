@@ -67,12 +67,18 @@ export default function PositionDetailPage() {
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
-  const { isConnected, address, chainId } = useSelector((state) => state.wallet);
+  const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
   const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
 
   const timerRef = useRef(null);
   const hasAttemptedFetch = useRef(false);
+  const positionsRef = useRef(positions);
+
+  // Keep positionsRef in sync with positions
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
 
   // State for various UI elements
   const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
@@ -89,16 +95,14 @@ export default function PositionDetailPage() {
     error: null
   });
 
+  // Track initial data loading to prevent "Position not found" flash
+  const [isLoadingInitialData, setIsLoadingInitialData] = useState(false);
+
   // State for modals
   const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
   const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
   const [showClosePositionModal, setShowClosePositionModal] = useState(false);
-
-  const [forceUpdateCounter, setForceUpdateCounter] = useState(0);
-
-  // Hacky way to force update since redux/state changes aren't triggering refresh
-  const forceUpdate = () => setForceUpdateCounter(prev => prev + 1);
 
   // Find the position by ID
   const position = useMemo(() => {
@@ -114,10 +118,18 @@ export default function PositionDetailPage() {
   }, [positions, id]);
 
   // Get pool and token data for the position
-  const poolData = position ? pools[position.pool] : null;
+  const poolData = useMemo(() => {
+    return position ? pools[position.pool] : null;
+  }, [position, pools]);
+
   // Token data is embedded in pool data, not stored separately
-  const token0Data = poolData?.token0 || null;
-  const token1Data = poolData?.token1 || null;
+  const token0Data = useMemo(() => {
+    return poolData?.token0 || null;
+  }, [poolData]);
+
+  const token1Data = useMemo(() => {
+    return poolData?.token1 || null;
+  }, [poolData]);
 
   // Check if any resources are currently updating
   const isUpdating = resourcesUpdating?.positions || false;
@@ -282,6 +294,7 @@ export default function PositionDetailPage() {
     if (isConnected && provider && address && chainId && id && (!positions || positions.length === 0)) {
       console.log("📥 Initial load: Fetching positions because Redux is empty");
       hasAttemptedFetch.current = true;
+      setIsLoadingInitialData(true); // Set loading state
 
       const fetchInitialPositions = async () => {
         try {
@@ -344,87 +357,14 @@ export default function PositionDetailPage() {
         } catch (error) {
           console.error("Error fetching initial positions:", error);
           showError(`Failed to load position data: ${error.message}`);
+        } finally {
+          setIsLoadingInitialData(false); // Clear loading state
         }
       };
 
       fetchInitialPositions();
     }
   }, [isConnected, provider, address, chainId, id, positions, dispatch, showError]);
-
-  // Ensure we're actively tracking lastUpdate changes with a dedicated effect
-  useEffect(() => {
-    if (lastUpdate) {
-      console.log("lastUpdate detected in position details:", new Date(lastUpdate).toISOString());
-
-      try {
-        // Explicitly force re-fetches by clearing local state
-        setUncollectedFees(null);
-        setTokenBalances(null);
-        setIsLoadingFees(true);
-        setIsLoadingBalances(true);
-
-        // This is critical - we need to force a refresh of these calculations
-        if (adapter && position && poolData && token0Data && token1Data) {
-          // Force fee recalculation
-          try {
-            const [fees0Raw, fees1Raw] = adapter.calculateUncollectedFees(position, poolData);
-            // Convert to number since formatFeeDisplay expects a number, not a string
-            const fees0Formatted = parseFloat(ethers.utils.formatUnits(fees0Raw.toString(), token0Data.decimals));
-            const fees1Formatted = parseFloat(ethers.utils.formatUnits(fees1Raw.toString(), token1Data.decimals));
-
-            setUncollectedFees({
-              token0: {
-                formatted: fees0Formatted,
-                raw: fees0Raw.toString()
-              },
-              token1: {
-                formatted: fees1Formatted,
-                raw: fees1Raw.toString()
-              }
-            });
-            setIsLoadingFees(false);
-            forceUpdate(); // Force component re-render
-          } catch (error) {
-            console.error("Error refreshing fees:", error);
-            setFeeLoadingError(true);
-            setIsLoadingFees(false);
-            showError("Failed to load uncollected fees data");
-          }
-
-          // Force token balances recalculation if we have chainId
-          if (chainId) {
-            adapter.calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
-              .then(balances => {
-                // balances is an array [amount0BigInt, amount1BigInt]
-                // Format it into the expected object structure
-                const formattedBalances = {
-                  token0: {
-                    raw: balances[0].toString(),
-                    formatted: parseFloat(ethers.utils.formatUnits(balances[0].toString(), token0Data.decimals))
-                  },
-                  token1: {
-                    raw: balances[1].toString(),
-                    formatted: parseFloat(ethers.utils.formatUnits(balances[1].toString(), token1Data.decimals))
-                  }
-                };
-                setTokenBalances(formattedBalances);
-                setIsLoadingBalances(false);
-                forceUpdate(); // Force component re-render
-              })
-              .catch(error => {
-                console.error("Error refreshing balances:", error);
-                setBalanceError(true);
-                setIsLoadingBalances(false);
-                showError("Failed to load token balance data");
-              });
-          }
-        }
-      } catch (error) {
-        console.error("Error processing lastUpdate in position details:", error);
-        showError("Error refreshing position data");
-      }
-    }
-  }, [lastUpdate, adapter, position, poolData, token0Data, token1Data, chainId, showError]);
 
   // Mark resources as updating when lastUpdate changes
   useEffect(() => {
@@ -473,9 +413,10 @@ export default function PositionDetailPage() {
             const freshPoolData = result.poolData[freshPosition.pool];
 
             // Update Redux with fresh data (without creating reference cycles)
-            if (positions && positions.length > 0) {
+            const currentPositions = positionsRef.current;
+            if (currentPositions && currentPositions.length > 0) {
               // Create a new array to avoid reference issues
-              const updatedPositions = [...positions];
+              const updatedPositions = [...currentPositions];
               // Find and replace the specific position
               const posIndex = updatedPositions.findIndex(p => p.id === id);
               if (posIndex >= 0) {
@@ -498,7 +439,7 @@ export default function PositionDetailPage() {
         showError("Error updating position data");
       }
     }
-  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, positions, showError]);
+  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, showError]);
 
   // Fetch fee data using the adapter
   useEffect(() => {
@@ -693,7 +634,68 @@ export default function PositionDetailPage() {
   const platformLogo = position?.platform ? getPlatformLogo(position.platform) : null;
   const hasPlatformLogo = !!platformLogo;
 
-  // If we're still loading the position or it doesn't exist
+  // Check if wallet is reconnecting FIRST (show spinner during auto-reconnect)
+  if (isReconnecting) {
+    return (
+      <>
+        <Navbar />
+        <Container className="py-4">
+          <Link href="/" passHref>
+            <Button variant="outline-secondary" className="mb-4">
+              &larr; Back to Dashboard
+            </Button>
+          </Link>
+          <div className="text-center py-5">
+            <Spinner animation="border" variant="primary" />
+            <p className="mt-3">Reconnecting wallet...</p>
+          </div>
+        </Container>
+      </>
+    );
+  }
+
+  // Check wallet connection before checking for position data
+  if (!isConnected) {
+    return (
+      <>
+        <Navbar />
+        <Container className="py-4">
+          <Link href="/" passHref>
+            <Button variant="outline-secondary" className="mb-4">
+              &larr; Back to Dashboard
+            </Button>
+          </Link>
+          <Alert variant="warning" className="text-center">
+            <Alert.Heading>Wallet Not Connected</Alert.Heading>
+            <p className="mb-0">Please connect your wallet to view position details.</p>
+          </Alert>
+        </Container>
+      </>
+    );
+  }
+
+  // If we're loading initial data OR should be loading (connected but no positions yet)
+  // This prevents flash of "Position not found" during the gap between reconnect and data fetch
+  if (isLoadingInitialData || (isConnected && (!positions || positions.length === 0))) {
+    return (
+      <>
+        <Navbar />
+        <Container className="py-4">
+          <Link href="/" passHref>
+            <Button variant="outline-secondary" className="mb-4">
+              &larr; Back to Dashboard
+            </Button>
+          </Link>
+          <div className="text-center py-5">
+            <Spinner animation="border" variant="primary" />
+            <p className="mt-3">Loading position data...</p>
+          </div>
+        </Container>
+      </>
+    );
+  }
+
+  // If we're still loading the position or it doesn't exist (after positions array is populated)
   if (!position || !poolData || !token0Data || !token1Data) {
     return (
       <>
@@ -984,7 +986,7 @@ export default function PositionDetailPage() {
                         <div className="border rounded p-2 bg-light">
                           <div className="d-flex justify-content-between align-items-center mb-2">
                             <Badge bg="white" text="dark" className="px-3 py-2">
-                              {formatFeeDisplay(uncollectedFees.token0.formatted)} {token0Data.symbol}
+                              {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data.symbol}
                             </Badge>
                             {tokenPrices.token0 && (
                               <span className="text-muted small">
@@ -994,7 +996,7 @@ export default function PositionDetailPage() {
                           </div>
                           <div className="d-flex justify-content-between align-items-center mb-1">
                             <Badge bg="white" text="dark" className="px-3 py-2">
-                              {formatFeeDisplay(uncollectedFees.token1.formatted)} {token1Data.symbol}
+                              {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data.symbol}
                             </Badge>
                             {tokenPrices.token1 && (
                               <span className="text-muted small">
