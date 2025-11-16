@@ -1,5 +1,5 @@
 // src/pages/vault/[address].js
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, Form, OverlayTrigger, Tooltip } from "react-bootstrap";
@@ -109,13 +109,13 @@ export default function VaultDetailPage() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
 
-  // Get strategy data from Redux
-  const strategyConfig = strategyConfigs?.[vaultAddress];
-  const performance = strategyPerformance?.[vaultAddress];
-  const history = executionHistory?.[vaultAddress] || [];
+  // Get strategy data from Redux (memoized to prevent unnecessary re-renders)
+  const strategyConfig = useMemo(() => strategyConfigs?.[vaultAddress], [strategyConfigs, vaultAddress]);
+  const performance = useMemo(() => strategyPerformance?.[vaultAddress], [strategyPerformance, vaultAddress]);
+  const history = useMemo(() => executionHistory?.[vaultAddress] || [], [executionHistory, vaultAddress]);
 
-  // Create loadData function to replace the useVaultDetailData hook
-  const loadData = async () => {
+  // Create loadData function to replace the useVaultDetailData hook (memoized)
+  const loadData = useCallback(async () => {
     if (!vaultAddress || !provider || !chainId) {
       return;
     }
@@ -164,7 +164,7 @@ export default function VaultDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [vaultAddress, provider, chainId, userAddress, dispatch, showError, showSuccess]);
 
   // Call loadData when dependencies change or refresh is triggered
   useEffect(() => {
@@ -173,8 +173,8 @@ export default function VaultDetailPage() {
     }
   }, [vaultAddress, userAddress, provider, chainId, lastUpdate]);
 
-  // Handle token withdrawal (for owner)
-  const handleWithdrawToken = async (token) => {
+  // Handle token withdrawal (for owner) - memoized
+  const handleWithdrawToken = useCallback(async (token) => {
     if (!isOwner) {
       showError("Only the vault owner can withdraw tokens");
       return;
@@ -182,10 +182,10 @@ export default function VaultDetailPage() {
 
     setSelectedWithdrawToken(token);
     setShowWithdrawModal(true);
-  };
+  }, [isOwner, showError]);
 
-  // Handle the automation toggle
-  const handleAutomationToggle = (enabled) => {
+  // Handle the automation toggle - memoized
+  const handleAutomationToggle = useCallback((enabled) => {
     if (enabled) {
       // Get the executor address for this chain
       const executorAddr = getExecutorAddress(chainId);
@@ -233,10 +233,10 @@ export default function VaultDetailPage() {
 
     // Show the confirmation modal
     setShowAutomationModal(true);
-  };
+  }, [chainId, showError, vaultFromRedux]);
 
-  // Add this new function to handle the actual transaction after confirmation
-  const handleConfirmAutomation = async () => {
+  // Add this new function to handle the actual transaction after confirmation - memoized
+  const handleConfirmAutomation = useCallback(async () => {
     if (!vaultAddress || !provider) {
       showError("Unable to connect to your wallet");
       setShowAutomationModal(false);
@@ -325,7 +325,7 @@ export default function VaultDetailPage() {
       setIsProcessingAutomation(false);
       setShowAutomationModal(false);
     }
-  };
+  }, [vaultAddress, provider, showError, showSuccess, vaultFromRedux, isEnablingAutomation, pendingExecutorAddress, dispatch]);
 
   // Iinitialize toggle based on executor address
   useEffect(() => {
@@ -339,8 +339,8 @@ export default function VaultDetailPage() {
     }
   }, [vaultFromRedux]);
 
-  // Format currency values consistently
-  const formatCurrency = (value) => {
+  // Format currency values consistently - memoized
+  const formatCurrency = useCallback((value) => {
     if (value === null || value === undefined) return '$0.00';
     return value.toLocaleString('en-US', {
       style: 'currency',
@@ -348,7 +348,7 @@ export default function VaultDetailPage() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
-  };
+  }, []);
 
   // If still loading
   // Check if wallet is reconnecting FIRST (show spinner during auto-reconnect)
