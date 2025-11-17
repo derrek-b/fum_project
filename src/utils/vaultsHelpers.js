@@ -1242,7 +1242,29 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       };
     }
 
-    // 9. NOW update all vaults in Redux with COMPLETE data
+    // 9. Fetch token balances for each vault and add to complete data
+    console.log("Fetching token balances for all vaults");
+    for (let i = 0; i < completeVaultsData.length; i++) {
+      try {
+        const tokenResult = await loadVaultTokenBalances(
+          completeVaultsData[i].address,
+          provider,
+          chainId,
+          dispatch,
+          { ...options, silent: true } // Use silent mode, we'll include it in setVaults
+        );
+
+        // Add tokenBalances to the vault data
+        if (tokenResult.success && tokenResult.tokenBalancesMap) {
+          completeVaultsData[i].tokenBalances = tokenResult.tokenBalancesMap;
+        }
+      } catch (error) {
+        console.error(`Error loading token balances for vault ${completeVaultsData[i].address}:`, error);
+        completeVaultsData[i].tokenBalances = {}; // Set to empty object on error
+      }
+    }
+
+    // 10. NOW update all vaults in Redux with COMPLETE data (including tokenBalances)
     console.log("Updating Redux with complete vault data");
     dispatch(setVaults(completeVaultsData));
 

@@ -1,7 +1,6 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
-import ReactDOM from 'react-dom';
-import { Card, Button, Spinner, Badge, Toast, ToastContainer } from "react-bootstrap";
-import { useSelector, useDispatch } from "react-redux";
+import React, { useMemo, useState, useEffect } from "react";
+import { Card, Spinner, Badge, Button } from "react-bootstrap";
+import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
 import { ethers } from "ethers";
 import { useProvider } from "../../contexts/ProviderContext";
@@ -12,15 +11,10 @@ import { formatPrice, formatFeeDisplay } from "fum_library/helpers/formatHelpers
 import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingecko";
 import { getPlatformColor, getPlatformLogo, getPlatformName } from "fum_library/helpers/platformHelpers";
 
-// Local project imports
-import ClaimFeesModal from "./ClaimFeesModal";
-import RemoveLiquidityModal from "./RemoveLiquidityModal";
-import ClosePositionModal from "./ClosePositionModal";
-import AddLiquidityModal from "./AddLiquidityModal";
-import { triggerUpdate } from "../../redux/updateSlice";
+// Local imports
+import PriceRangeChart from "../PriceRangeChart";
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
-  const dispatch = useDispatch();
   const router = useRouter();
   const { address, chainId } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
@@ -30,16 +24,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   // Token data is embedded in pool data from the adapter
   const token0Data = poolData?.token0 || null;
   const token1Data = poolData?.token1 || null;
-
-  // Reference for the card and dropdown state
-  const cardRef = useRef(null);
-  const [showActionsDropdown, setShowActionsDropdown] = useState(false);
-
-  // Toast state
-  const [showSuccessToast, setShowSuccessToast] = useState(false);
-  const [showErrorToast, setShowErrorToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
-  const [toastTxHash, setToastTxHash] = useState("");
 
   // Get the appropriate adapter for this position
   const adapter = useMemo(() => {
@@ -143,63 +127,6 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     error: null
   });
 
-  // State for action processing
-  const [isClaiming, setIsClaiming] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-
-  // Toast helper functions
-  const showSuccessToastWithMessage = (message, txHash = "") => {
-    setToastMessage(message);
-    setToastTxHash(txHash);
-    setShowSuccessToast(true);
-
-    // Auto-close after 5 seconds
-    setTimeout(() => setShowSuccessToast(false), 5000);
-  };
-
-  const showErrorToastWithMessage = (errorMessage) => {
-    // Try to make error message user-friendly
-    let userFriendlyError = errorMessage;
-
-    // Common error mappings
-    if (errorMessage?.includes("user rejected transaction")) {
-      userFriendlyError = "Transaction was rejected in your wallet.";
-    } else if (errorMessage?.includes("insufficient funds")) {
-      userFriendlyError = "Insufficient funds for transaction.";
-    } else if (errorMessage?.includes("price slippage check")) {
-      userFriendlyError = "Price changed too much during transaction. Try again or increase slippage tolerance.";
-    } else if (errorMessage?.length > 100) {
-      // Truncate very long error messages
-      userFriendlyError = errorMessage.substring(0, 100) + "...";
-    }
-
-    setToastMessage(userFriendlyError);
-    setShowErrorToast(true);
-
-    // Auto-close after 5 seconds
-    setTimeout(() => setShowErrorToast(false), 5000);
-  };
-
-  // Add click outside handler
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (showActionsDropdown &&
-          cardRef.current &&
-          !cardRef.current.contains(event.target)) {
-        setShowActionsDropdown(false);
-      }
-    };
-
-    if (showActionsDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showActionsDropdown]);
 
   // Fetch token prices
   useEffect(() => {
@@ -253,7 +180,20 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
           chainId
         );
 
-        setTokenBalances(balances);
+        // Format the balances - adapter returns [bigint, bigint]
+        const [amount0Raw, amount1Raw] = balances;
+        const formattedBalances = {
+          token0: {
+            formatted: ethers.utils.formatUnits(amount0Raw.toString(), token0Data.decimals),
+            raw: amount0Raw.toString()
+          },
+          token1: {
+            formatted: ethers.utils.formatUnits(amount1Raw.toString(), token1Data.decimals),
+            raw: amount1Raw.toString()
+          }
+        };
+
+        setTokenBalances(formattedBalances);
         setIsLoadingBalances(false);
       } catch (error) {
         console.error("Error calculating token balances:", error);
@@ -264,6 +204,30 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
     calculateBalances();
   }, [adapter, position, poolData, token0Data, token1Data, chainId]);
+
+  // Calculate position TVL
+  const positionTVL = useMemo(() => {
+    // Don't calculate until balances are loaded
+    if (isLoadingBalances || balanceError) {
+      return null;
+    }
+
+    // Ensure we have all required data
+    if (!tokenBalances || !tokenPrices.token0 || !tokenPrices.token1 || tokenPrices.loading || tokenPrices.error) {
+      return null;
+    }
+
+    try {
+      const token0Value = parseFloat(tokenBalances.token0.formatted) * tokenPrices.token0;
+      const token1Value = parseFloat(tokenBalances.token1.formatted) * tokenPrices.token1;
+      return token0Value + token1Value;
+    } catch (error) {
+      console.error("Error calculating position TVL:", error);
+      console.error("tokenBalances:", tokenBalances);
+      console.error("tokenPrices:", tokenPrices);
+      return null;
+    }
+  }, [tokenBalances, tokenPrices, isLoadingBalances, balanceError]);
 
   // Calculate uncollected fees
   useEffect(() => {
@@ -328,65 +292,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
     };
   }, [adapter, position, poolData, token0Data, token1Data]);
 
-  // State for modals
-  const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
-  const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
-  const [showClosePositionModal, setShowClosePositionModal] = useState(false);
-  const [showAddLiquidityModal, setShowAddLiquidityModal] = useState(false);
-
-  // Function to claim fees using the adapter
-  const claimFees = async () => {
-    if (!adapter) {
-      showErrorToastWithMessage("No adapter available for this position");
-      return;
-    }
-
-    setIsClaiming(true);
-    setShowActionsDropdown(false);
-
-    adapter.claimFees({
-      position,
-      provider,
-      address,
-      chainId,
-      poolData,
-      token0Data,
-      token1Data,
-      dispatch,
-      onStart: () => {
-        setIsClaiming(true);
-      },
-      onFinish: () => {
-        setIsClaiming(false);
-      },
-      onSuccess: (result) => {
-        // Show success toast with transaction hash if available
-        const txHash = result?.tx?.hash;
-        showSuccessToastWithMessage("Successfully claimed fees!", txHash);
-        dispatch(triggerUpdate()); // Refresh data
-      },
-      onError: (errorMessage) => {
-        showErrorToastWithMessage(errorMessage);
-        setIsClaiming(false);
-      }
-    });
-  };
 
   // Handle card click to navigate to detail page
   const handleCardClick = () => {
     router.push(`/position/${position.id}`);
-  };
-
-  // Get explorer URL based on chainId
-  const getExplorerUrl = (txHash) => {
-    if (!txHash || !chainId) return "#";
-
-    const explorers = {
-      1: "https://etherscan.io/tx/",
-      42161: "https://arbiscan.io/tx/"
-    };
-
-    return (explorers[chainId] || "#") + txHash;
   };
 
   // Get card styling based on vault status
@@ -441,11 +350,10 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         className="mb-3"
         style={getCardStyle()}
         onClick={handleCardClick}
-        ref={cardRef}
       >
         <Card.Body>
           <div className="d-flex justify-content-between align-items-center mb-2">
-            <Card.Title className="d-flex align-items-center">
+            <Card.Title className="d-flex align-items-center mb-0" style={{ fontSize: '1.5rem' }}>
               {/* Activity indicator at beginning of line */}
               <span
                 style={{
@@ -460,7 +368,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
               />
 
               {/* Position ID and token pair */}
-              <span>Position #{position.id} - {position.tokenPair}</span>
+              <span>#{position.id} - {position.tokenPair}</span>
 
               {/* Conditional display of either logo or badge */}
               {position.platform && (
@@ -512,335 +420,122 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
                 </div>
               )}
             </Card.Title>
-            <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative' }}>
-              {inVault ? (
-                <Button
-                  variant="outline-secondary"
-                  size="sm"
-                  onClick={() => router.push(`/vault/${position.vaultAddress}`)}
-                  aria-label="Vault position details"
-                  title="Go to vault"
-                >
-                  <span role="img" aria-label="vault">🤖</span>
-                </Button>
+
+            {/* TVL in top right */}
+            <div style={{ fontSize: '1.5rem', fontWeight: '600', textAlign: 'right' }}>
+              {isLoadingBalances || tokenPrices.loading ? (
+                <Spinner animation="border" size="sm" />
+              ) : positionTVL !== null ? (
+                <span className="text-crimson">
+                  ${positionTVL.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                  })}
+                </span>
               ) : (
-                <Button
-                  variant="outline-secondary"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowActionsDropdown(!showActionsDropdown);
-                  }}
-                  aria-label="Position actions"
-                  title="Position actions"
-                >
-                  <span role="img" aria-label="menu">🔧</span>
-                </Button>
-              )}
-
-              {/* Actions Dropdown Menu - Simplified with link-like elements */}
-              {!inVault && showActionsDropdown && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '35px',  // Position below the button
-                    right: '0px', // Align with the right side of the card
-                    zIndex: 1000,
-                    width: '130px',
-                    backgroundColor: 'white',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                    borderRadius: '0.375rem',
-                    padding: '0.5rem 0',
-                    border: '1px solid rgba(0,0,0,0.1)'
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Claim Fees Link */}
-                  <a
-                    className="dropdown-item"
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.12rem 0.7rem',
-                      fontSize: '0.9rem',
-                      cursor: !uncollectedFees || feeLoadingError ||
-                        (uncollectedFees &&
-                          parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                          parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 'not-allowed' : 'pointer',
-                      opacity: !uncollectedFees || feeLoadingError ||
-                        (uncollectedFees &&
-                          parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                          parseFloat(uncollectedFees.token1.formatted) < 0.0001) ? 0.5 : 1,
-                      color: 'inherit',
-                      textDecoration: 'none'
-                    }}
-                    onClick={!uncollectedFees || feeLoadingError ||
-                      (uncollectedFees &&
-                        parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                        parseFloat(uncollectedFees.token1.formatted) < 0.0001)
-                      ? (e) => e.preventDefault()
-                      : () => {
-                          setShowActionsDropdown(false);
-                          setTimeout(() => {
-                            setShowClaimFeesModal(true);
-                          }, 100);
-                        }}
-                    href="#"
-                  >
-                    Claim Fees
-                  </a>
-
-                  {/* Add Liquidity Link */}
-                  <a
-                    className="dropdown-item"
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.12rem 0.7rem',
-                      fontSize: '0.9rem',
-                      cursor: 'pointer',
-                      textDecoration: 'none'
-                    }}
-                    href="#"
-                    onClick={() => {
-                      setShowActionsDropdown(false);
-                      setTimeout(() => {
-                        setShowAddLiquidityModal(true);
-                      }, 100);
-                    }}
-                  >
-                    Add Liquidity
-                  </a>
-
-                  {/* Remove Liquidity Link */}
-                  <a
-                    className="dropdown-item"
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.12rem 0.7rem',
-                      fontSize: '0.9rem',
-                      cursor: !tokenBalances || balanceError ||
-                        (tokenBalances &&
-                          parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                          parseFloat(tokenBalances.token1.formatted) < 0.0001) ? 'not-allowed' : 'pointer',
-                      opacity: !tokenBalances || balanceError ||
-                        (tokenBalances &&
-                          parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                          parseFloat(tokenBalances.token1.formatted) < 0.0001) ? 0.5 : 1,
-                      textDecoration: 'none'
-                    }}
-                    href="#"
-                    onClick={!tokenBalances || balanceError ||
-                      (tokenBalances &&
-                        parseFloat(tokenBalances.token0.formatted) < 0.0001 &&
-                        parseFloat(tokenBalances.token1.formatted) < 0.0001)
-                      ? (e) => e.preventDefault()
-                      : () => {
-                          setShowActionsDropdown(false);
-                          setTimeout(() => {
-                            setShowRemoveLiquidityModal(true);
-                          }, 100);
-                        }}
-                  >
-                    Remove Liquidity
-                  </a>
-
-                  {/* Close Position Link */}
-                  <a
-                    className="dropdown-item"
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.12rem 0.7rem',
-                      fontSize: '0.9rem',
-                      cursor: 'pointer',
-                      color: '#dc3545',  // Red color for danger action
-                      textDecoration: 'none'
-                    }}
-                    href="#"
-                    onClick={() => {
-                      setShowActionsDropdown(false);
-                      setTimeout(() => {
-                        setShowClosePositionModal(true);
-                      }, 100);
-                    }}
-                  >
-                    Close Position
-                  </a>
-                </div>
+                <span className="text-danger">Error</span>
               )}
             </div>
           </div>
 
-          {/* Price Range Display */}
-          <div className="mb-2">
+          {/* Divider */}
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
+            {/* Price direction header with switch button */}
             <div className="d-flex align-items-center">
-              <strong className="me-2">Price Range:</strong>
-              <span>
-                {displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)} - {displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)} {priceLabel}
-              </span>
-              <div onClick={(e) => e.stopPropagation()}>
+              <strong>{priceLabel}</strong>
+              <div onClick={(e) => e.stopPropagation()} className="d-flex align-items-center">
                 <Button
                   variant="link"
                   className="p-0 ms-2"
                   size="sm"
                   onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
                   title="Switch price direction"
+                  style={{ textDecoration: 'none', lineHeight: '1' }}
                 >
                   <span role="img" aria-label="switch">⇄</span>
                 </Button>
               </div>
             </div>
+
+            {/* Price Range Chart */}
+            <PriceRangeChart
+              lowerPrice={displayLowerPrice}
+              upperPrice={displayUpperPrice}
+              currentPrice={currentPrice}
+              token0Symbol={token0Data?.symbol}
+              token1Symbol={token1Data?.symbol}
+              isInverted={invertPriceDisplay}
+              isActive={isActive}
+            />
           </div>
 
-          <Card.Text>
-            <strong>Current Price:</strong> {currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))} {priceLabel}<br />
-            <strong>Uncollected Fees:</strong>
-          </Card.Text>
+          {/* Divider */}
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
+            <div className="row g-3">
+              {/* Token Balances */}
+              <div className="col-6">
+                <small className="d-block mb-2" style={{ fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0a0a0a', fontWeight: '700' }}>
+                  Tokens
+                </small>
+                {isLoadingBalances ? (
+                  <div className="text-secondary small" style={{ paddingLeft: '0.7rem' }}>
+                    <Spinner animation="border" size="sm" className="me-2" />
+                    Loading...
+                  </div>
+                ) : balanceError || !tokenBalances ? (
+                  <div className="text-danger small" style={{ paddingLeft: '0.7rem' }}>
+                    Error loading balances
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '0.7rem' }}>
+                    <div className="mb-1">
+                      <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
+                      <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token0.formatted).toFixed(4)}</span>
+                    </div>
+                    <div className="mb-1">
+                      <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
+                      <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token1.formatted).toFixed(4)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-          <div className="ps-3 mt-1 mb-2">
-            {feeLoadingError ? (
-              <div className="text-danger small">
-                <i className="me-1">⚠️</i>
-                Unable to load fee data
+              {/* Uncollected Fees */}
+              <div className="col-6">
+                <small className="d-block mb-2" style={{ fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0a0a0a', fontWeight: '700' }}>
+                  Uncollected Fees
+                </small>
+                {feeLoadingError ? (
+                  <div className="text-danger small" style={{ paddingLeft: '0.7rem' }}>
+                    <i className="me-1">⚠️</i>
+                    Unable to load fees
+                  </div>
+                ) : isLoadingFees ? (
+                  <div className="text-secondary small" style={{ paddingLeft: '0.7rem' }}>
+                    <Spinner animation="border" size="sm" className="me-2" />
+                    Loading...
+                  </div>
+                ) : uncollectedFees ? (
+                  <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '0.7rem' }}>
+                    <div className="mb-1">
+                      <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
+                      <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}</span>
+                    </div>
+                    <div className="mb-1">
+                      <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
+                      <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-secondary small" style={{ paddingLeft: '0.7rem' }}>
+                    Fee data unavailable
+                  </div>
+                )}
               </div>
-            ) : isLoadingFees ? (
-              <div className="text-secondary small">
-                <Spinner animation="border" size="sm" className="me-2" />
-                Loading fee data...
-              </div>
-            ) : uncollectedFees ? (
-              <>
-                <Badge bg="light" text="dark" className="me-1">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data.symbol}
-                </Badge>
-                <Badge bg="light" text="dark">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data.symbol}
-                </Badge>
-              </>
-            ) : (
-              // No fee data available, but not an error
-              <div className="text-secondary small">
-                Fee data unavailable
-              </div>
-            )}
+            </div>
           </div>
         </Card.Body>
       </Card>
-
-      {/* Toast Containers */}
-      <ToastContainer
-        className="position-fixed"
-        position="top-center"
-        style={{ zIndex: 2000 }}
-      >
-        {/* Success Toast */}
-        <Toast
-          show={showSuccessToast}
-          onClose={() => setShowSuccessToast(false)}
-          bg="success"
-          text="white"
-        >
-          <Toast.Header>
-            <strong className="me-auto">Success</strong>
-          </Toast.Header>
-          <Toast.Body>
-            {toastMessage}
-            {toastTxHash && (
-              <div className="mt-1">
-                <a
-                  href={getExplorerUrl(toastTxHash)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-white text-decoration-underline"
-                >
-                  View Transaction
-                </a>
-              </div>
-            )}
-          </Toast.Body>
-        </Toast>
-
-        {/* Error Toast */}
-        <Toast
-          show={showErrorToast}
-          onClose={() => setShowErrorToast(false)}
-          bg="danger"
-          text="white"
-        >
-          <Toast.Header>
-            <strong className="me-auto">Error</strong>
-          </Toast.Header>
-          <Toast.Body>
-            {toastMessage}
-          </Toast.Body>
-        </Toast>
-      </ToastContainer>
-
-      {/* ClaimFeesModal - for consistent fee claiming experience */}
-      {!inVault && ReactDOM.createPortal(
-        <ClaimFeesModal
-          show={showClaimFeesModal}
-          onHide={() => setShowClaimFeesModal(false)}
-          position={position}
-          uncollectedFees={uncollectedFees}
-          token0Data={token0Data}
-          token1Data={token1Data}
-          tokenPrices={tokenPrices}
-          poolData={poolData}
-        />,
-        document.body
-      )}
-
-      {/* RemoveLiquidityModal */}
-      {!inVault && ReactDOM.createPortal(
-        <RemoveLiquidityModal
-        show={showRemoveLiquidityModal}
-        onHide={() => setShowRemoveLiquidityModal(false)}
-        position={position}
-        tokenBalances={tokenBalances}
-        token0Data={token0Data}
-        token1Data={token1Data}
-        tokenPrices={tokenPrices}
-        poolData={poolData}
-      />,
-      document.body
-      )}
-
-      {/* ClosePositionModal - refactored to handle the adapter calls directly */}
-      {!inVault && ReactDOM.createPortal(
-        <ClosePositionModal
-          show={showClosePositionModal}
-          onHide={() => setShowClosePositionModal(false)}
-          position={position}
-          tokenBalances={tokenBalances}
-          uncollectedFees={uncollectedFees}
-          token0Data={token0Data}
-          token1Data={token1Data}
-          tokenPrices={tokenPrices}
-          poolData={poolData}
-        />,
-        document.body
-      )}
-
-      {/* AddLiquidityModal - refactored to handle the adapter calls directly */}
-      {!inVault && ReactDOM.createPortal(
-      <AddLiquidityModal
-        show={showAddLiquidityModal}
-        onHide={() => setShowAddLiquidityModal(false)}
-        position={position}
-        poolData={poolData}
-        token0Data={token0Data}
-        token1Data={token1Data}
-        tokenPrices={tokenPrices}
-      />,
-      document.body
-      )}
     </>
   );
 }

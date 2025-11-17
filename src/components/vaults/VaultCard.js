@@ -51,19 +51,20 @@ export default function VaultCard({ vault }) {
 
   return (
     <Card
-      className="mb-3"
+      className="mb-4 animate-fade-in"
       style={{
         cursor: "pointer",
-        borderColor: vaultStrategy?.isActive ? '#28a745' : '#dee2e6',
-        boxShadow: vaultStrategy?.isActive
-          ? '0 0 0 1px rgba(40, 167, 69, 0.2)'
-          : '0 0 0 1px rgba(0, 0, 0, 0.05)'
+        position: "relative",
+        background: 'rgba(245, 245, 245, 0.95)',
+        borderColor: isAutomationEnabled
+          ? 'rgba(16, 185, 129, 0.5)'
+          : 'rgba(0, 0, 0, 0.1)'
       }}
       onClick={handleCardClick}
     >
-      <Card.Body>
-        <div className="d-flex justify-content-between align-items-center mb-2">
-          <Card.Title className="d-flex align-items-center">
+      <Card.Body style={{ paddingTop: 'var(--space-xl)', paddingBottom: 'var(--space-xl)' }}>
+        <div className="d-flex justify-content-between align-items-center">
+          <Card.Title className="d-flex align-items-center mb-0" style={{ fontSize: '1.5rem' }}>
             {vault.name}
             {(() => {
               // Check if there's a strategy configured in the vault data
@@ -86,10 +87,11 @@ export default function VaultCard({ vault }) {
                         borderWidth: "1px",
                         borderStyle: "solid",
                         color: strategyDetails?.textColor || "#FFFFFF",
-                        padding: '0.25em 0.8em',
+                        padding: '0.2em 0.6em',
+                        fontSize: '0.75rem',
                       }}
                     >
-                      {IconComponent && <IconComponent size={14} className="me-1" />}
+                      {IconComponent && <IconComponent size={12} className="me-1" />}
                       {strategyDetails?.name || vaultStrategy.strategyId || "Unknown"}
                     </Badge>
 
@@ -132,92 +134,125 @@ export default function VaultCard({ vault }) {
                       borderWidth: "1px",
                       borderStyle: "solid",
                       color: noneStrategy?.textColor || "#FFFFFF",
-                      padding: '0.25em 0.8em',
+                      padding: '0.2em 0.6em',
+                      fontSize: '0.75rem',
                     }}
                   >
-                    {NoneIcon && <NoneIcon size={14} className="me-1" />}
-                    {"Not Configured"}
+                    {NoneIcon && <NoneIcon size={12} className="me-1" />}
+                    {"No Strategy"}
                   </Badge>
                 );
               }
             })()}
           </Card.Title>
-        </div>
 
-        <div className="d-flex justify-content-between mb-3">
-          <div>
-            <small className="text-muted">Created</small>
-            <div>{formattedDate}</div>
-          </div>
-          <div>
-            <small className="text-muted">Positions</small>
-            <div className="text-center">
-              {positionCount !== undefined ? positionCount : (
-                <span className="text-danger">Error</span>
-              )}
-            </div>
-          </div>
-          <div>
-            <small className="text-muted">TVL</small>
-            <div className="text-end">
-              {metrics?.loading ? (
-                <Spinner animation="border" size="sm" />
-              ) : totalTVL !== null ? (
-                <>
+          {/* TVL in top right */}
+          <div style={{ fontSize: '1.5rem', fontWeight: '600', textAlign: 'right' }}>
+            {metrics?.loading ? (
+              <Spinner animation="border" size="sm" />
+            ) : totalTVL !== null ? (
+              <>
+                <span className="text-crimson">
                   ${totalTVL.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2
                   })}
-                  {metrics?.hasPartialData && (
-                    <OverlayTrigger
-                      placement="top"
-                      overlay={<Tooltip>Some data is missing or incomplete. Total value may be underestimated.</Tooltip>}
-                    >
-                      <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
-                    </OverlayTrigger>
-                  )}
+                </span>
+                {metrics?.hasPartialData && (
                   <OverlayTrigger
                     placement="top"
-                    overlay={
-                      <Tooltip>
-                        <div>Last updated: {metrics?.lastTVLUpdate ? new Date(metrics.lastTVLUpdate).toLocaleString() : 'N/A'}</div>
-                        <div>Position TVL: {typeof metrics?.tvl === 'number' ?
-                          `${metrics.tvl.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}` : 'N/A'}</div>
-                        <div>Token TVL: {typeof metrics?.tokenTVL === 'number' ?
-                          `${metrics.tokenTVL.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}` : 'N/A'}</div>
-                      </Tooltip>
-                    }
+                    overlay={<Tooltip>Some data is missing or incomplete. Total value may be underestimated.</Tooltip>}
                   >
-                    <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
+                    <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
                   </OverlayTrigger>
-                </>
+                )}
+                <OverlayTrigger
+                  placement="top"
+                  overlay={
+                    <Tooltip>
+                      <div>Last updated: {metrics?.lastTVLUpdate ? new Date(metrics.lastTVLUpdate).toLocaleString() : 'N/A'}</div>
+                      <div>Position TVL: {typeof metrics?.tvl === 'number' ?
+                        `${metrics.tvl.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}` : 'N/A'}</div>
+                      <div>Token TVL: {typeof metrics?.tokenTVL === 'number' ?
+                        `${metrics.tokenTVL.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}` : 'N/A'}</div>
+                    </Tooltip>
+                  }
+                >
+                  <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem", position: "relative", top: "-0.2rem" }}>ⓘ</small>
+                </OverlayTrigger>
+              </>
+            ) : (
+              <span className="text-danger">Error</span>
+            )}
+          </div>
+        </div>
+
+        {/* Vault Address */}
+        <div className="mb-3 mt-0">
+          <code style={{ fontSize: '0.875rem', padding: 0, margin: 0 }}>
+            {vault.address.substring(0, 10)}...{vault.address.substring(vault.address.length - 8)}
+          </code>
+        </div>
+
+        {/* Asset Balances */}
+        <div className="mt-4 pt-3" style={{ borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
+          <div className="row g-3">
+            {/* Token Balances */}
+            <div className="col-6">
+              <small className="d-block mb-2" style={{ fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0a0a0a', fontWeight: '700' }}>
+                Tokens
+              </small>
+              {vault.tokenBalances && Object.keys(vault.tokenBalances).length > 0 ? (
+                <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '0.7rem' }}>
+                  {Object.keys(vault.tokenBalances).slice(0, 3).map((tokenKey) => {
+                    const token = vault.tokenBalances[tokenKey];
+                    return (
+                      <div key={token.symbol} className="mb-1">
+                        <strong style={{ color: 'var(--crimson-700)' }}>{token.symbol}:</strong> {token.numericalBalance.toFixed(2)}
+                      </div>
+                    );
+                  })}
+                  {Object.keys(vault.tokenBalances).length > 3 && (
+                    <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                      +{Object.keys(vault.tokenBalances).length - 3} more
+                    </div>
+                  )}
+                </div>
               ) : (
-                <span className="text-danger">Error</span>
+                <div style={{ fontSize: '0.8125rem', color: '#525252', paddingLeft: '0.7rem' }}>None</div>
+              )}
+            </div>
+
+            {/* Positions */}
+            <div className="col-6">
+              <small className="d-block mb-2" style={{ fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0a0a0a', fontWeight: '700' }}>
+                Positions
+              </small>
+              {vault.positions && vault.positions.length > 0 ? (
+                <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '0.7rem' }}>
+                  {vault.positions.slice(0, 3).map((position) => (
+                    <div key={position.id} className="mb-1">
+                      #{position.id}: {position.token0Symbol || 'T0'}/{position.token1Symbol || 'T1'}
+                    </div>
+                  ))}
+                  {vault.positions.length > 3 && (
+                    <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                      +{vault.positions.length - 3} more
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.8125rem', color: '#525252', paddingLeft: '0.7rem' }}>None</div>
               )}
             </div>
           </div>
         </div>
-
-        <div className="d-flex justify-content-between align-items-center">
-          <div>
-            <small className="text-muted d-block text-end">APY</small>
-            <div className="text-end">
-              <span className="text-secondary">—</span>
-            </div>
-          </div>
-        </div>
-
-        <Card.Text className="mt-3 mb-0">
-          <small className="text-muted">
-            {vault.address.substring(0, 6)}...{vault.address.substring(vault.address.length - 4)}
-          </small>
-        </Card.Text>
       </Card.Body>
     </Card>
   );

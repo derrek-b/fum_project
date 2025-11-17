@@ -50,7 +50,13 @@ export default function VaultsPage() {
       <Navbar />
 
       <Container className="py-4">
-        <h1 className="mb-4">Vault Management</h1>
+        {/* Hero Section */}
+        <div className="mb-5 animate-fade-in">
+          <h1 className="mb-3">Vault Management</h1>
+          <p style={{ fontSize: '1.125rem', maxWidth: '42rem', color: '#0a0a0a' }}>
+            Automated liquidity management for your DeFi positions. Create vaults, configure strategies, and let automation handle the rest.
+          </p>
+        </div>
 
         {!isConnected ? (
           <Alert variant="info" className="text-center">

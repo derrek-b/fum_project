@@ -155,8 +155,8 @@ export default function WalletConnectEVM() {
     <div className="d-flex align-items-center">
       {isConnected ? (
         <>
-          <div className="me-2 text-light d-none d-md-block">
-            <small>{getChainName(chainId)}</small>
+          <div className="me-2 d-none d-md-block">
+            <small style={{ color: '#fbbf24' }}>{getChainName(chainId)}</small>
           </div>
           <Button
             variant="outline-light"

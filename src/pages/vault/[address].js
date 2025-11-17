@@ -442,11 +442,13 @@ export default function VaultDetailPage() {
           <title>{vault?.name || 'Vault Detail'} | DeFi Dashboard</title>
         </Head>
 
-        <Link href="/vaults" passHref>
-          <Button variant="outline-secondary" className="mb-4">
-            &larr; Back to Vaults
-          </Button>
-        </Link>
+        <div className="mb-4 animate-fade-in">
+          <Link href="/vaults" passHref>
+            <Button variant="outline-secondary">
+              &larr; Back to Vaults
+            </Button>
+          </Link>
+        </div>
 
         <ErrorBoundary
           FallbackComponent={ErrorFallback}
@@ -454,8 +456,8 @@ export default function VaultDetailPage() {
             window.location.reload();
           }}
         >
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <h1 className="mb-0 d-flex align-items-center">
+          <div className="d-flex justify-content-between align-items-start mb-4 animate-fade-in">
+            <h1 className="mb-0 d-flex align-items-center" style={{ fontSize: '2rem' }}>
               {vault.name}
               {vaultFromRedux.strategy?.strategyId ? (
                 (() => {
@@ -567,29 +569,30 @@ export default function VaultDetailPage() {
           </div>
 
           {/* Vault Overview Card */}
-          <Card className="mb-4">
+          <Card className="mb-4 animate-fade-in">
             <Card.Body>
-              <Row>
-                <Col md={4}>
-                  <div className="mb-3">
-                    <strong>Created:</strong> {formatTimestamp(vault.creationTime)}
-                  </div>
-                  <div className="mb-3">
-                    <strong>Owner:</strong> {vault.owner.substring(0, 6)}...{vault.owner.substring(vault.owner.length - 4)}
-                  </div>
-                </Col>
-                <Col md={4}>
-                  <div className="mb-3">
-                    <strong>Positions:</strong> {vaultPositions.length}
-                  </div>
-                  <div className="mb-3">
-                    <strong>Total Value Locked:</strong>{' '}
+              <h3 className="mb-4" style={{ fontSize: '1.25rem', fontWeight: '600', color: '#0a0a0a' }}>Overview</h3>
+              <Row className="g-4">
+                {/* TVL - Featured Metric */}
+                <Col md={6}>
+                  <div style={{
+                    padding: 'var(--space-lg)',
+                    background: 'rgba(90, 0, 0, 0.08)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '2px solid rgba(90, 0, 0, 0.3)'
+                  }}>
+                    <small className="d-block mb-2" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                      Total Value Locked
+                    </small>
+                    <div style={{ fontSize: '2rem', fontWeight: '700', lineHeight: '1' }}>
                     {vaultMetrics?.loading ? (
                       <Spinner animation="border" size="sm" />
                     ) : ((vaultMetrics?.tvl !== undefined && vaultMetrics?.tvl !== null) ||
                         (vaultMetrics?.tokenTVL !== undefined && vaultMetrics?.tokenTVL !== null)) ? (
                       <>
-                        {formatCurrency((vaultMetrics.tvl || 0) + (vaultMetrics.tokenTVL || 0))}
+                        <span className="text-crimson">
+                          {formatCurrency((vaultMetrics.tvl || 0) + (vaultMetrics.tokenTVL || 0))}
+                        </span>
                         {vaultMetrics.hasPartialData && (
                           <OverlayTrigger
                             placement="top"
@@ -631,16 +634,79 @@ export default function VaultDetailPage() {
                         <span className="text-danger">N/A</span>
                       </OverlayTrigger>
                     )}
+                    </div>
                   </div>
                 </Col>
-                <Col md={4}>
-                  <div className="mb-3">
-                    <strong>APY:</strong> {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
-                  </div>
+
+                {/* Other Metrics Grid */}
+                <Col md={6}>
+                  <Row className="g-3">
+                    <Col xs={6}>
+                      <div style={{
+                        padding: 'var(--space-md)',
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                          Positions
+                        </small>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#0a0a0a' }}>{vaultPositions.length}</div>
+                      </div>
+                    </Col>
+                    <Col xs={6}>
+                      <div style={{
+                        padding: 'var(--space-md)',
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                          APY
+                        </small>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#0a0a0a' }}>
+                          {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
+                        </div>
+                      </div>
+                    </Col>
+                    <Col xs={6}>
+                      <div style={{
+                        padding: 'var(--space-md)',
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                          Created
+                        </small>
+                        <div style={{ fontSize: '0.9375rem', fontWeight: '500', color: '#0a0a0a' }}>{formatTimestamp(vault.creationTime)}</div>
+                      </div>
+                    </Col>
+                    <Col xs={6}>
+                      <div style={{
+                        padding: 'var(--space-md)',
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                          Owner
+                        </small>
+                        <code style={{ fontSize: '2.25rem', fontWeight: '700' }}>
+                          {vault.owner.substring(0, 6)}...{vault.owner.substring(vault.owner.length - 4)}
+                        </code>
+                      </div>
+                    </Col>
+                  </Row>
                 </Col>
               </Row>
-              <div className="mb-0">
-                <strong>Vault Address:</strong> <code>{vaultAddress}</code>
+
+              {/* Vault Address */}
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
+                <small className="d-block mb-1" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
+                  Vault Address
+                </small>
+                <code>{vaultAddress}</code>
               </div>
             </Card.Body>
           </Card>

@@ -95,7 +95,7 @@ const PriceRangeChart = ({
       ? `${token1} per ${token0}`
       : `${token0} per ${token1}`;
 
-    const activeColor = '#28a745'; // Success green
+    const activeColor = '#7a0000'; // Crimson
     const inactiveColor = '#dc3545'; // Danger red
     const chartColor = isActive ? activeColor : inactiveColor;
 
@@ -113,7 +113,7 @@ const PriceRangeChart = ({
       rangeBar: {
         position: 'relative',
         height: '40px',
-        backgroundColor: '#f0f0f0',
+        backgroundColor: '#d0d0d0',
         borderRadius: '20px',
         marginTop: '20px',
         marginBottom: '10px'
@@ -125,7 +125,7 @@ const PriceRangeChart = ({
         opacity: 0.4,
         left: '25%',
         width: '50%',
-        borderRadius: '20px'
+        borderRadius: '0'
       },
       priceMarker: {
         position: 'absolute',
@@ -140,10 +140,11 @@ const PriceRangeChart = ({
         left: `${rangePct}%`,
         top: '-25px',
         transform: 'translateX(-50%)',
-        backgroundColor: '#fff',
+        backgroundColor: '#f5f5f5',
+        color: '#7c3aed',
         padding: '2px 6px',
         borderRadius: '4px',
-        border: '1px solid #ccc',
+        border: 'none',
         fontSize: '12px',
         fontWeight: 'bold'
       },
@@ -152,14 +153,18 @@ const PriceRangeChart = ({
         left: '25%',
         bottom: '-25px',
         transform: 'translateX(-50%)',
-        fontSize: '12px'
+        fontSize: '12px',
+        color: '#7c3aed',
+        fontWeight: 'bold'
       },
       upperPriceLabel: {
         position: 'absolute',
         left: '75%',
         bottom: '-25px',
         transform: 'translateX(-50%)',
-        fontSize: '12px'
+        fontSize: '12px',
+        color: '#7c3aed',
+        fontWeight: 'bold'
       },
       footer: {
         marginTop: '30px',
@@ -207,16 +212,6 @@ const PriceRangeChart = ({
           {/* Upper price label */}
           <div style={chartStyles.upperPriceLabel}>
             {displayUpper}
-          </div>
-        </div>
-
-        <div style={chartStyles.footer}>
-          Price range in {pairLabel}
-          <div className="mt-1">
-            <small className="text-muted">
-              Note: This is a simplified visualization. In a production app,
-              we would use a charting library like Chart.js or Recharts.
-            </small>
           </div>
         </div>
       </div>

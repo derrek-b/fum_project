@@ -10,14 +10,15 @@ const vaultsSlice = createSlice({
   },
   reducers: {
     setVaults: (state, action) => {
-      // Initialize vaults with empty positions arrays and metrics if not provided
+      // Initialize vaults with empty positions arrays, metrics, and tokenBalances if not provided
       state.userVaults = action.payload.map(vault => ({
         ...vault,
         positions: vault.positions || [], // Ensure positions array exists
         metrics: vault.metrics || {        // Ensure metrics object exists
           tvl: 0,
           positionCount: 0
-        }
+        },
+        tokenBalances: vault.tokenBalances || {} // Ensure tokenBalances object exists
       }));
     },
     addVault: (state, action) => {

@@ -1,5 +1,5 @@
 // src/components/PositionContainer.js - Updated version with modal adapter calls
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 
@@ -10,13 +10,12 @@ import { getChainName } from "fum_library/helpers/chainHelpers";
 
 // Local project imports
 import PositionCard from "./PositionCard";
-import RefreshControls from "../RefreshControls";
 import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { setPositions, addVaultPositions } from "../../redux/positionsSlice";
 import { setPools, clearPools } from "../../redux/poolSlice";
 import { setTokens, clearTokens } from "../../redux/tokensSlice";
-import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
+import { setResourceUpdating } from "../../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
 import { useToast } from "../../context/ToastContext";
@@ -27,7 +26,7 @@ export default function PositionContainer() {
   const { showError, showSuccess } = useToast();
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
-  const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
+  const { lastUpdate } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
   const { userVaults } = useSelector((state) => state.vaults);
   const { positions } = useSelector((state) => state.positions);
@@ -36,40 +35,9 @@ export default function PositionContainer() {
   const [localPositions, setLocalPositions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const timerRef = useRef(null);
 
   // State for create position modal
   const [showCreatePositionModal, setShowCreatePositionModal] = useState(false);
-
-  // Set up auto-refresh timer
-  useEffect(() => {
-    // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    // Only set up timer if auto-refresh is enabled and we're connected
-    if (autoRefresh.enabled && isConnected && provider && address && chainId) {
-      try {
-        timerRef.current = setInterval(() => {
-          dispatch(markAutoRefresh());
-          dispatch(triggerUpdate());
-        }, autoRefresh.interval);
-      } catch (error) {
-        console.error("Error setting up auto-refresh timer:", error);
-        showError("Failed to set up auto-refresh. Please try toggling it off and on again.");
-      }
-    }
-
-    // Cleanup on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch]);
 
   // Fetch vault data
   useEffect(() => {
@@ -355,10 +323,6 @@ export default function PositionContainer() {
     .filter((pos) => platformFilter === null || pos.platform === platformFilter);
   console.log(`✅ Active positions after filtering:`, activePositions.length, activePositions);
 
-  // Get the refreshing state
-  const isUpdatingPositions = resourcesUpdating?.positions || false;
-  const isUpdatingVaultPositions = resourcesUpdating?.vaultPositions || false;
-
   // Count vault positions for display
   const vaultPositionsCount = positions.filter(p => p.inVault).length;
 
@@ -390,8 +354,8 @@ export default function PositionContainer() {
       ) : (
         <>
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <div className="d-flex align-items-center">
-              <p className="text-muted mb-0 me-3">
+            <div>
+              <p className="mb-0" style={{ color: '#0a0a0a' }}>
                 Found {activePositions.length} active position{activePositions.length !== 1 ? 's' : ''}
                 {vaultPositionsCount > 0 && (
                   <span className="ms-1">
@@ -399,28 +363,18 @@ export default function PositionContainer() {
                   </span>
                 )}
               </p>
+            </div>
 
+            <div>
               {/* Create position button */}
               <Button
-                variant="outline-custom"
+                variant="outline-primary"
                 size="sm"
                 onClick={() => setShowCreatePositionModal(true)}
                 disabled={!isConnected}
               >
                 + Create Position
               </Button>
-            </div>
-
-            <div className="d-flex align-items-center">
-              {(isUpdatingPositions || isUpdatingVaultPositions) && (
-                <div className="d-flex align-items-center me-3">
-                  <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
-                  <small className="text-muted">
-                    {isUpdatingVaultPositions ? "Fetching vault positions..." : "Refreshing..."}
-                  </small>
-                </div>
-              )}
-              <RefreshControls />
             </div>
           </div>
 

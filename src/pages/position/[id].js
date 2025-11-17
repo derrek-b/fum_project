@@ -13,7 +13,7 @@ import AddLiquidityModal from "../../components/positions/AddLiquidityModal";
 import RemoveLiquidityModal from "../../components/positions/RemoveLiquidityModal";
 import ClosePositionModal from "../../components/positions/ClosePositionModal";
 import ClaimFeesModal from "../../components/positions/ClaimFeesModal";
-import { triggerUpdate, setResourceUpdating, markAutoRefresh } from "../../redux/updateSlice";
+import { triggerUpdate, setResourceUpdating } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
 import { setPools } from "@/redux/poolSlice";
 import { setTokens } from "@/redux/tokensSlice";
@@ -69,9 +69,7 @@ export default function PositionDetailPage() {
   const tokens = useSelector((state) => state.tokens);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
-  const { lastUpdate, autoRefresh, resourcesUpdating } = useSelector((state) => state.updates);
-
-  const timerRef = useRef(null);
+  const { lastUpdate, resourcesUpdating } = useSelector((state) => state.updates);
   const hasAttemptedFetch = useRef(false);
   const positionsRef = useRef(positions);
 
@@ -252,39 +250,6 @@ export default function PositionDetailPage() {
       return 0;
     }
   }, [displayLowerPrice, displayUpperPrice, currentPrice]);
-
-  // Set up auto-refresh timer
-  useEffect(() => {
-    // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    // Only set up timer if auto-refresh is enabled and we're connected
-    if (autoRefresh.enabled && isConnected && provider && address && chainId) {
-      try {
-        console.log(`Setting up auto-refresh timer with interval: ${autoRefresh.interval}ms`);
-        timerRef.current = setInterval(() => {
-          const timestamp = Date.now();
-          console.log(`Auto-refresh triggered at ${new Date(timestamp).toISOString()}`);
-          dispatch(markAutoRefresh());
-          dispatch(triggerUpdate()); // This should carry the timestamp
-        }, autoRefresh.interval);
-      } catch (error) {
-        console.error("Error setting up auto-refresh timer:", error);
-        showError("Failed to set up auto-refresh. Please try toggling it off and on again.");
-      }
-    }
-
-    // Cleanup on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [autoRefresh.enabled, autoRefresh.interval, isConnected, provider, address, chainId, dispatch, showError]);
 
   // Fetch positions on initial load if they're not already in Redux
   useEffect(() => {

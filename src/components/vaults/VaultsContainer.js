@@ -124,8 +124,6 @@ export default function VaultsContainer() {
   // Render component
   return (
     <div className="mb-5">
-      <h2 className="mb-3">Your Vaults</h2>
-
       {/* Bootstrap Toast Notifications */}
       <ToastContainer position="top-end" className="p-3" style={{ zIndex: 1100 }}>
         {notifications.map(notification => (
@@ -188,7 +186,7 @@ export default function VaultsContainer() {
         <>
           <div className="d-flex justify-content-between align-items-center mb-3">
             <div>
-              <p className="text-muted mb-0">
+              <p className="mb-0" style={{ color: '#0a0a0a' }}>
                 Found {userVaults.length} vault{userVaults.length !== 1 ? 's' : ''}
               </p>
             </div>

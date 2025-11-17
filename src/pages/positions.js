@@ -4,7 +4,6 @@ import { ErrorBoundary } from "react-error-boundary";
 import Head from "next/head";
 import Navbar from "../components/Navbar";
 import PositionContainer from "../components/positions/PositionContainer";
-import styles from "../styles/Home.module.css";
 import { useToast } from "../context/ToastContext";
 
 // Fallback component to show when an error occurs
@@ -38,15 +37,22 @@ function ErrorFallback({ error, resetErrorBoundary }) {
 
 export default function PositionsPage() {
   return (
-    <div className={styles.container}>
+    <div>
       <Head>
         <title>Position Dashboard | D-fied</title>
         <meta name="description" content="Manage your DeFi liquidity positions" />
       </Head>
 
       <Navbar />
-      <Container>
-        <h1 className={styles.title}>Position Dashboard</h1>
+      <Container className="py-4">
+        {/* Hero Section */}
+        <div className="mb-5 animate-fade-in">
+          <h1 className="mb-3">Position Management</h1>
+          <p style={{ fontSize: '1.125rem', maxWidth: '42rem', color: '#0a0a0a' }}>
+            Manage your positions across DeFi platforms all in one place. Create new positions, manage liquidity, collect fees, and close positions.
+          </p>
+        </div>
+
         <ErrorBoundary
           FallbackComponent={ErrorFallback}
           onReset={() => {
