@@ -658,7 +658,7 @@ const strategies = {
       rebalanceCountThresholdHigh: {
         name: "High Rebalance Count",
         description: "If more than this many rebalances occur in the timeframe, widen ranges",
-        type: "number",
+        type: "integer",
         defaultValue: 3,
         min: 1,
         max: 20,
@@ -671,7 +671,7 @@ const strategies = {
       rebalanceCountThresholdLow: {
         name: "Low Rebalance Count",
         description: "If fewer than this many rebalances occur in the timeframe, tighten ranges",
-        type: "number",
+        type: "integer",
         defaultValue: 1,
         min: 0,
         max: 10,
@@ -684,7 +684,7 @@ const strategies = {
       adaptiveTimeframeHigh: {
         name: "High Count Timeframe",
         description: "Days to look back when counting rebalances for widening ranges",
-        type: "number",
+        type: "integer",
         defaultValue: 7,
         min: 1,
         max: 30,
@@ -698,7 +698,7 @@ const strategies = {
       adaptiveTimeframeLow: {
         name: "Low Count Timeframe",
         description: "Days to look back when counting rebalances for tightening ranges",
-        type: "number",
+        type: "integer",
         defaultValue: 7,
         min: 1,
         max: 30,

@@ -591,8 +591,8 @@ export function validateStrategyParams(strategyId, params) {
     }
 
     // Numeric validations
-    if (paramConfig.type === "number" || paramConfig.type === "percent" ||
-        paramConfig.type === "fiat-currency") {
+    if (paramConfig.type === "integer" || paramConfig.type === "decimal" ||
+        paramConfig.type === "percent" || paramConfig.type === "fiat-currency") {
       const numValue = Number(value);
 
       if (isNaN(numValue)) {
@@ -608,6 +608,24 @@ export function validateStrategyParams(strategyId, params) {
       if (paramConfig.max !== undefined && numValue > paramConfig.max) {
         errors[paramId] = `${paramConfig.name} must be at most ${paramConfig.max}${paramConfig.suffix || ''}`;
         return;
+      }
+
+      // Integer validation - must be whole number
+      if (paramConfig.type === "integer") {
+        if (!Number.isInteger(numValue)) {
+          errors[paramId] = `${paramConfig.name} must be a whole number`;
+          return;
+        }
+      }
+
+      // Precision validation - max 2 decimal places for decimal, percent, and fiat-currency
+      if (paramConfig.type === "decimal" || paramConfig.type === "percent" ||
+          paramConfig.type === "fiat-currency") {
+        const decimalPlaces = (value.toString().split('.')[1] || '').length;
+        if (decimalPlaces > 2) {
+          errors[paramId] = `${paramConfig.name} cannot have more than 2 decimal places`;
+          return;
+        }
       }
     }
 
@@ -866,6 +884,10 @@ export function formatParameterValue(value, paramConfig) {
 
   if (paramConfig.type === 'fiat-currency') {
     return `${paramConfig.prefix || '$'}${value}`;
+  }
+
+  if (paramConfig.type === 'integer' || paramConfig.type === 'decimal') {
+    return `${value}${paramConfig.suffix || ''}`;
   }
 
   return `${value}${paramConfig.suffix || ''}`;

@@ -5,6 +5,33 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2025-11-18
+
+### Added
+- **New parameter types for better type safety**:
+  - `integer`: For whole number values (counts, days, positions)
+  - `decimal`: For decimal values with max 2 decimal places (ratios, multipliers)
+- **Enhanced precision validation**:
+  - All `percent`, `fiat-currency`, and `decimal` types enforce max 2 decimal places
+  - Aligns with on-chain precision limits (basis points/cents storage)
+  - Prevents silent rounding issues during contract calls
+
+### Changed - BREAKING CHANGES
+- **Parameter type system refined**:
+  - Replaced generic `number` type with explicit `integer` and `decimal` types
+  - Updated all count/day parameters to `type: "integer"` in strategy configs
+  - `validateStrategyParams()` now validates integer types (must be whole numbers)
+  - `validateStrategyParams()` now enforces 2 decimal max for `decimal`, `percent`, `fiat-currency`
+- **Test suite updates**:
+  - Added `validateIntegerParameter()` and `validateDecimalParameter()` test validators
+  - Enhanced `validatePercentParameter()` and `validateFiatCurrencyParameter()` with precision checks
+  - Template validation now enforces precision limits on default values
+
+### Improved
+- **Type safety**: Explicit integer vs decimal distinction prevents configuration errors
+- **Validation accuracy**: Precision validation catches user input errors before contract calls
+- **Developer experience**: Clear parameter types improve code documentation and maintainability
+
 ## [0.21.2] - 2025-11-18
 
 ### Added

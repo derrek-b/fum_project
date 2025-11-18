@@ -212,6 +212,12 @@ function validatePercentParameter(paramId, paramConfig, parameterGroups, contrac
     throw new Error(`Parameter ${paramId} defaultValue must be a finite number`);
   }
 
+  // Validate defaultValue has max 2 decimal places
+  const decimalPlaces = (paramConfig.defaultValue.toString().split('.')[1] || '').length;
+  if (decimalPlaces > 2) {
+    throw new Error(`Parameter ${paramId} defaultValue cannot have more than 2 decimal places`);
+  }
+
   // Validate min (required for percent, must be >= 0)
   if (typeof paramConfig.min !== 'number' || !Number.isFinite(paramConfig.min) || paramConfig.min < 0) {
     throw new Error(`Parameter ${paramId} min must be a finite number >= 0`);
@@ -252,33 +258,33 @@ function validatePercentParameter(paramId, paramConfig, parameterGroups, contrac
 }
 
 /**
- * Validate number parameter configuration
+ * Validate integer parameter configuration
  * @param {string} paramId - Parameter identifier
  * @param {Object} paramConfig - Parameter configuration object
  * @param {Object} parameterGroups - Parameter groups for validation
  * @param {Object} contractParametersGroups - Contract parameter groups for validation
  * @throws {Error} If parameter is invalid
  */
-function validateNumberParameter(paramId, paramConfig, parameterGroups, contractParametersGroups) {
+function validateIntegerParameter(paramId, paramConfig, parameterGroups, contractParametersGroups) {
   // First validate base properties (includes conditionals)
   validateParameterBase(paramId, paramConfig, parameterGroups, contractParametersGroups);
 
-  // Validate type is number
-  if (paramConfig.type !== 'number') {
-    throw new Error(`Parameter ${paramId} type must be 'number', got '${paramConfig.type}'`);
+  // Validate type is integer
+  if (paramConfig.type !== 'integer') {
+    throw new Error(`Parameter ${paramId} type must be 'integer', got '${paramConfig.type}'`);
   }
 
-  // Validate defaultValue is number
-  if (typeof paramConfig.defaultValue !== 'number' || !Number.isFinite(paramConfig.defaultValue)) {
-    throw new Error(`Parameter ${paramId} defaultValue must be a finite number`);
+  // Validate defaultValue is integer
+  if (typeof paramConfig.defaultValue !== 'number' || !Number.isInteger(paramConfig.defaultValue)) {
+    throw new Error(`Parameter ${paramId} defaultValue must be an integer`);
   }
 
-  // Validate min (required for number, must be >= 0 based on analysis)
+  // Validate min (required for integer, must be >= 0 based on analysis)
   if (typeof paramConfig.min !== 'number' || !Number.isFinite(paramConfig.min) || paramConfig.min < 0) {
     throw new Error(`Parameter ${paramId} min must be a finite number >= 0`);
   }
 
-  // Validate max (required for number)
+  // Validate max (required for integer)
   if (typeof paramConfig.max !== 'number' || !Number.isFinite(paramConfig.max)) {
     throw new Error(`Parameter ${paramId} max must be a finite number`);
   }
@@ -288,7 +294,7 @@ function validateNumberParameter(paramId, paramConfig, parameterGroups, contract
     throw new Error(`Parameter ${paramId} min (${paramConfig.min}) must be less than max (${paramConfig.max})`);
   }
 
-  // Validate step (required for number, must be > 0)
+  // Validate step (required for integer, must be > 0)
   if (typeof paramConfig.step !== 'number' || !Number.isFinite(paramConfig.step) || paramConfig.step <= 0) {
     throw new Error(`Parameter ${paramId} step must be a positive finite number`);
   }
@@ -306,7 +312,76 @@ function validateNumberParameter(paramId, paramConfig, parameterGroups, contract
     throw new Error(`Parameter ${paramId} defaultValue (${paramConfig.defaultValue}) must be reachable from min (${paramConfig.min}) using step (${paramConfig.step})`);
   }
 
-  // Validate suffix (optional for number type)
+  // Validate suffix (optional for integer type)
+  if (paramConfig.suffix !== undefined) {
+    if (typeof paramConfig.suffix !== 'string' || paramConfig.suffix.trim() === '') {
+      throw new Error(`Parameter ${paramId} suffix must be a non-empty string`);
+    }
+  }
+}
+
+/**
+ * Validate decimal parameter configuration
+ * @param {string} paramId - Parameter identifier
+ * @param {Object} paramConfig - Parameter configuration object
+ * @param {Object} parameterGroups - Parameter groups for validation
+ * @param {Object} contractParametersGroups - Contract parameter groups for validation
+ * @throws {Error} If parameter is invalid
+ */
+function validateDecimalParameter(paramId, paramConfig, parameterGroups, contractParametersGroups) {
+  // First validate base properties (includes conditionals)
+  validateParameterBase(paramId, paramConfig, parameterGroups, contractParametersGroups);
+
+  // Validate type is decimal
+  if (paramConfig.type !== 'decimal') {
+    throw new Error(`Parameter ${paramId} type must be 'decimal', got '${paramConfig.type}'`);
+  }
+
+  // Validate defaultValue is number
+  if (typeof paramConfig.defaultValue !== 'number' || !Number.isFinite(paramConfig.defaultValue)) {
+    throw new Error(`Parameter ${paramId} defaultValue must be a finite number`);
+  }
+
+  // Validate defaultValue has max 2 decimal places
+  const decimalPlaces = (paramConfig.defaultValue.toString().split('.')[1] || '').length;
+  if (decimalPlaces > 2) {
+    throw new Error(`Parameter ${paramId} defaultValue cannot have more than 2 decimal places`);
+  }
+
+  // Validate min (required for decimal, must be >= 0 based on analysis)
+  if (typeof paramConfig.min !== 'number' || !Number.isFinite(paramConfig.min) || paramConfig.min < 0) {
+    throw new Error(`Parameter ${paramId} min must be a finite number >= 0`);
+  }
+
+  // Validate max (required for decimal)
+  if (typeof paramConfig.max !== 'number' || !Number.isFinite(paramConfig.max)) {
+    throw new Error(`Parameter ${paramId} max must be a finite number`);
+  }
+
+  // Validate min < max
+  if (paramConfig.min >= paramConfig.max) {
+    throw new Error(`Parameter ${paramId} min (${paramConfig.min}) must be less than max (${paramConfig.max})`);
+  }
+
+  // Validate step (required for decimal, must be > 0)
+  if (typeof paramConfig.step !== 'number' || !Number.isFinite(paramConfig.step) || paramConfig.step <= 0) {
+    throw new Error(`Parameter ${paramId} step must be a positive finite number`);
+  }
+
+  // Validate defaultValue is within range
+  if (paramConfig.defaultValue < paramConfig.min || paramConfig.defaultValue > paramConfig.max) {
+    throw new Error(`Parameter ${paramId} defaultValue (${paramConfig.defaultValue}) must be between min (${paramConfig.min}) and max (${paramConfig.max})`);
+  }
+
+  // Validate defaultValue aligns with step (with floating point tolerance)
+  const offset = paramConfig.defaultValue - paramConfig.min;
+  const steps = offset / paramConfig.step;
+  const tolerance = 1e-10;
+  if (Math.abs(steps - Math.round(steps)) > tolerance) {
+    throw new Error(`Parameter ${paramId} defaultValue (${paramConfig.defaultValue}) must be reachable from min (${paramConfig.min}) using step (${paramConfig.step})`);
+  }
+
+  // Validate suffix (optional for decimal type)
   if (paramConfig.suffix !== undefined) {
     if (typeof paramConfig.suffix !== 'string' || paramConfig.suffix.trim() === '') {
       throw new Error(`Parameter ${paramId} suffix must be a non-empty string`);
@@ -334,6 +409,12 @@ function validateFiatCurrencyParameter(paramId, paramConfig, parameterGroups, co
   // Validate defaultValue is number
   if (typeof paramConfig.defaultValue !== 'number' || !Number.isFinite(paramConfig.defaultValue)) {
     throw new Error(`Parameter ${paramId} defaultValue must be a finite number`);
+  }
+
+  // Validate defaultValue has max 2 decimal places
+  const decimalPlaces = (paramConfig.defaultValue.toString().split('.')[1] || '').length;
+  if (decimalPlaces > 2) {
+    throw new Error(`Parameter ${paramId} defaultValue cannot have more than 2 decimal places`);
   }
 
   // Validate min (required for fiat-currency, must be > 0 for currency values)
@@ -542,11 +623,42 @@ function validateTemplateConfiguration(strategyId, templateId, templateConfig, s
         }
         break;
 
+      case 'integer':
+        if (typeof defaultValue !== 'number' || !Number.isInteger(defaultValue)) {
+          throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} must be an integer, got ${typeof defaultValue}`);
+        }
+
+        // Validate range constraints
+        if (paramConfig.min !== undefined && defaultValue < paramConfig.min) {
+          throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} (${defaultValue}) must be >= min (${paramConfig.min})`);
+        }
+
+        if (paramConfig.max !== undefined && defaultValue > paramConfig.max) {
+          throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} (${defaultValue}) must be <= max (${paramConfig.max})`);
+        }
+
+        // Validate step alignment (with floating point tolerance)
+        if (paramConfig.step !== undefined) {
+          const offset = defaultValue - paramConfig.min;
+          const steps = offset / paramConfig.step;
+          const tolerance = 1e-10;
+          if (Math.abs(steps - Math.round(steps)) > tolerance) {
+            throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} (${defaultValue}) must align with step (${paramConfig.step}) from min (${paramConfig.min})`);
+          }
+        }
+        break;
+
+      case 'decimal':
       case 'percent':
-      case 'number':
       case 'fiat-currency':
         if (typeof defaultValue !== 'number' || !Number.isFinite(defaultValue)) {
           throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} must be a finite number, got ${typeof defaultValue}`);
+        }
+
+        // Validate precision (max 2 decimal places for decimal, percent, fiat-currency)
+        const decimalPlaces = (defaultValue.toString().split('.')[1] || '').length;
+        if (decimalPlaces > 2) {
+          throw new Error(`Template ${strategyId}.${templateId} default for ${paramId} (${defaultValue}) cannot have more than 2 decimal places`);
         }
 
         // Validate range constraints
@@ -685,8 +797,11 @@ describe('Strategy Configuration Validation', () => {
               case 'percent':
                 validatePercentParameter(paramId, paramConfig, strategy.parameterGroups, strategy.contractParametersGroups);
                 break;
-              case 'number':
-                validateNumberParameter(paramId, paramConfig, strategy.parameterGroups, strategy.contractParametersGroups);
+              case 'integer':
+                validateIntegerParameter(paramId, paramConfig, strategy.parameterGroups, strategy.contractParametersGroups);
+                break;
+              case 'decimal':
+                validateDecimalParameter(paramId, paramConfig, strategy.parameterGroups, strategy.contractParametersGroups);
                 break;
               case 'fiat-currency':
                 validateFiatCurrencyParameter(paramId, paramConfig, strategy.parameterGroups, strategy.contractParametersGroups);
