@@ -35,7 +35,7 @@ export default function Home() {
           className="mb-4"
         />
         <h2>D-fied</h2>
-        <p>Redirecting to Vaults Dashboard...</p>
+        <p>Loading Vaults Dashboard...</p>
       </div>
     </div>
   );

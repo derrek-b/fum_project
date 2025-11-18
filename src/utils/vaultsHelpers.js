@@ -1121,11 +1121,14 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       dispatch(setTokens(allTokenData));
     }
 
-    // 6. Update Redux with ALL positions (vault and non-vault)
-    console.log(`✅ Dispatching ${allPositions.length} total positions to Redux`);
-    console.log(`   - Vault positions: ${allPositions.filter(p => p.inVault).length}`);
-    console.log(`   - Wallet positions: ${allPositions.filter(p => !p.inVault).length}`);
-    dispatch(setPositions(allPositions));
+    // 6. Update Redux with wallet positions only
+    // Note: setPositions is designed for wallet positions only and marks them as inVault: false
+    // Vault positions will be added separately via addVaultPositions when each vault is loaded
+    const walletPositions = allPositions.filter(p => !p.inVault);
+    console.log(`✅ Dispatching ${walletPositions.length} wallet positions to Redux`);
+    console.log(`   - Total positions found: ${allPositions.length}`);
+    console.log(`   - Vault positions (will be added separately): ${allPositions.filter(p => p.inVault).length}`);
+    dispatch(setPositions(walletPositions));
 
     // 7. Prefetch all token prices at once to make TVL calculations faster
     console.log("Prefetching token prices for all tokens");

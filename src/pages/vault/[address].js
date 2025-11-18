@@ -25,7 +25,6 @@ import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
-import { validateTokensForStrategy } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import * as LucideIcons from 'lucide-react';
@@ -105,7 +104,6 @@ export default function VaultDetailPage() {
   const [isEnablingAutomation, setIsEnablingAutomation] = useState(false);
   const [pendingExecutorAddress, setPendingExecutorAddress] = useState('');
   const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
-  const [validationMessages, setValidationMessages] = useState([]);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
 
@@ -208,27 +206,14 @@ export default function VaultDetailPage() {
         return;
       }
 
-      const messages = []
-      // Check 3: If vault has tokens, validate using the existing library function
-      if (vaultFromRedux.tokenBalances && Object.keys(vaultFromRedux.tokenBalances).length > 0) {
-        // Use the existing validator function from our library
-        const tokenValidationMessages = validateTokensForStrategy(vaultFromRedux.tokenBalances, vaultFromRedux.strategy.selectedTokens);
-
-        if (tokenValidationMessages.length > 0) {
-          messages.push(...tokenValidationMessages);
-        }
-      }
-
-      // Check 4: Check positions fit strategy when transferring/creating is reinstated
+      // Check 3: Check positions fit strategy when transferring/creating is reinstated
 
       console.log('setting executor...');
       setPendingExecutorAddress(executorAddr);
       setIsEnablingAutomation(true);
-      setValidationMessages(messages);
     } else {
       console.log('removing executor...');
       setIsEnablingAutomation(false);
-      setValidationMessages([]);
     }
 
     // Show the confirmation modal
@@ -442,12 +427,13 @@ export default function VaultDetailPage() {
           <title>{vault?.name || 'Vault Detail'} | DeFi Dashboard</title>
         </Head>
 
-        <div className="mb-4 animate-fade-in">
+        <div className="mb-4 animate-fade-in d-flex justify-content-between align-items-center">
           <Link href="/vaults" passHref>
-            <Button variant="outline-secondary">
+            <Button className="btn btn-back">
               &larr; Back to Vaults
             </Button>
           </Link>
+          <RefreshControls />
         </div>
 
         <ErrorBoundary
@@ -456,9 +442,12 @@ export default function VaultDetailPage() {
             window.location.reload();
           }}
         >
-          <div className="d-flex justify-content-between align-items-start mb-4 animate-fade-in">
-            <h1 className="mb-0 d-flex align-items-center" style={{ fontSize: '2rem' }}>
-              {vault.name}
+          {/* Vault Overview Card */}
+          <Card className="mb-4 animate-fade-in">
+            <Card.Body>
+              <div className="d-flex justify-content-between align-items-baseline">
+                <h1 className="mb-0 mt-0 d-flex align-items-center" style={{ fontSize: '2.5rem' }}>
+                  {vault.name}
               {vaultFromRedux.strategy?.strategyId ? (
                 (() => {
                   const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
@@ -517,74 +506,16 @@ export default function VaultDetailPage() {
                       }}
                     >
                       {NoneIcon && <NoneIcon size={10} className="me-1" />}
-                      {noneStrategy?.name || "Manual Management"}
+                      {noneStrategy?.name || "No Strategy"}
                     </Badge>
                   );
                 })()
               )}
+                </h1>
 
-              {/* Always show the Automation Toggle */}
-              <div className="d-flex align-items-center" style={{ marginLeft: '3.5rem' }}>
-                <OverlayTrigger
-                  placement="top"
-                  overlay={
-                    <Tooltip>
-                      {!vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
-                        ? "Automation requires an active strategy"
-                        : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
-                          ? "Automation requires assets in the vault"
-                          : automationEnabled
-                            ? "Click to disable automated strategy execution"
-                            : "Click to enable automated strategy execution"}
-                    </Tooltip>
-                  }
-                >
-                  <span>
-                    <Form.Check
-                      type="switch"
-                      id="automation-toggle"
-                      checked={automationEnabled}
-                      onChange={(e) => handleAutomationToggle(e.target.checked)}
-                      disabled={
-                        // Disable if:
-                        // 1. No strategy selected
-                        !vaultFromRedux.strategy?.strategyId ||
-                        vaultFromRedux.strategy?.strategyId === 'none' ||
-                        // 2. TVL is 0 (no assets in vault)
-                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
-                      }
-                      style={{ fontSize: '0.65em', paddingBottom: '4px' }}
-                    />
-                  </span>
-                </OverlayTrigger>
-                <small className="text-muted ms-2" style={{ fontSize: '0.4em' }}>
-                  Automation: {automationEnabled ? 'Enabled' : 'Disabled'}
-                </small>
-              </div>
-            </h1>
-
-            <div className="d-flex align-items-center">
-              <RefreshControls />
-            </div>
-          </div>
-
-          {/* Vault Overview Card */}
-          <Card className="mb-4 animate-fade-in">
-            <Card.Body>
-              <h3 className="mb-4" style={{ fontSize: '1.25rem', fontWeight: '600', color: '#0a0a0a' }}>Overview</h3>
-              <Row className="g-4">
-                {/* TVL - Featured Metric */}
-                <Col md={6}>
-                  <div style={{
-                    padding: 'var(--space-lg)',
-                    background: 'rgba(90, 0, 0, 0.08)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '2px solid rgba(90, 0, 0, 0.3)'
-                  }}>
-                    <small className="d-block mb-2" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                      Total Value Locked
-                    </small>
-                    <div style={{ fontSize: '2rem', fontWeight: '700', lineHeight: '1' }}>
+                {/* TVL in top right */}
+                <div style={{ textAlign: 'right', margin: 0, padding: 0 }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '600', margin: 0 }}>
                     {vaultMetrics?.loading ? (
                       <Spinner animation="border" size="sm" />
                     ) : ((vaultMetrics?.tvl !== undefined && vaultMetrics?.tvl !== null) ||
@@ -601,112 +532,103 @@ export default function VaultDetailPage() {
                             <span className="text-warning ms-1" style={{ cursor: "help" }}>⚠️</span>
                           </OverlayTrigger>
                         )}
-                        {vaultMetrics.lastTVLUpdate && (
-                          <OverlayTrigger
-                            placement="top"
-                            overlay={
-                              <Tooltip>
-                                <div>Last updated: {new Date(vaultMetrics.lastTVLUpdate).toLocaleString()}</div>
-                                <div>Position TVL: {formatCurrency(vaultMetrics.tvl || 0)}</div>
-                                <div>Token TVL: {formatCurrency(vaultMetrics.tokenTVL || 0)}</div>
-                              </Tooltip>
-                            }
-                          >
-                            <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
-                          </OverlayTrigger>
-                        )}
+                        <OverlayTrigger
+                          placement="top"
+                          overlay={
+                            <Tooltip>
+                              <div>Last updated: {vaultMetrics.lastTVLUpdate ? new Date(vaultMetrics.lastTVLUpdate).toLocaleString() : 'N/A'}</div>
+                              <div>Position TVL: {formatCurrency(vaultMetrics.tvl || 0)}</div>
+                              <div>Token TVL: {formatCurrency(vaultMetrics.tokenTVL || 0)}</div>
+                            </Tooltip>
+                          }
+                        >
+                          <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem", position: "relative", top: "-0.2rem" }}>ⓘ</small>
+                        </OverlayTrigger>
                       </>
                     ) : vaultMetrics?.tokenTVL > 0 ? (
                       <>
-                        {formatCurrency(vaultMetrics?.tokenTVL)}
+                        <span className="text-crimson">{formatCurrency(vaultMetrics?.tokenTVL)}</span>
                         <OverlayTrigger
                           placement="top"
                           overlay={<Tooltip>Value based on token balances only. Position values not included or unavailable.</Tooltip>}
                         >
-                          <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem" }}>ⓘ</small>
+                          <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem", position: "relative", top: "-0.2rem" }}>ⓘ</small>
                         </OverlayTrigger>
                       </>
                     ) : (
-                      <OverlayTrigger
-                        placement="top"
-                        overlay={<Tooltip>Could not calculate TVL. Token prices may be unavailable.</Tooltip>}
-                      >
-                        <span className="text-danger">N/A</span>
-                      </OverlayTrigger>
+                      <span className="text-danger">Error</span>
                     )}
-                    </div>
                   </div>
-                </Col>
+                </div>
+              </div>
 
-                {/* Other Metrics Grid */}
-                <Col md={6}>
-                  <Row className="g-3">
-                    <Col xs={6}>
-                      <div style={{
-                        padding: 'var(--space-md)',
-                        background: 'rgba(255, 255, 255, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                          Positions
-                        </small>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#0a0a0a' }}>{vaultPositions.length}</div>
-                      </div>
-                    </Col>
-                    <Col xs={6}>
-                      <div style={{
-                        padding: 'var(--space-md)',
-                        background: 'rgba(255, 255, 255, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                          APY
-                        </small>
-                        <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#0a0a0a' }}>
-                          {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
-                        </div>
-                      </div>
-                    </Col>
-                    <Col xs={6}>
-                      <div style={{
-                        padding: 'var(--space-md)',
-                        background: 'rgba(255, 255, 255, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                          Created
-                        </small>
-                        <div style={{ fontSize: '0.9375rem', fontWeight: '500', color: '#0a0a0a' }}>{formatTimestamp(vault.creationTime)}</div>
-                      </div>
-                    </Col>
-                    <Col xs={6}>
-                      <div style={{
-                        padding: 'var(--space-md)',
-                        background: 'rgba(255, 255, 255, 0.3)',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <small className="d-block mb-2" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                          Owner
-                        </small>
-                        <code style={{ fontSize: '2.25rem', fontWeight: '700' }}>
-                          {vault.owner.substring(0, 6)}...{vault.owner.substring(vault.owner.length - 4)}
-                        </code>
-                      </div>
-                    </Col>
-                  </Row>
-                </Col>
-              </Row>
+              {/* Second row: Address and APY aligned */}
+              <div className="d-flex justify-content-between mb-0">
+                {/* Vault Address */}
+                <div>
+                  <code style={{ fontSize: '1.1rem', padding: 0, margin: 0 }}>
+                    {vaultAddress}
+                  </code>
+                </div>
 
-              {/* Vault Address */}
-              <div className="mt-4 pt-4" style={{ borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
-                <small className="d-block mb-1" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#525252', fontWeight: '700' }}>
-                  Vault Address
+                {/* APY */}
+                <div style={{ textAlign: 'right' }}>
+                  <small style={{ fontSize: '0.9rem', color: '#525252' }}>
+                    <strong>APY:</strong> {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
+                  </small>
+                </div>
+              </div>
+
+              {/* Created timestamp */}
+              <div className="mb-3">
+                <small style={{ fontSize: '0.9rem', color: '#525252' }}>
+                  <strong>Created:</strong> {formatTimestamp(vault.creationTime)}
                 </small>
-                <code>{vaultAddress}</code>
+              </div>
+
+              {/* Divider */}
+              <hr style={{ margin: '1rem 0', border: 'none', borderTop: '2px solid rgba(0, 0, 0, 0.3)' }} />
+
+              {/* Automation Toggle */}
+              <div className="d-flex align-items-center">
+                <span style={{ fontSize: '1.75rem', marginRight: '1.25rem' }} className="text-crimson">
+                  <strong>Automation:</strong>
+                </span>
+                <OverlayTrigger
+                  placement="top"
+                  overlay={
+                    <Tooltip>
+                      {!vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
+                        ? "Automation requires an active strategy"
+                        : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
+                          ? "Automation requires assets in the vault"
+                          : automationEnabled
+                            ? "Click to disable automated strategy execution"
+                            : "Click to enable automated strategy execution"}
+                    </Tooltip>
+                  }
+                >
+                  <span style={{ display: 'inline-block', position: 'relative', top: '3px' }}>
+                    <Form.Check
+                      type="switch"
+                      id="automation-toggle"
+                      checked={automationEnabled}
+                      onChange={(e) => handleAutomationToggle(e.target.checked)}
+                      disabled={
+                        // Disable if:
+                        // 1. No strategy selected
+                        !vaultFromRedux.strategy?.strategyId ||
+                        vaultFromRedux.strategy?.strategyId === 'none' ||
+                        // 2. TVL is 0 (no assets in vault)
+                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
+                      }
+                      style={{ transform: 'scale(1.2)', marginRight: '0.5rem' }}
+                    />
+                  </span>
+                </OverlayTrigger>
+                <span className="text-muted" style={{ fontSize: '1.75rem' }}>
+                  {automationEnabled ? 'Enabled' : 'Disabled'}
+                </span>
               </div>
             </Card.Body>
           </Card>
@@ -733,7 +655,8 @@ export default function VaultDetailPage() {
                       + Add Positions
                     </Button>
                     <Button
-                      variant="outline-danger"
+                      variant=""
+                      className="btn btn-back"
                       onClick={() => {
                         setPositionModalMode('remove');
                         setShowPositionModal(true);
@@ -828,8 +751,7 @@ export default function VaultDetailPage() {
                             <td>
                               {isOwner && (
                                 <Button
-                                  variant="outline-secondary"
-                                  size="sm"
+                                  className="btn btn-back btn-sm"
                                   onClick={() => handleWithdrawToken(token)}
                                 >
                                   Withdraw
@@ -917,7 +839,7 @@ export default function VaultDetailPage() {
           isEnabling={isEnablingAutomation}
           executorAddress={pendingExecutorAddress}
           onConfirm={handleConfirmAutomation}
-          validationMessages={validationMessages}
+          isLoading={isProcessingAutomation}
         />
 
         {/* Position Selection Modal */}

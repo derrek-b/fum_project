@@ -34,23 +34,21 @@ const positionsSlice = createSlice({
         vaultAddress
       }));
 
-      // Create a set of IDs for fast lookup
-      const existingIds = new Set(state.positions.map(p => p.id));
+      // Add only positions that don't already exist, update those that do
+      vaultPositions.forEach(newPosition => {
+        const existingIndex = state.positions.findIndex(p => p.id === newPosition.id);
 
-      // Add only positions that don't already exist
-      vaultPositions.forEach(position => {
-        if (!existingIds.has(position.id)) {
-          state.positions.push(position);
+        if (existingIndex === -1) {
+          // Position doesn't exist, add it
+          state.positions.push(newPosition);
         } else {
-          // Update existing position to mark it as in vault if needed
-          const index = state.positions.findIndex(p => p.id === position.id);
-          if (index !== -1) {
-            state.positions[index] = {
-              ...state.positions[index],
-              inVault: true,
-              vaultAddress
-            };
-          }
+          // Position exists, update it instead of adding duplicate
+          state.positions[existingIndex] = {
+            ...state.positions[existingIndex],
+            ...newPosition,
+            inVault: true,
+            vaultAddress
+          };
         }
       });
     },

@@ -312,15 +312,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
         ...baseStyle,
         borderWidth: "1px",
         borderStyle: "solid",
-        borderColor: "black", // Gold border
-        // Multi-layered box shadow for a glowing effect
-        boxShadow: `
-          0 0 7px rgba(0, 128, 128, 0.4),
-          0 0 10px rgba(0, 128, 128, 0.6),
-          0 0 21px rgba(255, 255, 255, 0.9)
-        `,
-        // Add subtle transition for hover effects
-        transition: "all 0.2s ease-in-out"
+        borderColor: "black"
       };
     }
 
@@ -347,7 +339,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   return (
     <>
       <Card
-        className="mb-3"
+        className="mb-3 card-clickable"
         style={getCardStyle()}
         onClick={handleCardClick}
       >

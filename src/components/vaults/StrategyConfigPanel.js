@@ -10,9 +10,10 @@ import { useToast } from '@/context/ToastContext';
 import { useProvider } from '../../contexts/ProviderContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import StrategyTransactionModal from './StrategyTransactionModal';
+import StrategyValidationModal from './StrategyValidationModal';
 import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
-import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults } from 'fum_library/helpers/strategyHelpers';
+import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, validateTokensForStrategy, validatePositionsForStrategy } from 'fum_library/helpers/strategyHelpers';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import { config } from 'dotenv';
 
@@ -32,6 +33,10 @@ const StrategyConfigPanel = ({
     state.vaults.userVaults.find(v => v.address === vaultAddress)
   );
 
+  // Get positions and pools from Redux for validation
+  const allPositions = useSelector((state) => state.positions.positions);
+  const pools = useSelector((state) => state.pools);
+
   // State
   const [selectedStrategy, setSelectedStrategy] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -46,6 +51,8 @@ const StrategyConfigPanel = ({
 
   // Modals state
   const [showDeactivationModal, setShowDeactivationModal] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationWarnings, setValidationWarnings] = useState([]);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [transactionSteps, setTransactionSteps] = useState([]);
   const [currentTransactionStep, setCurrentTransactionStep] = useState(0);
@@ -61,6 +68,7 @@ const StrategyConfigPanel = ({
   const [tokensChanged, setTokensChanged] = useState(false);
   const [platformsChanged, setPlatformsChanged] = useState(false);
   const [paramsChanged, setParamsChanged] = useState(false);
+  const [currentPresetDefaults, setCurrentPresetDefaults] = useState({});
 
   // NEW: Add data loading state
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -93,6 +101,18 @@ const StrategyConfigPanel = ({
       if (vault.strategy.activeTemplate) {
         setActivePreset(vault.strategy.activeTemplate);
         setInitialActivePreset(vault.strategy.activeTemplate);
+
+        // If we're using a preset (not custom), load its defaults as baseline
+        if (vault.strategy.activeTemplate !== 'custom') {
+          const presetDefaults = getTemplateDefaults(activeStrategy, vault.strategy.activeTemplate);
+          if (presetDefaults) {
+            setCurrentPresetDefaults(presetDefaults);
+          }
+        } else {
+          setCurrentPresetDefaults({});
+        }
+      } else {
+        setCurrentPresetDefaults({});
       }
 
       // Set selected tokens and platforms
@@ -107,9 +127,11 @@ const StrategyConfigPanel = ({
       // Fallback to 'fed' if we know there's a strategy but don't have details
       setSelectedStrategy('fed');
       setInitialSelectedStrategy('fed');
+      setCurrentPresetDefaults({});
     } else {
       setSelectedStrategy('');
       setInitialSelectedStrategy('');
+      setCurrentPresetDefaults({});
     }
 
     // Determine if data is fully loaded
@@ -407,10 +429,14 @@ const StrategyConfigPanel = ({
         const templateDefaults = getTemplateDefaults(selectedStrategy, newPreset);
         if (templateDefaults) {
           setStrategyParams(templateDefaults);
-          // We don't update initialParams here - that would erase change detection
-          // Check if the new template params differ from initial params
-          setParamsChanged(checkParametersChanged(templateDefaults, initialParams));
+          // Store the preset defaults as the new baseline for detecting custom modifications
+          setCurrentPresetDefaults(templateDefaults);
+          // When switching to a preset, there are no custom modifications yet
+          setParamsChanged(false);
         }
+      } else {
+        // When switching to custom, clear the preset defaults baseline
+        setCurrentPresetDefaults({});
       }
     }
 
@@ -419,8 +445,13 @@ const StrategyConfigPanel = ({
       const newParams = { ...strategyParams, ...paramData.parameters };
       setStrategyParams(newParams);
 
-      // Check if parameters have changed using deep comparison
-      const hasChanged = checkParametersChanged(newParams, initialParams);
+      // Check if parameters have changed from the current preset defaults (if using a preset)
+      // or from the initial vault state (if using custom or no preset)
+      const baseline = (activePreset && activePreset !== 'custom' && Object.keys(currentPresetDefaults).length > 0)
+        ? currentPresetDefaults
+        : initialParams;
+
+      const hasChanged = checkParametersChanged(newParams, baseline);
       setParamsChanged(hasChanged);
     }
 
@@ -541,6 +572,43 @@ const StrategyConfigPanel = ({
       if (!isValid) return;
     }
 
+    // Check for token mismatches and show validation modal if needed
+    const warnings = [];
+
+    // Check token balances
+    if (selectedTokens.length > 0 && vault?.tokenBalances && Object.keys(vault.tokenBalances).length > 0) {
+      const tokenValidation = validateTokensForStrategy(vault.tokenBalances, selectedTokens);
+      if (!tokenValidation.isValid) {
+        warnings.push(...tokenValidation.warnings);
+      }
+    }
+
+    // Check vault positions
+    if (selectedTokens.length > 0 && vault?.positions && vault.positions.length > 0) {
+      // Get full position objects from position IDs
+      const vaultPositions = vault.positions
+        .map(id => allPositions.find(p => p.id === id))
+        .filter(Boolean); // Remove any undefined positions
+
+      const positionValidation = validatePositionsForStrategy(vaultPositions, pools, selectedTokens);
+      if (!positionValidation.isValid) {
+        warnings.push(...positionValidation.warnings);
+      }
+    }
+
+    // If there are warnings, show validation modal first
+    if (warnings.length > 0) {
+      setValidationWarnings(warnings);
+      setShowValidationModal(true);
+      return;
+    }
+
+    // Otherwise proceed directly to save
+    await proceedWithSave();
+  };
+
+  // Actual save logic (called after validation modal confirmation or directly)
+  const proceedWithSave = async () => {
     try {
       setTransactionLoading(true);
 
@@ -852,6 +920,17 @@ const StrategyConfigPanel = ({
       setInitialSelectedStrategy(selectedStrategy);
       setInitialActivePreset(activePreset);
       setInitialParams(strategyParams);
+
+      // Update preset defaults baseline if using a preset
+      if (activePreset && activePreset !== 'custom') {
+        const presetDefaults = getTemplateDefaults(selectedStrategy, activePreset);
+        if (presetDefaults) {
+          setCurrentPresetDefaults(presetDefaults);
+        }
+      } else {
+        setCurrentPresetDefaults({});
+      }
+
       setTemplateChanged(false);
       setTokensChanged(false);
       setPlatformsChanged(false);
@@ -953,8 +1032,8 @@ const StrategyConfigPanel = ({
             {vault?.hasActiveStrategy && isOwner && !editMode ? (
               <Form.Label style={{ width: '100%' }} >
                 <Button
-                  variant="outline-danger"
-                  size="sm"
+                  variant=""
+                  className="btn btn-back"
                   onClick={() => setShowDeactivationModal(true)}
                   style={{ width: '100%' }}
                 >
@@ -1029,6 +1108,22 @@ const StrategyConfigPanel = ({
         onConfirm={handleConfirmDeactivation}
         strategyName={getStrategyName()}
         hasExecutor={vault?.executor !== '0x0000000000000000000000000000000000000000'}
+        isLoading={isLoading}
+      />
+
+      {/* Strategy Validation Modal */}
+      <StrategyValidationModal
+        show={showValidationModal}
+        onHide={() => {
+          setShowValidationModal(false);
+          setValidationWarnings([]);
+        }}
+        onConfirm={() => {
+          setShowValidationModal(false);
+          setValidationWarnings([]);
+          proceedWithSave();
+        }}
+        warnings={validationWarnings}
       />
 
       {/* Strategy Transaction Modal */}

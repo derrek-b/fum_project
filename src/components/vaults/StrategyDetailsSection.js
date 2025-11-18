@@ -221,7 +221,7 @@ const StrategyDetailsSection = ({
         setSelectedPlatforms([]);
       }
     } else {
-      setParams(getDefaultParams(strategyId));
+      setParams(getParamDefaultValues(strategyId));
       setActivePreset('custom');
       setSelectedTokens([]);
       setSelectedPlatforms([]);
@@ -675,9 +675,7 @@ const StrategyDetailsSection = ({
           <Form.Group className="mb-3" key={paramId}>
             <Form.Label>{config.name}</Form.Label>
             <div className="input-group">
-              {config.prefix && <div className="input-group-prepend">
-                <span className="input-group-text">{config.prefix}</span>
-              </div>}
+              {config.prefix && <span className="input-group-text">{config.prefix}</span>}
 
               <Form.Control
                 type="number"
@@ -693,12 +691,9 @@ const StrategyDetailsSection = ({
                 isInvalid={!!error}
               />
 
-              {config.suffix && <div className="input-group-append">
-                <span className="input-group-text">{config.suffix}</span>
-              </div>}
-
-              <Form.Control.Feedback type="invalid">{error}</Form.Control.Feedback>
+              {config.suffix && <span className="input-group-text">{config.suffix}</span>}
             </div>
+            <Form.Control.Feedback type="invalid">{error}</Form.Control.Feedback>
             <Form.Text className="text-muted">{config.description}</Form.Text>
           </Form.Group>
         );

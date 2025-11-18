@@ -9,6 +9,8 @@ import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
 export default function VaultCard({ vault }) {
   const router = useRouter();
   const { activeStrategies, strategyPerformance } = useSelector((state) => state.strategies);
+  const allPositions = useSelector((state) => state.positions.positions);
+  const pools = useSelector((state) => state.pools);
 
   // Check if automation is enabled
   const isAutomationEnabled = vault.executor &&
@@ -51,7 +53,7 @@ export default function VaultCard({ vault }) {
 
   return (
     <Card
-      className="mb-4 animate-fade-in"
+      className="mb-4 animate-fade-in card-clickable"
       style={{
         cursor: "pointer",
         position: "relative",
@@ -236,11 +238,20 @@ export default function VaultCard({ vault }) {
               </small>
               {vault.positions && vault.positions.length > 0 ? (
                 <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '0.7rem' }}>
-                  {vault.positions.slice(0, 3).map((position) => (
-                    <div key={position.id} className="mb-1">
-                      #{position.id}: {position.token0Symbol || 'T0'}/{position.token1Symbol || 'T1'}
-                    </div>
-                  ))}
+                  {vault.positions.slice(0, 3).map((positionId) => {
+                    const position = allPositions.find(p => p.id === positionId);
+                    if (!position) return null;
+
+                    const poolData = pools[position.pool];
+                    const token0Symbol = poolData?.token0?.symbol || 'T0';
+                    const token1Symbol = poolData?.token1?.symbol || 'T1';
+
+                    return (
+                      <div key={positionId} className="mb-1">
+                        <strong style={{ color: 'var(--crimson-700)' }}>#{positionId}:</strong> {token0Symbol}/{token1Symbol}
+                      </div>
+                    );
+                  })}
                   {vault.positions.length > 3 && (
                     <div className="text-muted" style={{ fontSize: '0.75rem' }}>
                       +{vault.positions.length - 3} more

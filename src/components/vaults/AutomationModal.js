@@ -1,6 +1,6 @@
 // src/components/vaults/AutomationModal.js
 import React from 'react';
-import { Modal, Button, Alert } from 'react-bootstrap';
+import { Modal, Button, Alert, Spinner } from 'react-bootstrap';
 
 const AutomationModal = ({
   show,
@@ -8,7 +8,7 @@ const AutomationModal = ({
   isEnabling,
   executorAddress,
   onConfirm,
-  validationMessages
+  isLoading = false
 }) => {
   return (
     <Modal show={show} onHide={onHide} centered>
@@ -18,23 +18,12 @@ const AutomationModal = ({
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        {/* Display validation messages if there are any */}
-        {validationMessages.length > 0 && (
-          <Alert variant="danger" className="mb-3">
-            <Alert.Heading style={{ width: '100%', textAlign: 'center'}}>Warning</Alert.Heading>
-            <ul className="mb-0">
-              {validationMessages.map((message, index) => (
-                <li key={index}>{message}</li>
-              ))}
-            </ul>
-          </Alert>
-        )}
         {isEnabling ? (
           <>
             <p>You are about to enable the following address to automate position management for this vault:</p>
 
             <div className="bg-light p-3 mb-3 rounded">
-              <code className="user-select-all">{executorAddress}</code>
+              <code className="user-select-all" style={{ fontSize: '1rem' }}>{executorAddress}</code>
             </div>
 
             <p>The executor can only:</p>
@@ -69,14 +58,27 @@ const AutomationModal = ({
         )}
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="secondary" onClick={onHide}>
+        <Button variant="secondary" onClick={onHide} disabled={isLoading}>
           Cancel
         </Button>
         <Button
-          variant={isEnabling ? "primary" : "danger"}
+          variant="primary"
           onClick={onConfirm}
+          disabled={isLoading}
         >
-          {isEnabling ? "Enable Automation" : "Disable Automation"}
+          {isLoading ? (
+            <>
+              <Spinner
+                as="span"
+                animation="border"
+                size="sm"
+                role="status"
+                aria-hidden="true"
+                className="me-2"
+              />
+              {isEnabling ? "Enabling..." : "Disabling..."}
+            </>
+          ) : (isEnabling ? "Enable Automation" : "Disable Automation")}
         </Button>
       </Modal.Footer>
     </Modal>

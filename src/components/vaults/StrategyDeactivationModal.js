@@ -1,11 +1,11 @@
 // src/components/vaults/StrategyDeactivationModal.js
 import React from 'react';
-import { Modal, Button, Alert } from 'react-bootstrap';
+import { Modal, Button, Alert, Spinner } from 'react-bootstrap';
 
 /**
  * Modal to confirm strategy deactivation
  */
-const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName, hasExecutor = false }) => {
+const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName, hasExecutor = false, isLoading = false }) => {
   return (
     <Modal show={show} onHide={onHide} backdrop="static" centered>
       <Modal.Header closeButton>
@@ -27,7 +27,7 @@ const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName, hasE
                 <li>Fee collection will not be automated</li>
               </>
             )}
-            <li>Your positions will no longer be actively managed by the strategy</li>
+            <li>You will not be able to start automation without an active strategy</li>
           </ul>
           <p className="mb-0">
             You can reactivate the strategy at any time with the same or different parameters.
@@ -35,11 +35,23 @@ const StrategyDeactivationModal = ({ show, onHide, onConfirm, strategyName, hasE
         </Alert>
       </Modal.Body>
       <Modal.Footer>
-        <Button variant="outline-secondary" onClick={onHide}>
+        <Button variant="secondary" onClick={onHide} disabled={isLoading}>
           Cancel
         </Button>
-        <Button variant="danger" onClick={onConfirm}>
-          Deactivate Strategy
+        <Button variant="primary" onClick={onConfirm} disabled={isLoading}>
+          {isLoading ? (
+            <>
+              <Spinner
+                as="span"
+                animation="border"
+                size="sm"
+                role="status"
+                aria-hidden="true"
+                className="me-2"
+              />
+              Deactivating...
+            </>
+          ) : "Deactivate Strategy"}
         </Button>
       </Modal.Footer>
     </Modal>
