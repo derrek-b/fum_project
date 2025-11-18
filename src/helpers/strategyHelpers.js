@@ -894,16 +894,14 @@ export function formatParameterValue(value, paramConfig) {
  * @since 1.0.0
  */
 export function validateTokensForStrategy (vaultTokens, strategyTokens) {
-  const messages = [];
-
   // Early exit if no tokens in vault or no strategy config
   if (!vaultTokens || Object.keys(vaultTokens).length === 0 || !strategyTokens) {
-    return messages;
+    return { isValid: true, warnings: [] };
   }
 
   // If no tokens are specified in the strategy, we can't validate
   if (!strategyTokens.length) {
-    return messages;
+    return { isValid: true, warnings: [] };
   }
 
   // Check if each vault token is included in strategy tokens
@@ -913,11 +911,128 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
     !strategyTokens.includes(symbol)
   );
 
-  if (unmatchedTokens.length > 0) {
-    messages.push(`The following tokens in your vault are not part of your strategy: ${unmatchedTokens.join(', ')}. These tokens will be swapped into the selected strategy tokens.`);
+  if (unmatchedTokens.length === 0) {
+    return { isValid: true, warnings: [] };
   }
 
-  return messages;
+  return {
+    isValid: false,
+    warnings: [{
+      type: 'unmatchedTokens',
+      count: unmatchedTokens.length,
+      items: unmatchedTokens
+    }]
+  };
+}
+
+/**
+ * Validates that vault positions use tokens that are part of the strategy
+ * @param {Array} vaultPositions - Array of position objects from the vault
+ * @param {Object} pools - Pools data object from Redux (keyed by pool address)
+ * @param {Array<string>} strategyTokens - Array of token symbols selected for the strategy
+ * @returns {Array<string>} Array of warning messages (empty if all positions match)
+ * @example
+ * const positions = [{ id: '12345', pool: '0xabc...' }];
+ * const pools = { '0xabc...': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } } };
+ * const strategyTokens = ['USDC', 'DAI'];
+ * const messages = validatePositionsForStrategy(positions, pools, strategyTokens);
+ * // Returns: ["The following positions will be closed immediately: Position #12345 (WETH/USDC uses non-strategy token WETH). These positions will be closed and tokens swapped into your strategy tokens."]
+ * @since 1.0.0
+ */
+export function validatePositionsForStrategy (vaultPositions, pools, strategyTokens) {
+  // Early exit if no positions or no strategy tokens
+  if (!vaultPositions || vaultPositions.length === 0) {
+    return { isValid: true, warnings: [] };
+  }
+
+  if (!strategyTokens || strategyTokens.length === 0) {
+    return { isValid: true, warnings: [] };
+  }
+
+  if (!pools) {
+    return { isValid: true, warnings: [] };
+  }
+
+  // Check each position for token mismatches
+  const mismatchedPositions = [];
+
+  vaultPositions.forEach((position, index) => {
+    // Flag undefined positions as unable to validate
+    if (!position) {
+      mismatchedPositions.push({
+        id: `position-${index}`,
+        tokenPair: 'Unknown - undefined position',
+        nonMatchingTokens: ['Unable to validate - undefined position']
+      });
+      return;
+    }
+
+    // Flag positions without pool ID as unable to validate
+    if (!position.pool) {
+      mismatchedPositions.push({
+        id: position.id || `position-${index}`,
+        tokenPair: 'Unknown - missing pool ID',
+        nonMatchingTokens: ['Unable to validate - missing pool ID']
+      });
+      return;
+    }
+
+    const poolData = pools[position.pool];
+
+    // Flag positions with missing pool data as unable to validate
+    if (!poolData || !poolData.token0 || !poolData.token1) {
+      mismatchedPositions.push({
+        id: position.id,
+        tokenPair: 'Unknown - missing pool data',
+        nonMatchingTokens: ['Unable to validate - missing pool data']
+      });
+      return;
+    }
+
+    const token0Symbol = poolData.token0.symbol;
+    const token1Symbol = poolData.token1.symbol;
+
+    // Flag positions with undefined token symbols as unable to validate
+    if (!token0Symbol || !token1Symbol) {
+      mismatchedPositions.push({
+        id: position.id,
+        tokenPair: `${token0Symbol || 'undefined'}/${token1Symbol || 'undefined'}`,
+        nonMatchingTokens: ['Unable to validate - undefined token symbol']
+      });
+      return;
+    }
+
+    // Check if both tokens are in the strategy
+    const token0Match = strategyTokens.includes(token0Symbol);
+    const token1Match = strategyTokens.includes(token1Symbol);
+
+    // If either token doesn't match, add to mismatched list
+    if (!token0Match || !token1Match) {
+      const nonMatchingTokens = [];
+      if (!token0Match) nonMatchingTokens.push(token0Symbol);
+      if (!token1Match) nonMatchingTokens.push(token1Symbol);
+
+      mismatchedPositions.push({
+        id: position.id,
+        tokenPair: `${token0Symbol}/${token1Symbol}`,
+        nonMatchingTokens: nonMatchingTokens
+      });
+    }
+  });
+
+  // Return result
+  if (mismatchedPositions.length === 0) {
+    return { isValid: true, warnings: [] };
+  }
+
+  return {
+    isValid: false,
+    warnings: [{
+      type: 'unmatchedPositions',
+      count: mismatchedPositions.length,
+      items: mismatchedPositions
+    }]
+  };
 }
 
 /**

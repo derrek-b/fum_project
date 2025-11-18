@@ -5,6 +5,31 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2025-11-18
+
+### Added
+- **Position validation for strategy configuration**: New `validatePositionsForStrategy()` function
+  - Validates vault positions against strategy token configuration before saving
+  - Alerts users when positions contain tokens not included in strategy configuration
+  - Flags positions with missing or invalid pool data for user awareness
+  - Returns structured warning data with position IDs, token pairs, and non-matching tokens
+
+### Changed - BREAKING CHANGES
+- **Strategy validation functions now return structured data**:
+  - `validateTokensForStrategy()`: Changed return format from `string[]` to `{ isValid: boolean, warnings: Array<WarningObject> }`
+  - `validatePositionsForStrategy()`: Returns same structured format as `validateTokensForStrategy()`
+  - Warning objects include `type`, `count`, and `items` properties for better UI rendering
+  - Enables separation of concerns: library returns data, UI handles presentation
+  - All validation edge cases (missing pool data, undefined tokens) now flagged as warnings instead of silently skipped
+
+### Improved
+- **Enhanced validation coverage**: Both token and position validation now alert users to data quality issues
+  - Missing pool data, undefined token symbols, and null values are flagged as "Unable to validate"
+  - Ensures users are aware when positions cannot be properly validated against strategy configuration
+- **Test coverage**: Added 26 comprehensive tests for `validatePositionsForStrategy()`
+  - Success cases, warning cases, edge cases, and real-world scenarios
+  - Updated 26 existing tests for `validateTokensForStrategy()` to match new structured format
+
 ## [0.21.1] - 2025-11-15
 
 ### Fixed

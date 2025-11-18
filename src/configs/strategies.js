@@ -8,7 +8,7 @@ const strategies = {
   // None strategy (manual management)
   "none": {
     id: "none",
-    name: "Manual Management",
+    name: "No Strategy",
     subtitle: "No Automated Strategy",
     description: "Manually manage your positions without automation",
     icon: "Ban",

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-11-15T19:01:27.723Z
+Generated on: 2025-11-18T19:07:11.676Z
 
 ## Table of Contents
 
@@ -313,6 +313,7 @@ Token configuration with addresses on multiple chains
 - `strategySupportsTokens` (function)
 - `formatParameterValue` (function)
 - `validateTokensForStrategy` (function)
+- `validatePositionsForStrategy` (function)
 - `mapStrategyParameters` (function)
 - `getMinDeploymentMultiplier` (function)
 
