@@ -471,11 +471,8 @@ const StrategyConfigPanel = ({
   };
 
   // Set validation function
-  const handleSetValidation = (validateFn) => {
-    // Only update if it's actually different to avoid re-renders
-    if (validateFn !== validateFn) {
-      setValidateFn(() => validateFn);
-    }
+  const handleSetValidation = (_validateFn) => {
+    setValidateFn(() => _validateFn);
   };
 
   // Get the strategy name for display
@@ -829,6 +826,14 @@ const StrategyConfigPanel = ({
                 // Convert to pennies/cents (ensure integer, not float)
                 return Math.round(parseFloat(value) * 100);
 
+              case 'integer':
+                // Integer values (counts, days, etc.)
+                return parseInt(value);
+
+              case 'decimal':
+                // Decimal values (ratios, multipliers, etc.)
+                return parseFloat(value);
+
               case 'boolean':
                 return !!value;
 
@@ -1085,7 +1090,7 @@ const StrategyConfigPanel = ({
         {isOwner && isDataLoaded && (editMode || hasUnsavedChanges) && (
           <div className="d-flex justify-content-end mt-4">
             <Button
-              variant="outline-secondary"
+              variant="secondary"
               onClick={handleCancel}
               className="me-2"
             >

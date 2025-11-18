@@ -28,6 +28,21 @@ import {
 import { getAvailablePlatforms } from 'fum_library/helpers/platformHelpers';
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 
+// CSS to hide number input spinner arrows
+const numberInputStyles = `
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
+  }
+`;
+
 /**
  * Displays and allows editing of detailed strategy configuration for a vault
  */
@@ -679,16 +694,28 @@ const StrategyDetailsSection = ({
 
               <Form.Control
                 type="number"
+                inputMode="decimal"
                 value={value}
+                onKeyDown={(e) => {
+                  // Block scientific notation and negative signs
+                  if (['e', 'E', '+', '-'].includes(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
                 onChange={(e) => {
                   const val = e.target.value === '' ? '' : parseFloat(e.target.value);
                   handleParamChange(paramId, val);
                 }}
                 min={config.min}
                 max={config.max}
-                step={config.step}
                 disabled={!editMode}
                 isInvalid={!!error}
+                style={{
+                  MozAppearance: 'textfield',
+                  WebkitAppearance: 'none',
+                  margin: 0
+                }}
+                className="no-number-spinner"
               />
 
               {config.suffix && <span className="input-group-text">{config.suffix}</span>}
@@ -720,6 +747,7 @@ const StrategyDetailsSection = ({
 
   return (
     <div className="strategy-details-section mt-3">
+      <style>{numberInputStyles}</style>
       {/* Strategy information header */}
       <div className="mb-3">
         <div className="d-flex justify-content-between align-items-center">
