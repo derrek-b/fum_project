@@ -1,5 +1,5 @@
 // src/components/vault_wizard/StrategyDetailsSection.js
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import {
   Card,
@@ -182,12 +182,63 @@ const StrategyDetailsSection = ({
     }
   }, [params, selectedTokens, selectedPlatforms, activePreset]);
 
-  // Expose validation functionality - only register once
+  // Update the validateParams function to include min/max validations - memoized to prevent infinite loops
+  const validateParams = useCallback(() => {
+    if (!strategyId || strategyId === 'none') return true;
+
+    // Clear previous errors first
+    setErrors({});
+
+    // Validate strategy specific parameters
+    const validation = validateStrategyParams(strategyId, params);
+    let isValid = validation.isValid;
+    const allErrors = { ...validation.errors };
+
+    // Validate selected tokens
+    const strategyDetails = getStrategyDetails(strategyId);
+    if (strategyDetails?.minTokens && selectedTokens.length < strategyDetails.minTokens) {
+      isValid = false;
+      allErrors.tokens = `At least ${strategyDetails.minTokens} token(s) must be selected`;
+    }
+
+    // Add validation for max tokens if specified
+    if (strategyDetails?.maxTokens && selectedTokens.length > strategyDetails.maxTokens) {
+      isValid = false;
+      allErrors.tokens = `No more than ${strategyDetails.maxTokens} token(s) can be selected`;
+    }
+
+    // Validate platforms - min platforms
+    if (strategyDetails?.minPlatforms && selectedPlatforms.length < strategyDetails.minPlatforms) {
+      isValid = false;
+      allErrors.platforms = `At least ${strategyDetails.minPlatforms} platform(s) must be selected`;
+    }
+
+    // Add validation for max platforms if specified
+    if (strategyDetails?.maxPlatforms && selectedPlatforms.length > strategyDetails.maxPlatforms) {
+      isValid = false;
+      allErrors.platforms = `No more than ${strategyDetails.maxPlatforms} platform(s) can be selected`;
+    }
+
+    // Set errors if any
+    if (!isValid) {
+      setErrors(allErrors);
+
+      // Show more specific error message
+      const errorCount = Object.keys(allErrors).length;
+      showError(`Please correct ${errorCount} field error${errorCount > 1 ? 's' : ''} in the form`);
+
+      return false;
+    }
+
+    return true;
+  }, [strategyId, params, selectedTokens, selectedPlatforms, showError]);
+
+  // Expose validation functionality - update when validateParams changes
   useEffect(() => {
     if (onValidate) {
       onValidate(validateParams);
     }
-  }, [onValidate]);
+  }, [onValidate, validateParams]);
 
   // Handle token selection
   const handleTokenToggle = (symbol) => {
@@ -321,57 +372,6 @@ const StrategyDetailsSection = ({
         return newErrors;
       });
     }
-  };
-
-  // Update the validateParams function to include min/max validations
-  const validateParams = () => {
-    if (!strategyId || strategyId === 'none') return true;
-
-    // Clear previous errors first
-    setErrors({});
-
-    // Validate strategy specific parameters
-    const validation = validateStrategyParams(strategyId, params);
-    let isValid = validation.isValid;
-    const allErrors = { ...validation.errors };
-
-    // Validate selected tokens
-    const strategyDetails = getStrategyDetails(strategyId);
-    if (strategyDetails?.minTokens && selectedTokens.length < strategyDetails.minTokens) {
-      isValid = false;
-      allErrors.tokens = `At least ${strategyDetails.minTokens} token(s) must be selected`;
-    }
-
-    // Add validation for max tokens if specified
-    if (strategyDetails?.maxTokens && selectedTokens.length > strategyDetails.maxTokens) {
-      isValid = false;
-      allErrors.tokens = `No more than ${strategyDetails.maxTokens} token(s) can be selected`;
-    }
-
-    // Validate platforms - min platforms
-    if (strategyDetails?.minPlatforms && selectedPlatforms.length < strategyDetails.minPlatforms) {
-      isValid = false;
-      allErrors.platforms = `At least ${strategyDetails.minPlatforms} platform(s) must be selected`;
-    }
-
-    // Add validation for max platforms if specified
-    if (strategyDetails?.maxPlatforms && selectedPlatforms.length > strategyDetails.maxPlatforms) {
-      isValid = false;
-      allErrors.platforms = `No more than ${strategyDetails.maxPlatforms} platform(s) can be selected`;
-    }
-
-    // Set errors if any
-    if (!isValid) {
-      setErrors(allErrors);
-
-      // Show more specific error message
-      const errorCount = Object.keys(allErrors).length;
-      showError(`Please correct ${errorCount} field error${errorCount > 1 ? 's' : ''} in the form`);
-
-      return false;
-    }
-
-    return true;
   };
 
   // Render preset selection

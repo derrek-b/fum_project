@@ -819,11 +819,6 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
   }
 
   try {
-    console.log(`🔵 ========================================`);
-    console.log(`🔵 getVaultData() called for vault: ${vaultAddress}`);
-    console.log(`🔵 skipMetricsUpdate option: ${skipMetricsUpdate}`);
-    console.log(`🔵 ========================================`);
-
     // Step 1: Load strategies
     const strategiesResult = await loadVaultStrategies(provider, chainId, dispatch, options);
     if (!strategiesResult.success) {
@@ -856,14 +851,7 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
     );
 
     // Step 4: Load positions
-    console.log(`🔵 Loading positions for vault ${vaultAddress}...`);
     const positionsResult = await loadVaultPositions(vaultAddress, provider, chainId, dispatch, options);
-    console.log(`🔵 loadVaultPositions result:`, {
-      success: positionsResult.success,
-      positionsCount: positionsResult.positions?.length || 0,
-      positionIds: positionsResult.positionIds || [],
-      hasPoolData: !!positionsResult.poolData
-    });
 
     if (positionsResult.success) {
       // Update vault with position IDs
@@ -877,27 +865,12 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
     }
 
     // Only calculate position values and update metrics if not skipping metrics update
-    console.log(`🔵 TVL Calculation Gate Check for vault ${vaultAddress}:`);
-    console.log(`🔵   skipMetricsUpdate: ${skipMetricsUpdate}`);
-    console.log(`🔵   positionsResult.success: ${positionsResult.success}`);
-    console.log(`🔵   positionsResult.positions.length: ${positionsResult.positions?.length || 0}`);
-
     if (!skipMetricsUpdate && positionsResult.success) {
       const positions = positionsResult.positions || [];
       const poolData = positionsResult.poolData || {};
 
-      console.log(`🔵 Processing vault with ${positions.length} positions`);
-
       // Calculate position TVL using shared function
       const { totalTVL, hasPartialData } = await calculatePositionsTVL(positions, poolData, chainId, provider);
-
-      // Always update metrics whether there are positions or not
-      console.log(`🔵 TVL calculation complete:`);
-      console.log(`🔵   Total Position TVL: $${totalTVL}`);
-      console.log(`🔵   Token TVL: $${tokenResult.success ? tokenResult.totalTokenValue : 0}`);
-      console.log(`🔵   hasPartialData: ${hasPartialData}`);
-      console.log(`🔵   tokenHasPartialData: ${tokenResult.tokenHasPartialData || false}`);
-      console.log(`🔵   Position count: ${positions.length}`);
 
       // Update vault metrics with combined TVL information
       dispatch(updateVaultMetrics({
@@ -911,19 +884,6 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
           lastTVLUpdate: Date.now()
         }
       }));
-
-      console.log(`🔵 Dispatched updateVaultMetrics for vault ${vaultAddress}`);
-    } else {
-      console.log(`⚠️ TVL calculation SKIPPED for vault ${vaultAddress}`);
-      if (skipMetricsUpdate) {
-        console.log(`⚠️   Reason: skipMetricsUpdate = true`);
-      }
-      if (!positionsResult.success) {
-        console.log(`⚠️   Reason: positionsResult.success = false`);
-      }
-      if (!positionsResult.positions || positionsResult.positions.length === 0) {
-        console.log(`⚠️   Reason: No positions (length = ${positionsResult.positions?.length || 0})`);
-      }
     }
 
     return {
@@ -1247,19 +1207,12 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 8. Second pass: Calculate TVL for each vault
-    console.log(`🔵 Starting second pass: Calculating TVL for ${completeVaultsData.length} vaults`);
-
     for (let i = 0; i < completeVaultsData.length; i++) {
       const vault = completeVaultsData[i];
       const vaultPositions = positionsByVault[vault.address] || [];
 
-      console.log(`🔵 Calculating TVL for vault ${vault.address} with ${vaultPositions.length} positions`);
-
       // Calculate position TVL using shared function
       const { totalTVL: positionTVL, hasPartialData } = await calculatePositionsTVL(vaultPositions, allPoolData, chainId, provider);
-
-      // Update the metrics with calculated TVL
-      console.log(`🔵 Vault ${vault.address} TVL calculated: $${positionTVL}, hasPartialData: ${hasPartialData}`);
 
       completeVaultsData[i] = {
         ...vault,
@@ -1271,8 +1224,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
         }
       };
     }
-
-    console.log(`🔵 Second pass complete: All vault TVLs calculated`);
 
     // 9. Fetch token balances for each vault and add to complete data
     for (let i = 0; i < completeVaultsData.length; i++) {
@@ -1299,10 +1250,6 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 10. NOW update all vaults in Redux with COMPLETE data (including tokenBalances)
-    console.log(`🔵 Dispatching ${completeVaultsData.length} vaults to Redux with complete data`);
-    completeVaultsData.forEach(vault => {
-      console.log(`🔵 Vault ${vault.address}: TVL=$${vault.metrics.tvl}, tokenTVL=$${vault.metrics.tokenTVL}, hasPartialData=${vault.metrics.hasPartialData}`);
-    });
     dispatch(setVaults(completeVaultsData));
 
     return {

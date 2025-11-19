@@ -69,9 +69,14 @@ const PriceRangeChart = ({
     if (Math.abs(upper - lower) < 0.000001) {
       rangePct = 50; // If range is too small, just put marker in the middle
     } else {
-      // Calculate percentage and clamp between 0-100
-      rangePct = Math.min(Math.max(((current - lower) / (upper - lower)) * 100, 0), 100);
+      // Calculate percentage (don't clamp - we'll use this to detect out of range)
+      rangePct = ((current - lower) / (upper - lower)) * 100;
     }
+
+    // Determine if price is out of range
+    const isOutOfRange = rangePct < 0 || rangePct > 100;
+    const isAboveRange = rangePct > 100;
+    const isBelowRange = rangePct < 0;
 
     // For display purposes - handle potential formatting errors
     let displayLower = "N/A";
@@ -141,7 +146,7 @@ const PriceRangeChart = ({
         top: '-25px',
         transform: 'translateX(-50%)',
         backgroundColor: '#f5f5f5',
-        color: '#7c3aed',
+        color: isOutOfRange ? '#dc3545' : 'var(--blue-accent)',
         padding: '2px 6px',
         borderRadius: '4px',
         border: 'none',
@@ -154,7 +159,7 @@ const PriceRangeChart = ({
         bottom: '-25px',
         transform: 'translateX(-50%)',
         fontSize: '12px',
-        color: '#7c3aed',
+        color: 'var(--blue-accent)',
         fontWeight: 'bold'
       },
       upperPriceLabel: {
@@ -163,7 +168,7 @@ const PriceRangeChart = ({
         bottom: '-25px',
         transform: 'translateX(-50%)',
         fontSize: '12px',
-        color: '#7c3aed',
+        color: 'var(--blue-accent)',
         fontWeight: 'bold'
       },
       footer: {
@@ -173,6 +178,17 @@ const PriceRangeChart = ({
         color: '#666'
       }
     };
+
+    // Determine arrow indicator for out of range prices
+    let priceDisplayText = displayCurrent;
+    if (isAboveRange) {
+      priceDisplayText = `${displayCurrent} →`;
+    } else if (isBelowRange) {
+      priceDisplayText = `← ${displayCurrent}`;
+    }
+
+    // Calculate position for marker and label (clamp to 0-100 for positioning)
+    const clampedPct = Math.min(Math.max(rangePct, 0), 100);
 
     return (
       <div style={chartStyles.container}>
@@ -186,22 +202,24 @@ const PriceRangeChart = ({
             }}
           />
 
-          {/* Current price marker */}
-          <div
-            style={{
-              ...chartStyles.priceMarker,
-              left: `${25 + rangePct/2}%`
-            }}
-          />
+          {/* Current price marker - only show if in range */}
+          {!isOutOfRange && (
+            <div
+              style={{
+                ...chartStyles.priceMarker,
+                left: `${clampedPct}%`
+              }}
+            />
+          )}
 
           {/* Current price label */}
           <div
             style={{
               ...chartStyles.priceLabel,
-              left: `${25 + rangePct/2}%`
+              left: `${clampedPct}%`
             }}
           >
-            {displayCurrent}
+            {priceDisplayText}
           </div>
 
           {/* Lower price label */}

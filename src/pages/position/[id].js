@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { ethers } from "ethers";
-import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert } from "react-bootstrap";
+import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert, Tabs, Tab, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
 import Head from "next/head";
@@ -67,6 +67,7 @@ export default function PositionDetailPage() {
   const { positions } = useSelector((state) => state.positions);
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
+  const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
   const { lastUpdate, resourcesUpdating } = useSelector((state) => state.updates);
@@ -102,6 +103,9 @@ export default function PositionDetailPage() {
   const [showRemoveLiquidityModal, setShowRemoveLiquidityModal] = useState(false);
   const [showClosePositionModal, setShowClosePositionModal] = useState(false);
 
+  // State for active tab
+  const [activeTab, setActiveTab] = useState('price-range');
+
   // Find the position by ID
   const position = useMemo(() => {
     if (!positions || !id) {
@@ -128,6 +132,12 @@ export default function PositionDetailPage() {
   const token1Data = useMemo(() => {
     return poolData?.token1 || null;
   }, [poolData]);
+
+  // Get vault data if position is in a vault
+  const vaultData = useMemo(() => {
+    if (!position?.vaultAddress || !vaults) return null;
+    return vaults.find(v => v.address === position.vaultAddress);
+  }, [position?.vaultAddress, vaults]);
 
   // Check if any resources are currently updating
   const isUpdating = resourcesUpdating?.positions || false;
@@ -208,7 +218,6 @@ export default function PositionDetailPage() {
     if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
     try {
       const result = Math.min(parseFloat(lowerPrice), parseFloat(upperPrice));
-      console.log("📊 Display Lower Price:", result, "| Formatted:", formatPrice(result));
       return result;
     } catch (error) {
       console.error("Error calculating display lower price:", error);
@@ -220,7 +229,6 @@ export default function PositionDetailPage() {
     if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
     try {
       const result = Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
-      console.log("📊 Display Upper Price:", result, "| Formatted:", formatPrice(result));
       return result;
     } catch (error) {
       console.error("Error calculating display upper price:", error);
@@ -335,8 +343,6 @@ export default function PositionDetailPage() {
   useEffect(() => {
     if (id && lastUpdate) {
       try {
-        console.log("Position detail update triggered:", new Date().toISOString());
-
         // Force state resets to trigger recalculations
         setUncollectedFees(null);
         setTokenBalances(null);
@@ -359,8 +365,6 @@ export default function PositionDetailPage() {
     // Only run when lastUpdate changes and we have necessary context
     if (lastUpdate && adapter && provider && address && chainId && id) {
       try {
-        console.log("Refreshing position data due to lastUpdate change:", new Date(lastUpdate).toISOString());
-
         // Track the latest refresh timestamp to avoid duplicate refreshes
         const refreshTimestamp = lastUpdate;
 
@@ -605,9 +609,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
-            <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+          <Link href="/positions" passHref>
+            <Button className="btn btn-back mb-4">
+              &larr; Back to Positions
             </Button>
           </Link>
           <div className="text-center py-5">
@@ -625,9 +629,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
-            <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+          <Link href="/positions" passHref>
+            <Button className="btn btn-back mb-4">
+              &larr; Back to Positions
             </Button>
           </Link>
           <Alert variant="warning" className="text-center">
@@ -646,9 +650,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
-            <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+          <Link href="/positions" passHref>
+            <Button className="btn btn-back mb-4">
+              &larr; Back to Positions
             </Button>
           </Link>
           <div className="text-center py-5">
@@ -666,9 +670,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/" passHref>
-            <Button variant="outline-secondary" className="mb-4">
-              &larr; Back to Dashboard
+          <Link href="/positions" passHref>
+            <Button className="btn btn-back mb-4">
+              &larr; Back to Positions
             </Button>
           </Link>
           <Card>
@@ -700,11 +704,23 @@ export default function PositionDetailPage() {
           <title>Position #{position?.id} - {position?.tokenPair || 'Detail'} | Liquidity Dashboard</title>
         </Head>
 
-        <Link href="/" passHref>
-          <Button variant="outline-secondary" className="mb-4">
-            &larr; Back to Dashboard
-          </Button>
-        </Link>
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <Link href="/positions" passHref>
+            <Button className="btn btn-back">
+              &larr; Back to Positions
+            </Button>
+          </Link>
+
+          <div className="d-flex align-items-center">
+            {isUpdating && (
+              <div className="d-flex align-items-center me-3">
+                <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
+                <small className="text-muted">Refreshing...</small>
+              </div>
+            )}
+            <RefreshControls />
+          </div>
+        </div>
 
         <ErrorBoundary
           FallbackComponent={ErrorFallback}
@@ -713,110 +729,143 @@ export default function PositionDetailPage() {
             refreshData();
           }}
         >
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            {/* Updated header to match PositionCard styling */}
-            <h1 className="mb-0 d-flex align-items-center">
-              {/* Activity indicator dot */}
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: '14px',
-                  height: '14px',
-                  borderRadius: '50%',
-                  backgroundColor: isActive ? '#28a745' : '#dc3545',
-                  marginRight: '12px'
-                }}
-                title={isActive ? "In range" : "Out of range"}
-              />
-
-              {/* Position ID */}
-              <span>Position #{position.id}</span>
-
-              {/* Platform indicator - logo or colored badge */}
-              {position.platform && (
-                hasPlatformLogo ? (
-                  <div
-                    className="ms-2 d-inline-flex align-items-center justify-content-center"
-                    style={{ height: '24px', width: '24px' }}
-                  >
-                    <img
-                      src={platformLogo}
-                      alt={position.platformName || position.platform}
-                      width={24}
-                      height={24}
-                      title={position.platformName || position.platform}
-                    />
-                  </div>
-                ) : (
-                  <Badge
-                    className="ms-2 d-inline-flex align-items-center"
-                    pill
-                    bg=""
-                    style={{
-                      fontSize: '0.75rem',
-                      backgroundColor: getPlatformColor(position.platform),
-                      padding: '0.25em 0.8em',
-                      color: 'white',
-                      border: 'none'
-                    }}
-                  >
-                    {position.platformName}
-                  </Badge>
-                )
-              )}
-            </h1>
-
-            <div className="d-flex align-items-center">
-              {isUpdating && (
-                <div className="d-flex align-items-center me-3">
-                  <Spinner animation="border" size="sm" variant="secondary" className="me-2" />
-                  <small className="text-muted">Refreshing...</small>
-                </div>
-              )}
-              <RefreshControls />
-            </div>
-          </div>
 
           <Row>
-            <Col lg={8}>
+            <Col lg={12}>
               <Card className="mb-4">
-                <Card.Header>
-                  <h5 className="mb-0">Position Overview</h5>
-                </Card.Header>
                 <Card.Body>
-                  <Row>
-                    <Col md={6}>
-                      <div className="mb-3">
-                        <strong>Token Pair:</strong> {position.tokenPair}
-                      </div>
-                      <div className="mb-3">
-                        <strong>Fee Tier:</strong> {position.fee && isFinite(position.fee) ? (position.fee / 10000) : 'N/A'}%
-                      </div>
-                      <div className="mb-3">
-                        <strong>Status:</strong>{" "}
-                        <Badge bg={isActive ? "success" : "danger"}>
-                          {isActive ? "In Range (Active)" : "Out of Range (Inactive)"}
-                        </Badge>
-                      </div>
-                    </Col>
-                    <Col md={6}>
-                      <div className="mb-3">
-                        <strong>Price Direction:</strong>{" "}
-                        <span>
-                          {priceLabel}
-                          <Button
-                            variant="link"
-                            className="p-0 ms-2"
-                            size="sm"
-                            onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
-                            title="Switch price direction"
+                  <div className="d-flex justify-content-between align-items-baseline">
+                    <h1 className="mb-2 mt-0 d-flex align-items-center" style={{ fontSize: '2rem' }}>
+                      {/* Status badge */}
+                      <Badge bg={isActive ? "success" : "danger"} className="me-2" style={{ fontSize: '1rem' }}>
+                        {isActive ? "In Range" : "Out of Range"}
+                      </Badge>
+
+                      {/* Position ID */}
+                      <span>Position #{position.id}</span>
+
+                      {/* Platform indicator - logo or colored badge */}
+                      {position.platform && (
+                        hasPlatformLogo ? (
+                          <div
+                            className="ms-2 d-inline-flex align-items-center justify-content-center"
+                            style={{ height: '32px', width: '32px' }}
                           >
-                            <span role="img" aria-label="switch">⇄</span>
-                          </Button>
-                        </span>
+                            <img
+                              src={platformLogo}
+                              alt={position.platformName || position.platform}
+                              width={32}
+                              height={32}
+                              title={position.platformName || position.platform}
+                            />
+                          </div>
+                        ) : (
+                          <Badge
+                            className="ms-2 d-inline-flex align-items-center"
+                            pill
+                            bg=""
+                            style={{
+                              fontSize: '1rem',
+                              backgroundColor: getPlatformColor(position.platform),
+                              padding: '0.25em 0.8em',
+                              color: 'white',
+                              border: 'none'
+                            }}
+                          >
+                            {position.platformName}
+                          </Badge>
+                        )
+                      )}
+                    </h1>
+
+                    {/* TVL in top right */}
+                    <div style={{ textAlign: 'right', margin: 0, padding: 0 }}>
+                      <div style={{ fontSize: '2.5rem', fontWeight: '600', margin: 0 }}>
+                        {isLoadingBalances || isLoadingFees ? (
+                          <Spinner animation="border" size="sm" />
+                        ) : tokenBalances && uncollectedFees && tokenPrices.token0 && tokenPrices.token1 ? (
+                          <>
+                            <span className="text-crimson">
+                              ${(() => {
+                                const tokenTVL = (
+                                  (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
+                                  (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
+                                );
+                                const feesTVL = (
+                                  (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
+                                  (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
+                                );
+                                return (tokenTVL + feesTVL).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2
+                                });
+                              })()}
+                            </span>
+                            <OverlayTrigger
+                              placement="top"
+                              overlay={
+                                <Tooltip>
+                                  <div>Token TVL: ${(() => {
+                                    const tokenTVL = (
+                                      (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
+                                      (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
+                                    );
+                                    return tokenTVL.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
+                                    });
+                                  })()}</div>
+                                  <div>Uncollected Fees: ${(() => {
+                                    const feesTVL = (
+                                      (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
+                                      (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
+                                    );
+                                    return feesTVL.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
+                                    });
+                                  })()}</div>
+                                </Tooltip>
+                              }
+                            >
+                              <small className="ms-1 text-muted" style={{ cursor: "help", fontSize: "0.7rem", position: "relative", top: "-0.2rem" }}>ⓘ</small>
+                            </OverlayTrigger>
+                          </>
+                        ) : (
+                          <span className="text-danger">—</span>
+                        )}
                       </div>
-                      {/* Token balances now in the Overview section */}
-                      <div className="mb-3">
+                    </div>
+                  </div>
+
+                  {/* Vault info if position is in a vault */}
+                  {position.vaultAddress && (
+                    <div style={{ fontSize: '1.1rem' }}>
+                      <strong style={{ color: 'var(--crimson-700)' }}>Vault: </strong>
+                      <Link href={`/vault/${position.vaultAddress}`} passHref legacyBehavior>
+                        <a style={{ color: '#525252', textDecoration: 'none', fontSize: '0.95rem', fontWeight: '600' }}>
+                          {vaultData?.name || 'Unknown Vault'} ({position.vaultAddress.slice(0, 6)}...{position.vaultAddress.slice(-4)})
+                        </a>
+                      </Link>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: '1.1rem' }}>
+                    <strong style={{ color: 'var(--blue-accent)' }}>{position.tokenPair}</strong>
+                  </div>
+
+                  <div className="mb-3">
+                    <small style={{ fontSize: '0.9rem', color: '#525252' }}>
+                      <strong>Fee Tier:</strong> {position.fee && isFinite(position.fee) ? (position.fee / 10000) : 'N/A'}%
+                    </small>
+                  </div>
+
+                  {/* Divider */}
+                  <hr className="my-3" />
+
+                  <Row>
+                    <Col md={6} style={{ borderRight: '1px solid rgba(0, 0, 0, 0.1)', paddingRight: '2rem' }}>
+                      <div className="mb-3" style={{ paddingLeft: '9rem', paddingRight: '9rem' }}>
                         <strong>Token Balances:</strong>
                         {balanceError ? (
                           <div className="text-danger small">Error calculating balances</div>
@@ -826,34 +875,32 @@ export default function PositionDetailPage() {
                             <span className="small">Loading...</span>
                           </div>
                         ) : tokenBalances?.token0 && tokenBalances?.token1 ? (
-                          <div className="mt-2">
-                            <div className="mb-1 ps-1">
-                              <div className="d-flex justify-content-between align-items-center">
-                                <Badge bg="light" text="dark" className="px-2 py-1">
-                                  {tokenBalances.token0.formatted} {token0Data.symbol}
-                                </Badge>
-                                {tokenPrices.token0 && (
-                                  <span className="text-muted small">
-                                    ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                                  </span>
-                                )}
+                          <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
+                            <div className="mb-1 d-flex justify-content-between align-items-center">
+                              <div>
+                                <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
+                                <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token0.formatted).toFixed(4)}</span>
                               </div>
+                              {tokenPrices.token0 && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                  ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
                             </div>
-                            <div className="ps-1">
-                              <div className="d-flex justify-content-between align-items-center">
-                                <Badge bg="light" text="dark" className="px-2 py-1">
-                                  {tokenBalances.token1.formatted} {token1Data.symbol}
-                                </Badge>
-                                {tokenPrices.token1 && (
-                                  <span className="text-muted small">
-                                    ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                                  </span>
-                                )}
+                            <div className="mb-1 d-flex justify-content-between align-items-center">
+                              <div>
+                                <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
+                                <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token1.formatted).toFixed(4)}</span>
                               </div>
+                              {tokenPrices.token1 && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                  ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
                             </div>
                             {tokenPrices.token0 && tokenPrices.token1 && (
-                              <div className="mt-2 text-center small text-muted border-top pt-1">
-                                Total Value: ${(
+                              <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
+                                Total: ${(
                                   (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
                                   (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
                                 ).toFixed(2)}
@@ -865,197 +912,200 @@ export default function PositionDetailPage() {
                         )}
                       </div>
                     </Col>
+                    <Col md={6} style={{ paddingLeft: '2rem' }}>
+                      <div className="mb-3" style={{ paddingLeft: '9rem', paddingRight: '9rem' }}>
+                        <strong>Uncollected Fees:</strong>
+                        {feeLoadingError ? (
+                          <div className="text-danger small w-100">
+                            <i className="me-1">⚠️</i>
+                            Unable to load fee data. Please try refreshing.
+                          </div>
+                        ) : isLoadingFees ? (
+                          <div className="text-secondary text-center py-2">
+                            <Spinner animation="border" size="sm" className="me-2" />
+                            Loading fee data...
+                          </div>
+                        ) : uncollectedFees ? (
+                          <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
+                            <div className="mb-1 d-flex justify-content-between align-items-center">
+                              <div>
+                                <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
+                                <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}</span>
+                              </div>
+                              {tokenPrices.token0 && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                  ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mb-1 d-flex justify-content-between align-items-center">
+                              <div>
+                                <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
+                                <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}</span>
+                              </div>
+                              {tokenPrices.token1 && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                  ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
+                                </span>
+                              )}
+                            </div>
+                            {tokenPrices.token0 && tokenPrices.token1 && (
+                              <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
+                                Total: ${(
+                                  (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
+                                  (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
+                                ).toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-muted small">Not available</div>
+                        )}
+                      </div>
+                    </Col>
+                  </Row>
+
+                  {/* Divider */}
+                  <hr className="my-3" />
+
+                  {/* Action Buttons */}
+                  <Row>
+                    <Col xs={3}>
+                      <Button
+                        variant="outline-primary"
+                        className="w-100"
+                        disabled={position.inVault}
+                        onClick={() => setShowAddLiquidityModal(true)}
+                      >
+                        + Add Liquidity
+                      </Button>
+                    </Col>
+                    <Col xs={3}>
+                      <Button
+                        variant="outline-primary"
+                        className="w-100"
+                        disabled={position.inVault}
+                        onClick={() => setShowRemoveLiquidityModal(true)}
+                      >
+                        - Remove Liquidity
+                      </Button>
+                    </Col>
+                    <Col xs={3}>
+                      <Button
+                        variant="outline-primary"
+                        className="w-100"
+                        disabled={position.inVault || feeLoadingError || !uncollectedFees ||
+                                  (uncollectedFees &&
+                                  parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
+                                  parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
+                        onClick={() => setShowClaimFeesModal(true)}
+                      >
+                        Claim Fees
+                      </Button>
+                    </Col>
+                    <Col xs={3}>
+                      <Button
+                        className="btn btn-back w-100"
+                        disabled={position.inVault}
+                        onClick={() => setShowClosePositionModal(true)}
+                      >
+                        Close Position
+                      </Button>
+                    </Col>
                   </Row>
                 </Card.Body>
               </Card>
 
-              <Card className="mb-4">
-                <Card.Header>
-                  <h5 className="mb-0">Price Range</h5>
-                </Card.Header>
-                <Card.Body>
-                  <div className="mb-3">
-                    <div className="d-flex justify-content-between mb-2">
-                      <div>
-                        <small>Min Price</small>
-                        <div>
-                          <strong>{displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)}</strong>
-                        </div>
+              <Tabs
+                activeKey={activeTab}
+                onSelect={(k) => setActiveTab(k)}
+                className="mb-4"
+              >
+                <Tab eventKey="price-range" title="Price Range">
+                  <Card>
+                    <Card.Header>
+                      <div className="d-flex align-items-center">
+                        <h5 className="mb-0">
+                          {priceLabel}
+                        </h5>
+                        <Button
+                          variant="link"
+                          className="p-0 ms-2"
+                          size="sm"
+                          onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
+                          title="Switch price direction"
+                          style={{ textDecoration: 'none', position: 'relative', top: '-2px' }}
+                        >
+                          <span role="img" aria-label="switch">⇄</span>
+                        </Button>
                       </div>
-                      <div>
-                        <small>Current Price</small>
-                        <div className="text-center">
-                          <strong>{currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))}</strong>
-                        </div>
-                      </div>
-                      <div className="text-end">
-                        <small>Max Price</small>
-                        <div>
-                          <strong>{displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)}</strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <ProgressBar
-                      now={pricePositionPercent}
-                      variant={isActive ? "success" : "danger"}
-                      style={{ height: "10px" }}
-                    />
-                    <div className="text-center mt-2">
-                      <small className="text-muted">{priceLabel}</small>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 mb-3" style={{ height: "200px" }}>
-                    {/* Using the PriceRangeChart component with real data */}
-                    {displayLowerPrice !== "N/A" && displayUpperPrice !== "N/A" && currentPrice !== "N/A" ? (
-                      <PriceRangeChart
-                        lowerPrice={parseFloat(displayLowerPrice)}
-                        upperPrice={parseFloat(displayUpperPrice)}
-                        currentPrice={parseFloat(currentPrice)}
-                        token0Symbol={token0Data.symbol}
-                        token1Symbol={token1Data.symbol}
-                        isInverted={invertPriceDisplay}
-                        isActive={isActive}
-                      />
-                    ) : (
-                      <div className="text-center pt-5">
-                        <p className="text-muted">Cannot display chart due to missing price data</p>
-                      </div>
-                    )}
-                  </div>
-                </Card.Body>
-              </Card>
-            </Col>
-
-            <Col lg={4}>
-              <Card className="mb-4">
-                <Card.Header>
-                  <h5 className="mb-0">Position Actions</h5>
-                </Card.Header>
-                <Card.Body>
-                  <div className="mb-4">
-                    <h6>Uncollected Fees</h6>
-                    <div className="mb-3">
-                      {feeLoadingError ? (
-                        <div className="text-danger small w-100">
-                          <i className="me-1">⚠️</i>
-                          Unable to load fee data. Please try refreshing.
-                        </div>
-                      ) : isLoadingFees ? (
-                        <div className="text-secondary text-center py-2">
-                          <Spinner animation="border" size="sm" className="me-2" />
-                          Loading fee data...
-                        </div>
-                      ) : uncollectedFees ? (
-                        <div className="border rounded p-2 bg-light">
-                          <div className="d-flex justify-content-between align-items-center mb-2">
-                            <Badge bg="white" text="dark" className="px-3 py-2">
-                              {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data.symbol}
-                            </Badge>
-                            {tokenPrices.token0 && (
-                              <span className="text-muted small">
-                                ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                              </span>
-                            )}
+                    </Card.Header>
+                    <Card.Body>
+                      <div style={{ height: "120px" }}>
+                        {/* Using the PriceRangeChart component with real data */}
+                        {displayLowerPrice !== "N/A" && displayUpperPrice !== "N/A" && currentPrice !== "N/A" ? (
+                          <PriceRangeChart
+                            lowerPrice={parseFloat(displayLowerPrice)}
+                            upperPrice={parseFloat(displayUpperPrice)}
+                            currentPrice={parseFloat(currentPrice)}
+                            token0Symbol={token0Data.symbol}
+                            token1Symbol={token1Data.symbol}
+                            isInverted={invertPriceDisplay}
+                            isActive={isActive}
+                          />
+                        ) : (
+                          <div className="text-center pt-5">
+                            <p className="text-muted">Cannot display chart due to missing price data</p>
                           </div>
-                          <div className="d-flex justify-content-between align-items-center mb-1">
-                            <Badge bg="white" text="dark" className="px-3 py-2">
-                              {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data.symbol}
-                            </Badge>
-                            {tokenPrices.token1 && (
-                              <span className="text-muted small">
-                                ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                              </span>
-                            )}
-                          </div>
+                        )}
+                      </div>
 
-                          {tokenPrices.token0 && tokenPrices.token1 && (
-                            <div className="text-center small border-top pt-2 mt-2 fw-bold">
-                              Total Value: ${(
-                                (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
-                                (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
-                              ).toFixed(2)}
-                            </div>
-                          )}
+                      <div>
+                        <div className="mb-2">
+                          <strong style={{ color: 'var(--crimson-700)' }}>Min Price:</strong> {displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)}
                         </div>
-                      ) : (
-                        <div className="text-muted small text-center py-2">
-                          No fee data available
+                        <div className="mb-2">
+                          <strong style={{ color: 'var(--crimson-700)' }}>Current Price:</strong> {currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))}
                         </div>
-                      )}
-                    </div>
+                        <div className="mb-2">
+                          <strong style={{ color: 'var(--crimson-700)' }}>Max Price:</strong> {displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)}
+                        </div>
+                      </div>
+                    </Card.Body>
+                  </Card>
+                </Tab>
 
-                    <Button
-                      variant="primary"
-                      className="w-100 mb-3"
-                      disabled={position.inVault || feeLoadingError || !uncollectedFees ||
-                                (uncollectedFees &&
-                                parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                                parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
-                      onClick={() => setShowClaimFeesModal(true)}
-                    >
-                      Claim Fees
-                    </Button>
-                  </div>
-
-                  <div className="mb-4">
-                    <h6>Liquidity Management</h6>
-                    <Button
-                      variant="outline-primary"
-                      className="w-100 mb-2"
-                      disabled={position.inVault}
-                      onClick={() => setShowAddLiquidityModal(true)}
-                    >
-                      Add Liquidity
-                    </Button>
-                    <Button
-                      variant="outline-primary"
-                      className="w-100 mb-3"
-                      disabled={position.inVault}
-                      onClick={() => setShowRemoveLiquidityModal(true)}
-                    >
-                      Remove Liquidity
-                    </Button>
-                  </div>
-
-                  <div>
-                    <h6>Position Management</h6>
-                    <Button
-                      variant="outline-danger"
-                      className="w-100"
-                      disabled={position.inVault}
-                      onClick={() => setShowClosePositionModal(true)}
-                    >
-                      Close Position
-                    </Button>
-                  </div>
-                </Card.Body>
-              </Card>
-
-              <Card>
-                <Card.Header>
-                  <h5 className="mb-0">Technical Details</h5>
-                </Card.Header>
-                <Card.Body>
-                  <div className="mb-2">
-                    <strong>Tick Range:</strong>{" "}
-                    <code>{position.tickLower}</code> to <code>{position.tickUpper}</code>
-                  </div>
-                  <div className="mb-2">
-                    <strong>Chain ID:</strong> {chainId}
-                  </div>
-                  <div className="mb-2">
-                    <strong>Liquidity:</strong> {position.liquidity.toLocaleString()}
-                  </div>
-                  <div>
-                    <strong>Pool Address:</strong><br />
-                    <small className="text-muted">
-                      <code>{position.pool}</code>
-                    </small>
-                  </div>
-                </Card.Body>
-              </Card>
+                <Tab eventKey="technicals" title="Technicals">
+                  <Card>
+                    <Card.Header>
+                      <h5 className="mb-0">Technical Details</h5>
+                    </Card.Header>
+                    <Card.Body>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Tick Range:</strong> {position.tickLower} to {position.tickUpper}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Tick Spacing:</strong> {poolData?.tickSpacing || 'N/A'}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Chain ID:</strong> {chainId}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Liquidity:</strong> {position.liquidity.toLocaleString()}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Token0 Address:</strong> {token0Data?.address || 'N/A'}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Token1 Address:</strong> {token1Data?.address || 'N/A'}
+                      </div>
+                      <div className="mb-2">
+                        <strong style={{ color: 'var(--crimson-700)' }}>Pool Address:</strong> {position.pool}
+                      </div>
+                    </Card.Body>
+                  </Card>
+                </Tab>
+              </Tabs>
             </Col>
           </Row>
         </ErrorBoundary>
@@ -1077,6 +1127,7 @@ export default function PositionDetailPage() {
           onHide={() => setShowRemoveLiquidityModal(false)}
           position={position}
           tokenBalances={tokenBalances}
+          uncollectedFees={uncollectedFees}
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}

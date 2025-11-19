@@ -14,6 +14,21 @@ import { useToast } from '../../context/ToastContext.js';
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice.js';
 
+// CSS to hide number input spinner arrows
+const numberInputStyles = `
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
+  }
+`;
+
 export default function AddLiquidityModal({
   show,
   onHide,
@@ -35,6 +50,7 @@ export default function AddLiquidityModal({
   // Get auto-refresh state to manage pausing during liquidity addition
   const { autoRefresh } = useSelector(state => state.updates);
   const { supportedPlatforms } = useSelector(state => state.platforms);
+  const pools = useSelector(state => state.pools);
 
   // Keep track of the original auto-refresh setting to restore it on close
   const [originalAutoRefreshState, setOriginalAutoRefreshState] = useState(null);
@@ -240,8 +256,10 @@ export default function AddLiquidityModal({
           current: poolData.tick
         });
 
-        // Set fee tier
-        setSelectedFeeTier(position.fee);
+        // Set fee tier from pool data
+        if (position.pool && pools && pools[position.pool]) {
+          setSelectedFeeTier(pools[position.pool].fee);
+        }
 
         // Set platform
         setSelectedPlatform(position.platform);
@@ -1105,9 +1123,9 @@ export default function AddLiquidityModal({
       centered
       backdrop="static"
       keyboard={false}
-      size="lg"
       data-no-propagation="true"
     >
+      <style>{numberInputStyles}</style>
       <Form onSubmit={handleSubmit}>
         <Modal.Header closeButton>
           <Modal.Title>
@@ -1124,17 +1142,18 @@ export default function AddLiquidityModal({
         <Modal.Body>
           <div className="mb-4">
             {/* Platform and Token Selection Section */}
-            <h6 className="border-bottom pb-2 mb-3">Token Selection</h6>
+            <h6 className="border-bottom pb-2 mb-3">Position Details</h6>
 
             <Row className="mb-3">
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label>Platform</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>Platform</Form.Label>
                   <Form.Select
                     value={selectedPlatform}
                     onChange={(e) => setSelectedPlatform(e.target.value)}
                     disabled={isExistingPosition || isProcessingOperation}
                     required
+                    style={{ fontSize: '0.9em' }}
                   >
                     {supportedPlatforms?.length > 0
                       ? supportedPlatforms.map(platform => (
@@ -1150,12 +1169,13 @@ export default function AddLiquidityModal({
 
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label>Token 0</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>Token 0</Form.Label>
                   <Form.Select
                     value={token0Address}
                     onChange={(e) => handleToken0Selection(e.target.value)}
                     disabled={isExistingPosition || isProcessingOperation}
                     required
+                    style={{ fontSize: '0.9em' }}
                   >
                     {isExistingPosition ? (
                       <option value={token0Data?.address}>{token0Data?.symbol}</option>
@@ -1175,12 +1195,13 @@ export default function AddLiquidityModal({
 
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label>Token 1</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>Token 1</Form.Label>
                   <Form.Select
                     value={token1Address}
                     onChange={(e) => handleToken1Selection(e.target.value)}
                     disabled={isExistingPosition || !token0Address || isProcessingOperation}
                     required
+                    style={{ fontSize: '0.9em' }}
                   >
                     {isExistingPosition ? (
                       <option value={token1Data?.address}>{token1Data?.symbol}</option>
@@ -1204,12 +1225,13 @@ export default function AddLiquidityModal({
             <Row className="mb-3">
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label>Fee Tier</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>Fee Tier</Form.Label>
                   <Form.Select
                     value={selectedFeeTier}
                     onChange={(e) => setSelectedFeeTier(parseInt(e.target.value))}
                     disabled={isExistingPosition || isProcessingOperation}
                     required
+                    style={{ fontSize: '0.9em' }}
                   >
                     {getFeeTierOptions().map(tier => (
                       <option key={tier.value} value={tier.value}>
@@ -1221,30 +1243,31 @@ export default function AddLiquidityModal({
               </Col>
 
               <Col md={8}>
-                <div className="bg-light p-2 rounded h-100 d-flex align-items-center justify-content-center">
-                  <span className="text-center">
-                    <div className="text-muted small mb-1">
-                      Current Price:
-                      <Button
-                        variant="link"
-                        className="p-0 ms-2"
-                        size="sm"
-                        onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
-                        title="Switch price direction"
-                        disabled={isLoadingPrice || !!priceLoadError || isProcessingOperation}
-                      >
-                        <span role="img" aria-label="switch">⇄</span>
-                      </Button>
-                    </div>
+                <Form.Group className="h-100 d-flex flex-column">
+                  <div className="d-flex align-items-center mb-2">
+                    <Form.Label className="mb-0 me-2" style={{ fontSize: '0.9em' }}>Current Price</Form.Label>
+                    <Button
+                      variant="link"
+                      className="p-0 text-decoration-none"
+                      size="sm"
+                      style={{ verticalAlign: 'top', display: 'inline-flex', marginTop: '-2px', fontSize: '0.9em' }}
+                      onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
+                      title="Switch price direction"
+                      disabled={isLoadingPrice || !!priceLoadError || isProcessingOperation}
+                    >
+                      <span role="img" aria-label="switch">⇄</span>
+                    </Button>
+                  </div>
+                  <div className="p-2 rounded flex-grow-1 d-flex align-items-center" style={{ border: '1px solid var(--neutral-700)', backgroundColor: '#e9ecef', padding: '0.625rem 1rem', fontSize: '0.9em' }}>
                     {isLoadingPrice ? (
                       <Spinner animation="border" size="sm" className="me-2" />
                     ) : priceLoadError ? (
                       <div className="text-danger">{priceLoadError}</div>
                     ) : (
-                      <strong>{getPriceDisplay()}</strong>
+                      <span>{getPriceDisplay()}</span>
                     )}
-                  </span>
-                </div>
+                  </div>
+                </Form.Group>
               </Col>
             </Row>
 
@@ -1255,7 +1278,6 @@ export default function AddLiquidityModal({
               <Col md={12}>
                 <Form.Group className="mb-3">
                   <div className="d-flex justify-content-between">
-                    <Form.Label>Range Type</Form.Label>
                     {!isExistingPosition && (
                       <div className="mb-2">
                         <Form.Check
@@ -1344,22 +1366,9 @@ export default function AddLiquidityModal({
                   )}
 
                   {/* Display the selected price range */}
-                  <div className="p-2 mt-2 border rounded bg-light">
+                  <div className="p-2 mt-2 rounded" style={{ border: '1px solid var(--neutral-700)', backgroundColor: '#e9ecef', fontSize: '0.9em' }}>
                     <Row>
                       <Col md={7}>
-                        <small className="text-muted">
-                          Price Range:
-                          <Button
-                            variant="link"
-                            className="p-0 ms-2"
-                            size="sm"
-                            onClick={() => setInvertPriceDisplay(!invertPriceDisplay)}
-                            title="Switch price direction"
-                            disabled={isProcessingOperation}
-                          >
-                            <span role="img" aria-label="switch">⇄</span>
-                          </Button>
-                        </small>
                         <div>
                           <strong>
                             {formatTickToPrice(isExistingPosition ? position?.tickLower : priceRange.min)} - {formatTickToPrice(isExistingPosition ? position?.tickUpper : priceRange.max)}
@@ -1397,21 +1406,22 @@ export default function AddLiquidityModal({
             </Row>
 
             {/* Token Amounts Section */}
-            <h6 className="border-bottom pb-2 mt-4 mb-3">Add Liquidity</h6>
+            <h6 className="border-bottom pb-2 mt-4 mb-3" style={{ fontSize: '0.9em' }}>Add Liquidity</h6>
 
             <Row className="mb-3">
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>{token0Symbol} Amount</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>{token0Symbol} Amount</Form.Label>
                   {token0Balance && (
                     <div className="d-flex justify-content-between align-items-center mb-1">
-                      <small className="text-muted">
-                        Balance: {parseFloat(token0Balance).toFixed(6)} {token0Symbol}
+                      <small style={{ color: 'var(--neutral-600)', fontSize: '0.75em' }}>
+                        Balance: {parseFloat(token0Balance).toFixed(6)}
                       </small>
                       <Button
                         variant="link"
                         size="sm"
                         className="p-0"
+                        style={{ color: 'var(--crimson-700)', fontSize: '0.75em' }}
                         onClick={() => handleToken0AmountChange(token0Balance)}
                         disabled={isProcessingOperation}
                       >
@@ -1430,12 +1440,14 @@ export default function AddLiquidityModal({
                       isInvalid={!!token0Error}
                       size="sm"
                       disabled={isProcessingOperation}
+                      className="no-number-spinner"
+                      style={{ fontSize: '0.9em' }}
                     />
-                    <InputGroup.Text>{token0Symbol}</InputGroup.Text>
+                    <InputGroup.Text style={{ fontSize: '0.9em' }}>{token0Symbol}</InputGroup.Text>
                   </InputGroup>
                   {token0UsdValue !== null && (
                     <div className="mt-1 text-muted small">
-                      ≈ ${token0UsdValue.toFixed(2)} USD
+                      ${token0UsdValue.toFixed(2)} USD
                     </div>
                   )}
                   {token0Error && <Form.Control.Feedback type="invalid">{token0Error}</Form.Control.Feedback>}
@@ -1444,16 +1456,17 @@ export default function AddLiquidityModal({
 
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>{token1Symbol} Amount</Form.Label>
+                  <Form.Label style={{ fontSize: '0.9em' }}>{token1Symbol} Amount</Form.Label>
                   {token1Balance && (
                     <div className="d-flex justify-content-between align-items-center mb-1">
-                      <small className="text-muted">
-                        Balance: {parseFloat(token1Balance).toFixed(6)} {token1Symbol}
+                      <small style={{ color: 'var(--neutral-600)', fontSize: '0.75em' }}>
+                        Balance: {parseFloat(token1Balance).toFixed(6)}
                       </small>
                       <Button
                         variant="link"
                         size="sm"
                         className="p-0"
+                        style={{ color: 'var(--crimson-700)', fontSize: '0.75em' }}
                         onClick={() => handleToken1AmountChange(token1Balance)}
                         disabled={isProcessingOperation}
                       >
@@ -1472,12 +1485,14 @@ export default function AddLiquidityModal({
                       isInvalid={!!token1Error}
                       size="sm"
                       disabled={isProcessingOperation}
+                      className="no-number-spinner"
+                      style={{ fontSize: '0.9em' }}
                     />
-                    <InputGroup.Text>{token1Symbol}</InputGroup.Text>
+                    <InputGroup.Text style={{ fontSize: '0.9em' }}>{token1Symbol}</InputGroup.Text>
                   </InputGroup>
                   {token1UsdValue !== null && (
                     <div className="mt-1 text-muted small">
-                      ≈ ${token1UsdValue.toFixed(2)} USD
+                      ${token1UsdValue.toFixed(2)} USD
                     </div>
                   )}
                   {token1Error && <Form.Control.Feedback type="invalid">{token1Error}</Form.Control.Feedback>}
@@ -1504,9 +1519,6 @@ export default function AddLiquidityModal({
                     />
                     <InputGroup.Text>%</InputGroup.Text>
                   </InputGroup>
-                  <Form.Text className="text-muted small">
-                    Maximum allowed price change during transaction
-                  </Form.Text>
                 </Form.Group>
               </Col>
 

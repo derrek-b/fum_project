@@ -202,7 +202,7 @@ export default function VaultsContainer() {
                     <Spinner size="sm" animation="border" className="me-1" />
                     Creating...
                   </>
-                ) : '+ Create Vault'}
+                ) : '+ Create New Vault'}
               </Button>
             </div>
           </div>

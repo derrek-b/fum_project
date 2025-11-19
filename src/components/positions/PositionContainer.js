@@ -190,9 +190,6 @@ export default function PositionContainer() {
           vaultAddress: null
         }));
 
-        console.log(`📊 Fetched ${allPositions.length} wallet positions:`, allPositions);
-        console.log(`📊 Active platforms:`, activePlatforms);
-
         setLocalPositions(allPositions);
         dispatch(setPositions(allPositions));
         dispatch(setPools(allPoolData));
@@ -223,7 +220,6 @@ export default function PositionContainer() {
     }
 
     const fetchVaultPositions = async () => {
-      console.log(`🏦 Starting vault positions fetch for ${userVaults.length} vaults:`, userVaults);
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: true }));
 
       // Get current pool and token data from the store
@@ -233,7 +229,6 @@ export default function PositionContainer() {
       // Get adapters again (could be pulled from previous effect if stored)
       const result = AdapterFactory.getAdaptersForChain(chainId, provider);
       const adapters = result.adapters || [];
-      console.log(`🔧 Found ${adapters.length} adapters for vault positions`);
 
       if (adapters.length === 0) {
         dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: false }));
@@ -254,12 +249,10 @@ export default function PositionContainer() {
           // For each vault, fetch positions from all platforms
           for (const adapter of adapters) {
             try {
-              console.log(`🔎 Fetching positions for vault ${vault.address} from ${adapter.platformName}...`);
               const result = await adapter.getPositions(vault.address, provider);
 
               // Convert positions object to array
               const positionsArray = result.positions ? Object.values(result.positions) : [];
-              console.log(`📍 Vault ${vault.name || vault.address}: Found ${positionsArray.length} positions from ${adapter.platformName}`, result);
 
               if (positionsArray.length > 0) {
                 vaultPositionsFound += positionsArray.length;
@@ -317,11 +310,9 @@ export default function PositionContainer() {
 
   // Filter active positions (with liquidity > 0)
   // Apply platform filter if selected
-  console.log(`🔍 Total positions in Redux:`, positions.length, positions);
   const activePositions = positions
     .filter((pos) => pos.liquidity > 0)
     .filter((pos) => platformFilter === null || pos.platform === platformFilter);
-  console.log(`✅ Active positions after filtering:`, activePositions.length, activePositions);
 
   // Count vault positions for display
   const vaultPositionsCount = positions.filter(p => p.inVault).length;
@@ -373,7 +364,7 @@ export default function PositionContainer() {
                 onClick={() => setShowCreatePositionModal(true)}
                 disabled={!isConnected}
               >
-                + Create Position
+                + Create New Position
               </Button>
             </div>
           </div>

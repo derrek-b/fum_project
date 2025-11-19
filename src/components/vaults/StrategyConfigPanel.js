@@ -1,5 +1,5 @@
 // src/components/vaults/StrategyConfigPanel.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useSelector, useDispatch } from 'react-redux';
 import { Card, Form, Button, Alert, Spinner, Badge } from 'react-bootstrap';
@@ -470,10 +470,10 @@ const StrategyConfigPanel = ({
     }
   };
 
-  // Set validation function
-  const handleSetValidation = (_validateFn) => {
+  // Set validation function - memoized to prevent infinite loops
+  const handleSetValidation = useCallback((_validateFn) => {
     setValidateFn(() => _validateFn);
-  };
+  }, []);
 
   // Get the strategy name for display
   const getStrategyName = () => {

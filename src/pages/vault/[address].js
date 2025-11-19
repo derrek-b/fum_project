@@ -536,7 +536,6 @@ export default function VaultDetailPage() {
                           placement="top"
                           overlay={
                             <Tooltip>
-                              <div>Last updated: {vaultMetrics.lastTVLUpdate ? new Date(vaultMetrics.lastTVLUpdate).toLocaleString() : 'N/A'}</div>
                               <div>Position TVL: {formatCurrency(vaultMetrics.tvl || 0)}</div>
                               <div>Token TVL: {formatCurrency(vaultMetrics.tokenTVL || 0)}</div>
                             </Tooltip>

@@ -4,17 +4,42 @@ import { useSelector, useDispatch } from 'react-redux';
 
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
+import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
+// CSS for custom slider styling
+const sliderStyles = `
+  input[type="range"].crimson-slider::-webkit-slider-thumb {
+    background: var(--crimson-700);
+  }
+
+  input[type="range"].crimson-slider::-moz-range-thumb {
+    background: var(--crimson-700);
+  }
+
+  input[type="range"].crimson-slider::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, var(--crimson-700) 0%, var(--crimson-700) var(--value), #dee2e6 var(--value), #dee2e6 100%);
+  }
+
+  input[type="range"].crimson-slider::-moz-range-track {
+    background: #dee2e6;
+  }
+
+  input[type="range"].crimson-slider::-moz-range-progress {
+    background: var(--crimson-700);
+  }
+`;
+
 export default function RemoveLiquidityModal({
   show,
   onHide,
   position,
   tokenBalances,
+  uncollectedFees,
   token0Data,
   token1Data,
   tokenPrices,
@@ -73,11 +98,30 @@ export default function RemoveLiquidityModal({
     }
   };
 
-  // Calculate total USD value
+  // Calculate total USD value for current position
+  const currentTotalUsdValue = tokenBalances ?
+    (getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol) || 0) +
+    (getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol) || 0) :
+    null;
+
+  // Calculate total USD value for estimated amount to receive
   const totalUsdValue = estimatedBalances ?
     (getUsdValue(estimatedBalances.token0.formatted, token0Data?.symbol) || 0) +
     (getUsdValue(estimatedBalances.token1.formatted, token1Data?.symbol) || 0) :
     null;
+
+  // Calculate total USD value for uncollected fees
+  const totalFeesUsd = (uncollectedFees?.token0 && uncollectedFees?.token1) ?
+    (getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol) || 0) +
+    (getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol) || 0) :
+    null;
+
+  // Calculate grand total (estimated liquidity + all fees)
+  const grandTotalUsd = (totalUsdValue || 0) + (totalFeesUsd || 0);
+
+  // Check if we have meaningful fee amounts
+  const hasFees = (uncollectedFees?.token0 && uncollectedFees?.token1) &&
+    (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
 
   // Handle slider change
   const handleSliderChange = (e) => {
@@ -180,6 +224,7 @@ export default function RemoveLiquidityModal({
       keyboard={false} // Prevent Escape key from closing
       data-no-propagation="true" // Custom attribute for clarity
     >
+      <style>{sliderStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>
           Remove Liquidity from Position #{position?.id} - {position?.tokenPair}
@@ -197,35 +242,40 @@ export default function RemoveLiquidityModal({
           ) : (
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {tokenBalances.token0.formatted} {token0Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {tokenBalances.token0.formatted}
+                </div>
                 {tokenPrices?.token0 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
-              <div className="d-flex justify-content-between align-items-center mb-3">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {tokenBalances.token1.formatted} {token1Data?.symbol}
-                </Badge>
+              <div className="d-flex justify-content-between align-items-center">
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {tokenBalances.token1.formatted}
+                </div>
                 {tokenPrices?.token1 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
+              {currentTotalUsdValue !== null && (
+                <div className="text-end mt-2">
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${currentTotalUsdValue.toFixed(2)}</small>
+                </div>
+              )}
             </>
           )}
         </div>
 
         {/* Percentage Slider */}
-        <div className="mb-4">
+        <div className="mb-5">
           <h6 className="border-bottom pb-2">Amount to Remove</h6>
           <Form.Group className="mb-3">
             <Row className="align-items-center">
-              <Col>
+              <Col className="d-flex align-items-center">
                 <Form.Range
                   min={1}
                   max={100}
@@ -233,17 +283,27 @@ export default function RemoveLiquidityModal({
                   value={percentage}
                   onChange={handleSliderChange}
                   disabled={isRemoving}
+                  className="crimson-slider"
+                  style={{ '--value': `${percentage}%` }}
                 />
               </Col>
-              <Col xs="auto">
-                <Badge bg="primary">{percentage}%</Badge>
+              <Col xs="auto" className="d-flex align-items-center">
+                <Badge className="bg-crimson" style={{ backgroundColor: 'var(--crimson-700) !important', color: 'white' }}>{percentage}%</Badge>
               </Col>
             </Row>
           </Form.Group>
+
+          {/* Warning when removing 100% */}
+          {percentage === 100 && (
+            <Alert variant="warning" className="small mt-3 mb-0">
+              <strong>Tip:</strong> Removing 100% of liquidity will leave an empty position NFT that won't earn future fees.
+              Use <strong>Close Position</strong> to burn the NFT and maybe receive a gas refund.
+            </Alert>
+          )}
         </div>
 
         {/* Add slippage tolerance input after the percentage slider */}
-        <div className="mb-4">
+        <div className="mb-5">
           <h6 className="border-bottom pb-2">Slippage Tolerance</h6>
           <Form.Group>
             <InputGroup size="sm">
@@ -260,9 +320,6 @@ export default function RemoveLiquidityModal({
               />
               <InputGroup.Text>%</InputGroup.Text>
             </InputGroup>
-            <Form.Text className="text-muted small">
-              Maximum allowed price change during transaction (0.1% to 5%)
-            </Form.Text>
           </Form.Group>
         </div>
 
@@ -276,39 +333,85 @@ export default function RemoveLiquidityModal({
           ) : (
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {estimatedBalances.token0.formatted} {token0Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {estimatedBalances.token0.formatted}
+                </div>
                 {tokenPrices?.token0 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(estimatedBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(estimatedBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {estimatedBalances.token1.formatted} {token1Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {estimatedBalances.token1.formatted}
+                </div>
                 {tokenPrices?.token1 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(estimatedBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(estimatedBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               {totalUsdValue !== null && (
                 <div className="text-end mt-2">
-                  <small className="text-muted">Total: ${totalUsdValue.toFixed(2)}</small>
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${totalUsdValue.toFixed(2)}</small>
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* Info about fees */}
-        <Alert variant="info" className="small">
-          <strong>Note:</strong> Removing liquidity will also collect any unclaimed fees
-          for this position.
-        </Alert>
+        {/* Uncollected Fees Section */}
+        <div className="mb-3">
+          <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
+          {!uncollectedFees?.token0 || !uncollectedFees?.token1 ? (
+            <Alert variant="warning">
+              Fee information is not available
+            </Alert>
+          ) : !hasFees ? (
+            <Alert variant="warning">
+              This position has no uncollected fees
+            </Alert>
+          ) : (
+            <>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}
+                </div>
+                {tokenPrices?.token0 > 0 && (
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  </span>
+                )}
+              </div>
+              <div className="d-flex justify-content-between align-items-center">
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}
+                </div>
+                {tokenPrices?.token1 > 0 && (
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  </span>
+                )}
+              </div>
+              {totalFeesUsd !== null && (
+                <div className="text-end mt-2">
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${totalFeesUsd.toFixed(2)}</small>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Grand Total Section */}
+        {grandTotalUsd > 0 && (
+          <div className="border-top pt-3 mt-3 mb-5">
+            <div className="d-flex justify-content-between">
+              <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>Total Value to Receive:</h6>
+              <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>${grandTotalUsd.toFixed(2)}</h6>
+            </div>
+          </div>
+        )}
 
         {/* Operation Error Message */}
         {operationError && (

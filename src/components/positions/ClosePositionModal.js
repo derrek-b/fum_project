@@ -196,28 +196,28 @@ export default function ClosePositionModal({
           ) : (
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {tokenBalances.token0.formatted} {token0Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {tokenBalances.token0.formatted}
+                </div>
                 {tokenPrices?.token0 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {tokenBalances.token1.formatted} {token1Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {tokenBalances.token1.formatted}
+                </div>
                 {tokenPrices?.token1 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
-              {totalBalanceUsd && (
+              {totalBalanceUsd !== null && (
                 <div className="text-end mt-2">
-                  <small className="text-muted">Total: ${totalBalanceUsd.toFixed(2)}</small>
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${totalBalanceUsd.toFixed(2)}</small>
                 </div>
               )}
             </>
@@ -238,28 +238,28 @@ export default function ClosePositionModal({
           ) : (
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}
+                </div>
                 {tokenPrices?.token0 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}
+                </div>
                 {tokenPrices?.token1 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
-              {totalFeesUsd && (
+              {totalFeesUsd !== null && (
                 <div className="text-end mt-2">
-                  <small className="text-muted">Total: ${totalFeesUsd.toFixed(2)}</small>
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${totalFeesUsd.toFixed(2)}</small>
                 </div>
               )}
             </>
@@ -268,16 +268,16 @@ export default function ClosePositionModal({
 
         {/* Grand Total Section */}
         {grandTotalUsd > 0 && (
-          <div className="border-top pt-3 mt-3">
+          <div className="border-top pt-3 mt-3 mb-5">
             <div className="d-flex justify-content-between">
-              <h6 className="mb-0">Total Value to Receive:</h6>
-              <h6 className="mb-0">${grandTotalUsd.toFixed(2)}</h6>
+              <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>Total Value to Receive:</h6>
+              <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>${grandTotalUsd.toFixed(2)}</h6>
             </div>
           </div>
         )}
 
         {/* Add slippage tolerance input */}
-        <div className="border-top pt-3 mt-3 mb-3">
+        <div className="border-top pt-3 mt-3 mb-5">
           <h6 className="mb-2">Slippage Tolerance</h6>
           <Form.Group>
             <InputGroup size="sm">
@@ -294,9 +294,6 @@ export default function ClosePositionModal({
               />
               <InputGroup.Text>%</InputGroup.Text>
             </InputGroup>
-            <Form.Text className="text-muted small">
-              Maximum allowed price change during transaction (0.1% to 5%)
-            </Form.Text>
           </Form.Group>
         </div>
 
@@ -310,7 +307,7 @@ export default function ClosePositionModal({
             onChange={(e) => setShouldBurn(e.target.checked)}
             disabled={isClosing}
           />
-          <Form.Text className="text-muted">
+          <Form.Text style={{ color: 'var(--neutral-600)' }}>
             Burning the position NFT frees up storage on the blockchain and may result in a gas refund.
             If unchecked, the empty position will remain in your wallet.
           </Form.Text>
@@ -335,7 +332,7 @@ export default function ClosePositionModal({
           Cancel
         </Button>
         <Button
-          variant="danger"
+          variant="primary"
           onClick={handleClosePosition}
           disabled={isClosing}
         >

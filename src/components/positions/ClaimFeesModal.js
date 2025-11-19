@@ -162,28 +162,28 @@ export default function ClaimFeesModal({
           ) : (
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))} {token0Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}
+                </div>
                 {tokenPrices?.token0 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
-                <Badge bg="light" text="dark" className="px-3 py-2">
-                  {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))} {token1Data?.symbol}
-                </Badge>
+                <div style={{ fontSize: '0.9em' }}>
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}
+                </div>
                 {tokenPrices?.token1 > 0 && (
-                  <span className="text-muted">
-                    ≈ ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                  <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
+                    ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
-              {totalFeeValue && (
+              {totalFeeValue !== null && (
                 <div className="text-end mt-2">
-                  <small className="text-muted">Total Value: ${totalFeeValue.toFixed(2)}</small>
+                  <small style={{ color: 'var(--neutral-600)' }}>Total: ${totalFeeValue.toFixed(2)}</small>
                 </div>
               )}
             </>
