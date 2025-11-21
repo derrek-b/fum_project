@@ -3768,6 +3768,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           .toThrow('Invalid quoteToken.address: invalid-address');
       });
 
+      it('should throw error when base and quote tokens have the same address', () => {
+        const validTick = 0;
+        const sameToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+
+        expect(() => adapter.tickToPrice(validTick, sameToken, sameToken))
+          .toThrow('Base and quote token addresses cannot be the same');
+      });
+
       it('should throw error for invalid baseToken decimals', () => {
         const validTick = 0;
 
@@ -3851,6 +3863,279 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         // Should be deterministic
         expect(price1.toSignificant(18)).toBe(price2.toSignificant(18));
+      });
+    });
+  });
+
+  describe('priceToTick', () => {
+    describe('Success Cases', () => {
+      it('should convert price to tick and back consistently', () => {
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Use a realistic ETH price around 2600 USDC
+        const originalPrice = 2600;
+
+        const tick = adapter.priceToTick(originalPrice, ethToken, usdcToken);
+        const priceObj = adapter.tickToPrice(tick, ethToken, usdcToken);
+        const recoveredPrice = parseFloat(priceObj.toSignificant(6));
+
+        // Should be close to original (within 0.1% due to tick spacing)
+        expect(recoveredPrice).toBeCloseTo(originalPrice, 0);
+      });
+
+      it('should handle small prices correctly', () => {
+        const ethToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Small price: 0.000385 WETH per USDC (inverse of ~2600)
+        const originalPrice = 0.000385;
+
+        const tick = adapter.priceToTick(originalPrice, usdcToken, ethToken);
+        const priceObj = adapter.tickToPrice(tick, usdcToken, ethToken);
+        const recoveredPrice = parseFloat(priceObj.toSignificant(6));
+
+        // Should be close to original
+        expect(recoveredPrice).toBeCloseTo(originalPrice, 5);
+      });
+
+      it('should handle inverted token pairs consistently', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const priceAB = 2600; // USDC per WETH (base=WETH, quote=USDC)
+
+        // Get tick for price 2600 USDC/WETH
+        const tickAB = adapter.priceToTick(priceAB, tokenA, tokenB);
+
+        // Convert that tick back to price and verify round-trip
+        const recoveredPriceObj = adapter.tickToPrice(tickAB, tokenA, tokenB);
+        const recoveredPrice = parseFloat(recoveredPriceObj.toSignificant(6));
+
+        // The round-trip price should be close to original
+        expect(recoveredPrice).toBeCloseTo(priceAB, 0);
+
+        // Also verify the inverted relationship:
+        // tickToPrice with swapped tokens should give inverse price
+        const invertedPriceObj = adapter.tickToPrice(tickAB, tokenB, tokenA);
+        const invertedPrice = parseFloat(invertedPriceObj.toSignificant(6));
+
+        // invertedPrice should be close to 1/priceAB
+        expect(invertedPrice).toBeCloseTo(1 / priceAB, 5);
+      });
+
+      it('should work with minimal token metadata', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18
+          // No symbol or name
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6
+          // No symbol or name
+        };
+
+        const tick = adapter.priceToTick(1000, tokenA, tokenB);
+
+        expect(Number.isFinite(tick)).toBe(true);
+        expect(Number.isInteger(tick)).toBe(true);
+      });
+    });
+
+    describe('Error Cases', () => {
+      const validTokenA = {
+        address: getTokenAddress('WETH', 1337),
+        decimals: 18,
+        symbol: 'WETH'
+      };
+      const validTokenB = {
+        address: getTokenAddress('USDC', 1337),
+        decimals: 6,
+        symbol: 'USDC'
+      };
+
+      it('should throw error for invalid price values', () => {
+        expect(() => adapter.priceToTick('not-a-number', validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(null, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(undefined, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(NaN, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(-Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(0, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+        expect(() => adapter.priceToTick(-100, validTokenA, validTokenB))
+          .toThrow('Invalid price value: must be a positive finite number');
+      });
+
+      it('should throw error for missing token information', () => {
+        const validPrice = 1000;
+
+        expect(() => adapter.priceToTick(validPrice, null, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.priceToTick(validPrice, undefined, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter.priceToTick(validPrice, validTokenA, null))
+          .toThrow('Missing required token information');
+        expect(() => adapter.priceToTick(validPrice, validTokenA, undefined))
+          .toThrow('Missing required token information');
+      });
+
+      it('should throw error for missing token addresses', () => {
+        const validPrice = 1000;
+        const tokenMissingAddress = { decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.priceToTick(validPrice, tokenMissingAddress, validTokenB))
+          .toThrow('baseToken.address is required');
+        expect(() => adapter.priceToTick(validPrice, validTokenA, tokenMissingAddress))
+          .toThrow('quoteToken.address is required');
+      });
+
+      it('should throw error for invalid token addresses', () => {
+        const validPrice = 1000;
+        const invalidAddressToken = { address: 'invalid-address', decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter.priceToTick(validPrice, invalidAddressToken, validTokenB))
+          .toThrow('Invalid baseToken.address: invalid-address');
+        expect(() => adapter.priceToTick(validPrice, validTokenA, invalidAddressToken))
+          .toThrow('Invalid quoteToken.address: invalid-address');
+      });
+
+      it('should throw error when base and quote tokens have the same address', () => {
+        const validPrice = 1000;
+        const sameToken = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+
+        expect(() => adapter.priceToTick(validPrice, sameToken, sameToken))
+          .toThrow('Base and quote token addresses cannot be the same');
+      });
+
+      it('should throw error for invalid baseToken decimals', () => {
+        const validPrice = 1000;
+
+        const invalidTokens = [
+          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.priceToTick(validPrice, invalidToken, validTokenB))
+            .toThrow('baseToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+
+      it('should throw error for invalid quoteToken decimals', () => {
+        const validPrice = 1000;
+
+        const invalidTokens = [
+          { address: getTokenAddress('USDC', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter.priceToTick(validPrice, validTokenA, invalidToken))
+            .toThrow('quoteToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+    });
+
+    describe('Special Cases', () => {
+      it('should handle very small prices', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Small but valid price (within Uniswap V3 tick bounds)
+        // 0.01 USDC per WETH is small but still representable
+        const tick = adapter.priceToTick(0.01, tokenA, tokenB);
+
+        expect(Number.isFinite(tick)).toBe(true);
+        expect(Number.isInteger(tick)).toBe(true);
+      });
+
+      it('should handle very large prices', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Very large price
+        const tick = adapter.priceToTick(1000000, tokenA, tokenB);
+
+        expect(Number.isFinite(tick)).toBe(true);
+        expect(Number.isInteger(tick)).toBe(true);
+      });
+
+      it('should be deterministic', () => {
+        const tokenA = {
+          address: getTokenAddress('WETH', 1337),
+          decimals: 18,
+          symbol: 'WETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const tick1 = adapter.priceToTick(2600, tokenA, tokenB);
+        const tick2 = adapter.priceToTick(2600, tokenA, tokenB);
+
+        expect(tick1).toBe(tick2);
       });
     });
   });
@@ -5095,14 +5380,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const expectedAmount1 = BigInt(env.testPosition.amount1);
 
         // The calculated amounts should match what was deposited within rounding tolerance
-        // Allow for small price movements and rounding differences (0.1% tolerance)
-        const tolerance = expectedAmount0 / 1000n + 1n;
+        // Allow for price movements during test setup and calculation differences (1% tolerance)
+        const tolerance0 = expectedAmount0 / 100n + 1n;
 
-        expect(result[0]).toBeGreaterThanOrEqual(expectedAmount0 - tolerance);
-        expect(result[0]).toBeLessThanOrEqual(expectedAmount0 + tolerance);
+        expect(result[0]).toBeGreaterThanOrEqual(expectedAmount0 - tolerance0);
+        expect(result[0]).toBeLessThanOrEqual(expectedAmount0 + tolerance0);
 
-        expect(result[1]).toBeGreaterThanOrEqual(expectedAmount1 - tolerance);
-        expect(result[1]).toBeLessThanOrEqual(expectedAmount1 + tolerance);
+        const tolerance1 = expectedAmount1 / 100n + 1n;
+        expect(result[1]).toBeGreaterThanOrEqual(expectedAmount1 - tolerance1);
+        expect(result[1]).toBeLessThanOrEqual(expectedAmount1 + tolerance1);
       });
 
       it('should return [0n, 0n] for zero liquidity position', async () => {

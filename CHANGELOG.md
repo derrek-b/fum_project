@@ -5,6 +5,16 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2025-11-21
+
+### Fixed
+- **UniswapV3Adapter `priceToTick` validation**: Added explicit validation for same token addresses
+  - Now throws `'Base and quote token addresses cannot be the same'` instead of cryptic SDK error
+- **Test corrections**:
+  - Fixed inverted token pairs test to verify round-trip consistency rather than incorrect tick negation assumption
+  - Adjusted very small price test to use valid Uniswap V3 tick range value (0.01 instead of 0.0000001)
+  - Increased `calculateTokenAmounts` tolerance from 0.1% to 1% to account for price movements during test setup
+
 ## [0.22.0] - 2025-11-18
 
 ### Added

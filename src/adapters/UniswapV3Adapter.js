@@ -15,7 +15,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress } from "../helpers/tokenHelpers.js";
-import { Position, Pool, NonfungiblePositionManager, tickToPrice, TickMath } from '@uniswap/v3-sdk';
+import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
@@ -1229,6 +1229,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
     }
 
+    // Validate tokens are not the same
+    if (validatedBaseAddress.toLowerCase() === validatedQuoteAddress.toLowerCase()) {
+      throw new Error("Base and quote token addresses cannot be the same");
+    }
+
     // Validate decimals
     if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
       throw new Error("baseToken.decimals must be a finite number between 0 and 255");
@@ -1318,6 +1323,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
     }
 
+    // Validate tokens are not the same
+    if (validatedBaseAddress.toLowerCase() === validatedQuoteAddress.toLowerCase()) {
+      throw new Error("Base and quote token addresses cannot be the same");
+    }
+
     // Validate decimals
     if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
       throw new Error("baseToken.decimals must be a finite number between 0 and 255");
@@ -1348,6 +1358,92 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       console.error("Error converting tick to price:", error);
       throw new Error(`Failed to convert tick to price: ${error.message}`);
+    }
+  }
+
+  /**
+   * Convert a human-readable price to a tick value
+   * @param {number} price - Human-readable price (quoteToken per baseToken)
+   * @param {Object} baseToken - Base token (denominator)
+   * @param {string} baseToken.address - Token address
+   * @param {number} baseToken.decimals - Token decimals
+   * @param {Object} quoteToken - Quote token (numerator)
+   * @param {string} quoteToken.address - Token address
+   * @param {number} quoteToken.decimals - Token decimals
+   * @returns {number} The closest valid tick for this price
+   */
+  priceToTick(price, baseToken, quoteToken) {
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Invalid price value: must be a positive finite number");
+    }
+
+    if (!baseToken || !quoteToken) {
+      throw new Error("Missing required token information");
+    }
+
+    // Validate addresses
+    if (!baseToken.address) {
+      throw new Error("baseToken.address is required");
+    }
+    if (!quoteToken.address) {
+      throw new Error("quoteToken.address is required");
+    }
+
+    let validatedBaseAddress, validatedQuoteAddress;
+    try {
+      validatedBaseAddress = ethers.utils.getAddress(baseToken.address);
+    } catch (error) {
+      throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
+    }
+
+    try {
+      validatedQuoteAddress = ethers.utils.getAddress(quoteToken.address);
+    } catch (error) {
+      throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
+    }
+
+    // Validate that base and quote tokens are different
+    if (validatedBaseAddress === validatedQuoteAddress) {
+      throw new Error('Base and quote token addresses cannot be the same');
+    }
+
+    // Validate decimals
+    if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
+      throw new Error("baseToken.decimals must be a finite number between 0 and 255");
+    }
+    if (!Number.isFinite(quoteToken.decimals) || quoteToken.decimals < 0 || quoteToken.decimals > 255) {
+      throw new Error("quoteToken.decimals must be a finite number between 0 and 255");
+    }
+
+    try {
+
+      // Create Token instances
+      const base = new Token(this.chainId, validatedBaseAddress, baseToken.decimals);
+      const quote = new Token(this.chainId, validatedQuoteAddress, quoteToken.decimals);
+
+      // Create a Price object from the human-readable price
+      // The SDK's Price class stores RAW ratios, not decimal-adjusted prices.
+      // Human price = rawRatio * 10^(baseDecimals - quoteDecimals)
+      // So: rawRatio = humanPrice * 10^(quoteDecimals - baseDecimals)
+      //
+      // Example: 1 WETH per USDC (base=USDC 6dec, quote=WETH 18dec)
+      // rawRatio = 1 * 10^(18-6) = 10^12
+      // We express this as numerator/denominator where:
+      //   denominator = 10^baseDecimals
+      //   numerator = humanPrice * 10^quoteDecimals
+
+      const denominator = (10n ** BigInt(base.decimals)).toString();
+      const numerator = BigInt(Math.floor(price * Math.pow(10, quote.decimals))).toString();
+
+      const priceObj = new Price(base, quote, denominator, numerator);
+
+      // Convert Price object to tick using SDK function
+      const tick = priceToClosestTick(priceObj);
+
+      return tick;
+    } catch (error) {
+      console.error("Error converting price to tick:", error);
+      throw new Error(`Failed to convert price to tick: ${error.message}`);
     }
   }
 
