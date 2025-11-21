@@ -2,8 +2,8 @@
 import React from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button, Form } from 'react-bootstrap';
-import { setAutoRefresh, triggerUpdate } from '../redux/updateSlice';
-import { useToast } from '../context/ToastContext';
+import { setAutoRefresh, triggerUpdate } from '../../redux/updateSlice';
+import { useToast } from '../../context/ToastContext';
 import { clearPriceCache } from 'fum_library/services';
 
 export default function RefreshControls() {

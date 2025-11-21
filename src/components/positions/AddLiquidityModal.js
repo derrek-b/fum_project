@@ -13,6 +13,7 @@ import { formatPrice } from 'fum_library/helpers/formatHelpers';
 import { useToast } from '../../context/ToastContext.js';
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice.js';
+import TransactionProgressModal from '../common/TransactionProgressModal';
 
 // CSS to hide number input spinner arrows
 const numberInputStyles = `
@@ -111,6 +112,10 @@ export default function AddLiquidityModal({
   });
   const [rangeType, setRangeType] = useState('medium'); // 'custom', 'narrow', 'medium', 'wide'
 
+  // Store raw user input for custom price inputs (not formatted)
+  const [customMinInput, setCustomMinInput] = useState('');
+  const [customMaxInput, setCustomMaxInput] = useState('');
+
   // Token selection state
   const [commonTokens, setCommonTokens] = useState([]);
 
@@ -127,6 +132,13 @@ export default function AddLiquidityModal({
 
   // Token ordering state
   const [tokensSwapped, setTokensSwapped] = useState(false);
+
+  // Transaction modal state
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [currentTxStep, setCurrentTxStep] = useState(0);
+  const [transactionSteps, setTransactionSteps] = useState([]);
+  const [transactionError, setTransactionError] = useState('');
+  const [transactionWarning, setTransactionWarning] = useState('');
 
   // Get adapter for the selected platform
   const adapter = useMemo(() => {
@@ -192,6 +204,8 @@ export default function AddLiquidityModal({
       current: null
     });
     setRangeType('medium');
+    setCustomMinInput('');
+    setCustomMaxInput('');
     setToken0Balance(null);
     setToken1Balance(null);
     setToken0Error(null);
@@ -304,7 +318,7 @@ export default function AddLiquidityModal({
         showError("Error loading position data. Please try again later.");
       }
     }
-  }, [isExistingPosition, position, poolData, token0Data, token1Data, address, provider, adapter, showError]);
+  }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, provider, adapter, showError]);
 
   // Fetch token balances when token addresses change
   useEffect(() => {
@@ -741,15 +755,36 @@ export default function AddLiquidityModal({
 
   // Handle custom min/max price inputs
   const handleCustomMinPrice = (priceValue) => {
-    if (!priceValue || !adapter) {
+    // Update the input value immediately (allows typing)
+    setCustomMinInput(priceValue);
+
+    // Reset token amounts when price range changes
+    setToken0Amount('');
+    setToken1Amount('');
+
+    // Allow empty string for clearing the field
+    if (priceValue === '') {
+      setPriceRange({
+        ...priceRange,
+        min: null
+      });
+      return;
+    }
+
+    if (!adapter) {
       return;
     }
 
     try {
       const price = parseFloat(priceValue);
 
-      if (isNaN(price) || price <= 0) {
-        throw new Error("Invalid price value");
+      // Skip validation during typing (allow intermediate states)
+      if (isNaN(price)) {
+        return;
+      }
+
+      if (price <= 0) {
+        return;
       }
 
       // Convert price to tick
@@ -760,20 +795,40 @@ export default function AddLiquidityModal({
       });
     } catch (error) {
       console.error("Error setting custom min price:", error);
-      showError("Invalid minimum price value. Please enter a positive number.");
     }
   };
 
   const handleCustomMaxPrice = (priceValue) => {
-    if (!priceValue || !adapter) {
+    // Update the input value immediately (allows typing)
+    setCustomMaxInput(priceValue);
+
+    // Reset token amounts when price range changes
+    setToken0Amount('');
+    setToken1Amount('');
+
+    // Allow empty string for clearing the field
+    if (priceValue === '') {
+      setPriceRange({
+        ...priceRange,
+        max: null
+      });
+      return;
+    }
+
+    if (!adapter) {
       return;
     }
 
     try {
       const price = parseFloat(priceValue);
 
-      if (isNaN(price) || price <= 0) {
-        throw new Error("Invalid price value");
+      // Skip validation during typing (allow intermediate states)
+      if (isNaN(price)) {
+        return;
+      }
+
+      if (price <= 0) {
+        return;
       }
 
       // Convert price to tick
@@ -784,51 +839,138 @@ export default function AddLiquidityModal({
       });
     } catch (error) {
       console.error("Error setting custom max price:", error);
-      showError("Invalid maximum price value. Please enter a positive number.");
     }
   };
 
-  // Function to add liquidity to an existing position
+  // Function to add liquidity to an existing position with approval flow
   const addLiquidity = async (params) => {
     if (!adapter) {
       throw new Error("No adapter available for this position");
     }
 
+    // Get Position Manager address from adapter
+    const positionManagerAddress = adapter.addresses?.positionManagerAddress;
+    if (!positionManagerAddress) {
+      throw new Error("Position Manager address not found");
+    }
+
+    // Setup transaction steps
+    const steps = [
+      { title: `Approve {TOKEN}`, description: 'Grant permission to spend token', tokenIndex: 0 },
+      { title: `Approve {TOKEN}`, description: 'Grant permission to spend token', tokenIndex: 1 },
+      { title: 'Add Liquidity', description: 'Add tokens to your position' }
+    ];
+    setTransactionSteps(steps);
+    setCurrentTxStep(0);
+    setTransactionError('');
+    setTransactionWarning('');
+
+    // Show transaction modal and hide main modal
+    setShowTransactionModal(true);
     setIsAddingLiquidity(true);
     setOperationError(null);
 
     try {
-      await adapter.addLiquidity({
+      // Convert token amounts from human-readable format to wei
+      const token0AmountWei = ethers.utils.parseUnits(
+        params.token0Amount || "0",
+        token0Data.decimals
+      ).toString();
+
+      const token1AmountWei = ethers.utils.parseUnits(
+        params.token1Amount || "0",
+        token1Data.decimals
+      ).toString();
+
+      // Get signer
+      const signer = provider.getSigner(address);
+
+      // ERC20 ABI for approve and allowance
+      const erc20ABI = [
+        'function approve(address spender, uint256 amount) returns (bool)',
+        'function allowance(address owner, address spender) view returns (uint256)'
+      ];
+
+      // Step 1: Check and approve token0 if needed
+      if (token0AmountWei !== "0") {
+        const token0Contract = new ethers.Contract(token0Data.address, erc20ABI, provider);
+        const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+
+        if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
+          // Need approval for token0
+          const token0ContractWithSigner = token0Contract.connect(signer);
+          const approveTx = await token0ContractWithSigner.approve(
+            positionManagerAddress,
+            ethers.constants.MaxUint256
+          );
+          await approveTx.wait();
+        }
+      }
+
+      // Move to step 2
+      setCurrentTxStep(1);
+
+      // Step 2: Check and approve token1 if needed
+      if (token1AmountWei !== "0") {
+        const token1Contract = new ethers.Contract(token1Data.address, erc20ABI, provider);
+        const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+
+        if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
+          // Need approval for token1
+          const token1ContractWithSigner = token1Contract.connect(signer);
+          const approveTx = await token1ContractWithSigner.approve(
+            positionManagerAddress,
+            ethers.constants.MaxUint256
+          );
+          await approveTx.wait();
+        }
+      }
+
+      // Move to step 3
+      setCurrentTxStep(2);
+
+      // Step 3: Generate transaction data using the library
+      const txData = await adapter.generateAddLiquidityData({
         position: params.position,
-        token0Amount: params.token0Amount,
-        token1Amount: params.token1Amount,
-        slippageTolerance: params.slippageTolerance,
+        token0Amount: token0AmountWei,
+        token1Amount: token1AmountWei,
         provider,
-        address,
-        chainId,
         poolData,
         token0Data,
         token1Data,
-        dispatch,
-        onStart: () => setIsAddingLiquidity(true),
-        onFinish: () => setIsAddingLiquidity(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.tx?.hash;
-          showSuccess("Successfully added liquidity!", txHash);
-          handleClose();
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setOperationError(errorMessage);
-          showError(errorMessage);
-          setIsAddingLiquidity(false);
-        }
+        slippageTolerance: parseFloat(params.slippageTolerance),
+        deadlineMinutes: 20
       });
+
+      // Send add liquidity transaction
+      const tx = await signer.sendTransaction({
+        to: txData.to,
+        data: txData.data,
+        value: txData.value
+      });
+
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+
+      // All steps complete
+      setCurrentTxStep(3);
+
+      // Show success message with transaction hash
+      showSuccess("Successfully added liquidity!", receipt.hash);
+
+      // Close both modals and refresh
+      setTimeout(() => {
+        setShowTransactionModal(false);
+        handleClose();
+        dispatch(triggerUpdate());
+      }, 1500);
     } catch (error) {
       console.error("Error adding liquidity:", error);
-      setOperationError(`Error adding liquidity: ${error.message}`);
-      showError(`Error adding liquidity: ${error.message}`);
+      const errorMessage = error.message || "Failed to add liquidity";
+      setTransactionError(errorMessage);
+      setOperationError(`Error adding liquidity: ${errorMessage}`);
+      showError(`Error adding liquidity: ${errorMessage}`);
+    } finally {
       setIsAddingLiquidity(false);
     }
   };
@@ -870,74 +1012,192 @@ export default function AddLiquidityModal({
     }
   };
 
+  // Validate decimal precision based on token decimals
+  const validateDecimalPrecision = (value, tokenDecimals, tokenSymbol) => {
+    if (!value || value === '') return null;
+
+    // Count decimal places in the input
+    const parts = value.toString().split('.');
+    if (parts.length === 1) return null; // No decimals
+
+    const decimalPlaces = parts[1].length;
+
+    if (decimalPlaces > tokenDecimals) {
+      return `${tokenSymbol} supports a maximum of ${tokenDecimals} decimal places`;
+    }
+
+    return null;
+  };
+
   // Handle submission - now directly calls adapter methods
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    try {
-      // No need to pause auto-refresh here since we've already done it when the modal opened
-      if (isExistingPosition) {
-        // Validate inputs for adding liquidity
-        if (!token0Amount && !token1Amount) {
-          throw new Error("Please enter at least one token amount");
-        }
+    // Clear any previous errors
+    setOperationError(null);
 
-        if (token0Amount && parseFloat(token0Amount) <= 0) {
-          throw new Error("Token amount must be greater than zero");
-        }
+    // Collect all validation errors
+    const errors = [];
 
-        if (token1Amount && parseFloat(token1Amount) <= 0) {
-          throw new Error("Token amount must be greater than zero");
-        }
-
-        // Add liquidity to existing position - direct adapter call
-        addLiquidity({
-          position,
-          token0Amount,
-          token1Amount,
-          slippageTolerance
-        });
-      } else {
-        // Validate inputs for creating position
-        if (!token0Address || !token1Address) {
-          throw new Error("Please select both tokens");
-        }
-
-        if (priceRange.min === null || priceRange.max === null) {
-          throw new Error("Please set a price range");
-        }
-
-        if (!token0Amount && !token1Amount) {
-          throw new Error("Please enter at least one token amount");
-        }
-
-        if (token0Amount && parseFloat(token0Amount) <= 0) {
-          throw new Error("Token amount must be greater than zero");
-        }
-
-        if (token1Amount && parseFloat(token1Amount) <= 0) {
-          throw new Error("Token amount must be greater than zero");
-        }
-
-        // Create new position - direct adapter call
-        createPosition({
-          platformId: selectedPlatform,
-          token0Address,
-          token1Address,
-          feeTier: selectedFeeTier,
-          tickLower: priceRange.min,
-          tickUpper: priceRange.max,
-          token0Amount,
-          token1Amount,
-          slippageTolerance,
-          tokensSwapped, // Pass this so the handler knows if tokens need to be swapped
-          invertPriceDisplay // Pass the user's preference for price display
-        });
+    // No need to pause auto-refresh here since we've already done it when the modal opened
+    if (isExistingPosition) {
+      // Validate inputs for adding liquidity
+      if (!token0Amount && !token1Amount) {
+        errors.push("Please enter at least one token amount");
       }
-    } catch (error) {
-      console.error("Error submitting form:", error);
-      setOperationError(error.message || "Failed to submit. Please check your inputs and try again.");
-      showError(error.message || "Failed to submit. Please check your inputs and try again.");
+
+      // Validate token0 amount
+      if (token0Amount) {
+        const amount0 = parseFloat(token0Amount);
+
+        if (isNaN(amount0) || amount0 <= 0) {
+          errors.push(`${token0Data?.symbol || 'Token 0'} amount must be greater than zero`);
+        } else {
+          // Validate decimal precision
+          const decimalError = validateDecimalPrecision(token0Amount, token0Data?.decimals, token0Data?.symbol || 'Token 0');
+          if (decimalError) errors.push(decimalError);
+
+          // Validate balance
+          if (token0Balance !== null) {
+            const balance0 = parseFloat(token0Balance);
+            if (amount0 > balance0) {
+              errors.push(`${token0Data?.symbol || 'Token 0'} amount exceeds your balance`);
+            }
+          }
+        }
+      }
+
+      // Validate token1 amount
+      if (token1Amount) {
+        const amount1 = parseFloat(token1Amount);
+
+        if (isNaN(amount1) || amount1 <= 0) {
+          errors.push(`${token1Data?.symbol || 'Token 1'} amount must be greater than zero`);
+        } else {
+          // Validate decimal precision
+          const decimalError = validateDecimalPrecision(token1Amount, token1Data?.decimals, token1Data?.symbol || 'Token 1');
+          if (decimalError) errors.push(decimalError);
+
+          // Validate balance
+          if (token1Balance !== null) {
+            const balance1 = parseFloat(token1Balance);
+            if (amount1 > balance1) {
+              errors.push(`${token1Data?.symbol || 'Token 1'} amount exceeds your balance`);
+            }
+          }
+        }
+      }
+
+      // Validate slippage tolerance (validate last so it appears last in error list)
+      const slippageNum = parseFloat(slippageTolerance);
+      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
+        errors.push("Slippage tolerance must be between 0.1% and 5%");
+      }
+
+      // If there are validation errors, display them and stop
+      if (errors.length > 0) {
+        setOperationError(errors.join('. '));
+        return;
+      }
+
+      // Add liquidity to existing position - direct adapter call
+      addLiquidity({
+        position,
+        token0Amount,
+        token1Amount,
+        slippageTolerance
+      });
+    } else {
+      // Validate inputs for creating position
+      if (!token0Address || !token1Address) {
+        errors.push("Please select both tokens");
+      }
+
+      if (priceRange.min === null || priceRange.max === null) {
+        errors.push("Please set a price range");
+      } else {
+        // Validate that min < max
+        if (priceRange.min >= priceRange.max) {
+          errors.push("Minimum price must be less than maximum price");
+        }
+      }
+
+      if (!token0Amount && !token1Amount) {
+        errors.push("Please enter at least one token amount");
+      }
+
+      // Validate token0 amount for new position
+      if (token0Amount) {
+        const amount0 = parseFloat(token0Amount);
+        if (isNaN(amount0) || amount0 <= 0) {
+          errors.push("Token 0 amount must be greater than zero");
+        } else {
+          // Validate decimal precision
+          const token0Info = commonTokens.find(t => t.address.toLowerCase() === token0Address.toLowerCase());
+          if (token0Info) {
+            const decimalError = validateDecimalPrecision(token0Amount, token0Info.decimals, token0Info.symbol);
+            if (decimalError) errors.push(decimalError);
+          }
+
+          // Validate balance
+          if (token0Balance !== null) {
+            const balance0 = parseFloat(token0Balance);
+            if (amount0 > balance0) {
+              errors.push("Token 0 amount exceeds your balance");
+            }
+          }
+        }
+      }
+
+      // Validate token1 amount for new position
+      if (token1Amount) {
+        const amount1 = parseFloat(token1Amount);
+        if (isNaN(amount1) || amount1 <= 0) {
+          errors.push("Token 1 amount must be greater than zero");
+        } else {
+          // Validate decimal precision
+          const token1Info = commonTokens.find(t => t.address.toLowerCase() === token1Address.toLowerCase());
+          if (token1Info) {
+            const decimalError = validateDecimalPrecision(token1Amount, token1Info.decimals, token1Info.symbol);
+            if (decimalError) errors.push(decimalError);
+          }
+
+          // Validate balance
+          if (token1Balance !== null) {
+            const balance1 = parseFloat(token1Balance);
+            if (amount1 > balance1) {
+              errors.push("Token 1 amount exceeds your balance");
+            }
+          }
+        }
+      }
+
+      // Validate slippage tolerance (validate last so it appears last in error list)
+      const slippageNum = parseFloat(slippageTolerance);
+      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
+        errors.push("Slippage tolerance must be between 0.1% and 5%");
+      }
+
+      // If there are validation errors, display them and stop
+      if (errors.length > 0) {
+        setOperationError(errors.join('. '));
+        return;
+      }
+
+      // Create new position - direct adapter call
+      createPosition({
+        platformId: selectedPlatform,
+        token0Address,
+        token1Address,
+        feeTier: selectedFeeTier,
+        tickLower: priceRange.min,
+        tickUpper: priceRange.max,
+        token0Amount,
+        token1Amount,
+        slippageTolerance,
+        tokensSwapped, // Pass this so the handler knows if tokens need to be swapped
+        invertPriceDisplay // Pass the user's preference for price display
+      });
     }
   };
 
@@ -1117,6 +1377,7 @@ export default function AddLiquidityModal({
   };
 
   return (
+    <>
     <Modal
       show={show}
       onHide={handleClose}
@@ -1126,7 +1387,7 @@ export default function AddLiquidityModal({
       data-no-propagation="true"
     >
       <style>{numberInputStyles}</style>
-      <Form onSubmit={handleSubmit}>
+      <Form onSubmit={handleSubmit} noValidate>
         <Modal.Header closeButton>
           <Modal.Title>
             {isExistingPosition ? (
@@ -1140,9 +1401,37 @@ export default function AddLiquidityModal({
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
+          {/* Operation error message */}
+          {operationError && (
+            <Alert variant="danger" className="mb-3">
+              {operationError.includes('. ') ? (
+                <ul className="mb-0">
+                  {operationError.split('. ').filter(err => err.trim()).map((error, index) => (
+                    <li key={index}>{error}</li>
+                  ))}
+                </ul>
+              ) : (
+                operationError
+              )}
+            </Alert>
+          )}
+
+          {/* Passed error message (legacy support) */}
+          {errorMessage && !operationError && (
+            <Alert variant="danger" className="mb-3">
+              {errorMessage}
+            </Alert>
+          )}
+
+          {priceLoadError && (
+            <Alert variant="warning" className="mb-3">
+              {priceLoadError}
+            </Alert>
+          )}
+
           <div className="mb-4">
             {/* Platform and Token Selection Section */}
-            <h6 className="border-bottom pb-2 mb-3">Position Details</h6>
+            <h6 className="border-bottom pb-2 mb-4">Position Details</h6>
 
             <Row className="mb-3">
               <Col md={4}>
@@ -1271,144 +1560,151 @@ export default function AddLiquidityModal({
               </Col>
             </Row>
 
-            {/* Price Range Section */}
-            <h6 className="border-bottom pb-2 mt-4 mb-3">Price Range</h6>
+            {/* Price Range Section - Only show for new positions */}
+            {!isExistingPosition && (
+              <>
+                <h6 className="border-bottom pb-2 mt-4 mb-3">Price Range</h6>
 
-            <Row className="mb-3">
-              <Col md={12}>
-                <Form.Group className="mb-3">
-                  <div className="d-flex justify-content-between">
-                    {!isExistingPosition && (
-                      <div className="mb-2">
-                        <Form.Check
-                          inline
-                          type="radio"
-                          id="range-narrow"
-                          label="Narrow (±2.5%)"
-                          name="rangeType"
-                          value="narrow"
-                          checked={rangeType === 'narrow'}
-                          onChange={() => handleRangeTypeChange('narrow')}
-                          disabled={isExistingPosition || isProcessingOperation}
-                        />
-                        <Form.Check
-                          inline
-                          type="radio"
-                          id="range-medium"
-                          label="Medium (±5%)"
-                          name="rangeType"
-                          value="medium"
-                          checked={rangeType === 'medium'}
-                          onChange={() => handleRangeTypeChange('medium')}
-                          disabled={isExistingPosition || isProcessingOperation}
-                        />
-                        <Form.Check
-                          inline
-                          type="radio"
-                          id="range-wide"
-                          label="Wide (±10%)"
-                          name="rangeType"
-                          value="wide"
-                          checked={rangeType === 'wide'}
-                          onChange={() => handleRangeTypeChange('wide')}
-                          disabled={isExistingPosition || isProcessingOperation}
-                        />
-                        <Form.Check
-                          inline
-                          type="radio"
-                          id="range-custom"
-                          label="Custom"
-                          name="rangeType"
-                          value="custom"
-                          checked={rangeType === 'custom'}
-                          onChange={() => handleRangeTypeChange('custom')}
-                          disabled={isExistingPosition || isProcessingOperation}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {!isExistingPosition && rangeType === 'custom' && (
-                    <Row>
-                      <Col md={6}>
-                        <Form.Group className="mb-2">
-                          <Form.Label className="small">Min Price</Form.Label>
-                          <Form.Control
-                            type="number"
-                            placeholder="Min Price"
-                            value={priceRange.min !== null ? formatTickToPrice(priceRange.min) : ''}
-                            onChange={(e) => handleCustomMinPrice(e.target.value)}
-                            required
-                            min="0"
-                            step="any"
-                            disabled={isExistingPosition || isProcessingOperation}
-                            size="sm"
+                <Row className="mb-3">
+                  <Col md={12}>
+                    <Form.Group className="mb-3">
+                      <div className="d-flex justify-content-between">
+                        <div className="mb-2">
+                          <Form.Check
+                            inline
+                            type="radio"
+                            id="range-narrow"
+                            label="Narrow (±2.5%)"
+                            name="rangeType"
+                            value="narrow"
+                            checked={rangeType === 'narrow'}
+                            onChange={() => handleRangeTypeChange('narrow')}
+                            disabled={isProcessingOperation}
                           />
-                        </Form.Group>
-                      </Col>
-                      <Col md={6}>
-                        <Form.Group className="mb-2">
-                          <Form.Label className="small">Max Price</Form.Label>
-                          <Form.Control
-                            type="number"
-                            placeholder="Max Price"
-                            value={priceRange.max !== null ? formatTickToPrice(priceRange.max) : ''}
-                            onChange={(e) => handleCustomMaxPrice(e.target.value)}
-                            required
-                            min="0"
-                            step="any"
-                            disabled={isExistingPosition || isProcessingOperation}
-                            size="sm"
+                          <Form.Check
+                            inline
+                            type="radio"
+                            id="range-medium"
+                            label="Medium (±5%)"
+                            name="rangeType"
+                            value="medium"
+                            checked={rangeType === 'medium'}
+                            onChange={() => handleRangeTypeChange('medium')}
+                            disabled={isProcessingOperation}
                           />
-                        </Form.Group>
-                      </Col>
-                    </Row>
-                  )}
-
-                  {/* Display the selected price range */}
-                  <div className="p-2 mt-2 rounded" style={{ border: '1px solid var(--neutral-700)', backgroundColor: '#e9ecef', fontSize: '0.9em' }}>
-                    <Row>
-                      <Col md={7}>
-                        <div>
-                          <strong>
-                            {formatTickToPrice(isExistingPosition ? position?.tickLower : priceRange.min)} - {formatTickToPrice(isExistingPosition ? position?.tickUpper : priceRange.max)}
-                          </strong>
-                          {isExistingPosition ? (
-                            invertPriceDisplay ?
-                              <> {token0Symbol} per {token1Symbol}</> :
-                              <> {token1Symbol} per {token0Symbol}</>
-                          ) : (
-                            invertPriceDisplay ?
-                              (tokensSwapped ?
-                                <> {token1Symbol} per {token0Symbol}</> :
-                                <> {token0Symbol} per {token1Symbol}</>) :
-                              (tokensSwapped ?
-                                <> {token0Symbol} per {token1Symbol}</> :
-                                <> {token1Symbol} per {token0Symbol}</>)
-                          )}
+                          <Form.Check
+                            inline
+                            type="radio"
+                            id="range-wide"
+                            label="Wide (±10%)"
+                            name="rangeType"
+                            value="wide"
+                            checked={rangeType === 'wide'}
+                            onChange={() => handleRangeTypeChange('wide')}
+                            disabled={isProcessingOperation}
+                          />
+                          <Form.Check
+                            inline
+                            type="radio"
+                            id="range-custom"
+                            label="Custom"
+                            name="rangeType"
+                            value="custom"
+                            checked={rangeType === 'custom'}
+                            onChange={() => handleRangeTypeChange('custom')}
+                            disabled={isProcessingOperation}
+                          />
                         </div>
-                      </Col>
-                      <Col md={5} className="text-end">
-                        {/* Show if price is in range */}
-                        {(isExistingPosition ? poolData?.tick : priceRange.current) !== null && (
-                          <Badge bg={isPriceInRange() ? "success" : "danger"}>
-                            {isExistingPosition
-                              ? (isPriceInRange() ? "In Range" : "Out of Range")
-                              : (isPriceInRange() ? "Will Be In Range" : "Will Be Out of Range")
-                            }
-                          </Badge>
-                        )}
-                      </Col>
-                    </Row>
-                  </div>
-                </Form.Group>
-              </Col>
-            </Row>
+                      </div>
+
+                      {rangeType === 'custom' && (
+                        <Row>
+                          <Col md={6}>
+                            <Form.Group className="mb-2">
+                              <Form.Label className="small">Min Price</Form.Label>
+                              <Form.Control
+                                type="number"
+                                placeholder="Min Price"
+                                value={customMinInput}
+                                onChange={(e) => handleCustomMinPrice(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                                    e.preventDefault();
+                                  }
+                                }}
+                                disabled={isProcessingOperation}
+                                size="sm"
+                                className="no-number-spinner"
+                              />
+                            </Form.Group>
+                          </Col>
+                          <Col md={6}>
+                            <Form.Group className="mb-2">
+                              <Form.Label className="small">Max Price</Form.Label>
+                              <Form.Control
+                                type="number"
+                                placeholder="Max Price"
+                                value={customMaxInput}
+                                onChange={(e) => handleCustomMaxPrice(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                                    e.preventDefault();
+                                  }
+                                }}
+                                disabled={isProcessingOperation}
+                                size="sm"
+                                className="no-number-spinner"
+                              />
+                            </Form.Group>
+                          </Col>
+                        </Row>
+                      )}
+
+                      {/* Display the selected price range */}
+                      <div className="p-2 mt-2 rounded" style={{ border: '1px solid var(--neutral-700)', backgroundColor: '#e9ecef', fontSize: '0.9em' }}>
+                        <Row>
+                          <Col md={7}>
+                            <div>
+                              <strong>
+                                {formatTickToPrice(priceRange.min)} - {formatTickToPrice(priceRange.max)}
+                              </strong>
+                              {invertPriceDisplay ?
+                                (tokensSwapped ?
+                                  <> {token1Symbol} per {token0Symbol}</> :
+                                  <> {token0Symbol} per {token1Symbol}</>) :
+                                (tokensSwapped ?
+                                  <> {token0Symbol} per {token1Symbol}</> :
+                                  <> {token1Symbol} per {token0Symbol}</>)
+                              }
+                            </div>
+                          </Col>
+                          <Col md={5} className="text-end">
+                            {/* Show if price is in range */}
+                            {priceRange.current !== null && (
+                              <Badge bg={isPriceInRange() ? "success" : "danger"}>
+                                {isPriceInRange() ? "Will Be In Range" : "Will Be Out of Range"}
+                              </Badge>
+                            )}
+                          </Col>
+                        </Row>
+                      </div>
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                {/* Out of Range Warning */}
+                {!isExistingPosition && priceRange.current !== null && priceRange.min !== null && priceRange.max !== null && !isPriceInRange() && (
+                  <Alert variant="warning" className="mt-3 mb-0">
+                    <strong>Out of Range Position:</strong> The current market price is outside your selected price range. Your position will not earn fees until the price moves back into your specified range. Consider adjusting your range to include the current price if you want to start earning fees immediately.
+                  </Alert>
+                )}
+              </>
+            )}
 
             {/* Token Amounts Section */}
-            <h6 className="border-bottom pb-2 mt-4 mb-3" style={{ fontSize: '0.9em' }}>Add Liquidity</h6>
+            <h6 className="border-bottom pb-2 mt-5 mb-3" style={{ fontSize: '0.9em' }}>Add Liquidity</h6>
 
-            <Row className="mb-3">
+            <Row className="mb-4">
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label style={{ fontSize: '0.9em' }}>{token0Symbol} Amount</Form.Label>
@@ -1435,6 +1731,11 @@ export default function AddLiquidityModal({
                       placeholder={`Enter ${token0Symbol} amount`}
                       value={token0Amount}
                       onChange={(e) => handleToken0AmountChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                          e.preventDefault();
+                        }
+                      }}
                       min="0"
                       step="any"
                       isInvalid={!!token0Error}
@@ -1445,11 +1746,9 @@ export default function AddLiquidityModal({
                     />
                     <InputGroup.Text style={{ fontSize: '0.9em' }}>{token0Symbol}</InputGroup.Text>
                   </InputGroup>
-                  {token0UsdValue !== null && (
-                    <div className="mt-1 text-muted small">
-                      ${token0UsdValue.toFixed(2)} USD
-                    </div>
-                  )}
+                  <div className="mt-1 small" style={{ color: 'var(--neutral-600)' }}>
+                    ${token0UsdValue !== null ? token0UsdValue.toFixed(2) : '0.00'} USD
+                  </div>
                   {token0Error && <Form.Control.Feedback type="invalid">{token0Error}</Form.Control.Feedback>}
                 </Form.Group>
               </Col>
@@ -1480,6 +1779,11 @@ export default function AddLiquidityModal({
                       placeholder={`Enter ${token1Symbol} amount`}
                       value={token1Amount}
                       onChange={(e) => handleToken1AmountChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                          e.preventDefault();
+                        }
+                      }}
                       min="0"
                       step="any"
                       isInvalid={!!token1Error}
@@ -1490,68 +1794,50 @@ export default function AddLiquidityModal({
                     />
                     <InputGroup.Text style={{ fontSize: '0.9em' }}>{token1Symbol}</InputGroup.Text>
                   </InputGroup>
-                  {token1UsdValue !== null && (
-                    <div className="mt-1 text-muted small">
-                      ${token1UsdValue.toFixed(2)} USD
-                    </div>
-                  )}
+                  <div className="mt-1 small" style={{ color: 'var(--neutral-600)' }}>
+                    ${token1UsdValue !== null ? token1UsdValue.toFixed(2) : '0.00'} USD
+                  </div>
                   {token1Error && <Form.Control.Feedback type="invalid">{token1Error}</Form.Control.Feedback>}
                 </Form.Group>
               </Col>
             </Row>
 
-            <Row className="mb-3">
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label>Slippage Tolerance</Form.Label>
-                  <InputGroup size="sm">
-                    <Form.Control
-                      type="number"
-                      placeholder="Enter slippage tolerance"
-                      value={slippageTolerance}
-                      onChange={(e) => setSlippageTolerance(e.target.value)}
-                      required
-                      min="0.1"
-                      max="5"
-                      step="0.1"
-                      size="sm"
-                      disabled={isProcessingOperation}
-                    />
-                    <InputGroup.Text>%</InputGroup.Text>
-                  </InputGroup>
-                </Form.Group>
-              </Col>
+            {/* Slippage Tolerance Section */}
+            <div className="mb-5">
+              <h6 className="border-bottom pb-2 mt-2">Slippage Tolerance</h6>
+              <Form.Group>
+                <InputGroup size="sm">
+                  <Form.Control
+                    type="number"
+                    placeholder="Enter slippage tolerance"
+                    value={slippageTolerance}
+                    onChange={(e) => setSlippageTolerance(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                        e.preventDefault();
+                      }
+                    }}
+                    required
+                    min="0.1"
+                    max="5"
+                    step="any"
+                    disabled={isProcessingOperation}
+                    className="no-number-spinner"
+                  />
+                  <InputGroup.Text>%</InputGroup.Text>
+                </InputGroup>
+              </Form.Group>
+            </div>
 
-              <Col md={6} className="d-flex align-items-end justify-content-end">
-                {totalUsdValue !== null && (
-                  <div className="text-end mb-2">
-                    <small className="text-muted d-block">Total Value:</small>
-                    <span className="fw-bold">${totalUsdValue.toFixed(2)} USD</span>
-                  </div>
-                )}
-              </Col>
-            </Row>
+            {/* Total Value Section */}
+            <div className="border-top pt-3 mt-3 mb-3">
+              <div className="d-flex justify-content-between">
+                <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>Total Value:</h6>
+                <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>${totalUsdValue !== null ? totalUsdValue.toFixed(2) : '0.00'}</h6>
+              </div>
+            </div>
           </div>
 
-          {/* Operation error message */}
-          {operationError && (
-            <Alert variant="danger" className="mt-3 mb-0 py-2">
-              {operationError}
-            </Alert>
-          )}
-
-          {/* Passed error message (legacy support) */}
-          {errorMessage && !operationError && (
-            <Alert variant="danger" className="mt-3 mb-0 py-2">
-              {errorMessage}
-            </Alert>
-          )}
-
-          {priceLoadError && (
-            <Alert variant="warning" className="mt-3 mb-0 py-2">
-              {priceLoadError}
-            </Alert>
-          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={handleClose} disabled={isProcessingOperation}>
@@ -1560,9 +1846,7 @@ export default function AddLiquidityModal({
           <Button
             variant="primary"
             type="submit"
-            disabled={isProcessingOperation ||
-              (!token0Amount && !token1Amount) ||
-              (isExistingPosition ? false : (!token0Address || !token1Address || priceRange.min === null || priceRange.max === null))}
+            disabled={isProcessingOperation}
           >
             {isProcessingOperation ? (
               <>
@@ -1583,5 +1867,33 @@ export default function AddLiquidityModal({
         </Modal.Footer>
       </Form>
     </Modal>
+
+    {/* Transaction Progress Modal */}
+    <TransactionProgressModal
+      show={showTransactionModal}
+      onHide={() => {
+        setShowTransactionModal(false);
+        if (currentTxStep >= transactionSteps.length) {
+          handleClose();
+        }
+      }}
+      currentStep={currentTxStep}
+      steps={transactionSteps}
+      isLoading={isAddingLiquidity}
+      error={transactionError}
+      warning={transactionWarning}
+      tokenSymbols={[token0Data?.symbol || 'Token0', token1Data?.symbol || 'Token1']}
+      onCancel={() => {
+        if (!isAddingLiquidity) {
+          setShowTransactionModal(false);
+          setTransactionError('');
+        }
+      }}
+      title={isExistingPosition ?
+        `Add Liquidity: ${token0Data?.symbol}/${token1Data?.symbol}` :
+        `Create Position: ${token0Data?.symbol || 'Token0'}/${token1Data?.symbol || 'Token1'}`
+      }
+    />
+  </>
   );
 }

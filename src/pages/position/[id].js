@@ -6,9 +6,9 @@ import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert, 
 import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
 import Head from "next/head";
-import PriceRangeChart from "../../components/PriceRangeChart";
-import Navbar from "../../components/Navbar";
-import RefreshControls from "../../components/RefreshControls";
+import PriceRangeChart from "../../components/common/PriceRangeChart";
+import Navbar from "../../components/common/Navbar";
+import RefreshControls from "../../components/common/RefreshControls";
 import AddLiquidityModal from "../../components/positions/AddLiquidityModal";
 import RemoveLiquidityModal from "../../components/positions/RemoveLiquidityModal";
 import ClosePositionModal from "../../components/positions/ClosePositionModal";

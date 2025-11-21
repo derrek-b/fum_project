@@ -12,7 +12,7 @@ import { addPositionToVault, removePositionFromVault } from "../../redux/vaultsS
 import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
-import StrategyTransactionModal from './StrategyTransactionModal';
+import TransactionProgressModal from '../common/TransactionProgressModal';
 
 export default function PositionSelectionModal({
   show,
@@ -37,6 +37,7 @@ export default function PositionSelectionModal({
   // State for selected positions
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState("");
 
   // State for progress modal
   const [transactionSteps, setTransactionSteps] = useState([]);
@@ -112,6 +113,7 @@ export default function PositionSelectionModal({
 
   // Handle position toggle
   const handlePositionToggle = (positionId) => {
+    setError(""); // Clear error when selecting positions
     setSelectedPositions(prev => {
       if (prev.includes(positionId)) {
         return prev.filter(id => id !== positionId);
@@ -145,9 +147,11 @@ export default function PositionSelectionModal({
   // Handle position action (add or remove)
   const handleConfirm = async () => {
     if (selectedPositions.length === 0) {
-      showError("Please select at least one position");
+      setError("Please select at least one position");
       return;
     }
+
+    setError(""); // Clear any previous errors
 
     // Conditional logic: single position = toast flow, multiple = progress modal flow
     if (selectedPositions.length === 1) {
@@ -227,11 +231,11 @@ export default function PositionSelectionModal({
           return;
         }
 
-        // Real error - log and show user-friendly message
+        // Real error - log and show user-friendly message in modal
         const action = mode === 'add' ? 'adding position to' : 'removing position from';
         console.error(`Error ${action} vault:`, error);
         const errorDetail = error.reason || error.message || "Unknown error";
-        showError(`Failed to ${mode} position: ${errorDetail}`);
+        setError(`Failed to ${mode} position: ${errorDetail}`);
       } finally {
         setIsProcessing(false);
       }
@@ -394,6 +398,12 @@ export default function PositionSelectionModal({
       </Modal.Header>
 
       <Modal.Body>
+        {error && (
+          <Alert variant="danger">
+            {error}
+          </Alert>
+        )}
+
         <p>
           {mode === 'add'
             ? 'Select the positions you want to transfer to this vault:'
@@ -490,7 +500,7 @@ export default function PositionSelectionModal({
         <Button
           variant="primary"
           onClick={handleConfirm}
-          disabled={isProcessing || selectedPositions.length === 0 || filteredPositions.length === 0}
+          disabled={isProcessing}
         >
           {isProcessing ? (
             <>
@@ -511,14 +521,16 @@ export default function PositionSelectionModal({
       </Modal.Footer>
 
       {/* Progress Modal for Multiple Position Transfers */}
-      <StrategyTransactionModal
+      <TransactionProgressModal
         show={showTransactionModal}
         steps={transactionSteps}
         currentStep={currentTransactionStep}
-        loading={transactionLoading}
+        isLoading={transactionLoading}
         error={transactionError}
         warning={transactionWarning}
-        onClose={handleCloseTransactionModal}
+        onHide={handleCloseTransactionModal}
+        onCancel={handleCloseTransactionModal}
+        title="Position Management"
       />
     </Modal>
   );

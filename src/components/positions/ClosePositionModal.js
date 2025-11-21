@@ -142,12 +142,13 @@ export default function ClosePositionModal({
       }
 
       // Validate slippage tolerance
-      if (slippageTolerance < 0.1 || slippageTolerance > 5) {
+      const slippageNum = parseFloat(slippageTolerance);
+      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
         throw new Error("Slippage tolerance must be between 0.1% and 5%");
       }
 
       // Call the function that interacts with the adapter
-      closePosition(shouldBurn, slippageTolerance);
+      closePosition(shouldBurn, slippageNum);
     } catch (error) {
       console.error("Error initiating position close:", error);
       showError(`Failed to close position: ${error.message}`);
@@ -285,12 +286,18 @@ export default function ClosePositionModal({
                 type="number"
                 placeholder="Enter slippage tolerance"
                 value={slippageTolerance}
-                onChange={(e) => setSlippageTolerance(parseFloat(e.target.value) || 0.5)}
+                onChange={(e) => setSlippageTolerance(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                    e.preventDefault();
+                  }
+                }}
                 min="0.1"
                 max="5"
-                step="0.1"
+                step="any"
                 required
                 disabled={isClosing}
+                className="no-number-spinner"
               />
               <InputGroup.Text>%</InputGroup.Text>
             </InputGroup>

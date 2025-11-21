@@ -36,7 +36,7 @@ const AutomationModal = ({
             <p className="fw-bold">The executor cannot withdraw tokens or positions from your vault.</p>
 
             <Alert variant="warning">
-              You can disable automation at any time by toggling it off in the strategy settings.
+              You can disable automation at any time by toggling it off or disabling the strategy.
             </Alert>
           </>
         ) : (

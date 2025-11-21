@@ -12,7 +12,7 @@ import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingeck
 import { getPlatformColor, getPlatformLogo, getPlatformName } from "fum_library/helpers/platformHelpers";
 
 // Local imports
-import PriceRangeChart from "../PriceRangeChart";
+import PriceRangeChart from "../common/PriceRangeChart";
 
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const router = useRouter();

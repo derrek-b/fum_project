@@ -192,11 +192,12 @@ export default function RemoveLiquidityModal({
         throw new Error("Invalid percentage value (must be between 1-100%)");
       }
 
-      if (slippageTolerance < 0.1 || slippageTolerance > 5) {
+      const slippageNum = parseFloat(slippageTolerance);
+      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
         throw new Error("Slippage tolerance must be between 0.1% and 5%");
       }
 
-      removeLiquidity(percentage, slippageTolerance);
+      removeLiquidity(percentage, slippageNum);
     } catch (error) {
       console.error("Error initiating liquidity removal:", error);
       showError(`Failed to remove liquidity: ${error.message}`);
@@ -311,12 +312,18 @@ export default function RemoveLiquidityModal({
                 type="number"
                 placeholder="Enter slippage tolerance"
                 value={slippageTolerance}
-                onChange={(e) => setSlippageTolerance(parseFloat(e.target.value) || 0.5)}
+                onChange={(e) => setSlippageTolerance(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                    e.preventDefault();
+                  }
+                }}
                 min="0.1"
                 max="5"
-                step="0.1"
+                step="any"
                 required
                 disabled={isRemoving}
+                className="no-number-spinner"
               />
               <InputGroup.Text>%</InputGroup.Text>
             </InputGroup>

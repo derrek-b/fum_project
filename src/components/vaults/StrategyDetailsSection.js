@@ -173,14 +173,30 @@ const StrategyDetailsSection = ({
   // Update parent when params change
   useEffect(() => {
     if (onParamsChange) {
+      // Convert string values to numbers for parameters with type 'number'
+      const processedParams = { ...params };
+      Object.keys(processedParams).forEach(paramId => {
+        const paramConfig = parameterDefinitions[paramId];
+        if (paramConfig && paramConfig.type === 'number') {
+          const value = processedParams[paramId];
+          // Convert to number if it's a non-empty string
+          if (typeof value === 'string' && value !== '') {
+            const numValue = parseFloat(value);
+            if (!isNaN(numValue)) {
+              processedParams[paramId] = numValue;
+            }
+          }
+        }
+      });
+
       onParamsChange({
-        parameters: params,
+        parameters: processedParams,
         selectedTokens,
         selectedPlatforms,
         activePreset
       });
     }
-  }, [params, selectedTokens, selectedPlatforms, activePreset]);
+  }, [params, selectedTokens, selectedPlatforms, activePreset, parameterDefinitions]);
 
   // Update the validateParams function to include min/max validations - memoized to prevent infinite loops
   const validateParams = useCallback(() => {
@@ -703,11 +719,9 @@ const StrategyDetailsSection = ({
                   }
                 }}
                 onChange={(e) => {
-                  const val = e.target.value === '' ? '' : parseFloat(e.target.value);
-                  handleParamChange(paramId, val);
+                  handleParamChange(paramId, e.target.value);
                 }}
-                min={config.min}
-                max={config.max}
+                step="any"
                 disabled={!editMode}
                 isInvalid={!!error}
                 style={{
@@ -720,7 +734,11 @@ const StrategyDetailsSection = ({
 
               {config.suffix && <span className="input-group-text">{config.suffix}</span>}
             </div>
-            <Form.Control.Feedback type="invalid">{error}</Form.Control.Feedback>
+            {error && (
+              <div className="invalid-feedback d-block">
+                {error}
+              </div>
+            )}
             <Form.Text className="text-muted">{config.description}</Form.Text>
           </Form.Group>
         );

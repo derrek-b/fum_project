@@ -8,6 +8,21 @@ import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { useToast } from "../../context/ToastContext";
 import { useProvider } from "../../contexts/ProviderContext";
 
+// CSS to hide number input spinner arrows
+const numberInputStyles = `
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
+  }
+`;
+
 const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, onTokensUpdated }) => {
   const { chainId } = useSelector((state) => state.wallet);
   const { provider } = useProvider();
@@ -34,6 +49,24 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
     }
   };
 
+  // Validate decimal precision based on token decimals
+  const validateDecimalPrecision = (value, tokenDecimals) => {
+    if (!value || value === '') return true;
+
+    // Count decimal places in the input
+    const parts = value.toString().split('.');
+    if (parts.length === 1) return true; // No decimals
+
+    const decimalPlaces = parts[1].length;
+
+    if (decimalPlaces > tokenDecimals) {
+      setError(`${token?.symbol || 'This token'} supports a maximum of ${tokenDecimals} decimal places`);
+      return false;
+    }
+
+    return true;
+  };
+
   // Handle withdrawal
   const handleWithdraw = async () => {
     if (!token || !amount || !ownerAddress || !provider) {
@@ -42,13 +75,20 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
     }
 
     // Validate amount
-    if (parseFloat(amount) <= 0) {
+    const numAmount = parseFloat(amount);
+
+    if (isNaN(numAmount) || numAmount <= 0) {
       setError("Amount must be greater than 0");
       return;
     }
 
-    if (parseFloat(amount) > parseFloat(token.numericalBalance)) {
+    if (numAmount > parseFloat(token.numericalBalance)) {
       setError("Amount exceeds vault balance");
+      return;
+    }
+
+    // Validate decimal precision
+    if (!validateDecimalPrecision(amount, token.decimals)) {
       return;
     }
 
@@ -107,6 +147,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
       size="md"
       backdrop="static"
     >
+      <style>{numberInputStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>Withdraw {token.symbol} from Vault</Modal.Title>
       </Modal.Header>
@@ -116,7 +157,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
         <Form>
           {/* Token Info */}
           <div className="mb-4">
-            <div className="d-flex align-items-center mb-2">
+            <div className="d-flex align-items-center mb-4">
               {token.logoURI && (
                 <div className="me-2">
                   <img
@@ -129,11 +170,10 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
               )}
               <div>
                 <div className="fw-bold">{token.symbol}</div>
-                <small className="text-muted">{token.name}</small>
               </div>
             </div>
-            <div className="text-muted">
-              Vault Balance: <strong>{parseFloat(token.numericalBalance).toFixed(6)} {token.symbol}</strong>
+            <div style={{ color: 'var(--neutral-600)' }}>
+              <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>Vault Balance:</span> {parseFloat(token.numericalBalance).toFixed(6)} {token.symbol}
             </div>
           </div>
 
@@ -145,8 +185,18 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
                 type="number"
                 placeholder="0.0"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  setError(""); // Clear error when typing
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                    e.preventDefault();
+                  }
+                }}
+                step="any"
                 disabled={isSubmitting}
+                className="no-number-spinner"
               />
               <Button
                 variant="outline-secondary"
@@ -163,7 +213,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
               variant="primary"
               size="lg"
               onClick={handleWithdraw}
-              disabled={isSubmitting || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > parseFloat(token.numericalBalance)}
+              disabled={isSubmitting}
             >
               {isSubmitting ? (
                 <>

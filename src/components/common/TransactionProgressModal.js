@@ -1,13 +1,14 @@
-// src/components/vaults/StrategyTransactionModal.js
+// src/components/common/TransactionProgressModal.js
 import React from 'react';
 import { Modal, Button, Spinner, Alert } from 'react-bootstrap';
 import { Check2Circle, XCircle, ArrowClockwise } from 'react-bootstrap-icons';
 
 /**
- * A step by step transaction modal for strategy configuration
+ * A step by step transaction modal for multi-step transaction flows
  * Shows each transaction step and its current status
+ * Can be used for strategy configuration, position management, or any multi-transaction process
  */
-const StrategyTransactionModal = ({
+const TransactionProgressModal = ({
   show,
   onHide,
   currentStep,
@@ -17,12 +18,12 @@ const StrategyTransactionModal = ({
   warning,
   tokenSymbols = [],
   onCancel,
-  strategyName
+  title
 }) => {
   return (
     <Modal show={show} onHide={onCancel} backdrop="static" centered size="lg">
       <Modal.Header>
-        <Modal.Title>Configuring Strategy: {strategyName || "Strategy"}</Modal.Title>
+        <Modal.Title>{title || "Transaction Progress"}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
         {error && (
@@ -40,7 +41,7 @@ const StrategyTransactionModal = ({
         )}
 
         <p className="mb-3">
-          To configure this strategy, several transactions need to be approved in your wallet.
+          Several transactions need to be approved in your wallet.
           Please confirm each transaction when prompted.
         </p>
 
@@ -122,7 +123,7 @@ const StrategyTransactionModal = ({
             <div className="text-muted">
               {currentStep < steps.length ?
                 "Please confirm the current transaction in your wallet app" :
-                "Strategy configuration complete!"}
+                "All transactions complete!"}
             </div>
           )}
         </div>
@@ -143,4 +144,4 @@ const StrategyTransactionModal = ({
   );
 };
 
-export default StrategyTransactionModal;
+export default TransactionProgressModal;

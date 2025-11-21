@@ -3,11 +3,11 @@
 import React, { useState, useEffect } from "react";
 import { Button, Spinner } from "react-bootstrap";
 import { useDispatch, useSelector } from "react-redux";
-import { setWallet, disconnectWallet, setReconnecting } from "../redux/walletSlice";
+import { setWallet, disconnectWallet, setReconnecting } from "../../redux/walletSlice";
 import { createWeb3Provider } from "fum_library/blockchain/wallet";
 import { getChainName } from "fum_library/helpers/chainHelpers";
-import { useToast } from "../context/ToastContext"; // Import the toast hook
-import { useProvider } from "../contexts/ProviderContext";
+import { useToast } from "../../context/ToastContext"; // Import the toast hook
+import { useProvider } from "../../contexts/ProviderContext";
 
 export default function WalletConnectEVM() {
   const dispatch = useDispatch();

@@ -8,6 +8,21 @@ import { useToast } from "../../context/ToastContext";
 import { useProvider } from "../../contexts/ProviderContext";
 import Image from "next/image";
 
+// CSS to hide number input spinner arrows
+const numberInputStyles = `
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
+  }
+`;
+
 // Minimal ERC20 ABI with just the functions we need
 const ERC20_ABI = [
   // Read-only functions
@@ -95,6 +110,24 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     setAmount(userBalance);
   };
 
+  // Validate decimal precision based on token decimals
+  const validateDecimalPrecision = (value, tokenDecimals) => {
+    if (!value || value === '') return true;
+
+    // Count decimal places in the input
+    const parts = value.toString().split('.');
+    if (parts.length === 1) return true; // No decimals
+
+    const decimalPlaces = parts[1].length;
+
+    if (decimalPlaces > tokenDecimals) {
+      setError(`${selectedToken?.symbol || 'This token'} supports a maximum of ${tokenDecimals} decimal places`);
+      return false;
+    }
+
+    return true;
+  };
+
   // Handle deposit
   const handleDeposit = async () => {
     if (!selectedToken || !amount || !userAddress || !provider) {
@@ -103,13 +136,20 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     }
 
     // Validate amount
-    if (parseFloat(amount) <= 0) {
+    const numAmount = parseFloat(amount);
+
+    if (isNaN(numAmount) || numAmount <= 0) {
       setError("Amount must be greater than 0");
       return;
     }
 
-    if (parseFloat(amount) > parseFloat(userBalance)) {
+    if (numAmount > parseFloat(userBalance)) {
       setError("Amount exceeds your balance");
+      return;
+    }
+
+    // Validate decimal precision
+    if (!validateDecimalPrecision(amount, selectedToken.decimals)) {
       return;
     }
 
@@ -161,6 +201,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
       size="lg"
       backdrop="static"
     >
+      <style>{numberInputStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>Deposit Tokens to Vault</Modal.Title>
       </Modal.Header>
@@ -169,7 +210,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
 
         <Form>
           {/* Token Selection */}
-          <Form.Group className="mb-4">
+          <Form.Group className="mb-5">
             <Form.Label>Select Token</Form.Label>
             <div className="d-flex flex-wrap gap-2">
               {tokenList.map((token) => (
@@ -217,8 +258,18 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
                     type="number"
                     placeholder="0.0"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => {
+                      setAmount(e.target.value);
+                      setError(""); // Clear error when typing
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+                        e.preventDefault();
+                      }
+                    }}
+                    step="any"
                     disabled={isSubmitting}
+                    className="no-number-spinner"
                   />
                   <Button
                     variant="outline-secondary"
@@ -235,7 +286,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
                   variant="primary"
                   size="lg"
                   onClick={handleDeposit}
-                  disabled={isSubmitting || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > parseFloat(userBalance)}
+                  disabled={isSubmitting}
                 >
                   {isSubmitting ? (
                     <>

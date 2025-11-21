@@ -211,7 +211,7 @@ export default function ClaimFeesModal({
         <Button
           variant="primary"
           onClick={handleClaimFees}
-          disabled={isClaiming || !hasFees}
+          disabled={isClaiming}
         >
           {isClaiming ? (
             <>

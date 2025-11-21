@@ -9,7 +9,7 @@ import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
 import { useProvider } from '../../contexts/ProviderContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
-import StrategyTransactionModal from './StrategyTransactionModal';
+import TransactionProgressModal from '../common/TransactionProgressModal';
 import StrategyValidationModal from './StrategyValidationModal';
 import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
@@ -1132,7 +1132,7 @@ const StrategyConfigPanel = ({
       />
 
       {/* Strategy Transaction Modal */}
-      <StrategyTransactionModal
+      <TransactionProgressModal
         show={showTransactionModal}
         onHide={handleCloseTransactionModal}
         onCancel={() => {
@@ -1146,7 +1146,7 @@ const StrategyConfigPanel = ({
         error={transactionError}
         warning={transactionWarning}
         tokenSymbols={selectedTokens}
-        strategyName={getStrategyName()}
+        title={`Configuring Strategy: ${getStrategyName()}`}
       />
     </Card>
   );

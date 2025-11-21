@@ -1,5 +1,5 @@
 import React from 'react';
-import { useToast } from '../context/ToastContext';
+import { useToast } from '../../context/ToastContext';
 import { formatPrice } from 'fum_library/helpers';
 
 const PriceRangeChart = ({
