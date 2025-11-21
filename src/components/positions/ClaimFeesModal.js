@@ -69,55 +69,68 @@ export default function ClaimFeesModal({
     setOperationError(null);
 
     try {
-      await adapter.claimFees({
-        position,
+      // Generate transaction data for claiming fees
+      const txData = await adapter.generateClaimFeesData({
+        positionId: position.id,
         provider,
-        address,
-        chainId,
-        poolData, // Will be fetched by the adapter if needed
-        token0Data,
-        token1Data,
-        dispatch,
-        onStart: () => setIsClaiming(true),
-        onFinish: () => setIsClaiming(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.tx?.hash;
-          showSuccess("Successfully claimed fees!", txHash);
-          onHide();
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setOperationError(errorMessage);
-          showError(errorMessage);
-          setIsClaiming(false);
-        }
+        walletAddress: address,
+        token0Address: token0Data.address,
+        token1Address: token1Data.address,
+        token0Decimals: token0Data.decimals,
+        token1Decimals: token1Data.decimals
       });
-    } catch (error) {
-      console.error("Error claiming fees:", error);
-      setOperationError(error.message);
-      showError(error.message);
+
+      // Get signer to send transaction
+      const signer = await provider.getSigner();
+
+      // Send the transaction
+      const tx = await signer.sendTransaction(txData);
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+
+      // Show success message
+      showSuccess("Successfully claimed fees!", receipt.transactionHash);
+
+      // Close modal and refresh data
+      onHide();
+      dispatch(triggerUpdate());
+
       setIsClaiming(false);
+    } catch (error) {
+      // Always set claiming to false first to prevent state update issues
+      setIsClaiming(false);
+
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - silently ignore, modal stays open
+        return;
+      }
+
+      // Real error - log and show user-friendly message
+      console.error("Error claiming fees:", error);
+      const errorDetail = error.reason || error.message;
+      setOperationError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 
   // Handle the claim fees action
   const handleClaimFees = () => {
-    try {
-      if (!position) {
-        throw new Error("Position data is missing");
-      }
+    setOperationError(null);
 
-      if (!hasFees) {
-        throw new Error("No fees to claim");
-      }
-
-      // Call the function that interacts with the adapter
-      claimFees();
-    } catch (error) {
-      console.error("Error initiating fee claim:", error);
-      showError(`Failed to claim fees: ${error.message}`);
+    // Validate inputs
+    if (!position) {
+      setOperationError("Position data is missing");
+      return;
     }
+
+    if (!hasFees) {
+      setOperationError("No fees to claim");
+      return;
+    }
+
+    // Call the function that interacts with the adapter
+    claimFees();
   };
 
   // Handle modal close with safety checks
@@ -148,6 +161,13 @@ export default function ClaimFeesModal({
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        {/* Operation Error Message */}
+        {operationError && (
+          <Alert variant="danger" className="mb-3">
+            {operationError}
+          </Alert>
+        )}
+
         {/* Uncollected Fees Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
@@ -196,13 +216,6 @@ export default function ClaimFeesModal({
             <strong>Note:</strong> Claiming fees will collect all earned protocol fees without affecting your liquidity position.
           </Alert>
         </div>
-
-        {/* Operation Error Message */}
-        {operationError && (
-          <Alert variant="danger" className="mt-3 mb-0">
-            {operationError}
-          </Alert>
-        )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={handleModalClose} disabled={isClaiming}>

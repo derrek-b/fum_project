@@ -341,6 +341,14 @@ export default function PositionContainer() {
               Connected to {getChainName(chainId) || `Chain ID ${chainId}`}
             </small>
           )}
+          <p className="mt-2">
+            <Button
+              variant="primary"
+              onClick={() => setShowCreatePositionModal(true)}
+            >
+              Create Your First Position
+            </Button>
+          </p>
         </Alert>
       ) : (
         <>

@@ -1131,6 +1131,7 @@ export default function PositionDetailPage() {
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
+          poolData={poolData}
         />
 
         <ClosePositionModal
@@ -1142,6 +1143,7 @@ export default function PositionDetailPage() {
           token0Data={token0Data}
           token1Data={token1Data}
           tokenPrices={tokenPrices}
+          poolData={poolData}
         />
 
         <AddLiquidityModal

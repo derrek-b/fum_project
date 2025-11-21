@@ -11,7 +11,7 @@ import { useToast } from '../../context/ToastContext';
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
-// CSS for custom slider styling
+// CSS for custom slider styling and hiding number input spinners
 const sliderStyles = `
   input[type="range"].crimson-slider::-webkit-slider-thumb {
     background: var(--crimson-700);
@@ -31,6 +31,18 @@ const sliderStyles = `
 
   input[type="range"].crimson-slider::-moz-range-progress {
     background: var(--crimson-700);
+  }
+
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
   }
 `;
 
@@ -147,61 +159,75 @@ export default function RemoveLiquidityModal({
     setOperationError(null);
 
     try {
-      await adapter.decreaseLiquidity({
+      // Generate transaction data for removing liquidity
+      const txData = await adapter.generateRemoveLiquidityData({
         position,
-        provider,
-        address,
-        chainId,
         percentage,
-        poolData, // Will be fetched by the adapter if needed
+        provider,
+        walletAddress: address,
+        poolData,
         token0Data,
         token1Data,
-        dispatch,
         slippageTolerance,
-        onStart: () => setIsRemoving(true),
-        onFinish: () => setIsRemoving(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.decreaseReceipt?.hash || result?.collectReceipt?.hash;
-          showSuccess(`Successfully removed ${percentage}% of liquidity!`, txHash);
-          onHide();
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setOperationError(errorMessage);
-          showError(errorMessage);
-          setIsRemoving(false);
-        }
+        deadlineMinutes: 20
       });
-    } catch (error) {
-      console.error("Error removing liquidity:", error);
-      setOperationError(error.message);
-      showError(error.message);
+
+      // Get signer to send transaction
+      const signer = await provider.getSigner();
+
+      // Send the transaction
+      const tx = await signer.sendTransaction(txData);
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+
+      // Show success message
+      showSuccess(`Successfully removed ${percentage}% of liquidity!`, receipt.transactionHash);
+
+      // Close modal and refresh data
+      onHide();
+      dispatch(triggerUpdate());
+
       setIsRemoving(false);
+    } catch (error) {
+      // Always set removing to false first to prevent state update issues
+      setIsRemoving(false);
+
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - silently ignore, modal stays open
+        return;
+      }
+
+      // Real error - log and show user-friendly message
+      console.error("Error removing liquidity:", error);
+      const errorDetail = error.reason || error.message;
+      setOperationError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 
   // Handle remove liquidity
   const handleRemove = () => {
-    try {
-      if (!position) {
-        throw new Error("Position data is missing");
-      }
+    setOperationError(null);
 
-      if (percentage <= 0 || percentage > 100) {
-        throw new Error("Invalid percentage value (must be between 1-100%)");
-      }
-
-      const slippageNum = parseFloat(slippageTolerance);
-      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
-        throw new Error("Slippage tolerance must be between 0.1% and 5%");
-      }
-
-      removeLiquidity(percentage, slippageNum);
-    } catch (error) {
-      console.error("Error initiating liquidity removal:", error);
-      showError(`Failed to remove liquidity: ${error.message}`);
+    // Validate inputs
+    if (!position) {
+      setOperationError("Position data is missing");
+      return;
     }
+
+    if (percentage <= 0 || percentage > 100) {
+      setOperationError("Invalid percentage value (must be between 1-100%)");
+      return;
+    }
+
+    const slippageNum = parseFloat(slippageTolerance);
+    if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
+      setOperationError("Slippage tolerance must be between 0.1% and 5%");
+      return;
+    }
+
+    removeLiquidity(percentage, slippageNum);
   };
 
   // Handle modal close with safety checks
@@ -233,6 +259,13 @@ export default function RemoveLiquidityModal({
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        {/* Operation Error Message */}
+        {operationError && (
+          <Alert variant="danger" className="mb-3">
+            {operationError}
+          </Alert>
+        )}
+
         {/* Current Position Information */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Current Position</h6>
@@ -312,16 +345,16 @@ export default function RemoveLiquidityModal({
                 type="number"
                 placeholder="Enter slippage tolerance"
                 value={slippageTolerance}
-                onChange={(e) => setSlippageTolerance(e.target.value)}
+                onChange={(e) => {
+                  setSlippageTolerance(e.target.value);
+                  setOperationError(null); // Clear error when typing
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
                     e.preventDefault();
                   }
                 }}
-                min="0.1"
-                max="5"
                 step="any"
-                required
                 disabled={isRemoving}
                 className="no-number-spinner"
               />
@@ -418,20 +451,6 @@ export default function RemoveLiquidityModal({
               <h6 className="mb-0" style={{ color: 'var(--blue-accent)', fontWeight: 'bold' }}>${grandTotalUsd.toFixed(2)}</h6>
             </div>
           </div>
-        )}
-
-        {/* Operation Error Message */}
-        {operationError && (
-          <Alert variant="danger" className="mt-3 mb-0">
-            {operationError}
-          </Alert>
-        )}
-
-        {/* Legacy Error Message - for backward compatibility */}
-        {errorMessage && !operationError && (
-          <Alert variant="danger" className="mt-3 mb-0">
-            {errorMessage}
-          </Alert>
         )}
       </Modal.Body>
       <Modal.Footer>

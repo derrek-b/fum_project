@@ -369,6 +369,7 @@ export default function AddLiquidityModal({
   const handleToken0AmountChange = (value) => {
     setToken0Amount(value);
     setToken0Error(null);
+    setOperationError(null); // Clear operation error when typing
 
     if (!value || value === '0' || !currentPoolPrice) {
       return;
@@ -403,6 +404,7 @@ export default function AddLiquidityModal({
   const handleToken1AmountChange = (value) => {
     setToken1Amount(value);
     setToken1Error(null);
+    setOperationError(null); // Clear operation error when typing
 
     if (!value || value === '0' || !currentPoolPrice) {
       return;
@@ -639,6 +641,7 @@ export default function AddLiquidityModal({
     }
 
     setToken0Address(tokenAddress);
+    setOperationError(null); // Clear operation error when changing selection
 
     // Reset token amounts when changing tokens
     setToken0Amount('');
@@ -654,6 +657,7 @@ export default function AddLiquidityModal({
     }
 
     setToken1Address(tokenAddress);
+    setOperationError(null); // Clear operation error when changing selection
 
     // Reset token amounts when changing tokens
     setToken0Amount('');
@@ -665,6 +669,7 @@ export default function AddLiquidityModal({
   // Handle price range selection for new positions
   const handleRangeTypeChange = (type, currentTickOverride = null) => {
     setRangeType(type);
+    setOperationError(null); // Clear operation error when changing range
 
     // Use either the provided currentTick or the one from state
     const currentTick = currentTickOverride !== null ? currentTickOverride : priceRange.current;
@@ -757,6 +762,7 @@ export default function AddLiquidityModal({
   const handleCustomMinPrice = (priceValue) => {
     // Update the input value immediately (allows typing)
     setCustomMinInput(priceValue);
+    setOperationError(null); // Clear operation error when typing
 
     // Reset token amounts when price range changes
     setToken0Amount('');
@@ -801,6 +807,7 @@ export default function AddLiquidityModal({
   const handleCustomMaxPrice = (priceValue) => {
     // Update the input value immediately (allows typing)
     setCustomMaxInput(priceValue);
+    setOperationError(null); // Clear operation error when typing
 
     // Reset token amounts when price range changes
     setToken0Amount('');
@@ -1439,7 +1446,10 @@ export default function AddLiquidityModal({
                   <Form.Label style={{ fontSize: '0.9em' }}>Platform</Form.Label>
                   <Form.Select
                     value={selectedPlatform}
-                    onChange={(e) => setSelectedPlatform(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedPlatform(e.target.value);
+                      setOperationError(null); // Clear operation error when changing selection
+                    }}
                     disabled={isExistingPosition || isProcessingOperation}
                     required
                     style={{ fontSize: '0.9em' }}
@@ -1517,7 +1527,10 @@ export default function AddLiquidityModal({
                   <Form.Label style={{ fontSize: '0.9em' }}>Fee Tier</Form.Label>
                   <Form.Select
                     value={selectedFeeTier}
-                    onChange={(e) => setSelectedFeeTier(parseInt(e.target.value))}
+                    onChange={(e) => {
+                      setSelectedFeeTier(parseInt(e.target.value));
+                      setOperationError(null); // Clear operation error when changing selection
+                    }}
                     disabled={isExistingPosition || isProcessingOperation}
                     required
                     style={{ fontSize: '0.9em' }}
@@ -1632,6 +1645,7 @@ export default function AddLiquidityModal({
                                     e.preventDefault();
                                   }
                                 }}
+                                step="any"
                                 disabled={isProcessingOperation}
                                 size="sm"
                                 className="no-number-spinner"
@@ -1651,6 +1665,7 @@ export default function AddLiquidityModal({
                                     e.preventDefault();
                                   }
                                 }}
+                                step="any"
                                 disabled={isProcessingOperation}
                                 size="sm"
                                 className="no-number-spinner"
@@ -1736,7 +1751,6 @@ export default function AddLiquidityModal({
                           e.preventDefault();
                         }
                       }}
-                      min="0"
                       step="any"
                       isInvalid={!!token0Error}
                       size="sm"
@@ -1784,7 +1798,6 @@ export default function AddLiquidityModal({
                           e.preventDefault();
                         }
                       }}
-                      min="0"
                       step="any"
                       isInvalid={!!token1Error}
                       size="sm"
@@ -1811,15 +1824,15 @@ export default function AddLiquidityModal({
                     type="number"
                     placeholder="Enter slippage tolerance"
                     value={slippageTolerance}
-                    onChange={(e) => setSlippageTolerance(e.target.value)}
+                    onChange={(e) => {
+                      setSlippageTolerance(e.target.value);
+                      setOperationError(null); // Clear error when typing
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
                         e.preventDefault();
                       }
                     }}
-                    required
-                    min="0.1"
-                    max="5"
                     step="any"
                     disabled={isProcessingOperation}
                     className="no-number-spinner"

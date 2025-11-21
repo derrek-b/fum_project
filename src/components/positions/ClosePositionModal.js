@@ -11,6 +11,21 @@ import { useToast } from '../../context/ToastContext';
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from '../../redux/updateSlice';
 
+// CSS to hide number input spinner arrows
+const numberInputStyles = `
+  /* Chrome, Safari, Edge, Opera */
+  input.no-number-spinner::-webkit-outer-spin-button,
+  input.no-number-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Firefox */
+  input.no-number-spinner[type=number] {
+    -moz-appearance: textfield;
+  }
+`;
+
 export default function ClosePositionModal({
   show,
   onHide,
@@ -99,60 +114,75 @@ export default function ClosePositionModal({
     setOperationError(null);
 
     try {
-      await adapter.closePosition({
+      // Closing a position is just removing 100% of liquidity (which also collects fees)
+      const txData = await adapter.generateRemoveLiquidityData({
         position,
+        percentage: 100, // Remove 100% to close
         provider,
-        address,
-        chainId,
-        poolData, // Will be fetched by the adapter if needed
+        walletAddress: address,
+        poolData,
         token0Data,
         token1Data,
-        collectFees: true, // Always collect fees when closing a position
-        burnPosition: shouldBurn, // Whether to burn the position NFT
-        slippageTolerance, // Add slippage tolerance parameter
-        dispatch,
-        onStart: () => setIsClosing(true),
-        onFinish: () => setIsClosing(false),
-        onSuccess: (result) => {
-          // Show success toast with transaction hash if available
-          const txHash = result?.burnReceipt?.hash || result?.liquidityResult?.decreaseReceipt?.hash;
-          showSuccess("Successfully closed position!", txHash);
-          onHide();
-          dispatch(triggerUpdate()); // Refresh data
-        },
-        onError: (errorMessage) => {
-          setOperationError(errorMessage);
-          showError(errorMessage);
-          setIsClosing(false);
-        }
+        slippageTolerance,
+        deadlineMinutes: 20
       });
-    } catch (error) {
-      console.error("Error closing position:", error);
-      setOperationError(error.message);
-      showError(error.message);
+
+      // Get signer to send transaction
+      const signer = await provider.getSigner();
+
+      // Send the transaction
+      const tx = await signer.sendTransaction(txData);
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+
+      // TODO: If shouldBurn is true, we could send a second transaction to burn the NFT
+      // For now, we just remove 100% liquidity which leaves an empty NFT
+      // The burn functionality may need to be implemented separately
+
+      // Show success message
+      showSuccess("Successfully closed position!", receipt.transactionHash);
+
+      // Close modal and refresh data
+      onHide();
+      dispatch(triggerUpdate());
+
       setIsClosing(false);
+    } catch (error) {
+      // Always set closing to false first to prevent state update issues
+      setIsClosing(false);
+
+      // Check if user cancelled the transaction
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        // User cancelled - silently ignore, modal stays open
+        return;
+      }
+
+      // Real error - log and show user-friendly message
+      console.error("Error closing position:", error);
+      const errorDetail = error.reason || error.message;
+      setOperationError(`Transaction failed${errorDetail ? `: ${errorDetail}` : ''}`);
     }
   };
 
   // Handle the close position action
   const handleClosePosition = () => {
-    try {
-      if (!position) {
-        throw new Error("Position data is missing");
-      }
+    setOperationError(null);
 
-      // Validate slippage tolerance
-      const slippageNum = parseFloat(slippageTolerance);
-      if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
-        throw new Error("Slippage tolerance must be between 0.1% and 5%");
-      }
-
-      // Call the function that interacts with the adapter
-      closePosition(shouldBurn, slippageNum);
-    } catch (error) {
-      console.error("Error initiating position close:", error);
-      showError(`Failed to close position: ${error.message}`);
+    // Validate inputs
+    if (!position) {
+      setOperationError("Position data is missing");
+      return;
     }
+
+    const slippageNum = parseFloat(slippageTolerance);
+    if (isNaN(slippageNum) || slippageNum < 0.1 || slippageNum > 5) {
+      setOperationError("Slippage tolerance must be between 0.1% and 5%");
+      return;
+    }
+
+    // Call the function that interacts with the adapter
+    closePosition(shouldBurn, slippageNum);
   };
 
   // Handle modal close with safety checks
@@ -176,6 +206,7 @@ export default function ClosePositionModal({
       keyboard={false} // Prevent Escape key from closing
       data-no-propagation="true" // Custom attribute for clarity
     >
+      <style>{numberInputStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>
           Close Position #{position?.id} - {position?.tokenPair}
@@ -183,6 +214,13 @@ export default function ClosePositionModal({
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        {/* Operation Error Message */}
+        {operationError && (
+          <Alert variant="danger" className="mb-3">
+            {operationError}
+          </Alert>
+        )}
+
         {/* Token Balances Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Token Balances to Withdraw</h6>
@@ -286,16 +324,16 @@ export default function ClosePositionModal({
                 type="number"
                 placeholder="Enter slippage tolerance"
                 value={slippageTolerance}
-                onChange={(e) => setSlippageTolerance(e.target.value)}
+                onChange={(e) => {
+                  setSlippageTolerance(e.target.value);
+                  setOperationError(null); // Clear error when typing
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
                     e.preventDefault();
                   }
                 }}
-                min="0.1"
-                max="5"
                 step="any"
-                required
                 disabled={isClosing}
                 className="no-number-spinner"
               />
@@ -316,23 +354,9 @@ export default function ClosePositionModal({
           />
           <Form.Text style={{ color: 'var(--neutral-600)' }}>
             Burning the position NFT frees up storage on the blockchain and may result in a gas refund.
-            If unchecked, the empty position will remain in your wallet.
+            If unchecked, the empty position will remain in your wallet, but will not earn fees.
           </Form.Text>
         </div>
-
-        {/* Operation Error Message */}
-        {operationError && (
-          <Alert variant="danger" className="mt-3 mb-0">
-            {operationError}
-          </Alert>
-        )}
-
-        {/* Legacy Error Message - for backward compatibility */}
-        {errorMessage && !operationError && (
-          <Alert variant="danger" className="mt-3 mb-0">
-            {errorMessage}
-          </Alert>
-        )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={handleModalClose} disabled={isClosing}>
