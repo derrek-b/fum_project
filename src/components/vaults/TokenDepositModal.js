@@ -267,6 +267,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
                         e.preventDefault();
                       }
                     }}
+                    onWheel={(e) => e.target.blur()}
                     step="any"
                     disabled={isSubmitting}
                     className="no-number-spinner"

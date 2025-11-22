@@ -120,7 +120,7 @@ const TransactionProgressModal = ({
               <span>Processing transaction, please confirm in your wallet</span>
             </div>
           ) : (
-            <div className="text-muted">
+            <div className="text-neutral-600">
               {currentStep < steps.length ?
                 "Please confirm the current transaction in your wallet app" :
                 "All transactions complete!"}

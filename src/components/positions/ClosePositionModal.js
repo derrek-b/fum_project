@@ -333,6 +333,7 @@ export default function ClosePositionModal({
                     e.preventDefault();
                   }
                 }}
+                onWheel={(e) => e.target.blur()}
                 step="any"
                 disabled={isClosing}
                 className="no-number-spinner"

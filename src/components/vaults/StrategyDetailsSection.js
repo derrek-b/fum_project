@@ -721,6 +721,7 @@ const StrategyDetailsSection = ({
                 onChange={(e) => {
                   handleParamChange(paramId, e.target.value);
                 }}
+                onWheel={(e) => e.target.blur()}
                 step="any"
                 disabled={!editMode}
                 isInvalid={!!error}

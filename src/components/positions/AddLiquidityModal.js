@@ -8,6 +8,9 @@ import { Token } from '@uniswap/sdk-core';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatPrice } from 'fum_library/helpers/formatHelpers';
+import { getTokensByChain } from 'fum_library/helpers/tokenHelpers';
+import { getPlatformTickSpacing } from 'fum_library/helpers/platformHelpers';
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
@@ -130,8 +133,17 @@ export default function AddLiquidityModal({
   const [priceLoadError, setPriceLoadError] = useState(null);
   const [isLoadingPrice, setIsLoadingPrice] = useState(false);
 
+  // Pool data state for new positions (stores sqrtPriceX96, liquidity, tick, fee)
+  const [localPoolData, setLocalPoolData] = useState(null);
+  // Sorted token data for new positions
+  const [sortedToken0Data, setSortedToken0Data] = useState(null);
+  const [sortedToken1Data, setSortedToken1Data] = useState(null);
+
   // Token ordering state
   const [tokensSwapped, setTokensSwapped] = useState(false);
+
+  // Local token prices state (for new positions when tokenPrices prop is not provided)
+  const [localTokenPrices, setLocalTokenPrices] = useState(null);
 
   // Transaction modal state
   const [showTransactionModal, setShowTransactionModal] = useState(false);
@@ -153,29 +165,30 @@ export default function AddLiquidityModal({
   }, [selectedPlatform, chainId, provider, showError]);
 
   // Calculate USD values if token prices are available
+  // Use tokenPrices prop if provided, otherwise use localTokenPrices (fetched for new positions)
   const token0UsdValue = useMemo(() => {
-    if (!token0Amount || !tokenPrices?.token0) return null;
+    const price = tokenPrices?.token0 ?? localTokenPrices?.token0;
+    if (!token0Amount || !price) return null;
     try {
-      // Calculate USD value inline
       const numAmount = typeof token0Amount === 'string' ? parseFloat(token0Amount) : token0Amount;
-      return numAmount * tokenPrices.token0;
+      return numAmount * price;
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
     }
-  }, [token0Amount, tokenPrices]);
+  }, [token0Amount, tokenPrices, localTokenPrices]);
 
   const token1UsdValue = useMemo(() => {
-    if (!token1Amount || !tokenPrices?.token1) return null;
+    const price = tokenPrices?.token1 ?? localTokenPrices?.token1;
+    if (!token1Amount || !price) return null;
     try {
-      // Calculate USD value inline
       const numAmount = typeof token1Amount === 'string' ? parseFloat(token1Amount) : token1Amount;
-      return numAmount * tokenPrices.token1;
+      return numAmount * price;
     } catch (error) {
       console.error("Error calculating USD value:", error);
       return null;
     }
-  }, [token1Amount, tokenPrices]);
+  }, [token1Amount, tokenPrices, localTokenPrices]);
 
   // Calculate total USD value
   const totalUsdValue = useMemo(() => {
@@ -215,6 +228,10 @@ export default function AddLiquidityModal({
     setIsLoadingPrice(false);
     setTokensSwapped(false);
     setInvertPriceDisplay(false);
+    setLocalTokenPrices(null);
+    setLocalPoolData(null);
+    setSortedToken0Data(null);
+    setSortedToken1Data(null);
 
     // Reset operation states
     setOperationError(null);
@@ -241,23 +258,26 @@ export default function AddLiquidityModal({
 
   // Load common tokens when the modal opens
   useEffect(() => {
-    if (show && !isExistingPosition) {
+    if (show && !isExistingPosition && chainId) {
       try {
-        // In a real implementation, we would fetch common tokens from a service
-        // For now, let's use a hardcoded list
-        setCommonTokens([
-          { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18 },
-          { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
-          { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', name: 'Tether USD', decimals: 6 },
-          { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', name: 'Dai Stablecoin', decimals: 18 },
-          { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', name: 'Wrapped Bitcoin', decimals: 8 }
-        ]);
+        // Get all tokens available for the current chain from the library
+        const chainTokens = getTokensByChain(chainId);
+
+        // Format tokens to match the expected structure
+        const formattedTokens = chainTokens.map(token => ({
+          address: token.addresses[chainId],
+          symbol: token.symbol,
+          name: token.name,
+          decimals: token.decimals
+        }));
+
+        setCommonTokens(formattedTokens);
       } catch (error) {
         console.error("Error loading token list:", error);
         showError("Failed to load available tokens. Please try again later.");
       }
     }
-  }, [show, isExistingPosition, showError]);
+  }, [show, isExistingPosition, chainId, showError]);
 
   // Initialize values for existing position
   useEffect(() => {
@@ -338,6 +358,40 @@ export default function AddLiquidityModal({
       fetchPoolPrice();
     }
   }, [token0Address, token1Address, selectedFeeTier, provider, adapter, isExistingPosition]);
+
+  // Fetch token prices for new positions when tokens are selected
+  useEffect(() => {
+    const fetchPrices = async () => {
+      if (isExistingPosition || !token0Address || !token1Address) {
+        return;
+      }
+
+      // Get token symbols from commonTokens
+      const token0Info = commonTokens.find(t => t.address === token0Address);
+      const token1Info = commonTokens.find(t => t.address === token1Address);
+
+      if (!token0Info?.symbol || !token1Info?.symbol) {
+        return;
+      }
+
+      try {
+        const symbols = [token0Info.symbol, token1Info.symbol];
+        const prices = await fetchTokenPrices(symbols, CACHE_DURATIONS['2-MINUTES']);
+
+        if (prices) {
+          setLocalTokenPrices({
+            token0: prices[token0Info.symbol] || 0,
+            token1: prices[token1Info.symbol] || 0
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching token prices:", error);
+        // Don't show error to user - USD values are optional
+      }
+    };
+
+    fetchPrices();
+  }, [token0Address, token1Address, commonTokens, isExistingPosition]);
 
   // Calculate paired token amount when token0 amount changes
   useEffect(() => {
@@ -499,6 +553,11 @@ export default function AddLiquidityModal({
       return;
     }
 
+    // Can't create a pool with the same token
+    if (token0Address === token1Address) {
+      return;
+    }
+
     setIsLoadingPrice(true);
     setPriceLoadError(null);
 
@@ -578,16 +637,20 @@ export default function AddLiquidityModal({
         throw new Error("Failed to calculate pool address");
       }
 
-      // Create a minimal pool contract to get the current price
+      // Create a minimal pool contract to get the current price and liquidity
       const poolABI = [
-        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
+        'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+        'function liquidity() external view returns (uint128)'
       ];
 
       const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
 
       try {
         // Try to get the pool data
-        const slot0 = await poolContract.slot0();
+        const [slot0, liquidity] = await Promise.all([
+          poolContract.slot0(),
+          poolContract.liquidity()
+        ]);
 
         // Extract tick value
         const tickValue = typeof slot0.tick === 'bigint' ? Number(slot0.tick) : Number(slot0.tick);
@@ -608,6 +671,26 @@ export default function AddLiquidityModal({
           ...prev,
           current: tickValue
         }));
+
+        // Store full pool data for position creation
+        setLocalPoolData({
+          fee: selectedFeeTier,
+          sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+          liquidity: liquidity.toString(),
+          tick: tickValue
+        });
+
+        // Store sorted token data for position creation
+        setSortedToken0Data({
+          address: sortedToken0.address,
+          decimals: sortedToken0.decimals,
+          symbol: sortedToken0.symbol
+        });
+        setSortedToken1Data({
+          address: sortedToken1.address,
+          decimals: sortedToken1.decimals,
+          symbol: sortedToken1.symbol
+        });
 
         // Calculate default price ranges based on current tick and price
         handleRangeTypeChange(rangeType, tickValue);
@@ -698,22 +781,31 @@ export default function AddLiquidityModal({
           tickSpacing = Math.ceil(Math.log(1.1) / Math.log(1.0001));
           break;
         case 'custom':
-          // Default to medium if switching to custom without existing values
-          if (priceRange.min === null || priceRange.max === null) {
-            tickSpacing = Math.ceil(Math.log(1.05) / Math.log(1.0001));
-          } else {
-            // Keep existing custom values
-            return;
-          }
-          break;
+          // Clear values when switching to custom - let user enter their own
+          setCustomMinInput('');
+          setCustomMaxInput('');
+          setPriceRange({
+            ...priceRange,
+            min: null,
+            max: null
+          });
+          // Reset token amounts since range is cleared
+          setToken0Amount('');
+          setToken1Amount('');
+          return;
         default:
           console.error(`Unexpected range type: ${type}`);
           return;
       }
 
       // Calculate min and max ticks
-      const minTick = Math.floor(currentTick - tickSpacing);
-      const maxTick = Math.ceil(currentTick + tickSpacing);
+      const rawMinTick = currentTick - tickSpacing;
+      const rawMaxTick = currentTick + tickSpacing;
+
+      // Align ticks to pool's tick spacing (required by Uniswap V3)
+      const poolTickSpacing = getPlatformTickSpacing(selectedPlatform, selectedFeeTier);
+      const minTick = Math.floor(rawMinTick / poolTickSpacing) * poolTickSpacing;
+      const maxTick = Math.ceil(rawMaxTick / poolTickSpacing) * poolTickSpacing;
 
       // Verify calculations by converting ticks back to prices
       if (adapter && token0Address && token1Address) {
@@ -793,11 +885,30 @@ export default function AddLiquidityModal({
         return;
       }
 
-      // Convert price to tick
-      const tick = Math.log(price) / Math.log(1.0001);
+      // User enters price in the display format (what they see on screen)
+      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "WETH per USDC")
+      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per WETH")
+
+      // Determine which tokens to use as base and quote based on display format
+      // The adapter's priceToTick expects (price, baseToken, quoteToken) where price = quote/base
+      const baseToken = invertPriceDisplay ? getToken0Data() : getToken1Data();
+      const quoteToken = invertPriceDisplay ? getToken1Data() : getToken0Data();
+
+      // Can't calculate tick without token data
+      if (!baseToken || !quoteToken) {
+        return;
+      }
+
+      // Use adapter's priceToTick method which handles decimals correctly
+      const rawTick = adapter.priceToTick(price, baseToken, quoteToken);
+
+      // Align tick to pool's tick spacing (required by Uniswap V3)
+      const poolTickSpacing = getPlatformTickSpacing(selectedPlatform, selectedFeeTier);
+      const alignedTick = Math.floor(rawTick / poolTickSpacing) * poolTickSpacing;
+
       setPriceRange({
         ...priceRange,
-        min: Math.floor(tick)
+        min: alignedTick
       });
     } catch (error) {
       console.error("Error setting custom min price:", error);
@@ -838,11 +949,30 @@ export default function AddLiquidityModal({
         return;
       }
 
-      // Convert price to tick
-      const tick = Math.log(price) / Math.log(1.0001);
+      // User enters price in the display format (what they see on screen)
+      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "WETH per USDC")
+      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per WETH")
+
+      // Determine which tokens to use as base and quote based on display format
+      // The adapter's priceToTick expects (price, baseToken, quoteToken) where price = quote/base
+      const baseToken = invertPriceDisplay ? getToken0Data() : getToken1Data();
+      const quoteToken = invertPriceDisplay ? getToken1Data() : getToken0Data();
+
+      // Can't calculate tick without token data
+      if (!baseToken || !quoteToken) {
+        return;
+      }
+
+      // Use adapter's priceToTick method which handles decimals correctly
+      const rawTick = adapter.priceToTick(price, baseToken, quoteToken);
+
+      // Align tick to pool's tick spacing (required by Uniswap V3)
+      const poolTickSpacing = getPlatformTickSpacing(selectedPlatform, selectedFeeTier);
+      const alignedTick = Math.ceil(rawTick / poolTickSpacing) * poolTickSpacing;
+
       setPriceRange({
         ...priceRange,
-        max: Math.ceil(tick)
+        max: alignedTick
       });
     } catch (error) {
       console.error("Error setting custom max price:", error);
@@ -982,39 +1112,163 @@ export default function AddLiquidityModal({
     }
   };
 
-  // Function to create a new position
+  // Function to create a new position with approval flow
   const createPosition = async (params) => {
     if (!adapter) {
       throw new Error(`No adapter available for platform: ${params.platformId}`);
     }
 
+    if (!localPoolData || !sortedToken0Data || !sortedToken1Data) {
+      throw new Error("Pool data not loaded. Please wait for pool data to load.");
+    }
+
+    // Get Position Manager address from adapter
+    const positionManagerAddress = adapter.addresses?.positionManagerAddress;
+    if (!positionManagerAddress) {
+      throw new Error("Position Manager address not found");
+    }
+
+    // Setup transaction steps
+    const steps = [
+      { title: `Approve ${sortedToken0Data.symbol}`, description: 'Grant permission to spend token' },
+      { title: `Approve ${sortedToken1Data.symbol}`, description: 'Grant permission to spend token' },
+      { title: 'Create Position', description: 'Mint new liquidity position' }
+    ];
+    setTransactionSteps(steps);
+    setCurrentTxStep(0);
+    setTransactionError('');
+    setTransactionWarning('');
+
+    // Show transaction modal
+    setShowTransactionModal(true);
     setIsCreatingPosition(true);
     setOperationError(null);
 
     try {
-      await adapter.createPosition({
-        ...params,
-        provider,
-        address,
-        chainId,
-        dispatch,
-        onStart: () => setIsCreatingPosition(true),
-        onFinish: () => setIsCreatingPosition(false),
-        onSuccess: (result) => {
-          showSuccess(`Successfully created new ${params.platformId} position!`, result?.txHash);
-          handleClose();
-          dispatch(triggerUpdate()); // Refresh to show new position
-        },
-        onError: (errorMessage) => {
-          setOperationError(`Failed to create position: ${errorMessage}`);
-          showError(`Failed to create position: ${errorMessage}`);
-          setIsCreatingPosition(false);
+      // Convert token amounts from human-readable format to wei
+      const token0AmountWei = ethers.utils.parseUnits(
+        params.token0Amount || "0",
+        sortedToken0Data.decimals
+      ).toString();
+
+      const token1AmountWei = ethers.utils.parseUnits(
+        params.token1Amount || "0",
+        sortedToken1Data.decimals
+      ).toString();
+
+      // Get signer
+      const signer = provider.getSigner(address);
+
+      // ERC20 ABI for approve and allowance
+      const erc20ABI = [
+        'function approve(address spender, uint256 amount) returns (bool)',
+        'function allowance(address owner, address spender) view returns (uint256)'
+      ];
+
+      // Step 1: Check and approve token0 if needed
+      if (token0AmountWei !== "0") {
+        const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, provider);
+        const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+
+        if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
+          const token0ContractWithSigner = token0Contract.connect(signer);
+          const approveTx = await token0ContractWithSigner.approve(
+            positionManagerAddress,
+            ethers.constants.MaxUint256
+          );
+          await approveTx.wait();
         }
+      }
+
+      // Move to step 2
+      setCurrentTxStep(1);
+
+      // Step 2: Check and approve token1 if needed
+      if (token1AmountWei !== "0") {
+        const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, provider);
+        const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+
+        if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
+          const token1ContractWithSigner = token1Contract.connect(signer);
+          const approveTx = await token1ContractWithSigner.approve(
+            positionManagerAddress,
+            ethers.constants.MaxUint256
+          );
+          await approveTx.wait();
+        }
+      }
+
+      // Move to step 3
+      setCurrentTxStep(2);
+
+      // Step 3: Generate transaction data using the library
+      // Ensure tickLower < tickUpper for the SDK
+      const tickLower = Math.min(params.tickLower, params.tickUpper);
+      const tickUpper = Math.max(params.tickLower, params.tickUpper);
+
+      console.log('Creating position with:', {
+        tickLower,
+        tickUpper,
+        token0AmountWei,
+        token1AmountWei,
+        poolData: localPoolData,
+        token0Data: sortedToken0Data,
+        token1Data: sortedToken1Data
       });
+
+      const txData = await adapter.generateCreatePositionData({
+        position: {
+          tickLower,
+          tickUpper
+        },
+        token0Amount: token0AmountWei,
+        token1Amount: token1AmountWei,
+        provider,
+        walletAddress: address,
+        poolData: localPoolData,
+        token0Data: sortedToken0Data,
+        token1Data: sortedToken1Data,
+        slippageTolerance: parseFloat(params.slippageTolerance),
+        deadlineMinutes: 20
+      });
+
+      // Send create position transaction
+      const tx = await signer.sendTransaction({
+        to: txData.to,
+        data: txData.data,
+        value: txData.value
+      });
+
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+
+      // All steps complete
+      setCurrentTxStep(3);
+
+      // Show success message with transaction hash
+      showSuccess(`Successfully created new ${params.platformId} position!`, receipt.transactionHash);
+
+      // Close both modals and refresh
+      setTimeout(() => {
+        setShowTransactionModal(false);
+        handleClose();
+        dispatch(triggerUpdate());
+      }, 1500);
     } catch (error) {
+      // Check if user rejected the transaction - handle silently
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        setShowTransactionModal(false);
+        setIsCreatingPosition(false);
+        return;
+      }
+
+      // Real error - log and show user-friendly message
       console.error("Error creating position:", error);
-      setOperationError(`Error creating position: ${error.message}`);
-      showError(`Error creating position: ${error.message}`);
+      const errorMessage = error.reason || error.message || "Failed to create position";
+      setTransactionError(errorMessage);
+      setOperationError(`Error creating position: ${errorMessage}`);
+      showError(`Error creating position: ${errorMessage}`);
+    } finally {
       setIsCreatingPosition(false);
     }
   };
@@ -1050,7 +1304,7 @@ export default function AddLiquidityModal({
     if (isExistingPosition) {
       // Validate inputs for adding liquidity
       if (!token0Amount && !token1Amount) {
-        errors.push("Please enter at least one token amount");
+        errors.push("Please enter token amounts");
       }
 
       // Validate token0 amount
@@ -1120,12 +1374,51 @@ export default function AddLiquidityModal({
         errors.push("Please select both tokens");
       }
 
+      // Validate tokens are not the same
+      if (token0Address && token1Address && token0Address.toLowerCase() === token1Address.toLowerCase()) {
+        errors.push("Cannot create position with the same token for both sides");
+      }
+
+      // Validate pool exists
+      if (priceLoadError) {
+        errors.push("Cannot create position: pool does not exist for selected tokens and fee tier");
+      }
+
+      // Validate fee tier using adapter's supported fee tiers
+      if (adapter && adapter.feeTiers && !adapter.feeTiers.includes(selectedFeeTier)) {
+        errors.push(`Invalid fee tier selected. Supported fee tiers: ${adapter.feeTiers.map(f => f/10000 + '%').join(', ')}`);
+      }
+
+      // Validate price range
       if (priceRange.min === null || priceRange.max === null) {
         errors.push("Please set a price range");
       } else {
         // Validate that min < max
         if (priceRange.min >= priceRange.max) {
           errors.push("Minimum price must be less than maximum price");
+        }
+      }
+
+      // Validate custom price inputs when in custom mode
+      if (rangeType === 'custom') {
+        if (customMinInput) {
+          const minPrice = parseFloat(customMinInput);
+          if (isNaN(minPrice) || minPrice <= 0) {
+            errors.push("Min price must be a positive number");
+          }
+        }
+        if (customMaxInput) {
+          const maxPrice = parseFloat(customMaxInput);
+          if (isNaN(maxPrice) || maxPrice <= 0) {
+            errors.push("Max price must be a positive number");
+          }
+        }
+        if (customMinInput && customMaxInput) {
+          const minPrice = parseFloat(customMinInput);
+          const maxPrice = parseFloat(customMaxInput);
+          if (!isNaN(minPrice) && !isNaN(maxPrice) && minPrice >= maxPrice) {
+            errors.push("Min price must be less than max price");
+          }
         }
       }
 
@@ -1192,18 +1485,14 @@ export default function AddLiquidityModal({
       }
 
       // Create new position - direct adapter call
+      // Note: token data and pool data are now stored in state (sortedToken0Data, sortedToken1Data, localPoolData)
       createPosition({
         platformId: selectedPlatform,
-        token0Address,
-        token1Address,
-        feeTier: selectedFeeTier,
         tickLower: priceRange.min,
         tickUpper: priceRange.max,
         token0Amount,
         token1Amount,
-        slippageTolerance,
-        tokensSwapped, // Pass this so the handler knows if tokens need to be swapped
-        invertPriceDisplay // Pass the user's preference for price display
+        slippageTolerance
       });
     }
   };
@@ -1256,12 +1545,24 @@ export default function AddLiquidityModal({
         return 'N/A';
       }
 
-      // Use adapter's tick to price function
-      // If tokens are swapped from user perspective, we need to swap the tokens
-      const baseToken = tokensSwapped ? token1 : token0;
-      const quoteToken = tokensSwapped ? token0 : token1;
+      // Prevent infinite loop when tokens are the same
+      if (token0.address === token1.address) {
+        return 'N/A';
+      }
 
-      // Get the base price
+      // Use adapter's tick to price function
+      // The adapter now handles sorting internally and returns price in the order we request
+      // tickToPrice(base, quote) returns "quote per base"
+      //
+      // When invertPriceDisplay=false: We want to display "token0 per token1" (WETH per USDC)
+      //   So ask for tickToPrice(base=token1, quote=token0) → returns "token0 per token1" ✓
+      // When invertPriceDisplay=true: We want to display "token1 per token0" (USDC per WETH)
+      //   So ask for tickToPrice(base=token0, quote=token1) → returns "token1 per token0" ✓
+
+      const baseToken = invertPriceDisplay ? token0 : token1;
+      const quoteToken = invertPriceDisplay ? token1 : token0;
+
+      // Get the price from adapter
       let priceObj;
       try {
         priceObj = adapter.tickToPrice(tick, baseToken, quoteToken);
@@ -1270,26 +1571,15 @@ export default function AddLiquidityModal({
         return 'N/A';
       }
 
-      // Convert Price object to number
+      // Convert Price object to number - this is already in the format we requested
       let price = parseFloat(priceObj.toSignificant(18));
-
-      // Invert if requested by user
-      if (invertPriceDisplay) {
-        if (price > 0) {
-          price = 1 / price;
-        }
-      }
 
       // Format for display
       if (isNaN(price)) {
         return 'N/A';
       }
 
-      if (price < 0.0001 && price > 0) {
-        return price.toExponential(4);
-      }
-
-      return formatPrice(price);
+      return price.toFixed(8);
     } catch (error) {
       console.error("Error formatting tick to price:", error);
       return 'N/A';
@@ -1309,8 +1599,12 @@ export default function AddLiquidityModal({
         return "Unknown";
       }
 
-      // Invert the price if requested by user
-      const displayPrice = invertPriceDisplay ? 1 / price : price;
+      // currentPoolPrice from adapter is sortedToken1/sortedToken0 (sorted by address)
+      // When tokensSwapped is true, the price is already in user's token0/token1 direction
+      // When tokensSwapped is false, price needs inversion for user's view
+      // invertPriceDisplay then flips it if user clicked the switch button
+      const needsInversion = tokensSwapped ? invertPriceDisplay : !invertPriceDisplay;
+      const displayPrice = needsInversion ? 1 / price : price;
 
       // Handle very small numbers more gracefully
       if (displayPrice < 0.0001 && displayPrice > 0) {
@@ -1325,6 +1619,22 @@ export default function AddLiquidityModal({
   }, [currentPoolPrice, isExistingPosition, poolData, formatTickToPrice, invertPriceDisplay]);
 
   // Get token symbols safely
+  const getToken0Data = () => {
+    if (isExistingPosition) {
+      return token0Data;
+    } else {
+      return commonTokens.find(t => t.address === token0Address);
+    }
+  };
+
+  const getToken1Data = () => {
+    if (isExistingPosition) {
+      return token1Data;
+    } else {
+      return commonTokens.find(t => t.address === token1Address);
+    }
+  };
+
   const getToken0Symbol = () => {
     if (isExistingPosition) {
       return token0Data?.symbol || "Token0";
@@ -1349,26 +1659,27 @@ export default function AddLiquidityModal({
   // Get correct display price direction
   const getPriceDisplay = () => {
     // Base display determined by token order and whether they were swapped for Uniswap
+    // Default convention across the app: token0 per token1 (when invertPriceDisplay is false)
     let baseDisplay;
 
     // For existing positions, respect the token order from the position
     if (isExistingPosition) {
-      baseDisplay = `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}`;
+      baseDisplay = `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
     } else {
       // For new positions, if tokens were swapped for Uniswap order, we need to adjust the display
       if (tokensSwapped) {
-        baseDisplay = `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
-      } else {
         baseDisplay = `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}`;
+      } else {
+        baseDisplay = `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
       }
     }
 
     // If user manually flipped the price display, invert it
     if (invertPriceDisplay) {
       // Swap the token symbols in the display
-      return baseDisplay.includes(`${token1Symbol} per ${token0Symbol}`) ?
-        `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}` :
-        `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}`;
+      return baseDisplay.includes(`${token0Symbol} per ${token1Symbol}`) ?
+        `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}` :
+        `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
     }
 
     return baseDisplay;
@@ -1379,7 +1690,10 @@ export default function AddLiquidityModal({
     if (isExistingPosition) {
       return poolData?.tick >= position?.tickLower && poolData?.tick <= position?.tickUpper;
     } else {
-      return priceRange.current >= priceRange.min && priceRange.current <= priceRange.max;
+      // Handle case where min/max ticks might be swapped due to price display direction
+      const lowerTick = Math.min(priceRange.min, priceRange.max);
+      const upperTick = Math.max(priceRange.min, priceRange.max);
+      return priceRange.current >= lowerTick && priceRange.current <= upperTick;
     }
   };
 
@@ -1645,6 +1959,7 @@ export default function AddLiquidityModal({
                                     e.preventDefault();
                                   }
                                 }}
+                                onWheel={(e) => e.target.blur()}
                                 step="any"
                                 disabled={isProcessingOperation}
                                 size="sm"
@@ -1665,6 +1980,7 @@ export default function AddLiquidityModal({
                                     e.preventDefault();
                                   }
                                 }}
+                                onWheel={(e) => e.target.blur()}
                                 step="any"
                                 disabled={isProcessingOperation}
                                 size="sm"
@@ -1677,31 +1993,17 @@ export default function AddLiquidityModal({
 
                       {/* Display the selected price range */}
                       <div className="p-2 mt-2 rounded" style={{ border: '1px solid var(--neutral-700)', backgroundColor: '#e9ecef', fontSize: '0.9em' }}>
-                        <Row>
-                          <Col md={7}>
-                            <div>
-                              <strong>
-                                {formatTickToPrice(priceRange.min)} - {formatTickToPrice(priceRange.max)}
-                              </strong>
-                              {invertPriceDisplay ?
-                                (tokensSwapped ?
-                                  <> {token1Symbol} per {token0Symbol}</> :
-                                  <> {token0Symbol} per {token1Symbol}</>) :
-                                (tokensSwapped ?
-                                  <> {token0Symbol} per {token1Symbol}</> :
-                                  <> {token1Symbol} per {token0Symbol}</>)
-                              }
-                            </div>
-                          </Col>
-                          <Col md={5} className="text-end">
-                            {/* Show if price is in range */}
-                            {priceRange.current !== null && (
-                              <Badge bg={isPriceInRange() ? "success" : "danger"}>
-                                {isPriceInRange() ? "Will Be In Range" : "Will Be Out of Range"}
-                              </Badge>
-                            )}
-                          </Col>
-                        </Row>
+                        <strong>
+                          {formatTickToPrice(priceRange.min)} - {formatTickToPrice(priceRange.max)}
+                        </strong>
+                        {invertPriceDisplay ?
+                          (tokensSwapped ?
+                            <> {token0Symbol} per {token1Symbol}</> :
+                            <> {token1Symbol} per {token0Symbol}</>) :
+                          (tokensSwapped ?
+                            <> {token1Symbol} per {token0Symbol}</> :
+                            <> {token0Symbol} per {token1Symbol}</>)
+                        }
                       </div>
                     </Form.Group>
                   </Col>
@@ -1751,6 +2053,7 @@ export default function AddLiquidityModal({
                           e.preventDefault();
                         }
                       }}
+                      onWheel={(e) => e.target.blur()}
                       step="any"
                       isInvalid={!!token0Error}
                       size="sm"
@@ -1798,6 +2101,7 @@ export default function AddLiquidityModal({
                           e.preventDefault();
                         }
                       }}
+                      onWheel={(e) => e.target.blur()}
                       step="any"
                       isInvalid={!!token1Error}
                       size="sm"
@@ -1833,6 +2137,7 @@ export default function AddLiquidityModal({
                         e.preventDefault();
                       }
                     }}
+                    onWheel={(e) => e.target.blur()}
                     step="any"
                     disabled={isProcessingOperation}
                     className="no-number-spinner"

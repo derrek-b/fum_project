@@ -354,6 +354,7 @@ export default function RemoveLiquidityModal({
                     e.preventDefault();
                   }
                 }}
+                onWheel={(e) => e.target.blur()}
                 step="any"
                 disabled={isRemoving}
                 className="no-number-spinner"

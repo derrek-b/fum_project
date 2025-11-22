@@ -194,6 +194,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
                     e.preventDefault();
                   }
                 }}
+                onWheel={(e) => e.target.blur()}
                 step="any"
                 disabled={isSubmitting}
                 className="no-number-spinner"
