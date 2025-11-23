@@ -1,5 +1,6 @@
-#.env files
+# Environment files (keep .env.example as template)
 .env*
+!.env.example
 
 **/.claude/settings.local.json
 node_modules

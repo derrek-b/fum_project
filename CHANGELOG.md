@@ -1,5 +1,41 @@
 # F.U.M. Project Changelog
 
+## [0.13.0] SSE Broadcasting & VaultDataService Fixes - 2025-11-23
+
+### Real-Time Event Broadcasting
+
+This release adds Server-Sent Events (SSE) broadcasting for real-time UI updates and fixes critical issues with position tracking in VaultDataService.
+
+#### **SSE Broadcasting System**
+- **NEW**: SSEBroadcaster class for real-time event streaming to connected clients
+- **NEW**: HTTP server on configurable port (default 3001) for SSE connections
+- **NEW**: CORS support for cross-origin requests from frontend applications
+- **NEW**: Automatic event broadcasting for all AutomationService events
+- **NEW**: Client connection management with automatic cleanup on disconnect
+- **INTEGRATION**: AutomationService now accepts optional SSEBroadcaster instance
+
+#### **VaultDataService Fixes**
+- **CRITICAL FIX**: Removed dependency on `vault.getPositionIds()` which was unreliable
+- **ROOT CAUSE**: Uniswap V3's NonfungiblePositionManager uses `_mint()` not `_safeMint()`, so vault's `onERC721Received` callback is never triggered
+- **SOLUTION**: VDS now always queries platform adapters directly for positions
+- **REMOVED**: `getPositionIds()` call from `loadVault()` - positions fetched via adapters
+- **REMOVED**: `getPositionIds()` call from `refreshPositionsAndTokens()` - same approach
+- **SIMPLIFIED**: `fetchPositions()` method no longer takes positionIds parameter
+
+#### **Startup Script**
+- **NEW**: `scripts/start-automation.js` - Production-ready startup script
+- **FEATURE**: Accepts optional env file path as argument (default: `.env`)
+- **FEATURE**: Automatic SSE server startup with configurable port
+- **FEATURE**: Graceful shutdown handling (SIGINT, SIGTERM)
+
+#### **Library Upgrade**
+- **UPDATED**: fum_library v0.22.1 → v0.22.2
+- **INCLUDES**: Runtime API key resolution fix for Arbitrum RPC
+
+**Status**: ✅ Complete SSE integration with real-time event streaming
+**Breaking Changes**: None - SSE is opt-in via constructor parameter
+**Impact**: Enables real-time UI updates for vault monitoring dashboards
+
 ## [0.12.1] Emergency Exit Position Closure Bug Fix - 2025-10-07
 
 ### Bug Fixes
