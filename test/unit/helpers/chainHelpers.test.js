@@ -104,7 +104,7 @@ describe('Chain Helpers', () => {
         expect(config).toBeDefined();
         expect(typeof config).toBe('object');
         expect(config.name).toBe('Arbitrum One');
-        expect(config.rpcUrls).toEqual(['https://arb1.arbitrum.io/rpc']);
+        expect(config.rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2']);  // Base URL - API key appended by getChainRpcUrls()
         expect(config.executorAddress).toBe('0x0');
         expect(config.platformAddresses).toHaveProperty('uniswapV3');
       });
@@ -187,17 +187,52 @@ describe('Chain Helpers', () => {
         expect(rpcUrls).toEqual(['https://cloudflare-eth.com']);
       });
 
-      it('should return correct RPC URLs for Arbitrum One (chainId 42161)', () => {
-        const rpcUrls = getChainRpcUrls(42161);
+      it('should return correct RPC URLs for Arbitrum One (chainId 42161) with API key appended', () => {
+        // Set up API key for test
+        const originalApiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+        process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = 'test-api-key-123';
+
+        try {
+          const rpcUrls = getChainRpcUrls(42161);
+
+          expect(Array.isArray(rpcUrls)).toBe(true);
+          expect(rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2/test-api-key-123']);
+        } finally {
+          // Restore original API key
+          if (originalApiKey !== undefined) {
+            process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = originalApiKey;
+          } else {
+            delete process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+          }
+        }
+      });
+
+      it('should return static RPC URLs for local fork (chainId 1337) without modification', () => {
+        const rpcUrls = getChainRpcUrls(1337);
 
         expect(Array.isArray(rpcUrls)).toBe(true);
-        expect(rpcUrls).toEqual(['https://arb1.arbitrum.io/rpc']);
+        expect(rpcUrls).toEqual(['http://localhost:8545']);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for unsupported chain', () => {
         expect(() => getChainRpcUrls(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for Arbitrum (chainId 42161) when API key is missing', () => {
+        // Remove API key for test
+        const originalApiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+        delete process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+
+        try {
+          expect(() => getChainRpcUrls(42161)).toThrow('NEXT_PUBLIC_ALCHEMY_API_KEY environment variable is required for Arbitrum RPC');
+        } finally {
+          // Restore original API key
+          if (originalApiKey !== undefined) {
+            process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = originalApiKey;
+          }
+        }
       });
 
       it('should throw error when no RPC URL is configured', async () => {

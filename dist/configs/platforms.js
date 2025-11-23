@@ -34,13 +34,13 @@ const platforms = {
         queryType: "uniswap"
       },      // Ethereum mainnet (Official Uniswap V3)
       42161: {
-        id: "FQ6JYszEKApsBpAmiHesRsd9Ygc6mzmpNRANeVQFYoVX",
-        queryType: "messari"
-      },   // Arbitrum One (Messari)
+        id: "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
+        queryType: "uniswap"
+      },   // Arbitrum One (Uniswap - supports native USDC)
       1337: {
-        id: "FQ6JYszEKApsBpAmiHesRsd9Ygc6mzmpNRANeVQFYoVX",
-        queryType: "messari"
-      }    // Local fork (Messari)
+        id: "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
+        queryType: "uniswap"
+      }    // Local fork (Uniswap - supports native USDC)
     },
   },
   // Add other platforms here as needed

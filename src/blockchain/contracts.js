@@ -141,22 +141,12 @@ export async function createVault(name, signer) {
     throw new Error('Invalid signer. Must be an ethers signer instance.');
   }
 
-  console.time('🔍 getVaultFactory');
   const factory = await getVaultFactory(signer.provider);
-  console.timeEnd('🔍 getVaultFactory');
-
-  console.time('🔍 factory.connect');
   const factoryWithSigner = factory.connect(signer);
-  console.timeEnd('🔍 factory.connect');
 
   try {
-    console.time('🔍 createVault tx');
     const tx = await factoryWithSigner.createVault(name);
-    console.timeEnd('🔍 createVault tx');
-
-    console.time('🔍 tx.wait');
     const receipt = await tx.wait();
-    console.timeEnd('🔍 tx.wait');
 
     // Extract vault address from event logs
     const vaultCreatedTopic = factoryWithSigner.interface.getEventTopic('VaultCreated');

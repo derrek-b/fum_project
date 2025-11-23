@@ -1,6 +1,6 @@
 {
   "name": "fum_library",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "description": "Shared utilities for FUM DeFi management",
   "type": "module",
   "main": "dist/index.js",
@@ -46,7 +46,7 @@
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
-    "pack": "npm run build && npm pack && (cd ../fum_automation && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum_automation && npm install file:../fum_library/fum_library-0.22.1.tgz) && (cd ../fum && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum && npm install file:../fum_library/fum_library-0.22.1.tgz --legacy-peer-deps --force)",
+    "pack": "npm run build && npm pack && (cd ../fum_automation && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum_automation && npm install file:../fum_library/fum_library-0.22.2.tgz) && (cd ../fum && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum && npm install file:../fum_library/fum_library-0.22.2.tgz --legacy-peer-deps --force)",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

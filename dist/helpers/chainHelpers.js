@@ -136,6 +136,15 @@ export function getChainRpcUrls(chainId) {
     throw new Error(`Chain ${chainId} RPC URLs not configured`);
   }
 
+  // Chains that require API key appended at runtime
+  if (chainId === 42161) {
+    const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+    if (!apiKey) {
+      throw new Error('NEXT_PUBLIC_ALCHEMY_API_KEY environment variable is required for Arbitrum RPC');
+    }
+    return config.rpcUrls.map(url => `${url}/${apiKey}`);
+  }
+
   return config.rpcUrls;
 }
 

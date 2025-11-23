@@ -5,6 +5,22 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2] - 2025-11-23
+
+### Fixed
+- **Runtime API key construction for Arbitrum RPC**: Fixed ESM import timing issue where `NEXT_PUBLIC_ALCHEMY_API_KEY` was undefined at config load time
+  - **Root Cause**: Environment variables in template literals are evaluated at module import time, before `dotenv.config()` runs in ESM
+  - **Solution**: `getChainRpcUrls()` now appends API key at runtime for Arbitrum (chain 42161)
+  - **chains.js**: Arbitrum `rpcUrls` now contains base URL only (without API key)
+  - **chainHelpers.js**: `getChainRpcUrls(42161)` constructs full URL with API key at call time
+  - Throws descriptive error if `NEXT_PUBLIC_ALCHEMY_API_KEY` is not set when requesting Arbitrum RPC
+
+### Changed
+- **PositionVault.sol `getPositionIds()` deprecated**: Added deprecation notice to contract
+  - Function is unreliable because Uniswap V3's NonfungiblePositionManager uses `_mint()` not `_safeMint()`
+  - `onERC721Received` is never called when positions are created, so positions aren't registered
+  - Consumers should query positions directly from the NFT contract via platform adapters
+
 ## [0.22.1] - 2025-11-21
 
 ### Fixed

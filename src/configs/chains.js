@@ -13,7 +13,7 @@ const chains = {
       symbol: "ETH",
       decimals: 18
     },
-    rpcUrls: [`https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`],
+    rpcUrls: ["https://arb-mainnet.g.alchemy.com/v2"],  // Base URL - API key appended by getChainRpcUrls()
     blockExplorerUrls: ["https://arbiscan.io"],
     envPK: process.env.ARBITRUM_DEPLOYER_PK,
     executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
