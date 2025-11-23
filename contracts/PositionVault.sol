@@ -265,8 +265,12 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Gets all position IDs currently managed by this vault
-     * @return Array of position IDs
+     * @notice DEPRECATED - Do not use. This function will be removed in future versions.
+     * @dev Position IDs are not reliably tracked because Uniswap V3's NonfungiblePositionManager
+     * uses _mint() instead of _safeMint(), so onERC721Received is never called when positions
+     * are created. Use the platform adapter to query positions directly from the NFT contract
+     * (e.g., balanceOf + tokenOfOwnerByIndex on NonfungiblePositionManager).
+     * @return Array of position IDs (unreliable - may not include all positions)
      */
     function getPositionIds() external view returns (uint256[] memory) {
         return positionIds;

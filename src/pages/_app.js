@@ -5,6 +5,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { ToastProvider } from '../context/ToastContext';
 import { ProviderProvider } from '../contexts/ProviderContext';
 import { triggerUpdate, markAutoRefresh } from '../redux/updateSlice';
+import { useAutomationEvents } from '../hooks/useAutomationEvents';
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
@@ -59,6 +60,12 @@ function AutoRefreshHandler() {
   return null; // This component doesn't render anything
 }
 
+// Automation events handler - connects to SSE stream
+function AutomationEventsHandler() {
+  useAutomationEvents();
+  return null; // This component doesn't render anything
+}
+
 export default function MyApp({ Component, pageProps }) {
   // Multiple global error handlers
   useEffect(() => {
@@ -105,6 +112,7 @@ export default function MyApp({ Component, pageProps }) {
         >
           <ToastProvider>
             <AutoRefreshHandler />
+            <AutomationEventsHandler />
             <Component {...pageProps} />
           </ToastProvider>
         </ErrorBoundary>

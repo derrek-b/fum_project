@@ -8,6 +8,7 @@ import updatesReducer from "./updateSlice";
 import platformsReducer from "./platformsSlice";
 import vaultsReducer from "./vaultsSlice";
 import strategiesReducer from "./strategiesSlice"; // Add strategiesReducer
+import automationReducer from "./automationSlice";
 
 export const store = configureStore({
   reducer: {
@@ -19,6 +20,7 @@ export const store = configureStore({
     platforms: platformsReducer,
     vaults: vaultsReducer,
     strategies: strategiesReducer, // Add strategies reducer
+    automation: automationReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

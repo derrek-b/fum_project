@@ -11,6 +11,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.4.0] - 2025-11-23
+### Major Architecture Refactor
+
+Complete application refactor for library integration and ethers.js v5 compatibility.
+
+#### **Ethers.js Migration (v6 → v5)**
+- Migrated entire application from ethers.js v6 to v5 for library compatibility
+- Moved ethers provider from Redux store to React Context for proper lifecycle management
+- Updated all contract interactions for v5 API compatibility
+
+#### **Library Integration Refactor**
+- Complete vault pages and components refactor to use library functions directly
+- Complete position pages and components refactor for library architecture
+- Removed duplicate helper wrappers - now using library functions directly
+- Implemented global data refresh system replacing per-component refresh logic
+- Standardized error handling patterns across all vault and position modals
+
+#### **UI/UX Improvements**
+- Improved vault UI with better automation indicators and status feedback
+- Improved position and vault card layouts with consistent styling
+- Enhanced wallet connection UX with better loading states and error feedback
+- Optimized vault detail page with React performance best practices (memoization, callbacks)
+- Standardized input validation and number input UX across all modals
+- Added strategy validation with structured warnings in modal UI
+
+#### **New Features**
+- AutomationStatus component for real-time SSE event streaming display
+- Redux automationSlice for centralized automation state management
+- useAutomationSSE hook for managing SSE connection lifecycle
+- Token withdrawal functionality with improved modal UI
+- Position transfer functionality between wallets and vaults
+
+#### **Script Improvements**
+- Consolidated vault setup in create-test-vault.js (target tokens, platforms, strategy, executor)
+- Simplified seed.js to read addresses from deployment files instead of hardcoding
+
+#### **Bug Fixes**
+- Fixed vault configuration and strategy parameter saving bugs
+- Fixed TokenDepositModal error handling and stale data issues
+- Fixed position modal bugs during transfer operations
+- Fixed data loading issues after wallet connection
+
+#### **Code Cleanup**
+- Removed unused vault components
+- Removed price helper wrappers (using library directly)
+
+### Deprecated
+- PositionVault.getPositionIds() - unreliable for Uniswap V3 (uses _mint() not _safeMint())
+  - Added deprecation notice in contract comments
+  - Use platform adapters to query NFT contract directly instead
+
+### Dependencies
+- Updated fum_library to v0.22.3
+
 ## [0.3.3] - 2025-09-30
 ### Added
 - EIP-1271 signature validation support in PositionVault contract

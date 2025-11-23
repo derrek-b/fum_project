@@ -170,7 +170,47 @@ async function main() {
     signer
   );
 
-  // Rest of your code (commented out position creation etc.)...
+  // Get strategy address from deployment file
+  const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
+  const babyStepsStrategyAddress = deployment.contracts.BabyStepsStrategy;
+  const executorAddress = '0xabA472B2EA519490EE10E643A422D578a507197A';
+
+  if (!babyStepsStrategyAddress) {
+    throw new Error('BabyStepsStrategy address not found in deployment file');
+  }
+
+  // Configure the vault for automation
+  console.log("\n=== CONFIGURING VAULT FOR AUTOMATION ===");
+
+  // Set target tokens
+  console.log("Setting target tokens: USDC, USD₮0...");
+  const setTokensTx = await vault.setTargetTokens(['USDC', 'USD₮0']);
+  await setTokensTx.wait();
+  console.log("Target tokens set");
+
+  // Set target platforms
+  console.log("Setting target platforms: uniswapV3...");
+  const setPlatformsTx = await vault.setTargetPlatforms(['uniswapV3']);
+  await setPlatformsTx.wait();
+  console.log("Target platforms set");
+
+  // Set strategy
+  console.log(`Setting strategy: BabySteps (${babyStepsStrategyAddress})...`);
+  const setStrategyTx = await vault.setStrategy(babyStepsStrategyAddress);
+  await setStrategyTx.wait();
+  console.log("Strategy set");
+
+  // Set executor
+  console.log(`Setting executor: ${executorAddress}...`);
+  const setExecutorTx = await vault.setExecutor(executorAddress);
+  await setExecutorTx.wait();
+  console.log("Executor set");
+
+  console.log("\n✅ Vault configured for BabySteps automation!");
+  console.log(`   Target Tokens: USDC, USD₮0`);
+  console.log(`   Target Platform: uniswapV3`);
+  console.log(`   Strategy: BabySteps`);
+  console.log(`   Executor: ${executorAddress}`);
 
   // Define token addresses for Arbitrum that will be needed later
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum

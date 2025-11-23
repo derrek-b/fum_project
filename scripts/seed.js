@@ -9,14 +9,20 @@ import IUniswapV3PoolArtifact from '@uniswap/v3-core/artifacts/contracts/interfa
 import NonfungiblePositionManagerArtifact from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
 import ERC20Artifact from '@openzeppelin/contracts/build/contracts/ERC20.json';
 import UniswapV3RouterArtifact from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const IUniswapV3PoolABI = IUniswapV3PoolArtifact.abi;
 const NonfungiblePositionManagerABI = NonfungiblePositionManagerArtifact.abi;
 const ERC20ABI = ERC20Artifact.abi;
 const UniswapV3RouterABI = UniswapV3RouterArtifact.abi
 
-// import fs from 'fs';
-// import path from 'path';
+// Get deployment addresses from the deployment file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const deploymentPath = path.join(__dirname, '..', 'deployments', '1337-latest.json');
+const deployment = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
 
 // Define config directly for local fork of Arbitrum
 const config = {
@@ -491,6 +497,44 @@ async function main() {
   const ethBalance = await provider.getBalance(wallet.address);
   console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
 
+  // Fund the automation executor address with ETH for gas
+  const AUTOMATION_EXECUTOR = '0xabA472B2EA519490EE10E643A422D578a507197A';
+  console.log(`\nFunding automation executor ${AUTOMATION_EXECUTOR} with 10 ETH...`);
+  const fundTx = await wallet.sendTransaction({
+    to: AUTOMATION_EXECUTOR,
+    value: ethers.utils.parseEther('10')
+  });
+  await fundTx.wait();
+  const executorBalance = await provider.getBalance(AUTOMATION_EXECUTOR);
+  console.log(`Automation executor funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
+
+  // =====================================================
+  // Get existing vault (created and configured by create-test-vault.js)
+  // =====================================================
+  console.log('\n=== GETTING EXISTING VAULT ===');
+
+  const VAULT_FACTORY_ADDRESS = deployment.contracts.VaultFactory;
+
+  // VaultFactory ABI (minimal)
+  const VAULT_FACTORY_ABI = [
+    'function getVaultCount(address user) external view returns (uint256)',
+    'function getVaults(address user) external view returns (address[])'
+  ];
+
+  const vaultFactory = new ethers.Contract(VAULT_FACTORY_ADDRESS, VAULT_FACTORY_ABI, wallet);
+
+  // Get existing vaults for this wallet (created by create-test-vault.js)
+  const userVaults = await vaultFactory.getVaults(wallet.address);
+  console.log(`Found ${userVaults.length} existing vault(s) for wallet`);
+
+  if (userVaults.length === 0) {
+    throw new Error('No existing vault found. Run create-test-vault.js first.');
+  }
+
+  // Use the first vault (created and configured by create-test-vault.js)
+  const vaultAddress = userVaults[0];
+  console.log(`Using existing vault at: ${vaultAddress}`);
+
   // Define token addresses for Arbitrum
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
@@ -951,8 +995,8 @@ async function main() {
     // NEW SECTION: Generate fees by performing multiple swaps
     console.log('\n=== GENERATING FEES FOR THE POSITION ===');
 
-    // Perform multiple swaps to generate fees (just one swap for now as requested)
-    await performSwapsToGenerateFees(wallet, 200);
+    // Perform multiple swaps to generate fees (commented out for faster testing)
+    // await performSwapsToGenerateFees(wallet, 200);
 
     // Calculate fees directly without "poking" the position
     console.log('\n=== CALCULATING UNCOLLECTED FEES ===');
