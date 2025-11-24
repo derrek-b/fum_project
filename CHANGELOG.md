@@ -11,6 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.4.1] - 2025-01-23
+### Automation Service Connection Monitoring
+
+Real-time automation service status monitoring with UI alerts for service availability.
+
+#### **Service Connection Status UI**
+- **NEW**: Global red alert banners on vault pages when automation service is disconnected
+- **NEW**: Vault detail page disconnection alerts with clear messaging
+- **NEW**: Automation toggle disabled when service is unavailable
+- **BEHAVIOR**: Green pulsing dot only shows when vault is actively managed (enabled + connected + not blacklisted + not retrying)
+- **IMPACT**: Users now have clear visibility into automation service availability
+
+#### **SSE Event Integration**
+- **UPDATED**: `useAutomationEvents` hook handles `VaultLoadFailed` and `VaultLoadRecovered` events
+- **NEW**: Yellow retry warning banners when vaults are having temporary issues
+- **NEW**: Retry warnings only show when service is connected (not during disconnections)
+- **FIXED**: Retry and blacklist state cleared when automation is revoked
+
+#### **Redux State Management**
+- **UPDATED**: `vaultsSlice` includes `isRetrying` and `retryError` fields
+- **BEHAVIOR**: Vault state accurately reflects automation service health
+- **INTEGRATION**: Connection status from `automationSlice` drives all UI states
+
+#### **UI Components Updated**
+- **UPDATED**: `VaultCard` - Green dot checks all 4 conditions (enabled, not blacklisted, not retrying, connected)
+- **UPDATED**: `vaults.js` - Global service disconnection banner
+- **UPDATED**: `vault/[address].js` - Disconnection alerts, retry condition updates, toggle disable logic
+- **CONSISTENCY**: All automation-related UI responds to service connection state
+
+**Status**: ✅ Complete automation service monitoring
+**Breaking Changes**: None
+**Impact**: Clear user visibility into automation service health and vault management status
+
 ## [0.4.0] - 2025-11-23
 ### Major Architecture Refactor
 

@@ -8,6 +8,7 @@ import {
   eventReceived
 } from '../redux/automationSlice';
 import { triggerUpdate } from '../redux/updateSlice';
+import { updateVault } from '../redux/vaultsSlice';
 
 const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL || 'http://localhost:3001/events';
 
@@ -19,7 +20,9 @@ const REFRESH_TRIGGER_EVENTS = [
   'FeesCollected',
   'VaultOnboarded',
   'VaultOffboarded',
-  'TokensSwapped'
+  'TokensSwapped',
+  'VaultUnrecoverable',
+  'VaultAuthRevoked'
 ];
 
 /**
@@ -89,7 +92,8 @@ export function useAutomationEvents() {
         'TokensSwapped',
         'VaultBaselineCaptured',
         'MonitoringStarted',
-        'VaultMonitoringStopped',
+        'VaultLoadFailed',
+        'VaultLoadRecovered',
         'VaultUnrecoverable',
         'VaultRecovered',
         'FeeCollectionFailed'
@@ -107,6 +111,53 @@ export function useAutomationEvents() {
               data: payload.data,
               timestamp: payload.timestamp
             }));
+
+            // Handle vault state updates
+            if (eventName === 'VaultLoadFailed' && payload.data?.vaultAddress) {
+              // Vault is having trouble loading - show retry warning
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isRetrying: true,
+                  retryError: {
+                    message: payload.data.error || 'Unknown error',
+                    attempts: payload.data.attempts || 1,
+                    lastAttempt: payload.data.lastAttempt || Date.now()
+                  }
+                }
+              }));
+            } else if (eventName === 'VaultLoadRecovered' && payload.data?.vaultAddress) {
+              // Vault recovered - clear retry state
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isRetrying: false,
+                  retryError: null
+                }
+              }));
+            } else if (eventName === 'VaultUnrecoverable' && payload.data?.vaultAddress) {
+              // Vault blacklisted - clear retry state, set blacklist state
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isBlacklisted: true,
+                  blacklistReason: payload.data.reason || 'Unknown error',
+                  isRetrying: false,
+                  retryError: null
+                }
+              }));
+            } else if (eventName === 'VaultAuthRevoked' && payload.data?.vaultAddress) {
+              // When automation is disabled, clear all automation states
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isBlacklisted: false,
+                  blacklistReason: null,
+                  isRetrying: false,
+                  retryError: null
+                }
+              }));
+            }
 
             // Trigger data refresh for relevant events
             if (REFRESH_TRIGGER_EVENTS.includes(eventName)) {

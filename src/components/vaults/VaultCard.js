@@ -4,6 +4,7 @@ import { Card, Badge, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
 import * as LucideIcons from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
 
 export default function VaultCard({ vault }) {
@@ -11,6 +12,7 @@ export default function VaultCard({ vault }) {
   const { activeStrategies, strategyPerformance } = useSelector((state) => state.strategies);
   const allPositions = useSelector((state) => state.positions.positions);
   const pools = useSelector((state) => state.pools);
+  const automationConnected = useSelector((state) => state.automation?.connected);
 
   // Check if automation is enabled
   const isAutomationEnabled = vault.executor &&
@@ -57,10 +59,19 @@ export default function VaultCard({ vault }) {
       style={{
         cursor: "pointer",
         position: "relative",
-        background: 'rgba(245, 245, 245, 0.95)',
-        borderColor: isAutomationEnabled
-          ? 'rgba(16, 185, 129, 0.5)'
-          : 'rgba(0, 0, 0, 0.1)'
+        background: vault.isBlacklisted
+          ? 'rgba(254, 242, 242, 0.95)'
+          : vault.isRetrying
+            ? 'rgba(255, 251, 235, 0.95)'
+            : 'rgba(245, 245, 245, 0.95)',
+        borderColor: vault.isBlacklisted
+          ? '#dc3545'
+          : vault.isRetrying
+            ? '#f59e0b'
+            : isAutomationEnabled
+              ? 'rgba(16, 185, 129, 0.5)'
+              : 'rgba(0, 0, 0, 0.1)',
+        borderWidth: vault.isBlacklisted || vault.isRetrying ? '2px' : '1px'
       }}
       onClick={handleCardClick}
     >
@@ -97,8 +108,8 @@ export default function VaultCard({ vault }) {
                       {strategyDetails?.name || vaultStrategy.strategyId || "Unknown"}
                     </Badge>
 
-                    {/* Automation indicator */}
-                    {isAutomationEnabled && (
+                    {/* Automation indicator - only show if enabled AND not blacklisted AND not retrying AND service connected */}
+                    {isAutomationEnabled && !vault.isBlacklisted && !vault.isRetrying && automationConnected && (
                       <div className="ms-2 d-inline-flex align-items-center">
                         {/* Pulsing green dot */}
                         <div
@@ -264,6 +275,56 @@ export default function VaultCard({ vault }) {
             </div>
           </div>
         </div>
+
+        {/* Blacklist Warning Banner */}
+        {vault.isBlacklisted && (
+          <div
+            className="mt-3 d-flex align-items-center justify-content-center"
+            style={{
+              backgroundColor: '#dc3545',
+              color: '#ffffff',
+              padding: '0.75rem 1rem',
+              marginLeft: 'calc(-1 * var(--space-xl))',
+              marginRight: 'calc(-1 * var(--space-xl))',
+              marginBottom: 'calc(-1 * var(--space-xl))',
+              borderBottomLeftRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              borderBottomRightRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              fontWeight: '600',
+              fontSize: '0.9rem'
+            }}
+          >
+            <AlertTriangle size={18} className="me-2" />
+            BLACKLISTED - Automation Disabled
+          </div>
+        )}
+
+        {/* Retry Warning Banner - show when retrying but not blacklisted */}
+        {vault.isRetrying && !vault.isBlacklisted && (
+          <div
+            className="mt-3 d-flex align-items-center justify-content-center"
+            style={{
+              backgroundColor: '#f59e0b',
+              color: '#ffffff',
+              padding: '0.75rem 1rem',
+              marginLeft: 'calc(-1 * var(--space-xl))',
+              marginRight: 'calc(-1 * var(--space-xl))',
+              marginBottom: 'calc(-1 * var(--space-xl))',
+              borderBottomLeftRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              borderBottomRightRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              fontWeight: '600',
+              fontSize: '0.9rem'
+            }}
+          >
+            <RefreshCw size={18} className="me-2" style={{ animation: 'spin 2s linear infinite' }} />
+            RETRYING - Automation Having Issues
+            <style jsx>{`
+              @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        )}
       </Card.Body>
     </Card>
   );

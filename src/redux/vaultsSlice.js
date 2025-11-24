@@ -18,7 +18,11 @@ const vaultsSlice = createSlice({
           tvl: 0,
           positionCount: 0
         },
-        tokenBalances: vault.tokenBalances || {} // Ensure tokenBalances object exists
+        tokenBalances: vault.tokenBalances || {}, // Ensure tokenBalances object exists
+        isBlacklisted: vault.isBlacklisted || false, // Blacklist status from automation service
+        blacklistReason: vault.blacklistReason || null, // Reason for blacklisting if applicable
+        isRetrying: vault.isRetrying || false, // Vault load retry in progress
+        retryError: vault.retryError || null // Error info during retry attempts
       }));
     },
     addVault: (state, action) => {
@@ -29,7 +33,11 @@ const vaultsSlice = createSlice({
         metrics: action.payload.metrics || {
           tvl: 0,
           positionCount: 0
-        }
+        },
+        isBlacklisted: action.payload.isBlacklisted || false,
+        blacklistReason: action.payload.blacklistReason || null,
+        isRetrying: action.payload.isRetrying || false,
+        retryError: action.payload.retryError || null
       };
       state.userVaults.push(newVault);
     },

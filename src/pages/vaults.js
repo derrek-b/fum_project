@@ -39,6 +39,7 @@ function ErrorFallback({ error, resetErrorBoundary }) {
 
 export default function VaultsPage() {
   const { isConnected } = useSelector((state) => state.wallet);
+  const automationConnected = useSelector((state) => state.automation?.connected);
 
   return (
     <div>
@@ -50,6 +51,16 @@ export default function VaultsPage() {
       <Navbar />
 
       <Container className="py-4">
+        {/* Automation Service Disconnection Alert */}
+        {!automationConnected && (
+          <Alert variant="danger" className="mb-4" style={{ borderLeft: '4px solid #dc3545' }}>
+            <Alert.Heading className="h5 mb-2">⚠️ Cannot Connect to Automation Service</Alert.Heading>
+            <p className="mb-0">
+              Unable to reach the automation service. Vaults are not being monitored. You cannot enable automation until the service is available.
+            </p>
+          </Alert>
+        )}
+
         {/* Hero Section */}
         <div className="mb-5 animate-fade-in">
           <h1 className="mb-3">Vault Management</h1>

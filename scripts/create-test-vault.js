@@ -200,17 +200,17 @@ async function main() {
   await setStrategyTx.wait();
   console.log("Strategy set");
 
-  // Set executor
-  console.log(`Setting executor: ${executorAddress}...`);
-  const setExecutorTx = await vault.setExecutor(executorAddress);
-  await setExecutorTx.wait();
-  console.log("Executor set");
+  // Set executor (commented out - enable automation manually via UI)
+  // console.log(`Setting executor: ${executorAddress}...`);
+  // const setExecutorTx = await vault.setExecutor(executorAddress);
+  // await setExecutorTx.wait();
+  // console.log("Executor set");
 
   console.log("\n✅ Vault configured for BabySteps automation!");
   console.log(`   Target Tokens: USDC, USD₮0`);
   console.log(`   Target Platform: uniswapV3`);
   console.log(`   Strategy: BabySteps`);
-  console.log(`   Executor: ${executorAddress}`);
+  console.log(`   Executor: Not set (enable via UI)`);
 
   // Define token addresses for Arbitrum that will be needed later
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum

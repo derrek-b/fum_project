@@ -16,6 +16,28 @@ import contractData from 'fum_library/artifacts/contracts';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
 const ERC20ABI = ERC20ARTIFACT.abi;
 
+// SSE base URL for automation service API calls
+const SSE_BASE_URL = process.env.NEXT_PUBLIC_SSE_URL?.replace('/events', '') || 'http://localhost:3001';
+
+/**
+ * Fetch blacklist data from automation service
+ * @returns {Promise<object>} Blacklist data keyed by vault address
+ */
+export const fetchBlacklistData = async () => {
+  try {
+    const response = await fetch(`${SSE_BASE_URL}/blacklist`);
+    if (!response.ok) {
+      console.warn(`Failed to fetch blacklist: ${response.status}`);
+      return {};
+    }
+    const data = await response.json();
+    return data.blacklisted || {};
+  } catch (error) {
+    console.warn('Error fetching blacklist data:', error);
+    return {};
+  }
+};
+
 /**
  * Map OracleSource enum to string value
  * @param {number} enumValue - Enum value from contract
@@ -1249,7 +1271,27 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       }
     }
 
-    // 10. NOW update all vaults in Redux with COMPLETE data (including tokenBalances)
+    // 10. Fetch blacklist data and apply to vaults
+    try {
+      const blacklistData = await fetchBlacklistData();
+      if (Object.keys(blacklistData).length > 0) {
+        for (let i = 0; i < completeVaultsData.length; i++) {
+          const vaultAddress = completeVaultsData[i].address;
+          // Check both original and checksummed addresses
+          const blacklistEntry = blacklistData[vaultAddress] ||
+                                 blacklistData[vaultAddress.toLowerCase()] ||
+                                 blacklistData[ethers.utils.getAddress(vaultAddress)];
+          if (blacklistEntry) {
+            completeVaultsData[i].isBlacklisted = true;
+            completeVaultsData[i].blacklistReason = blacklistEntry.reason || 'Unknown error';
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Error applying blacklist data:', error);
+    }
+
+    // 11. NOW update all vaults in Redux with COMPLETE data (including tokenBalances and blacklist)
     dispatch(setVaults(completeVaultsData));
 
     return {

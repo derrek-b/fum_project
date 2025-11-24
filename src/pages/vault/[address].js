@@ -28,6 +28,7 @@ import { getStrategyDetails } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import * as LucideIcons from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
 const ERC20ABI = ERC20ARTIFACT.abi;
 
@@ -82,6 +83,7 @@ export default function VaultDetailPage() {
   );
   const vaultMetrics = vaultFromRedux?.metrics;
   const vaultTokens = vaultFromRedux?.tokenBalances;
+  const automationConnected = useSelector((state) => state.automation?.connected);
 
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
@@ -597,13 +599,17 @@ export default function VaultDetailPage() {
                   placement="top"
                   overlay={
                     <Tooltip>
-                      {!vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
-                        ? "Automation requires an active strategy"
-                        : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
-                          ? "Automation requires assets in the vault"
-                          : automationEnabled
-                            ? "Click to disable automated strategy execution"
-                            : "Click to enable automated strategy execution"}
+                      {!automationConnected && !automationEnabled
+                        ? "Cannot connect to automation service - vaults not being monitored"
+                        : vaultFromRedux?.isBlacklisted && !automationEnabled
+                          ? "Vault is blacklisted - cannot re-enable until blacklist is cleared"
+                          : !vaultFromRedux.strategy?.strategyId || vaultFromRedux.strategy?.strategyId === 'none'
+                            ? "Automation requires an active strategy"
+                            : ((vaultMetrics?.tvl) + (vaultMetrics?.tokenTVL) === 0)
+                              ? "Automation requires assets in the vault"
+                              : automationEnabled
+                                ? "Click to disable automated strategy execution"
+                                : "Click to enable automated strategy execution"}
                     </Tooltip>
                   }
                 >
@@ -615,11 +621,15 @@ export default function VaultDetailPage() {
                       onChange={(e) => handleAutomationToggle(e.target.checked)}
                       disabled={
                         // Disable if:
-                        // 1. No strategy selected
+                        // 1. Automation service disconnected and automation is off
+                        (!automationConnected && !automationEnabled) ||
+                        // 2. No strategy selected
                         !vaultFromRedux.strategy?.strategyId ||
                         vaultFromRedux.strategy?.strategyId === 'none' ||
-                        // 2. TVL is 0 (no assets in vault)
-                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0)
+                        // 3. TVL is 0 (no assets in vault)
+                        ((vaultMetrics?.tvl || 0) + (vaultMetrics?.tokenTVL || 0) === 0) ||
+                        // 4. Vault is blacklisted and automation is off (can't re-enable until blacklist cleared)
+                        (vaultFromRedux?.isBlacklisted && !automationEnabled)
                       }
                       style={{ transform: 'scale(1.2)', marginRight: '0.5rem' }}
                     />
@@ -631,6 +641,98 @@ export default function VaultDetailPage() {
               </div>
             </Card.Body>
           </Card>
+
+          {/* Automation Service Disconnection Alert */}
+          {!automationConnected && (
+            <Alert
+              variant="danger"
+              className="mb-4 d-flex align-items-start"
+              style={{
+                borderLeft: '4px solid #dc3545',
+                backgroundColor: '#f8d7da'
+              }}
+            >
+              <AlertTriangle size={24} className="me-3 flex-shrink-0" style={{ marginTop: '2px' }} />
+              <div>
+                <Alert.Heading className="h5 mb-2">
+                  Cannot Connect to Automation Service
+                </Alert.Heading>
+                <p className="mb-0">
+                  Unable to reach the automation service. This vault is not being monitored. You cannot enable automation until the service is available.
+                </p>
+              </div>
+            </Alert>
+          )}
+
+          {/* Blacklist Warning Alert */}
+          {vaultFromRedux?.isBlacklisted && (
+            <Alert
+              variant="danger"
+              className="mb-4 d-flex align-items-start"
+              style={{
+                borderLeft: '4px solid #dc3545',
+                backgroundColor: '#f8d7da'
+              }}
+            >
+              <AlertTriangle size={24} className="me-3 flex-shrink-0" style={{ marginTop: '2px' }} />
+              <div>
+                <Alert.Heading className="h5 mb-2">
+                  Vault Blacklisted - Automation Suspended
+                </Alert.Heading>
+                <p className="mb-2">
+                  This vault has been removed from automated management due to an unrecoverable error.
+                  To re-enable automation, disable and re-enable the automation toggle after resolving the issue.
+                </p>
+                {vaultFromRedux.blacklistReason && (
+                  <p className="mb-0">
+                    <strong>Reason:</strong> {vaultFromRedux.blacklistReason}
+                  </p>
+                )}
+              </div>
+            </Alert>
+          )}
+
+          {/* Retry Warning Alert - show when retrying but not blacklisted and service connected */}
+          {vaultFromRedux?.isRetrying && !vaultFromRedux?.isBlacklisted && automationConnected && (
+            <Alert
+              variant="warning"
+              className="mb-4 d-flex align-items-start"
+              style={{
+                borderLeft: '4px solid #f59e0b',
+                backgroundColor: '#fffbeb'
+              }}
+            >
+              <RefreshCw
+                size={24}
+                className="me-3 flex-shrink-0"
+                style={{ marginTop: '2px', animation: 'spin 2s linear infinite' }}
+              />
+              <style jsx>{`
+                @keyframes spin {
+                  from { transform: rotate(0deg); }
+                  to { transform: rotate(360deg); }
+                }
+              `}</style>
+              <div>
+                <Alert.Heading className="h5 mb-2">
+                  Automation Having Issues - Retrying
+                </Alert.Heading>
+                <p className="mb-2">
+                  The automation service is having trouble managing this vault. It will continue retrying automatically.
+                </p>
+                {vaultFromRedux.retryError && (
+                  <>
+                    <p className="mb-1">
+                      <strong>Attempts:</strong> {vaultFromRedux.retryError.attempts || 1}
+                    </p>
+                    <p className="mb-0">
+                      <strong>Error:</strong> {vaultFromRedux.retryError.message || 'Unknown error'}
+                    </p>
+                  </>
+                )}
+              </div>
+            </Alert>
+          )}
 
           {/* Tabs for different sections */}
           <Tabs
