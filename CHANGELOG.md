@@ -1,5 +1,48 @@
 # F.U.M. Project Changelog
 
+## [0.14.0] Fail-Together Architecture & Configuration Improvements - 2025-01-23
+
+### Service Reliability & Configuration
+
+This release implements a fail-together architecture between SSE and automation services, adds required configuration for failure handling, and improves service resilience.
+
+#### **Fail-Together Architecture**
+- **NEW**: SSE runtime crashes now terminate the entire service (`onCrash` callback)
+- **NEW**: Automation crashes now cleanly shutdown SSE before terminating
+- **NEW**: `uncaughtException` and `unhandledRejection` handlers ensure clean shutdowns
+- **NEW**: `isShuttingDown` flag prevents new SSE connections during shutdown
+- **BEHAVIOR**: 503 responses during shutdown prevent reconnection attempts from blocking exit
+- **IMPACT**: SSE connection state now reliably indicates automation service status
+
+#### **Required Configuration Parameters**
+- **BREAKING**: `MAX_FAILURE_DURATION_MS` is now required (no default fallback)
+- **BREAKING**: `RETRY_INTERVAL_MS` already required (from v0.13.0)
+- **NEW**: Comprehensive unit tests for all configuration validation
+- **VALUES**:
+  - Testing: `MAX_FAILURE_DURATION_MS=60000` (1 minute)
+  - Production: `MAX_FAILURE_DURATION_MS=3600000` (1 hour)
+
+#### **Environment Configuration**
+- **UPDATED**: `.env.example` with `MAX_FAILURE_DURATION_MS` documentation
+- **UPDATED**: `.env.local` with production defaults (1 hour)
+- **UPDATED**: `test/.env.test` with testing defaults (1 minute)
+- **ADDED**: `test/unit/AutomationService.config.test.js` - 75 tests for config validation
+
+#### **SSE Broadcaster Enhancements**
+- **NEW**: Runtime error handler distinguishes startup vs runtime failures
+- **NEW**: `onCrash` callback parameter for fatal error propagation
+- **NEW**: Graceful shutdown rejects new connections during cleanup
+- **FIXED**: Server shutdown sequence now prevents reconnection-blocking
+
+#### **Startup Script Updates**
+- **ADDED**: `MAX_FAILURE_DURATION_MS` to required environment variables
+- **ADDED**: Startup logging for max failure duration (displays in hours)
+- **UPDATED**: Config validation to enforce new required parameter
+
+**Status**: ✅ Production-ready fail-together architecture
+**Breaking Changes**: `MAX_FAILURE_DURATION_MS` must be set in environment
+**Impact**: Reliable service health monitoring via SSE connection status
+
 ## [0.13.0] SSE Broadcasting & VaultDataService Fixes - 2025-11-23
 
 ### Real-Time Event Broadcasting
