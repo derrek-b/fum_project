@@ -1,5 +1,32 @@
 # F.U.M. Project Changelog
 
+## [0.14.1] SSE Event Refinements - 2025-01-24
+
+### SSE Broadcast Event Optimization
+
+Refined the SSE event broadcasting system to reduce redundancy and improve clarity of event purposes.
+
+#### **Added Events**
+- **NEW**: `VaultBlacklisted` - Explicit blacklist event for time-based failures
+- **NEW**: `VaultUnblacklisted` - Explicit unblacklist event for vault recovery
+
+#### **Removed Events**
+- **REMOVED**: `VaultAuthGranted` - Redundant with frontend transaction handling
+- **REMOVED**: `VaultAuthRevoked` - State clearing now handled locally in frontend
+- **REMOVED**: `VaultOnboarded` - Covered by asset change events (NewPositionCreated, TokensSwapped)
+- **REMOVED**: `VaultOffboarded` - No on-chain changes, handled locally in frontend
+- **REMOVED**: `VaultRecovered` - Redundant with NewPositionCreated + PositionRebalanced
+
+#### **Impact**
+- **EVENT COUNT**: Reduced from 20 to 15 broadcast events
+- **CLARITY**: Each event now represents unique backend-driven state changes
+- **EFFICIENCY**: Frontend handles user-initiated actions locally without SSE round-trip
+- **COVERAGE**: All recovery scenarios still emit appropriate events
+
+**Status**: ✅ SSE event system optimized
+**Breaking Changes**: None (frontend updated in sync)
+**Impact**: Cleaner event architecture with reduced network traffic
+
 ## [0.14.0] Fail-Together Architecture & Configuration Improvements - 2025-01-23
 
 ### Service Reliability & Configuration
