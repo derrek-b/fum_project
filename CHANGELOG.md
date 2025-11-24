@@ -11,6 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.4.2] - 2025-01-24
+### SSE Event Handler Refinements
+
+Updated automation event handling to align with backend event optimization and improve local state management.
+
+#### **New Event Handlers**
+- **NEW**: `VaultBlacklisted` handler - Sets blacklist state, clears retry state
+- **NEW**: `VaultUnblacklisted` handler - Clears blacklist state
+- **FIXED**: `VaultLoadRecovered` now clears blacklist state (was missing)
+
+#### **Local State Management**
+- **UPDATED**: `removeExecutor` transaction handler clears all automation states locally
+  - Clears executor address
+  - Clears `isBlacklisted` and `blacklistReason`
+  - Clears `isRetrying` and `retryError`
+- **REMOVED**: `VaultAuthRevoked` event handler (state clearing moved to transaction handler)
+
+#### **Event Listener Updates**
+- **REMOVED**: Listeners for `VaultAuthGranted`, `VaultAuthRevoked`, `VaultOnboarded`, `VaultOffboarded`, `VaultRecovered`
+- **ADDED**: `LiquidityAddedToPosition` to refresh trigger events (was missing)
+- **UPDATED**: Refresh trigger events list reduced from 9 to 7 events
+
+#### **Impact**
+- **CLARITY**: User actions handled locally, backend events for system-driven changes only
+- **PERFORMANCE**: Reduced SSE event traffic and faster state updates for user actions
+- **RELIABILITY**: All automation states properly cleared when user disables automation
+
+**Status**: ✅ Event handling optimized
+**Breaking Changes**: None (synchronized with automation service v0.14.1)
+**Impact**: Cleaner event handling with improved responsiveness
+
 ## [0.4.1] - 2025-01-23
 ### Automation Service Connection Monitoring
 

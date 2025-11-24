@@ -274,11 +274,15 @@ export default function VaultDetailPage() {
         const tx = await vaultContract.removeExecutor();
         await tx.wait();
 
-        // Update Redux store with address(0)
+        // Update Redux store - clear executor and all automation states
         dispatch(updateVault({
           vaultAddress,
           vaultData: {
-            executor: "0x0000000000000000000000000000000000000000"
+            executor: "0x0000000000000000000000000000000000000000",
+            isBlacklisted: false,
+            blacklistReason: null,
+            isRetrying: false,
+            retryError: null
           }
         }));
 
