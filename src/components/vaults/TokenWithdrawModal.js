@@ -106,8 +106,8 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
       // Convert amount to token units
       const amountInUnits = ethers.utils.parseUnits(amount, token.decimals);
 
-      // Call withdrawTokens on vault contract
-      const tx = await vaultContract.withdrawTokens(tokenAddress, ownerAddress, amountInUnits);
+      // Call withdrawTokens on vault contract (always withdraws to owner)
+      const tx = await vaultContract.withdrawTokens(tokenAddress, amountInUnits);
 
       await tx.wait();
 

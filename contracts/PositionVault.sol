@@ -30,37 +30,35 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     // Wallet authorized to execute transactions
     address public executor;
 
-    // Positions managed by this vault
-    mapping(uint256 => bool) public managedPositions;
+    // Uniswap Universal Router address (chain-specific, immutable)
+    // Used for validating swap recipient in execute()
+    address public immutable universalRouter;
 
-    // NEW: Enhanced position tracking
-    uint256[] private positionIds;
-    mapping(uint256 => uint256) private positionIdToIndex;
-
-    // NEW: Target tokens and platforms
+    // Target tokens and platforms
     string[] private targetTokens;
     string[] private targetPlatforms;
 
-    // Events for tracking position lifecycle
-    event PositionRegistered(uint256 indexed tokenId, address indexed nftContract);
-    event PositionRemoved(uint256 indexed tokenId, address indexed nftContract);
+    // Events
     event TransactionExecuted(address indexed target, bytes data, bool success);
     event TokensWithdrawn(address indexed token, address indexed to, uint256 amount);
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
     event StrategyChanged(address indexed strategy);
     event ExecutorChanged(address indexed executor, bool indexed isAuthorized);
 
-    // NEW: Events for token and platform updates
+    // Events for token and platform updates
     event TargetTokensUpdated(string[] tokens);
     event TargetPlatformsUpdated(string[] platforms);
 
     /**
      * @notice Constructor
      * @param _owner Address of the vault owner
+     * @param _universalRouter Address of Uniswap Universal Router for this chain
      */
-    constructor(address _owner) {
+    constructor(address _owner, address _universalRouter) {
         require(_owner != address(0), "PositionVault: zero owner address");
+        require(_universalRouter != address(0), "PositionVault: zero router address");
         owner = _owner;
+        universalRouter = _universalRouter;
         strategy = address(0);
         executor = address(0);
     }
@@ -114,6 +112,105 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
+     * @notice Executes swaps via supported routers with security validation
+     * @dev Validates swap commands and recipients based on the target router
+     * @param targets Array of router addresses to call
+     * @param data Array of calldata to send to each router
+     * @return results Array of success flags for each swap
+     *
+     * Supported routers:
+     * - Universal Router: V2/V3 swaps with recipient validation
+     *
+     * Unknown routers will revert.
+     */
+    function swap(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            // Validate based on router type
+            if (targets[i] == universalRouter) {
+                _validateUniversalRouterSwap(data[i]);
+            } else {
+                revert("PositionVault: unsupported router");
+            }
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success);
+
+            require(success, "PositionVault: swap failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Validates Universal Router swap commands
+     * @dev Only allows V2/V3 swap commands and PERMIT2_PERMIT; blocks everything else
+     * @param data The calldata being sent to the Universal Router
+     *
+     * Allowed commands:
+     * - V3_SWAP_EXACT_IN (0x00): Validate recipient = vault
+     * - V3_SWAP_EXACT_OUT (0x01): Validate recipient = vault
+     * - V2_SWAP_EXACT_IN (0x08): Validate recipient = vault
+     * - V2_SWAP_EXACT_OUT (0x09): Validate recipient = vault
+     * - PERMIT2_PERMIT (0x0a): Allowed (no recipient concern)
+     * All other commands are blocked.
+     */
+    function _validateUniversalRouterSwap(bytes calldata data) internal view {
+        require(data.length >= 4, "PositionVault: invalid calldata");
+
+        // Decode the calldata (skip 4-byte selector)
+        (bytes memory commands, bytes[] memory inputs, ) = abi.decode(
+            data[4:],
+            (bytes, bytes[], uint256)
+        );
+
+        for (uint256 i = 0; i < commands.length; i++) {
+            uint8 command = uint8(commands[i]);
+
+            // V3_SWAP_EXACT_IN (0x00) or V3_SWAP_EXACT_OUT (0x01)
+            if (command == 0x00 || command == 0x01) {
+                (address recipient, , , , ) = abi.decode(
+                    inputs[i],
+                    (address, uint256, uint256, bytes, bool)
+                );
+                require(
+                    recipient == address(this),
+                    "PositionVault: swap recipient must be vault"
+                );
+            }
+            // V2_SWAP_EXACT_IN (0x08) or V2_SWAP_EXACT_OUT (0x09)
+            else if (command == 0x08 || command == 0x09) {
+                (address recipient, , , , ) = abi.decode(
+                    inputs[i],
+                    (address, uint256, uint256, address[], bool)
+                );
+                require(
+                    recipient == address(this),
+                    "PositionVault: swap recipient must be vault"
+                );
+            }
+            // PERMIT2_PERMIT (0x0a) - allowed, no recipient validation needed
+            else if (command == 0x0a) {
+                // Allowed
+            }
+            // All other commands are blocked
+            else {
+                revert("PositionVault: command not allowed");
+            }
+        }
+    }
+
+    /**
      * @notice Authorizes a strategy
      * @param _strategy Address of the strategy
      */
@@ -150,73 +247,42 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Withdraws tokens from the vault
+     * @notice Withdraws tokens from the vault to the owner
      * @param token Address of the token to withdraw
-     * @param to Address to send the tokens to
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawTokens(address token, address to, uint256 amount) external onlyOwner nonReentrant {
+    function withdrawTokens(address token, uint256 amount) external onlyAuthorized nonReentrant {
         require(token != address(0), "PositionVault: zero token address");
-        require(to != address(0), "PositionVault: zero recipient address");
 
-        IERC20(token).safeTransfer(to, amount);
+        IERC20(token).safeTransfer(owner, amount);
 
-        emit TokensWithdrawn(token, to, amount);
+        emit TokensWithdrawn(token, owner, amount);
     }
 
     /**
-     * @notice Withdraws a position NFT from the vault
+     * @notice Withdraws a position NFT from the vault to the owner
      * @param nftContract Address of the NFT contract
      * @param tokenId ID of the NFT token
-     * @param to Address to send the NFT to
      */
-    function withdrawPosition(address nftContract, uint256 tokenId, address to) external onlyOwner nonReentrant {
+    function withdrawPosition(address nftContract, uint256 tokenId) external onlyAuthorized nonReentrant {
         require(nftContract != address(0), "PositionVault: zero NFT contract address");
-        require(to != address(0), "PositionVault: zero recipient address");
-        require(managedPositions[tokenId], "PositionVault: position not managed by vault");
 
-        // Transfer the NFT
-        IERC721(nftContract).safeTransferFrom(address(this), to, tokenId);
+        // Transfer the NFT to owner
+        IERC721(nftContract).safeTransferFrom(address(this), owner, tokenId);
 
-        // Remove from tracking array with efficient swap and pop
-        uint256 index = positionIdToIndex[tokenId];
-        if (index < positionIds.length - 1) {
-            // Not the last element - swap with last
-            uint256 lastTokenId = positionIds[positionIds.length - 1];
-            positionIds[index] = lastTokenId;
-            positionIdToIndex[lastTokenId] = index;
-        }
-
-        // Pop last element
-        positionIds.pop();
-
-        // Clean up mappings
-        delete positionIdToIndex[tokenId];
-        delete managedPositions[tokenId];
-
-        emit PositionWithdrawn(tokenId, nftContract, to);
-        emit PositionRemoved(tokenId, nftContract);
+        emit PositionWithdrawn(tokenId, nftContract, owner);
     }
 
     /**
      * @notice Handles the receipt of an NFT
-     * @dev Called by NFT contracts when safeTransferFrom is called
+     * @dev Required for safeTransferFrom compatibility
      */
     function onERC721Received(
         address /*operator*/,
         address /*from*/,
-        uint256 tokenId,
+        uint256 /*tokenId*/,
         bytes calldata /*data*/
-    ) external override returns (bytes4) {
-        // Register this position in our tracking
-        managedPositions[tokenId] = true;
-
-        // Add to position tracking array
-        positionIdToIndex[tokenId] = positionIds.length;
-        positionIds.push(tokenId);
-
-        emit PositionRegistered(tokenId, msg.sender);
-
+    ) external pure override returns (bytes4) {
         return this.onERC721Received.selector;
     }
 
@@ -235,6 +301,14 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
+     * @notice Gets the target tokens for this vault
+     * @return Array of token symbols
+     */
+    function getTargetTokens() external view returns (string[] memory) {
+        return targetTokens;
+    }
+
+    /**
      * @notice Sets the target platforms for this vault
      * @param platforms Array of platform IDs to target
      */
@@ -249,31 +323,11 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Gets the target tokens for this vault
-     * @return Array of token symbols
-     */
-    function getTargetTokens() external view returns (string[] memory) {
-        return targetTokens;
-    }
-
-    /**
      * @notice Gets the target platforms for this vault
      * @return Array of platform IDs
      */
     function getTargetPlatforms() external view returns (string[] memory) {
         return targetPlatforms;
-    }
-
-    /**
-     * @notice DEPRECATED - Do not use. This function will be removed in future versions.
-     * @dev Position IDs are not reliably tracked because Uniswap V3's NonfungiblePositionManager
-     * uses _mint() instead of _safeMint(), so onERC721Received is never called when positions
-     * are created. Use the platform adapter to query positions directly from the NFT contract
-     * (e.g., balanceOf + tokenOfOwnerByIndex on NonfungiblePositionManager).
-     * @return Array of position IDs (unreliable - may not include all positions)
-     */
-    function getPositionIds() external view returns (uint256[] memory) {
-        return positionIds;
     }
 
     /**
@@ -305,6 +359,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.3.3";
+        return "0.4.2";
     }
 }

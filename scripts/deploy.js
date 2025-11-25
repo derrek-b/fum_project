@@ -219,8 +219,14 @@ async function deploy() {
     // Check if the contract has constructor parameters
     let contract;
     if (contractName === "VaultFactory") {
-      // Deploy using the wallet address as the owner parameter
-      contract = await factory.deploy(wallet.address);
+      // Get Universal Router address for this chain
+      const universalRouterAddress = networkConfig.uniswapV3?.universalRouterAddress;
+      if (!universalRouterAddress) {
+        throw new Error(`Universal Router address not configured for chain ${chainId}`);
+      }
+      // Deploy using the wallet address as owner and chain's Universal Router
+      console.log(`Using Universal Router: ${universalRouterAddress}`);
+      contract = await factory.deploy(wallet.address, universalRouterAddress);
     } else {
       // No constructor parameters for other contracts
       contract = await factory.deploy();

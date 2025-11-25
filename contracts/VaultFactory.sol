@@ -10,6 +10,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * @dev Deploys new PositionVault contracts and maintains a registry of them
  */
 contract VaultFactory is Ownable {
+    // Uniswap Universal Router address for this chain (passed to new vaults)
+    address public immutable universalRouter;
+
     // Mapping of user address to their vault addresses
     mapping(address => address[]) public userVaults;
 
@@ -31,8 +34,12 @@ contract VaultFactory is Ownable {
     /**
      * @notice Constructor
      * @param initialOwner The factory owner address
+     * @param _universalRouter Uniswap Universal Router address for this chain
      */
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    constructor(address initialOwner, address _universalRouter) Ownable(initialOwner) {
+        require(_universalRouter != address(0), "VaultFactory: zero router address");
+        universalRouter = _universalRouter;
+    }
 
     /**
      * @notice Creates a new vault for the caller with a required name
@@ -42,8 +49,8 @@ contract VaultFactory is Ownable {
     function createVault(string calldata name) external returns (address vault) {
         require(bytes(name).length > 0, "VaultFactory: vault name cannot be empty");
 
-        // Create new vault with the caller as owner
-        vault = address(new PositionVault(msg.sender));
+        // Create new vault with the caller as owner and chain's Universal Router
+        vault = address(new PositionVault(msg.sender, universalRouter));
 
         // Register vault in mappings
         userVaults[msg.sender].push(vault);
@@ -131,6 +138,6 @@ contract VaultFactory is Ownable {
     }
 
     function getVersion() external pure returns (string memory) {
-        return "0.3.0";
+        return "0.4.0";
     }
 }

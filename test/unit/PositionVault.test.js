@@ -1,13 +1,15 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 0.3.2", function() {
+describe("PositionVault - 0.4.2", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
+  let MockUniversalRouter;
   let vault;
   let nft;
   let token;
+  let router;
   let owner;
   let user1;
   let user2;
@@ -18,9 +20,14 @@ describe("PositionVault - 0.3.2", function() {
     // Get signers
     [owner, user1, user2, strategyContract, executorWallet] = await ethers.getSigners();
 
-    // Deploy the test contracts
+    // Deploy mock Universal Router first (needed for vault)
+    MockUniversalRouter = await ethers.getContractFactory("MockUniversalRouter");
+    router = await MockUniversalRouter.deploy();
+    await router.waitForDeployment();
+
+    // Deploy the vault with owner and router
     PositionVault = await ethers.getContractFactory("PositionVault");
-    vault = await PositionVault.deploy(owner.address);
+    vault = await PositionVault.deploy(owner.address, await router.getAddress());
     await vault.waitForDeployment();
 
     // Deploy mock NFT contract
@@ -40,154 +47,76 @@ describe("PositionVault - 0.3.2", function() {
     await token.transfer(await vault.getAddress(), ethers.parseEther("100"));
   });
 
-  // All existing tests remain the same
-
-  // Add new tests for position tracking
-  describe("Position ID Tracking", function() {
-    // Use BigInt for token IDs to match contract return values
-    const tokenIds = [BigInt(1), BigInt(2), BigInt(3)];
+  // Test for position withdrawal security
+  describe("Position Withdrawal", function() {
+    const tokenId = BigInt(1);
 
     beforeEach(async function() {
-      // Create multiple position NFTs
-      for (let i = 0; i < tokenIds.length; i++) {
-        await nft.createPosition(
-          owner.address,
-          await token.getAddress(),
-          ethers.ZeroAddress,
-          3000,
-          -10000,
-          10000,
-          1000000
-        );
+      // Create a position NFT
+      await nft.createPosition(
+        owner.address,
+        await token.getAddress(),
+        ethers.ZeroAddress,
+        3000,
+        -10000,
+        10000,
+        1000000
+      );
 
-        // Approve vault to transfer the NFT
-        await nft.approve(await vault.getAddress(), tokenIds[i]);
-      }
+      // Transfer NFT to vault
+      await nft.approve(await vault.getAddress(), tokenId);
+      await nft["safeTransferFrom(address,address,uint256)"](
+        owner.address,
+        await vault.getAddress(),
+        tokenId
+      );
     });
 
-    it("should track position IDs correctly", async function() {
-      const vaultAddress = await vault.getAddress();
+    it("should withdraw position to owner address only", async function() {
+      // Withdraw position - should go to owner
+      await vault.withdrawPosition(await nft.getAddress(), tokenId);
 
-      // Initial state should be empty
-      let positionIds = await vault.getPositionIds();
-      expect(positionIds).to.be.an('array').that.is.empty;
-
-      // Transfer first NFT
-      await nft["safeTransferFrom(address,address,uint256)"](
-        owner.address,
-        vaultAddress,
-        tokenIds[0]
-      );
-
-      // Check position is tracked
-      positionIds = await vault.getPositionIds();
-      expect(positionIds.length).to.equal(1);
-      expect(positionIds[0]).to.equal(tokenIds[0]);
-
-      // Transfer second NFT
-      await nft["safeTransferFrom(address,address,uint256)"](
-        owner.address,
-        vaultAddress,
-        tokenIds[1]
-      );
-
-      // Check both positions are tracked - use BigInt-aware comparison
-      positionIds = await vault.getPositionIds();
-      expect(positionIds.length).to.equal(2);
-
-      // Check each position ID individually
-      expect(positionIds).to.deep.include(tokenIds[0]);
-      expect(positionIds).to.deep.include(tokenIds[1]);
+      // Verify NFT went to owner
+      expect(await nft.ownerOf(tokenId)).to.equal(owner.address);
     });
 
-    it("should handle position removal correctly", async function() {
-      const vaultAddress = await vault.getAddress();
-
-      // Transfer all NFTs to vault
-      for (const id of tokenIds) {
-        await nft["safeTransferFrom(address,address,uint256)"](
-          owner.address,
-          vaultAddress,
-          id
-        );
-      }
-
-      // Check all positions are tracked
-      let positionIds = await vault.getPositionIds();
-      expect(positionIds.length).to.equal(tokenIds.length);
-
-      // Withdraw the middle position
-      await vault.withdrawPosition(await nft.getAddress(), tokenIds[1], user1.address);
-
-      // Check position tracking updated correctly - use BigInt comparison
-      positionIds = await vault.getPositionIds();
-      expect(positionIds.length).to.equal(tokenIds.length - 1);
-
-      // Check each position individually
-      expect(positionIds).to.deep.include(tokenIds[0]);
-      expect(positionIds).to.deep.include(tokenIds[2]);
-      expect(positionIds).to.not.deep.include(tokenIds[1]);
-
-      // Verify NFT ownership
-      expect(await nft.ownerOf(tokenIds[1])).to.equal(user1.address);
+    it("should emit PositionWithdrawn event with owner as recipient", async function() {
+      await expect(vault.withdrawPosition(await nft.getAddress(), tokenId))
+        .to.emit(vault, "PositionWithdrawn")
+        .withArgs(tokenId, await nft.getAddress(), owner.address);
     });
 
-    it("should handle removing all positions correctly", async function() {
-      const vaultAddress = await vault.getAddress();
-
-      // Transfer all NFTs to vault
-      for (const id of tokenIds) {
-        await nft["safeTransferFrom(address,address,uint256)"](
-          owner.address,
-          vaultAddress,
-          id
-        );
-      }
-
-      // Withdraw all positions
-      for (const id of tokenIds) {
-        await vault.withdrawPosition(await nft.getAddress(), id, user1.address);
-      }
-
-      // Check no positions remain
-      const positionIds = await vault.getPositionIds();
-      expect(positionIds).to.be.an('array').that.is.empty;
+    it("should only allow authorized callers to withdraw positions", async function() {
+      await expect(
+        vault.connect(user1).withdrawPosition(await nft.getAddress(), tokenId)
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
     });
 
-    it("should maintain correct position tracking after multiple operations", async function() {
-      const vaultAddress = await vault.getAddress();
+    it("should allow executor to withdraw position to owner", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
 
-      // Transfer NFTs 0 and 1
-      await nft["safeTransferFrom(address,address,uint256)"](
-        owner.address,
-        vaultAddress,
-        tokenIds[0]
-      );
+      // Executor withdraws position
+      await vault.connect(executorWallet).withdrawPosition(await nft.getAddress(), tokenId);
 
-      await nft["safeTransferFrom(address,address,uint256)"](
-        owner.address,
-        vaultAddress,
-        tokenIds[1]
-      );
+      // Verify NFT went to owner (not executor)
+      expect(await nft.ownerOf(tokenId)).to.equal(owner.address);
+    });
 
-      // Withdraw NFT 0
-      await vault.withdrawPosition(await nft.getAddress(), tokenIds[0], user1.address);
+    it("should emit PositionWithdrawn with owner as recipient when executor calls", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
 
-      // Add NFT 2
-      await nft["safeTransferFrom(address,address,uint256)"](
-        owner.address,
-        vaultAddress,
-        tokenIds[2]
-      );
+      // Verify event shows owner as recipient
+      await expect(vault.connect(executorWallet).withdrawPosition(await nft.getAddress(), tokenId))
+        .to.emit(vault, "PositionWithdrawn")
+        .withArgs(tokenId, await nft.getAddress(), owner.address);
+    });
 
-      // Check correct positions are tracked - use BigInt-aware comparison
-      const positionIds = await vault.getPositionIds();
-      expect(positionIds.length).to.equal(2);
-
-      // Check each position individually
-      expect(positionIds).to.deep.include(tokenIds[1]);
-      expect(positionIds).to.deep.include(tokenIds[2]);
-      expect(positionIds).to.not.deep.include(tokenIds[0]);
+    it("should reject zero NFT contract address", async function() {
+      await expect(
+        vault.withdrawPosition(ethers.ZeroAddress, tokenId)
+      ).to.be.revertedWith("PositionVault: zero NFT contract address");
     });
   });
 
@@ -283,7 +212,74 @@ describe("PositionVault - 0.3.2", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("0.3.3");
+      expect(await vault.getVersion()).to.equal("0.4.2");
+    });
+  });
+
+  // Test for token withdrawal security
+  describe("Token Withdrawal", function() {
+    it("should withdraw tokens to owner address only", async function() {
+      const vaultAddress = await vault.getAddress();
+      const initialOwnerBalance = await token.balanceOf(owner.address);
+      const vaultBalance = await token.balanceOf(vaultAddress);
+
+      // Withdraw tokens - should go to owner
+      await vault.withdrawTokens(await token.getAddress(), vaultBalance);
+
+      // Verify tokens went to owner
+      const finalOwnerBalance = await token.balanceOf(owner.address);
+      expect(finalOwnerBalance).to.equal(initialOwnerBalance + vaultBalance);
+
+      // Verify vault is empty
+      expect(await token.balanceOf(vaultAddress)).to.equal(0);
+    });
+
+    it("should emit TokensWithdrawn event with owner as recipient", async function() {
+      const withdrawAmount = ethers.parseEther("10");
+
+      await expect(vault.withdrawTokens(await token.getAddress(), withdrawAmount))
+        .to.emit(vault, "TokensWithdrawn")
+        .withArgs(await token.getAddress(), owner.address, withdrawAmount);
+    });
+
+    it("should only allow authorized callers to withdraw tokens", async function() {
+      await expect(
+        vault.connect(user1).withdrawTokens(await token.getAddress(), ethers.parseEther("10"))
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to withdraw tokens to owner", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      const withdrawAmount = ethers.parseEther("10");
+      const initialOwnerBalance = await token.balanceOf(owner.address);
+      const initialExecutorBalance = await token.balanceOf(executorWallet.address);
+
+      // Executor withdraws tokens
+      await vault.connect(executorWallet).withdrawTokens(await token.getAddress(), withdrawAmount);
+
+      // Verify tokens went to owner (not executor)
+      expect(await token.balanceOf(owner.address)).to.equal(initialOwnerBalance + withdrawAmount);
+      expect(await token.balanceOf(executorWallet.address)).to.equal(initialExecutorBalance);
+    });
+
+    it("should emit TokensWithdrawn with owner as recipient when executor calls", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      const withdrawAmount = ethers.parseEther("10");
+
+      // Verify event shows owner as recipient
+      await expect(vault.connect(executorWallet).withdrawTokens(await token.getAddress(), withdrawAmount))
+        .to.emit(vault, "TokensWithdrawn")
+        .withArgs(await token.getAddress(), owner.address, withdrawAmount);
+    });
+
+    it("should reject zero token address", async function() {
+      await expect(
+        vault.withdrawTokens(ethers.ZeroAddress, ethers.parseEther("10"))
+      ).to.be.revertedWith("PositionVault: zero token address");
     });
   });
 
@@ -418,6 +414,407 @@ describe("PositionVault - 0.3.2", function() {
       // Verify signature through vault
       const result = await vault.isValidSignature(digest, signature);
       expect(result).to.equal(MAGICVALUE);
+    });
+  });
+
+  // Test for Universal Router configuration
+  describe("Universal Router Configuration", function() {
+    it("should have universalRouter set from constructor", async function() {
+      expect(await vault.universalRouter()).to.equal(await router.getAddress());
+    });
+
+    it("should reject deployment with zero router address", async function() {
+      const PositionVaultFactory = await ethers.getContractFactory("PositionVault");
+      await expect(
+        PositionVaultFactory.deploy(owner.address, ethers.ZeroAddress)
+      ).to.be.revertedWith("PositionVault: zero router address");
+    });
+  });
+
+  // Test for swap() function with command validation
+  describe("Swap Function", function() {
+    // Universal Router execute selector: 0x3593564c
+    const EXECUTE_SELECTOR = "0x3593564c";
+
+    // Command IDs
+    const CMD = {
+      V3_SWAP_EXACT_IN: 0x00,
+      V3_SWAP_EXACT_OUT: 0x01,
+      SWEEP: 0x04,
+      TRANSFER: 0x05,
+      PAY_PORTION: 0x06,
+      V2_SWAP_EXACT_IN: 0x08,
+      V2_SWAP_EXACT_OUT: 0x09,
+      PERMIT2_PERMIT: 0x0a,
+      WRAP_ETH: 0x0b,
+      UNWRAP_WETH: 0x0c
+    };
+
+    // Helper to encode Universal Router execute calldata
+    function encodeRouterExecute(commands, inputs, deadline = Math.floor(Date.now() / 1000) + 3600) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const commandBytes = ethers.hexlify(Uint8Array.from(commands));
+      const encoded = abiCoder.encode(
+        ["bytes", "bytes[]", "uint256"],
+        [commandBytes, inputs, deadline]
+      );
+      return EXECUTE_SELECTOR + encoded.slice(2);
+    }
+
+    // Helper to encode V3 swap input
+    function encodeV3SwapInput(recipient, amountIn, amountOutMin, path, payerIsUser) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      return abiCoder.encode(
+        ["address", "uint256", "uint256", "bytes", "bool"],
+        [recipient, amountIn, amountOutMin, path, payerIsUser]
+      );
+    }
+
+    // Helper to encode V2 swap input
+    function encodeV2SwapInput(recipient, amountIn, amountOutMin, path, payerIsUser) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      return abiCoder.encode(
+        ["address", "uint256", "uint256", "address[]", "bool"],
+        [recipient, amountIn, amountOutMin, path, payerIsUser]
+      );
+    }
+
+    // Helper to encode generic input (for blocked commands)
+    function encodeGenericInput(addr1, addr2, value) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      return abiCoder.encode(["address", "address", "uint256"], [addr1, addr2, value]);
+    }
+
+    // Mock swap path
+    function createMockPath(tokenIn, tokenOut) {
+      const fee = "000bb8";
+      return tokenIn.toLowerCase() + fee + tokenOut.toLowerCase().slice(2);
+    }
+
+    describe("Authorization", function() {
+      it("should allow owner to call swap", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        // Should not revert with authorization error
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: caller is not authorized");
+      });
+
+      it("should allow executor to call swap", async function() {
+        await vault.setExecutor(executorWallet.address);
+
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.connect(executorWallet).swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: caller is not authorized");
+      });
+
+      it("should reject unauthorized caller", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.connect(user1).swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: caller is not authorized");
+      });
+
+      it("should reject unsupported router", async function() {
+        const vaultAddress = await vault.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        // Use a random address as router
+        await expect(vault.swap([user2.address], [calldata]))
+          .to.be.revertedWith("PositionVault: unsupported router");
+      });
+    });
+
+    describe("V3 Swap Commands (0x00, 0x01)", function() {
+      it("should allow V3_SWAP_EXACT_IN with vault as recipient", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject V3_SWAP_EXACT_IN with non-vault recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(user1.address, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject V3_SWAP_EXACT_OUT with non-vault recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(user1.address, 1000, 1100, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_OUT], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+    });
+
+    describe("V2 Swap Commands (0x08, 0x09)", function() {
+      it("should allow V2_SWAP_EXACT_IN with vault as recipient", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = [tokenAddress, tokenAddress];
+
+        const input = encodeV2SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject V2_SWAP_EXACT_IN with non-vault recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = [tokenAddress, tokenAddress];
+
+        const input = encodeV2SwapInput(user1.address, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject V2_SWAP_EXACT_OUT with non-vault recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = [tokenAddress, tokenAddress];
+
+        const input = encodeV2SwapInput(user1.address, 1000, 1100, path, true);
+        const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_OUT], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+    });
+
+    describe("PERMIT2_PERMIT Command (0x0a)", function() {
+      it("should allow PERMIT2_PERMIT command", async function() {
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const mockPermitInput = abiCoder.encode(
+          ["tuple(tuple(address,uint160,uint48,uint48),address,uint256)", "bytes"],
+          [[[ethers.ZeroAddress, 0, 0, 0], ethers.ZeroAddress, 0], "0x"]
+        );
+        const calldata = encodeRouterExecute([CMD.PERMIT2_PERMIT], [mockPermitInput]);
+
+        // Should not revert with command not allowed
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: command not allowed");
+      });
+    });
+
+    describe("Blocked Commands", function() {
+      it("should reject SWEEP command (0x04)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+
+        const input = encodeGenericInput(tokenAddress, vaultAddress, 0);
+        const calldata = encodeRouterExecute([CMD.SWEEP], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should reject TRANSFER command (0x05)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+
+        const input = encodeGenericInput(tokenAddress, vaultAddress, 1000);
+        const calldata = encodeRouterExecute([CMD.TRANSFER], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should reject PAY_PORTION command (0x06)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+
+        const input = encodeGenericInput(tokenAddress, vaultAddress, 5000);
+        const calldata = encodeRouterExecute([CMD.PAY_PORTION], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should reject WRAP_ETH command (0x0b)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const input = abiCoder.encode(["address", "uint256"], [vaultAddress, ethers.parseEther("1")]);
+        const calldata = encodeRouterExecute([CMD.WRAP_ETH], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should reject UNWRAP_WETH command (0x0c)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const input = abiCoder.encode(["address", "uint256"], [vaultAddress, ethers.parseEther("1")]);
+        const calldata = encodeRouterExecute([CMD.UNWRAP_WETH], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should reject unknown command (0x10 V4_SWAP)", async function() {
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const input = abiCoder.encode(["bytes", "bytes[]"], ["0x", []]);
+        const calldata = encodeRouterExecute([0x10], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+    });
+
+    describe("Multi-command Validation", function() {
+      it("should validate all commands in a single router call", async function() {
+        const vaultAddress = await vault.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+        const routerAddress = await router.getAddress();
+
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const permitInput = abiCoder.encode(
+          ["tuple(tuple(address,uint160,uint48,uint48),address,uint256)", "bytes"],
+          [[[tokenAddress, 1000, Math.floor(Date.now()/1000) + 3600, 0], routerAddress, Math.floor(Date.now()/1000) + 3600], "0x"]
+        );
+        const swapInput = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+
+        const calldata = encodeRouterExecute(
+          [CMD.PERMIT2_PERMIT, CMD.V3_SWAP_EXACT_IN],
+          [permitInput, swapInput]
+        );
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault:");
+      });
+
+      it("should reject if any command has invalid recipient", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const validSwap = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const invalidSwap = encodeV3SwapInput(user1.address, 500, 450, path, true);
+
+        const calldata = encodeRouterExecute(
+          [CMD.V3_SWAP_EXACT_IN, CMD.V3_SWAP_EXACT_IN],
+          [validSwap, invalidSwap]
+        );
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject if any command is blocked", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const validSwap = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const blockedCmd = encodeGenericInput(tokenAddress, vaultAddress, 0);
+
+        const calldata = encodeRouterExecute(
+          [CMD.V3_SWAP_EXACT_IN, CMD.SWEEP],
+          [validSwap, blockedCmd]
+        );
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: command not allowed");
+      });
+
+      it("should execute multiple swap transactions in one call", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Two separate swap calldatas
+        const swap1Input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const swap1Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap1Input]);
+
+        const swap2Input = encodeV3SwapInput(vaultAddress, 2000, 1800, path, true);
+        const swap2Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap2Input]);
+
+        // Should pass validation for both (router will fail but that's ok)
+        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata]))
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+
+      it("should reject batched swaps if any has invalid recipient", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // First swap invalid recipient (will fail validation before any execution)
+        const swap1Input = encodeV3SwapInput(user1.address, 1000, 900, path, true);
+        const swap1Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap1Input]);
+
+        const swap2Input = encodeV3SwapInput(vaultAddress, 2000, 1800, path, true);
+        const swap2Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap2Input]);
+
+        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata]))
+          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+      });
+    });
+
+    describe("Execute function unchanged", function() {
+      it("should still allow execute for non-router calls", async function() {
+        const tokenAddress = await token.getAddress();
+        const calldata = token.interface.encodeFunctionData("transfer", [user1.address, 1]);
+
+        await expect(vault.execute([tokenAddress], [calldata]))
+          .to.not.be.reverted;
+      });
     });
   });
 });

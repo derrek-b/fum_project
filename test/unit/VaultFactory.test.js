@@ -1,10 +1,12 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("VaultFactory - 0.3.0", function() {
+describe("VaultFactory - 0.4.0", function() {
   let VaultFactory;
   let PositionVault;
+  let MockUniversalRouter;
   let factory;
+  let router;
   let owner;
   let user1;
   let user2;
@@ -13,12 +15,17 @@ describe("VaultFactory - 0.3.0", function() {
     // Get signers
     [owner, user1, user2] = await ethers.getSigners();
 
+    // Deploy mock Universal Router
+    MockUniversalRouter = await ethers.getContractFactory("MockUniversalRouter");
+    router = await MockUniversalRouter.deploy();
+    await router.waitForDeployment();
+
     // Deploy the PositionVault contract first (we need its bytecode for the factory)
     PositionVault = await ethers.getContractFactory("PositionVault");
 
-    // Deploy the VaultFactory contract
+    // Deploy the VaultFactory contract with owner and router
     VaultFactory = await ethers.getContractFactory("VaultFactory");
-    factory = await VaultFactory.deploy(owner.address);
+    factory = await VaultFactory.deploy(owner.address, await router.getAddress());
     await factory.waitForDeployment();
   });
 
@@ -48,6 +55,9 @@ describe("VaultFactory - 0.3.0", function() {
       // Verify the vault contract has the correct owner
       const vault = await ethers.getContractAt("PositionVault", vaultAddress);
       expect(await vault.owner()).to.equal(user1.address);
+
+      // Verify the vault has the correct Universal Router
+      expect(await vault.universalRouter()).to.equal(await router.getAddress());
     });
 
     it("should allow a user to create multiple vaults", async function() {

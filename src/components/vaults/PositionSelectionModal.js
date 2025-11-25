@@ -186,13 +186,12 @@ export default function PositionSelectionModal({
           );
           tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
         } else {
-          // Remove: Call vault's withdrawPosition method
+          // Remove: Call vault's withdrawPosition method (always withdraws to owner)
           const vaultContract = getVaultContract(vault.address, provider);
           const vaultWithSigner = vaultContract.connect(signer);
           tx = await vaultWithSigner.withdrawPosition(
             platformInfo.positionManagerAddress,
-            positionId,
-            address
+            positionId
           );
         }
 
@@ -283,13 +282,12 @@ export default function PositionSelectionModal({
               );
               tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
             } else {
-              // Remove: Call vault's withdrawPosition method
+              // Remove: Call vault's withdrawPosition method (always withdraws to owner)
               const vaultContract = getVaultContract(vault.address, provider);
               const vaultWithSigner = vaultContract.connect(signer);
               tx = await vaultWithSigner.withdrawPosition(
                 platformInfo.positionManagerAddress,
-                positionId,
-                address
+                positionId
               );
             }
 
