@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.22.2] - 2025-11-23
 
+### Changed
+- **Contract artifacts updated** (2025-11-26): Rebuilt ABIs and bytecode for PositionVault v0.5.0 security refactor
+  - New constrained functions: `swap()`, `approve()`, `mint()`, `increaseLiquidity()`, `decreaseLiquidity()`, `collect()`, `burn()`
+  - Updated test setup for new contract structure
+
 ### Fixed
 - **Runtime API key construction for Arbitrum RPC**: Fixed ESM import timing issue where `NEXT_PUBLIC_ALCHEMY_API_KEY` was undefined at config load time
   - **Root Cause**: Environment variables in template literals are evaluated at module import time, before `dotenv.config()` runs in ESM

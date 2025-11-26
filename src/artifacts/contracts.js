@@ -2447,6 +2447,21 @@
             "internalType": "address",
             "name": "_owner",
             "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_universalRouter",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_permit2",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_nonfungiblePositionManager",
+            "type": "address"
           }
         ],
         "stateMutability": "nonpayable",
@@ -2512,44 +2527,6 @@
           }
         ],
         "name": "ExecutorChanged",
-        "type": "event"
-      },
-      {
-        "anonymous": false,
-        "inputs": [
-          {
-            "indexed": true,
-            "internalType": "uint256",
-            "name": "tokenId",
-            "type": "uint256"
-          },
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "nftContract",
-            "type": "address"
-          }
-        ],
-        "name": "PositionRegistered",
-        "type": "event"
-      },
-      {
-        "anonymous": false,
-        "inputs": [
-          {
-            "indexed": true,
-            "internalType": "uint256",
-            "name": "tokenId",
-            "type": "uint256"
-          },
-          {
-            "indexed": true,
-            "internalType": "address",
-            "name": "nftContract",
-            "type": "address"
-          }
-        ],
-        "name": "PositionRemoved",
         "type": "event"
       },
       {
@@ -2661,10 +2638,112 @@
             "internalType": "bool",
             "name": "success",
             "type": "bool"
+          },
+          {
+            "indexed": false,
+            "internalType": "string",
+            "name": "txType",
+            "type": "string"
           }
         ],
         "name": "TransactionExecuted",
         "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "approve",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "burn",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "collect",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "decreaseLiquidity",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
       },
       {
         "inputs": [
@@ -2698,19 +2777,6 @@
             "internalType": "address",
             "name": "",
             "type": "address"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [],
-        "name": "getPositionIds",
-        "outputs": [
-          {
-            "internalType": "uint256[]",
-            "name": "",
-            "type": "uint256[]"
           }
         ],
         "stateMutability": "view",
@@ -2758,6 +2824,30 @@
       {
         "inputs": [
           {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "increaseLiquidity",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
             "internalType": "bytes32",
             "name": "hash",
             "type": "bytes32"
@@ -2782,17 +2872,35 @@
       {
         "inputs": [
           {
-            "internalType": "uint256",
-            "name": "",
-            "type": "uint256"
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
           }
         ],
-        "name": "managedPositions",
+        "name": "mint",
         "outputs": [
           {
-            "internalType": "bool",
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "nonfungiblePositionManager",
+        "outputs": [
+          {
+            "internalType": "address",
             "name": "",
-            "type": "bool"
+            "type": "address"
           }
         ],
         "stateMutability": "view",
@@ -2812,7 +2920,7 @@
           },
           {
             "internalType": "uint256",
-            "name": "tokenId",
+            "name": "",
             "type": "uint256"
           },
           {
@@ -2829,12 +2937,25 @@
             "type": "bytes4"
           }
         ],
-        "stateMutability": "nonpayable",
+        "stateMutability": "pure",
         "type": "function"
       },
       {
         "inputs": [],
         "name": "owner",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "permit2",
         "outputs": [
           {
             "internalType": "address",
@@ -2927,6 +3048,43 @@
       {
         "inputs": [
           {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          }
+        ],
+        "name": "swap",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "universalRouter",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
             "internalType": "address",
             "name": "nftContract",
             "type": "address"
@@ -2935,11 +3093,6 @@
             "internalType": "uint256",
             "name": "tokenId",
             "type": "uint256"
-          },
-          {
-            "internalType": "address",
-            "name": "to",
-            "type": "address"
           }
         ],
         "name": "withdrawPosition",
@@ -2952,11 +3105,6 @@
           {
             "internalType": "address",
             "name": "token",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "to",
             "type": "address"
           },
           {
@@ -2984,6 +3132,21 @@
           {
             "internalType": "address",
             "name": "initialOwner",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_universalRouter",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_permit2",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_nonfungiblePositionManager",
             "type": "address"
           }
         ],
@@ -3238,7 +3401,33 @@
       },
       {
         "inputs": [],
+        "name": "nonfungiblePositionManager",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
         "name": "owner",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "permit2",
         "outputs": [
           {
             "internalType": "address",
@@ -3267,6 +3456,19 @@
         "name": "transferOwnership",
         "outputs": [],
         "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "universalRouter",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       },
       {

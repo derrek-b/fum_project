@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getContract } from './ganache-config.js';
 import contractsData from '../../dist/artifacts/contracts.js';
+import { getChainConfig } from '../../dist/helpers/chainHelpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -149,8 +150,20 @@ export async function deployFUMContracts(deployer, config = {}) {
     // Deploy BatchExecutor
     contracts.batchExecutor = await deployContract(deployer, 'BatchExecutor');
 
-    // Deploy VaultFactory with owner address
-    contracts.vaultFactory = await deployContract(deployer, 'VaultFactory', [deployer.address]);
+    // Get protocol addresses for the test chain (1337 is a fork of Arbitrum)
+    const chainConfig = getChainConfig(1337);
+    const universalRouterAddress = chainConfig.platformAddresses.uniswapV3.universalRouterAddress;
+    const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
+    // Permit2 canonical address - same on all chains
+    const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+    // Deploy VaultFactory with owner address and protocol addresses
+    contracts.vaultFactory = await deployContract(deployer, 'VaultFactory', [
+      deployer.address,
+      universalRouterAddress,
+      permit2Address,
+      positionManagerAddress
+    ]);
 
     // Deploy strategies (no constructor args)
     contracts.parrisIsland = await deployContract(deployer, 'ParrisIslandStrategy');
