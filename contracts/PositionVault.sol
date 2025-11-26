@@ -47,7 +47,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     string[] private targetPlatforms;
 
     // Events
-    event TransactionExecuted(address indexed target, bytes data, bool success);
+    // txType: "any" (execute), "swap", "approval", "mint", "addliq", "subliq", "collect", "burn"
+    event TransactionExecuted(address indexed target, bytes data, bool success, string txType);
     event TokensWithdrawn(address indexed token, address indexed to, uint256 amount);
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
     event StrategyChanged(address indexed strategy);
@@ -56,9 +57,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     // Events for token and platform updates
     event TargetTokensUpdated(string[] tokens);
     event TargetPlatformsUpdated(string[] platforms);
-
-    // Event for token approvals
-    event TokenApproved(address indexed token, address indexed spender, uint256 amount);
 
     /**
      * @notice Constructor
@@ -105,14 +103,16 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Executes a batch of transactions
+     * @notice Executes a batch of arbitrary transactions (owner only)
+     * @dev Used for owner-initiated actions like strategy configuration
+     *      Executor cannot use this function - use specific functions instead
      * @param targets Array of contract addresses to call
      * @param data Array of calldata to send to each target
      * @return results Array of execution success flags
      */
     function execute(address[] calldata targets, bytes[] calldata data)
         external
-        onlyAuthorized
+        onlyOwner
         nonReentrant
         returns (bool[] memory results)
     {
@@ -124,7 +124,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
-            emit TransactionExecuted(targets[i], data[i], success);
+            emit TransactionExecuted(targets[i], data[i], success, "any");
 
             // If any transaction fails, revert the entire batch
             require(success, "PositionVault: transaction failed");
@@ -166,7 +166,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
-            emit TransactionExecuted(targets[i], data[i], success);
+            emit TransactionExecuted(targets[i], data[i], success, "swap");
 
             require(success, "PositionVault: swap failed");
         }
@@ -303,8 +303,12 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             require(targets[i] != address(0), "PositionVault: zero token address");
             require(data[i].length >= 68, "PositionVault: invalid approval data");
 
+            // Validate selector is approve(address,uint256) = 0x095ea7b3
+            bytes4 selector = bytes4(data[i][:4]);
+            require(selector == 0x095ea7b3, "PositionVault: not an approve call");
+
             // Decode spender from ERC20.approve calldata (skip 4-byte selector)
-            (address spender, uint256 amount) = abi.decode(data[i][4:], (address, uint256));
+            (address spender, ) = abi.decode(data[i][4:], (address, uint256));
 
             require(
                 spender == permit2 || spender == nonfungiblePositionManager,
@@ -314,9 +318,250 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
-            emit TokenApproved(targets[i], spender, amount);
+            emit TransactionExecuted(targets[i], data[i], success, "approval");
 
             require(success, "PositionVault: approval failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Mints new liquidity positions via NonfungiblePositionManager
+     * @dev Only allows mint calls to the hardcoded NonfungiblePositionManager address
+     *      Validates that the recipient of the minted NFT is the vault
+     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @param data Array of encoded mint calls
+     * @return results Array of success flags for each operation
+     *
+     * MintParams recipient is at offset 292 (4-byte selector + 9 * 32-byte params)
+     */
+    function mint(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                targets[i] == nonfungiblePositionManager,
+                "PositionVault: invalid target"
+            );
+
+            // Validate mint call: selector 0x88316456, recipient at offset 292
+            require(data[i].length >= 356, "PositionVault: invalid mint data");
+            bytes4 selector = bytes4(data[i][:4]);
+            require(selector == 0x88316456, "PositionVault: not a mint call");
+            address recipient = abi.decode(data[i][292:324], (address));
+            require(recipient == address(this), "PositionVault: mint recipient must be vault");
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "mint");
+
+            require(success, "PositionVault: mint failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Increases liquidity in existing positions via NonfungiblePositionManager
+     * @dev Only allows increaseLiquidity calls to the hardcoded NonfungiblePositionManager address
+     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @param data Array of encoded increaseLiquidity calls
+     * @return results Array of success flags for each operation
+     */
+    function increaseLiquidity(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                targets[i] == nonfungiblePositionManager,
+                "PositionVault: invalid target"
+            );
+
+            // Validate selector is increaseLiquidity(IncreaseLiquidityParams) = 0x219f5d17
+            require(data[i].length >= 4, "PositionVault: invalid calldata");
+            bytes4 selector = bytes4(data[i][:4]);
+            require(selector == 0x219f5d17, "PositionVault: not an increaseLiquidity call");
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "addliq");
+
+            require(success, "PositionVault: increaseLiquidity failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Decreases liquidity and collects tokens from positions via NonfungiblePositionManager
+     * @dev Only allows multicall to the hardcoded NonfungiblePositionManager address
+     *      Validates that inner collect() calls have the vault as recipient
+     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @param data Array of encoded multicall data (batching decreaseLiquidity + collect)
+     * @return results Array of success flags for each operation
+     *
+     * Only allows multicall (0xac9650d8) containing:
+     * - decreaseLiquidity (0x0c49ccbe): No recipient validation needed
+     * - collect (0xfc6f7865): Validates recipient = vault (offset 36)
+     */
+    function decreaseLiquidity(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                targets[i] == nonfungiblePositionManager,
+                "PositionVault: invalid target"
+            );
+
+            // Validate multicall selector (0xac9650d8)
+            require(data[i].length >= 4, "PositionVault: invalid calldata");
+            bytes4 selector = bytes4(data[i][:4]);
+            require(selector == 0xac9650d8, "PositionVault: must be multicall");
+
+            // Validate each inner call
+            bytes[] memory innerCalls = abi.decode(data[i][4:], (bytes[]));
+            for (uint256 j = 0; j < innerCalls.length; j++) {
+                bytes memory innerCall = innerCalls[j];
+                require(innerCall.length >= 4, "PositionVault: invalid inner calldata");
+
+                bytes4 innerSelector;
+                assembly {
+                    innerSelector := mload(add(innerCall, 32))
+                }
+
+                // decreaseLiquidity (0x0c49ccbe) - allowed
+                if (innerSelector == 0x0c49ccbe) {
+                    continue;
+                }
+                // collect (0xfc6f7865) - validate recipient
+                if (innerSelector == 0xfc6f7865) {
+                    require(innerCall.length >= 68, "PositionVault: invalid collect data");
+                    address recipient;
+                    assembly {
+                        recipient := mload(add(innerCall, 68))
+                    }
+                    require(recipient == address(this), "PositionVault: collect recipient must be vault");
+                    continue;
+                }
+                // All other selectors blocked
+                revert("PositionVault: function not allowed in multicall");
+            }
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "subliq");
+
+            require(success, "PositionVault: decreaseLiquidity failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Collects fees from positions via NonfungiblePositionManager
+     * @dev Only allows collect calls to the hardcoded NonfungiblePositionManager address
+     *      Validates that collect recipient is the vault
+     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @param data Array of encoded collect calls
+     * @return results Array of success flags for each operation
+     *
+     * CollectParams recipient is at offset 36 (4-byte selector + 32-byte tokenId)
+     */
+    function collect(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                targets[i] == nonfungiblePositionManager,
+                "PositionVault: invalid target"
+            );
+
+            // Validate collect call: selector 0xfc6f7865, recipient at offset 36
+            require(data[i].length >= 68, "PositionVault: invalid collect data");
+            bytes4 selector = bytes4(data[i][:4]);
+            require(selector == 0xfc6f7865, "PositionVault: not a collect call");
+            address recipient = abi.decode(data[i][36:68], (address));
+            require(recipient == address(this), "PositionVault: collect recipient must be vault");
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "collect");
+
+            require(success, "PositionVault: collect failed");
+        }
+
+        return results;
+    }
+
+    /**
+     * @notice Burns empty position NFTs via NonfungiblePositionManager
+     * @dev Only allows burn(uint256) calls to the hardcoded NonfungiblePositionManager address
+     *      Position must have 0 liquidity and 0 owed tokens to burn
+     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @param data Array of encoded burn calls
+     * @return results Array of success flags for each operation
+     */
+    function burn(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(
+                targets[i] == nonfungiblePositionManager,
+                "PositionVault: invalid target"
+            );
+
+            // Validate that this is actually a burn call
+            require(data[i].length >= 4, "PositionVault: invalid calldata");
+            bytes4 selector = bytes4(data[i][:4]);
+            // burn(uint256) selector = 0x42966c68
+            require(selector == 0x42966c68, "PositionVault: not a burn call");
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "burn");
+
+            require(success, "PositionVault: burn failed");
         }
 
         return results;

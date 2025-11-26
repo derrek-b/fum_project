@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.5.0] - 2025-01-26
+### Security Refactor - PositionVault Attack Surface Reduction
+
+Major security hardening of the PositionVault smart contract to eliminate potential attack vectors through the automation executor role.
+
+#### **Contract Security Hardening**
+- **NEW**: `swap()` function - Validates Universal Router target and swap function selectors
+- **NEW**: `approve()` function - Validates ERC20 targets and restricts spenders to whitelisted addresses (Permit2, NonfungiblePositionManager)
+- **NEW**: `mint()` function - Validates NonfungiblePositionManager target and mint selector, enforces 356-byte minimum calldata
+- **NEW**: `increaseLiquidity()` function - Validates target and selector for adding liquidity
+- **NEW**: `decreaseLiquidity()` function - Validates target and selector for removing liquidity
+- **NEW**: `collect()` function - Validates target and selector for fee collection
+- **NEW**: `burn()` function - Validates target and selector for position NFT burning
+- **SECURITY**: Hardcoded vault address as recipient in all position manager operations
+- **SECURITY**: `execute()` function now restricted to `onlyOwner` (was `onlyAuthorized`)
+- **SECURITY**: `executeBatchTransactions()` removed - replaced by constrained functions above
+
+#### **Test Coverage**
+- **NEW**: MockNonfungiblePositionManager for comprehensive position operation testing
+- **UPDATED**: Full test coverage for all new constrained functions
+- **UPDATED**: Security validation tests for target addresses and function selectors
+
+#### **Impact**
+- **ELIMINATED**: Arbitrary contract call vulnerability through automation executor
+- **ELIMINATED**: Token theft via malicious approve() calls
+- **ELIMINATED**: Fund redirection via manipulated position operations
+- **MAINTAINED**: Full functionality for legitimate automation operations
+
+**Status**: ✅ Security hardening complete
+**Breaking Changes**: Automation service must use new constrained functions
+**Impact**: Significant reduction in smart contract attack surface
+
 ## [0.4.2] - 2025-01-24
 ### SSE Event Handler Refinements
 

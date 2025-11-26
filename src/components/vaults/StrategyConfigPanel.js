@@ -11,7 +11,7 @@ import { useProvider } from '../../contexts/ProviderContext';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import TransactionProgressModal from '../common/TransactionProgressModal';
 import StrategyValidationModal from './StrategyValidationModal';
-import { getVaultContract, executeVaultTransactions } from 'fum_library/blockchain/contracts';
+import { getVaultContract } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
 import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, validateTokensForStrategy, validatePositionsForStrategy } from 'fum_library/helpers/strategyHelpers';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';

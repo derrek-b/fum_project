@@ -45,8 +45,13 @@ contract MockUniversalRouter {
     /**
      * @notice Mock execute function matching Universal Router interface
      * @dev Decodes the swap input to verify recipient is the vault
+     * @param commands The commands to execute
+     * @param inputs The inputs for each command
+     * @param deadline The deadline for the transaction (ignored in mock)
      */
-    function execute(bytes calldata commands, bytes[] calldata inputs) external payable {
+    function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable {
+        // Silence unused variable warning
+        deadline;
         require(!shouldFail, "MockUniversalRouter: forced failure");
 
         lastCommands = commands;

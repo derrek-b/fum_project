@@ -6,11 +6,13 @@ describe("PositionVault - 0.4.3", function() {
   let MockPositionNFT;
   let MockToken;
   let MockUniversalRouter;
+  let MockNonfungiblePositionManager;
   let vault;
   let nft;
   let token;
   let token2;
   let router;
+  let positionManager;
   let permit2Address;
   let nonfungiblePositionManagerAddress;
   let owner;
@@ -28,10 +30,15 @@ describe("PositionVault - 0.4.3", function() {
     router = await MockUniversalRouter.deploy();
     await router.waitForDeployment();
 
-    // Use deterministic addresses for permit2 and nonfungiblePositionManager
-    // These are the canonical Uniswap addresses on mainnet
+    // Deploy mock NonfungiblePositionManager
+    MockNonfungiblePositionManager = await ethers.getContractFactory("MockNonfungiblePositionManager");
+    positionManager = await MockNonfungiblePositionManager.deploy();
+    await positionManager.waitForDeployment();
+
+    // Use deterministic address for permit2 (canonical Uniswap address)
     permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-    nonfungiblePositionManagerAddress = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
+    // Use deployed mock for position manager
+    nonfungiblePositionManagerAddress = await positionManager.getAddress();
 
     // Deploy the vault with owner, router, permit2, and position manager
     PositionVault = await ethers.getContractFactory("PositionVault");
@@ -199,7 +206,7 @@ describe("PositionVault - 0.4.3", function() {
 
       // Set executor
       const tx = await vault.setExecutor(executorWallet.address);
-      
+
       // Check executor was set
       expect(await vault.executor()).to.equal(executorWallet.address);
 
@@ -216,7 +223,7 @@ describe("PositionVault - 0.4.3", function() {
 
       // Remove executor
       const tx = await vault.removeExecutor();
-      
+
       // Check executor was cleared
       expect(await vault.executor()).to.equal(ethers.ZeroAddress);
 
@@ -234,7 +241,7 @@ describe("PositionVault - 0.4.3", function() {
 
     it("should only allow owner to remove executor", async function() {
       await vault.setExecutor(executorWallet.address);
-      
+
       await expect(
         vault.connect(user1).removeExecutor()
       ).to.be.revertedWith("PositionVault: caller is not the owner");
@@ -246,35 +253,36 @@ describe("PositionVault - 0.4.3", function() {
       ).to.be.revertedWith("PositionVault: zero executor address");
     });
 
-    it("should allow executor to call execute function", async function() {
+    it("should NOT allow executor to call execute function (owner only)", async function() {
       // Set executor
       await vault.setExecutor(executorWallet.address);
 
-      // Test execute function - using a simple call that should succeed
+      // Test execute function - executor should NOT be able to call it
       const targets = [await token.getAddress()];
       const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
 
-      // This should not revert (executor is authorized)
-      await expect(vault.connect(executorWallet).execute(targets, data))
-        .to.not.be.reverted;
+      // This should revert (execute is now owner-only)
+      await expect(
+        vault.connect(executorWallet).execute(targets, data)
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
     });
 
     it("should not allow unauthorized user to call execute function", async function() {
-      // Don't set any executor, try with unauthorized user
+      // Try with unauthorized user
       const targets = [await token.getAddress()];
       const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
 
       await expect(
         vault.connect(user1).execute(targets, data)
-      ).to.be.revertedWith("PositionVault: caller is not authorized");
+      ).to.be.revertedWith("PositionVault: caller is not the owner");
     });
 
-    it("should always allow owner to call execute function", async function() {
-      // Owner should be able to execute even without setting executor
+    it("should allow owner to call execute function", async function() {
+      // Owner should be able to execute for arbitrary calls (e.g., strategy config)
       const targets = [await token.getAddress()];
       const data = [token.interface.encodeFunctionData("transfer", [user1.address, 1])];
 
-      // This should not revert (owner is always authorized)
+      // This should not revert (owner can call execute)
       await expect(vault.connect(owner).execute(targets, data))
         .to.not.be.reverted;
     });
@@ -369,8 +377,8 @@ describe("PositionVault - 0.4.3", function() {
       await expect(vault.approve(
         [await token.getAddress()],
         [approveData]
-      )).to.emit(vault, "TokenApproved")
-        .withArgs(await token.getAddress(), permit2Address, amount);
+      )).to.emit(vault, "TransactionExecuted")
+        .withArgs(await token.getAddress(), approveData, true, "approval");
 
       // Verify allowance was set
       const allowance = await token.allowance(await vault.getAddress(), permit2Address);
@@ -475,6 +483,822 @@ describe("PositionVault - 0.4.3", function() {
 
       const allowance = await token.allowance(await vault.getAddress(), permit2Address);
       expect(allowance).to.equal(amount);
+    });
+
+    it("should reject non-approve function calls", async function() {
+      // Try to pass a transfer call through approve function
+      const iface = new ethers.Interface([
+        "function transfer(address to, uint256 amount)"
+      ]);
+      const transferData = iface.encodeFunctionData("transfer", [permit2Address, ethers.parseEther("100")]);
+
+      await expect(
+        vault.approve(
+          [await token.getAddress()],
+          [transferData]
+        )
+      ).to.be.revertedWith("PositionVault: not an approve call");
+    });
+  });
+
+  // Test for mint function (create new positions)
+  describe("Mint Position", function() {
+    // Helper to encode NonfungiblePositionManager.mint calldata
+    function encodeMint(token0, token1, fee, tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min, recipient, deadline) {
+      const iface = new ethers.Interface([
+        "function mint((address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline) params)"
+      ]);
+      return iface.encodeFunctionData("mint", [{
+        token0,
+        token1,
+        fee,
+        tickLower,
+        tickUpper,
+        amount0Desired,
+        amount1Desired,
+        amount0Min,
+        amount1Min,
+        recipient,
+        deadline
+      }]);
+    }
+
+    it("should allow mint with vault as recipient", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000, // fee tier
+        -887220, // tickLower
+        887220,  // tickUpper
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        vaultAddress, // recipient = vault
+        deadline
+      );
+
+      await expect(
+        vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "mint");
+    });
+
+    it("should reject mint with non-vault recipient", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000,
+        -887220,
+        887220,
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        user1.address, // wrong recipient
+        deadline
+      );
+
+      await expect(
+        vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: mint recipient must be vault");
+    });
+
+    it("should reject invalid target address", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000,
+        -887220,
+        887220,
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        vaultAddress,
+        deadline
+      );
+
+      await expect(
+        vault.mint(
+          [user1.address], // wrong target
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid target");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000,
+        -887220,
+        887220,
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        vaultAddress,
+        deadline
+      );
+
+      await expect(
+        vault.mint(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000,
+        -887220,
+        887220,
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        vaultAddress,
+        deadline
+      );
+
+      await expect(
+        vault.connect(user1).mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to mint", async function() {
+      await vault.setExecutor(executorWallet.address);
+
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tokenAddress = await token.getAddress();
+      const token2Address = await token2.getAddress();
+
+      const calldata = encodeMint(
+        tokenAddress,
+        token2Address,
+        3000,
+        -887220,
+        887220,
+        ethers.parseEther("1"),
+        ethers.parseEther("1"),
+        0,
+        0,
+        vaultAddress,
+        deadline
+      );
+
+      await expect(
+        vault.connect(executorWallet).mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "mint");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      // Only provide partial calldata (less than 356 bytes needed)
+      const calldata = "0x88316456" + "00".repeat(100); // selector + 100 bytes
+
+      await expect(
+        vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid mint data");
+    });
+
+    it("should reject non-mint function calls", async function() {
+      // Create calldata that's 356+ bytes but with wrong selector (not 0x88316456)
+      // Use a fake selector 0x11111111 followed by enough padding to pass length check
+      const wrongSelector = "0x11111111";
+      // Mint requires 356 bytes minimum. 4 bytes selector + 352 bytes padding = 356 bytes
+      const padding = "00".repeat(352);
+      const fakeCalldata = wrongSelector + padding;
+
+      await expect(
+        vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [fakeCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: not a mint call");
+    });
+  });
+
+  // Test for increaseLiquidity function
+  describe("Increase Liquidity", function() {
+    // Helper to encode NonfungiblePositionManager.increaseLiquidity calldata
+    function encodeIncreaseLiquidity(tokenId, amount0Desired, amount1Desired, amount0Min, amount1Min, deadline) {
+      const iface = new ethers.Interface([
+        "function increaseLiquidity((uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params)"
+      ]);
+      return iface.encodeFunctionData("increaseLiquidity", [{
+        tokenId,
+        amount0Desired,
+        amount1Desired,
+        amount0Min,
+        amount1Min,
+        deadline
+      }]);
+    }
+
+    it("should only allow calls to nonfungiblePositionManager", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "addliq");
+    });
+
+    it("should reject invalid target address", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.increaseLiquidity(
+          [user1.address],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid target");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.connect(user1).increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to increase liquidity", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.connect(executorWallet).increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "addliq");
+    });
+
+    it("should reject non-increaseLiquidity function calls", async function() {
+      // Try to pass a collect call through increaseLiquidity function
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const iface = new ethers.Interface([
+        "function collect((uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params)"
+      ]);
+      const collectCalldata = iface.encodeFunctionData("collect", [{
+        tokenId: 1,
+        recipient: vaultAddress,
+        amount0Max: maxUint128,
+        amount1Max: maxUint128
+      }]);
+
+      await expect(
+        vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [collectCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: not an increaseLiquidity call");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      const shortCalldata = "0x219f"; // Less than 4 bytes
+
+      await expect(
+        vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [shortCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid calldata");
+    });
+  });
+
+  // Test for decreaseLiquidity function (only accepts multicall)
+  describe("Decrease Liquidity", function() {
+    // Helper to encode NonfungiblePositionManager.decreaseLiquidity calldata
+    function encodeDecreaseLiquidity(tokenId, liquidity, amount0Min, amount1Min, deadline) {
+      const iface = new ethers.Interface([
+        "function decreaseLiquidity((uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params)"
+      ]);
+      return iface.encodeFunctionData("decreaseLiquidity", [{
+        tokenId,
+        liquidity,
+        amount0Min,
+        amount1Min,
+        deadline
+      }]);
+    }
+
+    // Helper to encode NonfungiblePositionManager.collect calldata
+    function encodeCollect(tokenId, recipient, amount0Max, amount1Max) {
+      const iface = new ethers.Interface([
+        "function collect((uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params)"
+      ]);
+      return iface.encodeFunctionData("collect", [{
+        tokenId,
+        recipient,
+        amount0Max,
+        amount1Max
+      }]);
+    }
+
+    // Helper to encode multicall
+    function encodeMulticall(innerCalls) {
+      const iface = new ethers.Interface([
+        "function multicall(bytes[] data)"
+      ]);
+      return iface.encodeFunctionData("multicall", [innerCalls]);
+    }
+
+    it("should allow multicall with decreaseLiquidity + collect (vault recipient)", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, multicallData, true, "subliq");
+    });
+
+    it("should reject direct decreaseLiquidity calls (must be multicall)", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const calldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: must be multicall");
+    });
+
+    it("should reject direct collect calls (must be multicall)", async function() {
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: must be multicall");
+    });
+
+    it("should reject multicall with collect to non-vault recipient", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, user1.address, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: collect recipient must be vault");
+    });
+
+    it("should reject multicall with disallowed function", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const burnIface = new ethers.Interface(["function burn(uint256 tokenId)"]);
+      const burnCalldata = burnIface.encodeFunctionData("burn", [1]);
+      const multicallData = encodeMulticall([decreaseCalldata, burnCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: function not allowed in multicall");
+    });
+
+    it("should reject invalid target address", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [user1.address],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: invalid target");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.connect(user1).decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to decrease liquidity", async function() {
+      await vault.setExecutor(executorWallet.address);
+
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata]);
+
+      await expect(
+        vault.connect(executorWallet).decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, multicallData, true, "subliq");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      const calldata = "0xac96"; // Less than 4 bytes
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid calldata");
+    });
+
+    it("should reject multicall with empty inner call", async function() {
+      const multicallData = encodeMulticall(["0x00"]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.be.revertedWith("PositionVault: invalid inner calldata");
+    });
+
+    it("should allow multicall with only decreaseLiquidity", async function() {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const multicallData = encodeMulticall([decreaseCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.emit(vault, "TransactionExecuted");
+    });
+  });
+
+  // Test for collect function (fee collection)
+  describe("Collect Fees", function() {
+    // Helper to encode NonfungiblePositionManager.collect calldata
+    function encodeCollect(tokenId, recipient, amount0Max, amount1Max) {
+      const iface = new ethers.Interface([
+        "function collect((uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params)"
+      ]);
+      return iface.encodeFunctionData("collect", [{
+        tokenId,
+        recipient,
+        amount0Max,
+        amount1Max
+      }]);
+    }
+
+    it("should allow collect calls with vault as recipient", async function() {
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "collect");
+    });
+
+    it("should reject collect calls with non-vault recipient", async function() {
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, user1.address, maxUint128, maxUint128);
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: collect recipient must be vault");
+    });
+
+    it("should reject non-collect function calls", async function() {
+      // Try to pass a decreaseLiquidity call through collect function
+      const iface = new ethers.Interface([
+        "function decreaseLiquidity((uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params)"
+      ]);
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const decreaseCalldata = iface.encodeFunctionData("decreaseLiquidity", [{
+        tokenId: 1,
+        liquidity: 1000,
+        amount0Min: 0,
+        amount1Min: 0,
+        deadline: deadline
+      }]);
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress],
+          [decreaseCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: not a collect call");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      const shortCalldata = "0xfc6f"; // Less than 4 bytes
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress],
+          [shortCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid collect data");
+    });
+
+    it("should reject invalid target address", async function() {
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.collect(
+          [user1.address],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid target");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.collect(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.connect(user1).collect(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to collect fees", async function() {
+      await vault.setExecutor(executorWallet.address);
+
+      const vaultAddress = await vault.getAddress();
+      const maxUint128 = 2n ** 128n - 1n;
+      const calldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+
+      await expect(
+        vault.connect(executorWallet).collect(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "collect");
+    });
+  });
+
+  // Test for burn function (burn empty position NFTs)
+  describe("Burn Position", function() {
+    // Helper to encode NonfungiblePositionManager.burn calldata
+    function encodeBurn(tokenId) {
+      const iface = new ethers.Interface([
+        "function burn(uint256 tokenId)"
+      ]);
+      return iface.encodeFunctionData("burn", [tokenId]);
+    }
+
+    it("should allow burn calls to nonfungiblePositionManager", async function() {
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "burn");
+    });
+
+    it("should reject invalid target address", async function() {
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.burn(
+          [user1.address],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid target");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.connect(user1).burn(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to burn", async function() {
+      await vault.setExecutor(executorWallet.address);
+
+      const calldata = encodeBurn(1);
+
+      await expect(
+        vault.connect(executorWallet).burn(
+          [nonfungiblePositionManagerAddress],
+          [calldata]
+        )
+      ).to.emit(vault, "TransactionExecuted")
+        .withArgs(nonfungiblePositionManagerAddress, calldata, true, "burn");
+    });
+
+    it("should allow batch burning multiple positions", async function() {
+      const calldata1 = encodeBurn(1);
+      const calldata2 = encodeBurn(2);
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata1, calldata2]
+        )
+      ).to.emit(vault, "TransactionExecuted");
+    });
+
+    it("should reject non-burn function calls", async function() {
+      // Try to pass a collect call through burn function
+      const iface = new ethers.Interface([
+        "function collect((uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params)"
+      ]);
+      const maxUint128 = 2n ** 128n - 1n;
+      const collectCalldata = iface.encodeFunctionData("collect", [{
+        tokenId: 1,
+        recipient: user1.address,
+        amount0Max: maxUint128,
+        amount1Max: maxUint128
+      }]);
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress],
+          [collectCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: not a burn call");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      const shortCalldata = "0x4296"; // Less than 4 bytes
+
+      await expect(
+        vault.burn(
+          [nonfungiblePositionManagerAddress],
+          [shortCalldata]
+        )
+      ).to.be.revertedWith("PositionVault: invalid calldata");
     });
   });
 
@@ -673,7 +1497,7 @@ describe("PositionVault - 0.4.3", function() {
     }
 
     describe("Authorization", function() {
-      it("should allow owner to call swap", async function() {
+      it("should allow owner to call swap and emit TransactionExecuted with swap type", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
@@ -682,9 +1506,10 @@ describe("PositionVault - 0.4.3", function() {
         const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        // Should not revert with authorization error
+        // Should emit TransactionExecuted with "swap" type
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: caller is not authorized");
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(routerAddress, calldata, true, "swap");
       });
 
       it("should allow executor to call swap", async function() {
@@ -699,7 +1524,8 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
         await expect(vault.connect(executorWallet).swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: caller is not authorized");
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(routerAddress, calldata, true, "swap");
       });
 
       it("should reject unauthorized caller", async function() {
@@ -988,13 +1814,24 @@ describe("PositionVault - 0.4.3", function() {
       });
     });
 
-    describe("Execute function unchanged", function() {
-      it("should still allow execute for non-router calls", async function() {
+    describe("Execute function (owner only)", function() {
+      it("should allow owner to call execute for arbitrary calls and emit TransactionExecuted with any type", async function() {
         const tokenAddress = await token.getAddress();
         const calldata = token.interface.encodeFunctionData("transfer", [user1.address, 1]);
 
-        await expect(vault.execute([tokenAddress], [calldata]))
-          .to.not.be.reverted;
+        await expect(vault.connect(owner).execute([tokenAddress], [calldata]))
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(tokenAddress, calldata, true, "any");
+      });
+
+      it("should reject executor calling execute", async function() {
+        await vault.setExecutor(executorWallet.address);
+        const tokenAddress = await token.getAddress();
+        const calldata = token.interface.encodeFunctionData("transfer", [user1.address, 1]);
+
+        await expect(
+          vault.connect(executorWallet).execute([tokenAddress], [calldata])
+        ).to.be.revertedWith("PositionVault: caller is not the owner");
       });
     });
   });
