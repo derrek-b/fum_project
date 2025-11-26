@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 0.4.2", function() {
+describe("PositionVault - 0.4.3", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
@@ -9,7 +9,10 @@ describe("PositionVault - 0.4.2", function() {
   let vault;
   let nft;
   let token;
+  let token2;
   let router;
+  let permit2Address;
+  let nonfungiblePositionManagerAddress;
   let owner;
   let user1;
   let user2;
@@ -25,9 +28,19 @@ describe("PositionVault - 0.4.2", function() {
     router = await MockUniversalRouter.deploy();
     await router.waitForDeployment();
 
-    // Deploy the vault with owner and router
+    // Use deterministic addresses for permit2 and nonfungiblePositionManager
+    // These are the canonical Uniswap addresses on mainnet
+    permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+    nonfungiblePositionManagerAddress = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
+
+    // Deploy the vault with owner, router, permit2, and position manager
     PositionVault = await ethers.getContractFactory("PositionVault");
-    vault = await PositionVault.deploy(owner.address, await router.getAddress());
+    vault = await PositionVault.deploy(
+      owner.address,
+      await router.getAddress(),
+      permit2Address,
+      nonfungiblePositionManagerAddress
+    );
     await vault.waitForDeployment();
 
     // Deploy mock NFT contract
@@ -35,16 +48,74 @@ describe("PositionVault - 0.4.2", function() {
     nft = await MockPositionNFT.deploy(owner.address);
     await nft.waitForDeployment();
 
-    // Deploy mock ERC20 token
+    // Deploy mock ERC20 tokens
     MockToken = await ethers.getContractFactory("MockERC20");
     token = await MockToken.deploy("Mock Token", "MOCK", 18);
     await token.waitForDeployment();
 
+    token2 = await MockToken.deploy("Mock Token 2", "MOCK2", 18);
+    await token2.waitForDeployment();
+
     // Mint some tokens to owner
     await token.mint(owner.address, ethers.parseEther("1000"));
+    await token2.mint(owner.address, ethers.parseEther("1000"));
 
     // Transfer some tokens to the vault
     await token.transfer(await vault.getAddress(), ethers.parseEther("100"));
+    await token2.transfer(await vault.getAddress(), ethers.parseEther("100"));
+  });
+
+  // Test for constructor validation
+  describe("Constructor", function() {
+    it("should reject zero owner address", async function() {
+      await expect(
+        PositionVault.deploy(
+          ethers.ZeroAddress,
+          await router.getAddress(),
+          permit2Address,
+          nonfungiblePositionManagerAddress
+        )
+      ).to.be.revertedWith("PositionVault: zero owner address");
+    });
+
+    it("should reject zero router address", async function() {
+      await expect(
+        PositionVault.deploy(
+          owner.address,
+          ethers.ZeroAddress,
+          permit2Address,
+          nonfungiblePositionManagerAddress
+        )
+      ).to.be.revertedWith("PositionVault: zero router address");
+    });
+
+    it("should reject zero permit2 address", async function() {
+      await expect(
+        PositionVault.deploy(
+          owner.address,
+          await router.getAddress(),
+          ethers.ZeroAddress,
+          nonfungiblePositionManagerAddress
+        )
+      ).to.be.revertedWith("PositionVault: zero permit2 address");
+    });
+
+    it("should reject zero position manager address", async function() {
+      await expect(
+        PositionVault.deploy(
+          owner.address,
+          await router.getAddress(),
+          permit2Address,
+          ethers.ZeroAddress
+        )
+      ).to.be.revertedWith("PositionVault: zero position manager address");
+    });
+
+    it("should store immutable addresses correctly", async function() {
+      expect(await vault.universalRouter()).to.equal(await router.getAddress());
+      expect(await vault.permit2()).to.equal(permit2Address);
+      expect(await vault.nonfungiblePositionManager()).to.equal(nonfungiblePositionManagerAddress);
+    });
   });
 
   // Test for position withdrawal security
@@ -283,6 +354,130 @@ describe("PositionVault - 0.4.2", function() {
     });
   });
 
+  // Test for token approval security
+  describe("Token Approval", function() {
+    // Helper to encode ERC20.approve calldata
+    function encodeApprove(spender, amount) {
+      const iface = new ethers.Interface(["function approve(address spender, uint256 amount)"]);
+      return iface.encodeFunctionData("approve", [spender, amount]);
+    }
+
+    it("should approve tokens for permit2", async function() {
+      const amount = ethers.parseEther("100");
+      const approveData = encodeApprove(permit2Address, amount);
+
+      await expect(vault.approve(
+        [await token.getAddress()],
+        [approveData]
+      )).to.emit(vault, "TokenApproved")
+        .withArgs(await token.getAddress(), permit2Address, amount);
+
+      // Verify allowance was set
+      const allowance = await token.allowance(await vault.getAddress(), permit2Address);
+      expect(allowance).to.equal(amount);
+    });
+
+    it("should approve tokens for nonfungiblePositionManager", async function() {
+      const amount = ethers.parseEther("50");
+      const approveData = encodeApprove(nonfungiblePositionManagerAddress, amount);
+
+      await vault.approve(
+        [await token.getAddress()],
+        [approveData]
+      );
+
+      const allowance = await token.allowance(await vault.getAddress(), nonfungiblePositionManagerAddress);
+      expect(allowance).to.equal(amount);
+    });
+
+    it("should batch approve multiple tokens", async function() {
+      const amount1 = ethers.parseEther("100");
+      const amount2 = ethers.parseEther("200");
+      const approveData1 = encodeApprove(permit2Address, amount1);
+      const approveData2 = encodeApprove(nonfungiblePositionManagerAddress, amount2);
+
+      await vault.approve(
+        [await token.getAddress(), await token2.getAddress()],
+        [approveData1, approveData2]
+      );
+
+      const allowance1 = await token.allowance(await vault.getAddress(), permit2Address);
+      const allowance2 = await token2.allowance(await vault.getAddress(), nonfungiblePositionManagerAddress);
+
+      expect(allowance1).to.equal(amount1);
+      expect(allowance2).to.equal(amount2);
+    });
+
+    it("should reject invalid spender address", async function() {
+      const approveData = encodeApprove(user1.address, ethers.parseEther("100"));
+
+      await expect(
+        vault.approve(
+          [await token.getAddress()],
+          [approveData]
+        )
+      ).to.be.revertedWith("PositionVault: invalid spender");
+    });
+
+    it("should reject zero token address", async function() {
+      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+
+      await expect(
+        vault.approve(
+          [ethers.ZeroAddress],
+          [approveData]
+        )
+      ).to.be.revertedWith("PositionVault: zero token address");
+    });
+
+    it("should reject mismatched array lengths", async function() {
+      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+
+      await expect(
+        vault.approve(
+          [await token.getAddress(), await token2.getAddress()],
+          [approveData]
+        )
+      ).to.be.revertedWith("PositionVault: length mismatch");
+    });
+
+    it("should reject invalid approval data (too short)", async function() {
+      await expect(
+        vault.approve(
+          [await token.getAddress()],
+          ["0x1234"]
+        )
+      ).to.be.revertedWith("PositionVault: invalid approval data");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+
+      await expect(
+        vault.connect(user1).approve(
+          [await token.getAddress()],
+          [approveData]
+        )
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to approve tokens", async function() {
+      // Set executor
+      await vault.setExecutor(executorWallet.address);
+
+      const amount = ethers.parseEther("100");
+      const approveData = encodeApprove(permit2Address, amount);
+
+      await vault.connect(executorWallet).approve(
+        [await token.getAddress()],
+        [approveData]
+      );
+
+      const allowance = await token.allowance(await vault.getAddress(), permit2Address);
+      expect(allowance).to.equal(amount);
+    });
+  });
+
   // Test for EIP-1271 signature validation
   describe("EIP-1271 Signature Validation", function() {
     const MAGICVALUE = "0x1626ba7e";
@@ -414,20 +609,6 @@ describe("PositionVault - 0.4.2", function() {
       // Verify signature through vault
       const result = await vault.isValidSignature(digest, signature);
       expect(result).to.equal(MAGICVALUE);
-    });
-  });
-
-  // Test for Universal Router configuration
-  describe("Universal Router Configuration", function() {
-    it("should have universalRouter set from constructor", async function() {
-      expect(await vault.universalRouter()).to.equal(await router.getAddress());
-    });
-
-    it("should reject deployment with zero router address", async function() {
-      const PositionVaultFactory = await ethers.getContractFactory("PositionVault");
-      await expect(
-        PositionVaultFactory.deploy(owner.address, ethers.ZeroAddress)
-      ).to.be.revertedWith("PositionVault: zero router address");
     });
   });
 

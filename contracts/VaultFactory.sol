@@ -13,6 +13,12 @@ contract VaultFactory is Ownable {
     // Uniswap Universal Router address for this chain (passed to new vaults)
     address public immutable universalRouter;
 
+    // Permit2 contract address for this chain (passed to new vaults)
+    address public immutable permit2;
+
+    // Uniswap NonfungiblePositionManager address for this chain (passed to new vaults)
+    address public immutable nonfungiblePositionManager;
+
     // Mapping of user address to their vault addresses
     mapping(address => address[]) public userVaults;
 
@@ -35,10 +41,21 @@ contract VaultFactory is Ownable {
      * @notice Constructor
      * @param initialOwner The factory owner address
      * @param _universalRouter Uniswap Universal Router address for this chain
+     * @param _permit2 Permit2 contract address for this chain
+     * @param _nonfungiblePositionManager Uniswap NonfungiblePositionManager address for this chain
      */
-    constructor(address initialOwner, address _universalRouter) Ownable(initialOwner) {
+    constructor(
+        address initialOwner,
+        address _universalRouter,
+        address _permit2,
+        address _nonfungiblePositionManager
+    ) Ownable(initialOwner) {
         require(_universalRouter != address(0), "VaultFactory: zero router address");
+        require(_permit2 != address(0), "VaultFactory: zero permit2 address");
+        require(_nonfungiblePositionManager != address(0), "VaultFactory: zero position manager address");
         universalRouter = _universalRouter;
+        permit2 = _permit2;
+        nonfungiblePositionManager = _nonfungiblePositionManager;
     }
 
     /**
@@ -49,8 +66,13 @@ contract VaultFactory is Ownable {
     function createVault(string calldata name) external returns (address vault) {
         require(bytes(name).length > 0, "VaultFactory: vault name cannot be empty");
 
-        // Create new vault with the caller as owner and chain's Universal Router
-        vault = address(new PositionVault(msg.sender, universalRouter));
+        // Create new vault with the caller as owner and chain's protocol addresses
+        vault = address(new PositionVault(
+            msg.sender,
+            universalRouter,
+            permit2,
+            nonfungiblePositionManager
+        ));
 
         // Register vault in mappings
         userVaults[msg.sender].push(vault);

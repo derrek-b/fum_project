@@ -1,12 +1,14 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("VaultFactory - 0.4.0", function() {
+describe("VaultFactory - 0.4.3", function() {
   let VaultFactory;
   let PositionVault;
   let MockUniversalRouter;
   let factory;
   let router;
+  let permit2Address;
+  let nonfungiblePositionManagerAddress;
   let owner;
   let user1;
   let user2;
@@ -20,12 +22,21 @@ describe("VaultFactory - 0.4.0", function() {
     router = await MockUniversalRouter.deploy();
     await router.waitForDeployment();
 
+    // Use canonical Uniswap addresses for permit2 and nonfungiblePositionManager
+    permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+    nonfungiblePositionManagerAddress = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
+
     // Deploy the PositionVault contract first (we need its bytecode for the factory)
     PositionVault = await ethers.getContractFactory("PositionVault");
 
-    // Deploy the VaultFactory contract with owner and router
+    // Deploy the VaultFactory contract with owner, router, permit2, and position manager
     VaultFactory = await ethers.getContractFactory("VaultFactory");
-    factory = await VaultFactory.deploy(owner.address, await router.getAddress());
+    factory = await VaultFactory.deploy(
+      owner.address,
+      await router.getAddress(),
+      permit2Address,
+      nonfungiblePositionManagerAddress
+    );
     await factory.waitForDeployment();
   });
 
@@ -56,8 +67,10 @@ describe("VaultFactory - 0.4.0", function() {
       const vault = await ethers.getContractAt("PositionVault", vaultAddress);
       expect(await vault.owner()).to.equal(user1.address);
 
-      // Verify the vault has the correct Universal Router
+      // Verify the vault has the correct protocol addresses
       expect(await vault.universalRouter()).to.equal(await router.getAddress());
+      expect(await vault.permit2()).to.equal(permit2Address);
+      expect(await vault.nonfungiblePositionManager()).to.equal(nonfungiblePositionManagerAddress);
     });
 
     it("should allow a user to create multiple vaults", async function() {

@@ -31,8 +31,16 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     address public executor;
 
     // Uniswap Universal Router address (chain-specific, immutable)
-    // Used for validating swap recipient in execute()
+    // Used for validating swap recipient in swap()
     address public immutable universalRouter;
+
+    // Permit2 contract address (chain-specific, immutable)
+    // Used for gasless token approvals in swaps
+    address public immutable permit2;
+
+    // Uniswap NonfungiblePositionManager address (chain-specific, immutable)
+    // Used for liquidity operations
+    address public immutable nonfungiblePositionManager;
 
     // Target tokens and platforms
     string[] private targetTokens;
@@ -49,16 +57,30 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     event TargetTokensUpdated(string[] tokens);
     event TargetPlatformsUpdated(string[] platforms);
 
+    // Event for token approvals
+    event TokenApproved(address indexed token, address indexed spender, uint256 amount);
+
     /**
      * @notice Constructor
      * @param _owner Address of the vault owner
      * @param _universalRouter Address of Uniswap Universal Router for this chain
+     * @param _permit2 Address of Permit2 contract for this chain
+     * @param _nonfungiblePositionManager Address of Uniswap NonfungiblePositionManager for this chain
      */
-    constructor(address _owner, address _universalRouter) {
+    constructor(
+        address _owner,
+        address _universalRouter,
+        address _permit2,
+        address _nonfungiblePositionManager
+    ) {
         require(_owner != address(0), "PositionVault: zero owner address");
         require(_universalRouter != address(0), "PositionVault: zero router address");
+        require(_permit2 != address(0), "PositionVault: zero permit2 address");
+        require(_nonfungiblePositionManager != address(0), "PositionVault: zero position manager address");
         owner = _owner;
         universalRouter = _universalRouter;
+        permit2 = _permit2;
+        nonfungiblePositionManager = _nonfungiblePositionManager;
         strategy = address(0);
         executor = address(0);
     }
@@ -257,6 +279,47 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         IERC20(token).safeTransfer(owner, amount);
 
         emit TokensWithdrawn(token, owner, amount);
+    }
+
+    /**
+     * @notice Approves spenders to spend vault tokens
+     * @dev Only allows approval to known DeFi protocol addresses (Permit2, NonfungiblePositionManager)
+     *      Decodes the spender from ERC20.approve calldata for validation
+     * @param targets Array of token addresses to approve
+     * @param data Array of encoded ERC20.approve(spender, amount) calls
+     * @return results Array of success flags for each approval
+     */
+    function approve(address[] calldata targets, bytes[] calldata data)
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(targets[i] != address(0), "PositionVault: zero token address");
+            require(data[i].length >= 68, "PositionVault: invalid approval data");
+
+            // Decode spender from ERC20.approve calldata (skip 4-byte selector)
+            (address spender, uint256 amount) = abi.decode(data[i][4:], (address, uint256));
+
+            require(
+                spender == permit2 || spender == nonfungiblePositionManager,
+                "PositionVault: invalid spender"
+            );
+
+            (bool success, ) = targets[i].call(data[i]);
+            results[i] = success;
+
+            emit TokenApproved(targets[i], spender, amount);
+
+            require(success, "PositionVault: approval failed");
+        }
+
+        return results;
     }
 
     /**
