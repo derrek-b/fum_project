@@ -1,5 +1,33 @@
 # F.U.M. Project Changelog
 
+## [0.15.0] Security Refactor - Constrained Vault Operations - 2025-01-26
+
+### Automation Service Security Alignment
+
+Updated automation service to use new constrained PositionVault functions, eliminating arbitrary contract call capabilities.
+
+#### **Transaction Execution Security**
+- **UPDATED**: `executeBatchTransactions()` now dispatches to constrained vault functions based on type parameter
+- **NEW**: Type parameter validation: `swap`, `approval`, `mint`, `addliq`, `subliq`, `collect`, `burn`
+- **SECURITY**: All token swaps route through `vault.swap()` with Universal Router validation
+- **SECURITY**: All approvals route through `vault.approve()` with spender whitelist validation
+- **SECURITY**: All position operations route through dedicated vault functions with selector validation
+
+#### **Vault Initialization Fix**
+- **FIXED**: Race condition between vault initialization and recovery mechanism
+- **NEW**: `lockVault()` called at start of `initializeVaultForStrategy()`
+- **NEW**: `unlockVault()` in finally block ensures proper cleanup on success or failure
+- **IMPACT**: Prevents parallel position creation attempts during initial setup
+
+#### **Code Changes**
+- **UPDATED**: All `executeBatchTransactions()` calls now include explicit type parameter
+- **REMOVED**: Direct `execute()` calls for automation operations
+- **MAINTAINED**: `executePermit2Approval()` uses `vault.approve()` directly (still constrained)
+
+**Status**: ✅ Security alignment complete
+**Breaking Changes**: Requires PositionVault v0.5.0 with constrained functions
+**Impact**: Automation service can no longer execute arbitrary contract calls
+
 ## [0.14.1] SSE Event Refinements - 2025-01-24
 
 ### SSE Broadcast Event Optimization
