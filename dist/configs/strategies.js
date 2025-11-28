@@ -100,14 +100,14 @@ const strategies = {
         defaults: {
           targetRangeUpper: 10.0,
           targetRangeLower: 10.0,
-          rebalanceThresholdUpper: 3.0,
-          rebalanceThresholdLower: 3.0,
-          maxUtilization: 60,
-          maxSlippage: 0.3,
-          emergencyExitTrigger: 20,
-          feeReinvestment: false,
+          rebalanceThresholdUpper: 6.0,
+          rebalanceThresholdLower: 6.0,
+          maxUtilization: 90,
+          maxSlippage: 0.5,
+          emergencyExitTrigger: 10,
+          feeReinvestment: true,
           reinvestmentTrigger: 50.00,
-          reinvestmentRatio: 80
+          reinvestmentRatio: 30
         }
       },
       'moderate': {
@@ -116,14 +116,14 @@ const strategies = {
         defaults: {
           targetRangeUpper: 5.0,
           targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 1.5,
-          rebalanceThresholdLower: 1.5,
-          maxUtilization: 80,
+          rebalanceThresholdUpper: 4.0,
+          rebalanceThresholdLower: 4.0,
+          maxUtilization: 90,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
+          emergencyExitTrigger: 10,
           feeReinvestment: true,
           reinvestmentTrigger: 50.00,
-          reinvestmentRatio: 80
+          reinvestmentRatio: 50
         }
       },
       'aggressive': {
@@ -134,25 +134,25 @@ const strategies = {
           targetRangeLower: 3.0,
           rebalanceThresholdUpper: 0.8,
           rebalanceThresholdLower: 0.8,
-          maxUtilization: 95,
-          maxSlippage: 1.0,
+          maxUtilization: 90,
+          maxSlippage: 0.5,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
-          reinvestmentTrigger: 25.00,
-          reinvestmentRatio: 100
+          reinvestmentTrigger: 50.00,
+          reinvestmentRatio: 90
         }
       },
       'stablecoin': {
         name: "Stablecoin",
         description: "Very tight ranges for stablecoin pairs",
         defaults: {
-          targetRangeUpper: 0.5,
-          targetRangeLower: 0.5,
-          rebalanceThresholdUpper: 0.2,
-          rebalanceThresholdLower: 0.2,
+          targetRangeUpper: 0.2,
+          targetRangeLower: 0.2,
+          rebalanceThresholdUpper: 12.5,
+          rebalanceThresholdLower: 12.5,
           maxUtilization: 90,
-          maxSlippage: 0.1,
-          emergencyExitTrigger: 2.0,
+          maxSlippage: 0.2,
+          emergencyExitTrigger: 1.0,
           feeReinvestment: true,
           reinvestmentTrigger: 10.00,
           reinvestmentRatio: 100
@@ -164,14 +164,14 @@ const strategies = {
         defaults: {
           targetRangeUpper: 5.0,
           targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 1.5,
-          rebalanceThresholdLower: 1.5,
+          rebalanceThresholdUpper: 4.0,
+          rebalanceThresholdLower: 4.0,
           feeReinvestment: true,
           reinvestmentTrigger: 50.00,
-          reinvestmentRatio: 80,
+          reinvestmentRatio: 50,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 10,
+          maxUtilization: 90
         }
       }
     },

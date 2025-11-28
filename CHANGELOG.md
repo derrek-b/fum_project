@@ -5,6 +5,41 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2025-01-28
+
+### Changed - Baby Steps Strategy Templates Production-Ready
+
+Comprehensive overhaul of all Baby Steps (bob) strategy templates for production deployment.
+
+#### **Standardized Across All Templates**
+- **maxUtilization**: All templates now use 90% (was 60-95% varying)
+- **maxSlippage**: All non-stablecoin templates use 0.5% (was 0.3-1.0% varying)
+- **emergencyExitTrigger**: All non-stablecoin templates use 10% (was 10-20% varying)
+  - Emergency exit triggers on price movement between rebalances, not from original entry
+  - 10% catches flash crashes without false positives during normal volatility
+
+#### **Stablecoin Template (USDC/USDT optimized)**
+- **targetRange**: Tightened to ±0.2% (was ±0.5%) for better capital efficiency
+- **rebalanceThreshold**: Set to 12.5% of range (was 0.05%) - provides actual buffer before falling out of range
+- **emergencyExitTrigger**: 1% (appropriate for stablecoin pairs)
+- **maxSlippage**: 0.2% (tighter for deep stablecoin pools)
+
+#### **Rebalance Thresholds (% of range width)**
+- **Conservative**: 6% (was 3%) - more buffer before rebalancing
+- **Moderate**: 4% (was 1.5%) - reasonable middle ground
+- **Aggressive**: 0.8% (unchanged) - tight is the point
+- **Custom**: 4% (matches moderate)
+
+#### **Fee Reinvestment Settings**
+- **Conservative**: Enabled feeReinvestment (was false), 30% ratio (70% to user)
+- **Moderate**: 50% ratio (balanced)
+- **Aggressive**: 90% ratio (maximize compounding)
+- **Stablecoin**: 100% ratio (low IL risk, compound everything)
+- **Triggers**: $50 for all non-stablecoin, $10 for stablecoin
+
+**Status**: ✅ Production-ready defaults
+**Breaking Changes**: Template defaults changed - existing vaults unaffected (parameters stored on-chain)
+
 ## [0.22.2] - 2025-11-23
 
 ### Changed
