@@ -1,5 +1,33 @@
 # F.U.M. Project Changelog
 
+## [0.16.0] Transaction History & Demo Support - 2025-01-28
+
+### Vault REST API & Transaction Logging
+
+Added REST API endpoints for vault data access and transaction history logging to support frontend demo and analytics features.
+
+#### **New REST API Endpoints**
+- **NEW**: `GET /vault/:address/metadata` - Returns vault tracker metadata (baseline, snapshots, aggregates)
+- **NEW**: `GET /vault/:address/transactions` - Returns paginated transaction history with filtering options
+- **FEATURE**: Query parameters for filtering: `?limit=N&offset=N&type=swap|fee|rebalance`
+
+#### **SSE Events**
+- **NEW**: `TransactionLogged` event - Broadcasts when new transactions are logged for vault activity feeds
+
+#### **Tracker Enhancements**
+- **NEW**: `AssetValuesFetched` event listener - Updates vault snapshots with current values for APY calculation
+- **NEW**: Fee tracking split: `cumulativeFeesReinvestedUSD` and `cumulativeFeesWithdrawnUSD` aggregates
+- **FIXED**: Token decimals lookup using `getTokenBySymbol()` for accurate swap value calculations
+
+#### **Logging Cleanup**
+- **REDUCED**: Removed verbose `Filter details:` object dump from EventManager registration
+- **REDUCED**: Moved `vaultLoaded` and `positionsRefreshed` VDS events to debug-only logging
+- **REDUCED**: Set `includeData: false` on `VaultAuthGranted` event emission
+
+**Status**: ✅ Demo support complete
+**Breaking Changes**: None
+**Impact**: Frontend can now display transaction history and calculate APY metrics
+
 ## [0.15.0] Security Refactor - Constrained Vault Operations - 2025-01-26
 
 ### Automation Service Security Alignment
