@@ -22,7 +22,11 @@ const vaultsSlice = createSlice({
         isBlacklisted: vault.isBlacklisted || false, // Blacklist status from automation service
         blacklistReason: vault.blacklistReason || null, // Reason for blacklisting if applicable
         isRetrying: vault.isRetrying || false, // Vault load retry in progress
-        retryError: vault.retryError || null // Error info during retry attempts
+        retryError: vault.retryError || null, // Error info during retry attempts
+        // Tracker data from automation service
+        trackerMetadata: vault.trackerMetadata || null, // Baseline, aggregates, last snapshot
+        transactionHistory: vault.transactionHistory || [], // Transaction log entries
+        trackerDataLoaded: vault.trackerDataLoaded || false // Flag indicating tracker data has been fetched
       }));
     },
     addVault: (state, action) => {
@@ -37,7 +41,10 @@ const vaultsSlice = createSlice({
         isBlacklisted: action.payload.isBlacklisted || false,
         blacklistReason: action.payload.blacklistReason || null,
         isRetrying: action.payload.isRetrying || false,
-        retryError: action.payload.retryError || null
+        retryError: action.payload.retryError || null,
+        trackerMetadata: action.payload.trackerMetadata || null,
+        transactionHistory: action.payload.transactionHistory || [],
+        trackerDataLoaded: action.payload.trackerDataLoaded || false
       };
       state.userVaults.push(newVault);
     },
@@ -190,6 +197,35 @@ const vaultsSlice = createSlice({
         };
       }
     },
+    // Update tracker data (metadata and transactions) for a vault
+    updateVaultTrackerData: (state, action) => {
+      const { vaultAddress, trackerMetadata, transactionHistory } = action.payload;
+      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+
+      if (vaultIndex !== -1) {
+        if (trackerMetadata !== undefined) {
+          state.userVaults[vaultIndex].trackerMetadata = trackerMetadata;
+        }
+        if (transactionHistory !== undefined) {
+          state.userVaults[vaultIndex].transactionHistory = transactionHistory;
+        }
+        state.userVaults[vaultIndex].trackerDataLoaded = true;
+      }
+    },
+    // Append a new transaction to vault's history (for real-time SSE updates)
+    appendVaultTransaction: (state, action) => {
+      const { vaultAddress, transaction } = action.payload;
+      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+
+      if (vaultIndex !== -1) {
+        // Initialize array if needed
+        if (!state.userVaults[vaultIndex].transactionHistory) {
+          state.userVaults[vaultIndex].transactionHistory = [];
+        }
+        // Prepend new transaction (most recent first)
+        state.userVaults[vaultIndex].transactionHistory.unshift(transaction);
+      }
+    },
     clearVaults: (state) => {
       state.userVaults = [];
       state.vaultError = null;
@@ -213,7 +249,9 @@ export const {
   updateVaultPositions,
   updateVaultTokenBalances,
   updateVaultMetrics,
-  updateVaultStrategy,  // Add this
+  updateVaultStrategy,
+  updateVaultTrackerData,
+  appendVaultTransaction,
   clearVaults,
   setLoadingVaults,
   setVaultError

@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 import * as LucideIcons from 'lucide-react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
+import { calculateVaultAPY } from '../../utils/vaultsHelpers';
 
 export default function VaultCard({ vault }) {
   const router = useRouter();
@@ -206,11 +207,23 @@ export default function VaultCard({ vault }) {
           </div>
         </div>
 
-        {/* Vault Address */}
-        <div className="mb-3 mt-0">
+        {/* Vault Address and APY */}
+        <div className="mb-3 mt-0 d-flex justify-content-between align-items-center">
           <code style={{ fontSize: '0.875rem', padding: 0, margin: 0 }}>
             {vault.address.substring(0, 10)}...{vault.address.substring(vault.address.length - 8)}
           </code>
+          {(() => {
+            const apyData = calculateVaultAPY(vault.trackerMetadata);
+            if (!apyData) return null;
+            const isNegative = apyData.apy < 0;
+            return (
+              <span style={{ fontSize: '0.875rem', color: '#3a3a3a' }}>
+                APY: <span style={{ color: isNegative ? '#ef4444' : '#10b981' }}>
+                  {isNegative ? '' : '+'}{apyData.apyPercent.toFixed(2)}%
+                </span>
+              </span>
+            );
+          })()}
         </div>
 
         {/* Asset Balances */}

@@ -38,6 +38,9 @@ export default function Navbar() {
             <Link href="/positions" passHref legacyBehavior>
               <Nav.Link active={isActive('/positions') || isActive('/position')}>Positions</Nav.Link>
             </Link>
+            <Link href="/demo" passHref legacyBehavior>
+              <Nav.Link active={isActive('/demo')}>Demo</Nav.Link>
+            </Link>
           </Nav>
 
           <Nav>

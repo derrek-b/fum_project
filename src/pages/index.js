@@ -1,18 +1,21 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { useSelector } from 'react-redux';
 import Head from 'next/head';
 
 export default function Home() {
   const router = useRouter();
+  const { isConnected } = useSelector((state) => state.wallet);
 
   useEffect(() => {
     const redirectTimer = setTimeout(() => {
-      router.push('/vaults');
-    }, 1000); // Wait 2 seconds before redirecting
+      // Redirect to vaults if wallet connected, otherwise to demo
+      router.push(isConnected ? '/vaults' : '/demo');
+    }, 1000);
 
     // Clean up the timeout if component unmounts
     return () => clearTimeout(redirectTimer);
-  }, [router]);
+  }, [router, isConnected]);
 
   return (
     <div>
@@ -35,7 +38,7 @@ export default function Home() {
           className="mb-4"
         />
         <h2>D-fied</h2>
-        <p>Loading Vaults Dashboard...</p>
+        <p>{isConnected ? 'Loading Vaults Dashboard...' : 'Loading Demo...'}</p>
       </div>
     </div>
   );

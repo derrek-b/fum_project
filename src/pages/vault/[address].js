@@ -10,6 +10,7 @@ import Image from "next/image";
 import { ethers } from "ethers";
 import Navbar from "../../components/common/Navbar";
 import PositionCard from "../../components/positions/PositionCard";
+import TransactionList from "../../components/transactions/TransactionList";
 import TokenDepositModal from "../../components/vaults/TokenDepositModal";
 import TokenWithdrawModal from "../../components/vaults/TokenWithdrawModal";
 import StrategyConfigPanel from "../../components/vaults/StrategyConfigPanel";
@@ -20,7 +21,7 @@ import { useToast } from "../../context/ToastContext";
 import { useProvider } from '../../contexts/ProviderContext';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVault } from "../../redux/vaultsSlice";
-import { loadVaultData, getVaultData, loadVaultTokenBalances } from '../../utils/vaultsHelpers';
+import { loadVaultData, getVaultData, loadVaultTokenBalances, calculateVaultAPY } from '../../utils/vaultsHelpers';
 import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
@@ -112,7 +113,8 @@ export default function VaultDetailPage() {
   // Get strategy data from Redux (memoized to prevent unnecessary re-renders)
   const strategyConfig = useMemo(() => strategyConfigs?.[vaultAddress], [strategyConfigs, vaultAddress]);
   const performance = useMemo(() => strategyPerformance?.[vaultAddress], [strategyPerformance, vaultAddress]);
-  const history = useMemo(() => executionHistory?.[vaultAddress] || [], [executionHistory, vaultAddress]);
+  // NOTE: executionHistory kept in destructure for potential future use
+  // History tab now uses transactionHistory from tracker data via vaultFromRedux
 
   // Create loadData function to replace the useVaultDetailData hook (memoized)
   const loadData = useCallback(async () => {
@@ -578,9 +580,25 @@ export default function VaultDetailPage() {
 
                 {/* APY */}
                 <div style={{ textAlign: 'right' }}>
-                  <small style={{ fontSize: '0.9rem', color: '#525252' }}>
-                    <strong>APY:</strong> {performance?.apy ? `${performance.apy.toFixed(2)}%` : '—'}
-                  </small>
+                  {(() => {
+                    const apyData = calculateVaultAPY(vaultFromRedux?.trackerMetadata);
+                    if (!apyData) {
+                      return (
+                        <small style={{ fontSize: '0.9rem', color: '#525252' }}>
+                          <strong>APY:</strong> —
+                        </small>
+                      );
+                    }
+                    const isNegative = apyData.apy < 0;
+                    return (
+                      <small style={{ fontSize: '0.9rem', color: '#3a3a3a' }}>
+                        <strong>APY:</strong>{' '}
+                        <span style={{ color: isNegative ? '#ef4444' : '#10b981' }}>
+                          {isNegative ? '' : '+'}{apyData.apyPercent.toFixed(2)}%
+                        </span>
+                      </small>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -882,36 +900,12 @@ export default function VaultDetailPage() {
             </Tab>
 
             <Tab eventKey="history" title="History">
-              {history.length === 0 ? (
-                <Alert variant="info" className="text-center">
-                  No strategy execution history yet.
-                </Alert>
-              ) : (
-                <Table striped hover>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Action</th>
-                      <th>Result</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((record, index) => (
-                      <tr key={index}>
-                        <td>{formatTimestamp(record.timestamp)}</td>
-                        <td>{record.action}</td>
-                        <td>
-                          <Badge bg={record.success ? "success" : "danger"}>
-                            {record.success ? "Success" : "Failed"}
-                          </Badge>
-                        </td>
-                        <td>{record.details}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
+              <TransactionList
+                transactions={vaultFromRedux?.transactionHistory || []}
+                chainId={chainId}
+                isLoading={!vaultFromRedux?.trackerDataLoaded && vaultFromRedux?.transactionHistory?.length === 0}
+                emptyMessage="No transaction history yet for this vault."
+              />
             </Tab>
           </Tabs>
         </ErrorBoundary>

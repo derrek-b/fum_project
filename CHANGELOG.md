@@ -11,6 +11,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance metrics for strategy execution
 - Strategy history tracking
 
+## [0.6.0] - 2025-01-28
+### Demo Page & Transaction History
+
+New demo page showcasing vault functionality with real-time transaction history and performance metrics.
+
+#### **Demo Page**
+- **NEW**: `/demo` page - Showcases vault automation with configurable demo address
+- **NEW**: Live transaction feed with real-time updates via SSE
+- **NEW**: APY calculation and performance metrics display
+- **NEW**: Navbar link for demo page access
+
+#### **Transaction Components**
+- **NEW**: `TransactionList` component - Scrollable transaction feed with filtering
+- **NEW**: `TransactionItem` component - Detailed transaction display with type icons
+
+#### **Vault Helpers**
+- **NEW**: `fetchVaultTrackerData()` - Fetches metadata and transactions from automation service
+- **NEW**: `calculateVaultAPY()` - Calculates APY from tracker metadata (baseline, snapshots, aggregates)
+- **FEATURE**: Handles fee split tracking (reinvested vs withdrawn)
+
+#### **Redux State**
+- **NEW**: `trackerMetadata` field in vault state
+- **NEW**: `transactionHistory` field in vault state
+- **NEW**: `updateVaultTrackerData` action
+
+**Status**: ✅ Demo support complete
+**Breaking Changes**: None
+**Impact**: Enables showcasing vault automation with real performance data
+
 ## [0.5.0] - 2025-01-26
 ### Security Refactor - PositionVault Attack Surface Reduction
 

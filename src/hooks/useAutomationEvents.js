@@ -8,7 +8,7 @@ import {
   eventReceived
 } from '../redux/automationSlice';
 import { triggerUpdate } from '../redux/updateSlice';
-import { updateVault } from '../redux/vaultsSlice';
+import { updateVault, appendVaultTransaction } from '../redux/vaultsSlice';
 
 const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL || 'http://localhost:3001/events';
 
@@ -91,7 +91,8 @@ export function useAutomationEvents() {
         'VaultUnrecoverable',
         'VaultBlacklisted',
         'VaultUnblacklisted',
-        'FeeCollectionFailed'
+        'FeeCollectionFailed',
+        'TransactionLogged'
       ];
 
       automationEvents.forEach(eventName => {
@@ -162,6 +163,12 @@ export function useAutomationEvents() {
                   isBlacklisted: false,
                   blacklistReason: null
                 }
+              }));
+            } else if (eventName === 'TransactionLogged' && payload.data?.vaultAddress) {
+              // Append new transaction to vault's history for real-time updates
+              dispatch(appendVaultTransaction({
+                vaultAddress: payload.data.vaultAddress,
+                transaction: payload.data
               }));
             }
 

@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { setPositions, addVaultPositions } from '../redux/positionsSlice';
 import { setPools } from '../redux/poolSlice';
 import { setTokens } from '../redux/tokensSlice';
-import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, updateVault, setVaults } from '../redux/vaultsSlice';
+import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, updateVault, setVaults, updateVaultTrackerData } from '../redux/vaultsSlice';
 import { triggerUpdate } from '../redux/updateSlice';
 import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
 import { ethers } from 'ethers';
@@ -36,6 +36,118 @@ export const fetchBlacklistData = async () => {
     console.warn('Error fetching blacklist data:', error);
     return {};
   }
+};
+
+/**
+ * Fetch tracker data (metadata and transactions) for a vault from automation service
+ * @param {string} vaultAddress - The vault address
+ * @returns {Promise<object>} Object with trackerMetadata and transactionHistory
+ */
+export const fetchVaultTrackerData = async (vaultAddress) => {
+  const result = {
+    trackerMetadata: null,
+    transactionHistory: [],
+    success: false
+  };
+
+  try {
+    // Fetch metadata and transactions in parallel
+    const [metadataResponse, transactionsResponse] = await Promise.all([
+      fetch(`${SSE_BASE_URL}/vault/${vaultAddress}/metadata`),
+      fetch(`${SSE_BASE_URL}/vault/${vaultAddress}/transactions`)
+    ]);
+
+    // Process metadata response
+    if (metadataResponse.ok) {
+      result.trackerMetadata = await metadataResponse.json();
+    } else if (metadataResponse.status !== 404) {
+      // 404 is expected for vaults not yet tracked, only warn on other errors
+      console.warn(`Failed to fetch tracker metadata for ${vaultAddress}: ${metadataResponse.status}`);
+    }
+
+    // Process transactions response
+    if (transactionsResponse.ok) {
+      const data = await transactionsResponse.json();
+      // Sort by timestamp descending (most recent first)
+      result.transactionHistory = (data.transactions || []).sort((a, b) => b.timestamp - a.timestamp);
+    } else if (transactionsResponse.status !== 404) {
+      console.warn(`Failed to fetch transactions for ${vaultAddress}: ${transactionsResponse.status}`);
+    }
+
+    result.success = true;
+  } catch (error) {
+    console.warn(`Error fetching tracker data for ${vaultAddress}:`, error);
+  }
+
+  return result;
+};
+
+/**
+ * Calculate APY for a vault based on tracker metadata
+ * @param {Object} trackerMetadata - Tracker metadata with baseline, lastSnapshot, and aggregates
+ * @returns {Object|null} APY data object or null if insufficient data
+ */
+export const calculateVaultAPY = (trackerMetadata) => {
+  if (!trackerMetadata?.baseline || !trackerMetadata?.lastSnapshot || !trackerMetadata?.aggregates) {
+    return null;
+  }
+
+  const { baseline, lastSnapshot, aggregates } = trackerMetadata;
+
+  // Need both timestamps to calculate time elapsed
+  if (!baseline.timestamp || !lastSnapshot.timestamp) {
+    return null;
+  }
+
+  // Calculate time elapsed in days
+  const msElapsed = lastSnapshot.timestamp - baseline.timestamp;
+  const daysElapsed = msElapsed / (1000 * 60 * 60 * 24);
+
+  // Need at least some time to have passed (about 30 seconds minimum)
+  if (daysElapsed < 0.00035) {
+    return null;
+  }
+
+  // Get values
+  const baselineValue = baseline.value || 0;
+  const currentValue = lastSnapshot.value || 0;
+  const feesWithdrawn = aggregates.cumulativeFeesWithdrawnUSD || 0;
+  const gasCost = aggregates.cumulativeGasUSD || 0;
+
+  // Can't calculate if no baseline value
+  if (baselineValue <= 0) {
+    return null;
+  }
+
+  // Net return = (current - baseline) + fees withdrawn to owner - gas costs
+  // Note: Reinvested fees are already reflected in currentValue
+  const netReturn = (currentValue - baselineValue) + feesWithdrawn - gasCost;
+  const simpleReturn = netReturn / baselineValue;
+
+  // Calculate APY: ((1 + return) ^ (365 / days)) - 1
+  // Handle negative returns properly
+  let apy;
+  if (simpleReturn >= 0) {
+    apy = Math.pow(1 + simpleReturn, 365 / daysElapsed) - 1;
+  } else {
+    // For negative returns, use the same formula
+    apy = Math.pow(1 + simpleReturn, 365 / daysElapsed) - 1;
+  }
+
+  return {
+    apy,                          // Decimal (0.15 = 15%)
+    apyPercent: apy * 100,        // Percentage (15 = 15%)
+    netReturn,                    // USD
+    simpleReturn,                 // Decimal
+    simpleReturnPercent: simpleReturn * 100,
+    daysElapsed,
+    baselineValue,
+    currentValue,
+    feesWithdrawn,
+    feesReinvested: aggregates.cumulativeFeesReinvestedUSD || 0,
+    totalFees: aggregates.cumulativeFeesUSD || 0,
+    gasCost
+  };
 };
 
 /**
@@ -908,6 +1020,20 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
       }));
     }
 
+    // Fetch tracker data (metadata and transactions) from automation service
+    try {
+      const trackerData = await fetchVaultTrackerData(vaultAddress);
+      if (trackerData.success) {
+        dispatch(updateVaultTrackerData({
+          vaultAddress,
+          trackerMetadata: trackerData.trackerMetadata,
+          transactionHistory: trackerData.transactionHistory
+        }));
+      }
+    } catch (error) {
+      console.warn(`Error fetching tracker data for ${vaultAddress}:`, error);
+    }
+
     return {
       success: true,
       vault: vaultData,
@@ -1291,7 +1417,24 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       console.warn('Error applying blacklist data:', error);
     }
 
-    // 11. NOW update all vaults in Redux with COMPLETE data (including tokenBalances and blacklist)
+    // 11. Fetch tracker data (metadata and transactions) for all vaults in parallel
+    try {
+      const trackerDataPromises = completeVaultsData.map(vault => fetchVaultTrackerData(vault.address));
+      const trackerResults = await Promise.all(trackerDataPromises);
+
+      for (let i = 0; i < completeVaultsData.length; i++) {
+        const trackerData = trackerResults[i];
+        if (trackerData.success) {
+          completeVaultsData[i].trackerMetadata = trackerData.trackerMetadata;
+          completeVaultsData[i].transactionHistory = trackerData.transactionHistory;
+          completeVaultsData[i].trackerDataLoaded = true;
+        }
+      }
+    } catch (error) {
+      console.warn('Error fetching tracker data:', error);
+    }
+
+    // 12. NOW update all vaults in Redux with COMPLETE data (including tokenBalances, blacklist, and tracker data)
     dispatch(setVaults(completeVaultsData));
 
     return {
