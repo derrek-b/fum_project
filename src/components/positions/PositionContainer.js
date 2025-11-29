@@ -19,13 +19,13 @@ import { setResourceUpdating } from "../../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useReadProvider } from '../../hooks/useReadProvider';
 
 export default function PositionContainer() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { provider } = useReadProvider();
   const { lastUpdate } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
   const { userVaults } = useSelector((state) => state.vaults);

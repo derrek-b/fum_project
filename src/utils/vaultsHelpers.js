@@ -17,7 +17,7 @@ import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
 const ERC20ABI = ERC20ARTIFACT.abi;
 
 // SSE base URL for automation service API calls
-const SSE_BASE_URL = process.env.NEXT_PUBLIC_SSE_URL?.replace('/events', '') || 'http://localhost:3001';
+const SSE_BASE_URL = process.env.NEXT_PUBLIC_SSE_URL?.replace('/events', '');
 
 /**
  * Fetch blacklist data from automation service
@@ -1150,8 +1150,6 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
               chainId
             );
 
-            console.log(`🔵 calculateTokenAmounts returned:`, tokenAmounts);
-
             if (!tokenAmounts || !Array.isArray(tokenAmounts) || tokenAmounts.length !== 2) {
               console.log(`⚠️ tokenAmounts invalid format`);
               hasPartialData = true;
@@ -1161,8 +1159,6 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
             // Format the BigInt amounts using token decimals
             const token0Formatted = ethers.utils.formatUnits(tokenAmounts[0], data.token0Data.decimals);
             const token1Formatted = ethers.utils.formatUnits(tokenAmounts[1], data.token1Data.decimals);
-
-            console.log(`🔵 Formatted amounts: token0=${token0Formatted} ${data.token0Data.symbol}, token1=${token1Formatted} ${data.token1Data.symbol}`);
 
             // Calculate USD values
             const token0Price = prices[data.token0Data.symbol];

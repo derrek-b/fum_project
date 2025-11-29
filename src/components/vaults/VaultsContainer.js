@@ -1,7 +1,7 @@
 // src/components/VaultsContainer.js
 import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-bootstrap";
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
@@ -16,7 +16,7 @@ export default function VaultsContainer() {
 
   // Redux state
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const { userVaults } = useSelector((state) => state.vaults);
   const { lastUpdate } = useSelector((state) => state.updates);
 
@@ -54,7 +54,7 @@ export default function VaultsContainer() {
 
   const loadData = () => {
     // Skip if not connected
-    if (!isConnected || !address || !provider || !chainId) {
+    if (!isConnected || !address || !isReadReady || !chainId) {
       setIsLoading(false);
       return;
     }
@@ -67,8 +67,8 @@ export default function VaultsContainer() {
     dispatch(setVaultError(null));
     dispatch(setResourceUpdating({ resource: 'vaults', isUpdating: true }));
 
-    // 2. Use our helper function to load all data
-    loadVaultData(address, provider, chainId, dispatch, { showError, showSuccess })
+    // 2. Use our helper function to load all data (uses dedicated read provider)
+    loadVaultData(address, readProvider, chainId, dispatch, { showError, showSuccess })
       .then(result => {
         if (!result.success) {
           console.error(`Error loading vaults: ${result.error}`);
@@ -93,17 +93,17 @@ export default function VaultsContainer() {
   // Load data effect - runs when wallet connection state changes or manual refresh
   useEffect(() => {
     loadData();
-  }, [isConnected, address, provider, chainId, lastUpdate]);
+  }, [isConnected, address, isReadReady, chainId, lastUpdate]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
-    if (!vaultName || !provider || !address) return;
+    if (!vaultName || !isWriteReady || !address) return;
 
     setIsCreatingVault(true);
     setCreateVaultError(null);
 
     try {
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Step 1: Create the vault - this remains the same for now
       const newVaultAddress = await createVault(vaultName, signer);

@@ -4,7 +4,7 @@ import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-boo
 import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { platforms } from 'fum_library/configs';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
@@ -30,7 +30,7 @@ export default function PositionSelectionModal({
   const { positions } = useSelector((state) => state.positions);
   //const { provider } = useSelector((state) => state.wallet.provider);
   const { address } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isWriteReady } = useProviders();
   // const { pools = {} } = useSelector((state) => state.pools);
   // const { tokens = {} } = useSelector((state) => state.tokens);
 
@@ -160,7 +160,7 @@ export default function PositionSelectionModal({
 
       try {
         const positionId = selectedPositions[0];
-        const signer = await provider.getSigner();
+        const signer = await getSigner();
 
         // Find the position object from the positions array
         const position = positions.find(p => p.id === positionId);
@@ -187,7 +187,7 @@ export default function PositionSelectionModal({
           tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
         } else {
           // Remove: Call vault's withdrawPosition method (always withdraws to owner)
-          const vaultContract = getVaultContract(vault.address, provider);
+          const vaultContract = getVaultContract(vault.address, readProvider);
           const vaultWithSigner = vaultContract.connect(signer);
           tx = await vaultWithSigner.withdrawPosition(
             platformInfo.positionManagerAddress,
@@ -250,7 +250,7 @@ export default function PositionSelectionModal({
       setShowTransactionModal(true);
 
       try {
-        const signer = await provider.getSigner();
+        const signer = await getSigner();
 
         // Process each position with step tracking
         for (let i = 0; i < selectedPositions.length; i++) {
@@ -283,7 +283,7 @@ export default function PositionSelectionModal({
               tx = await nftPositionManager.safeTransferFrom(address, vault.address, positionId);
             } else {
               // Remove: Call vault's withdrawPosition method (always withdraws to owner)
-              const vaultContract = getVaultContract(vault.address, provider);
+              const vaultContract = getVaultContract(vault.address, readProvider);
               const vaultWithSigner = vaultContract.connect(signer);
               tx = await vaultWithSigner.withdrawPosition(
                 platformInfo.positionManagerAddress,

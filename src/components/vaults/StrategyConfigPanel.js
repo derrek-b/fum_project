@@ -7,7 +7,7 @@ import StrategyDetailsSection from './StrategyDetailsSection';
 import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
 import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
 import TransactionProgressModal from '../common/TransactionProgressModal';
 import StrategyValidationModal from './StrategyValidationModal';
@@ -24,7 +24,7 @@ const StrategyConfigPanel = ({
   onStrategyToggle
 }) => {
   const dispatch = useDispatch();
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isWriteReady } = useProviders();
   const chainId = useSelector(state => state.wallet.chainId);
   const availableStrategies = useSelector(state => state.strategies.availableStrategies);
 
@@ -187,15 +187,15 @@ const StrategyConfigPanel = ({
       try {
         setTransactionLoading(true);
 
-        if (!provider) {
+        if (!isWriteReady) {
           throw new Error("No provider available");
         }
 
         // Get signer
-        const signer = await provider.getSigner();
+        const signer = await getSigner();
 
         // Get vault contract instance with signer
-        const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+        const vaultContract = getVaultContract(vaultAddress, readProvider).connect(signer);
 
         // Generate deactivation steps and show modal
         const steps = generateDeactivationSteps(true);
@@ -309,15 +309,15 @@ const StrategyConfigPanel = ({
       try {
         setIsLoading(true);
 
-        if (!provider) {
+        if (!isWriteReady) {
           throw new Error("No provider available");
         }
 
         // Get signer
-        const signer = await provider.getSigner();
+        const signer = await getSigner();
 
         // Get vault contract instance with signer
-        const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+        const vaultContract = getVaultContract(vaultAddress, readProvider).connect(signer);
 
         // Remove strategy
         const removeStrategyTx = await vaultContract.removeStrategy();
@@ -609,12 +609,12 @@ const StrategyConfigPanel = ({
     try {
       setTransactionLoading(true);
 
-      if (!provider) {
+      if (!isWriteReady) {
         throw new Error("No provider available");
       }
 
       // Get signer with await
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Get the selected strategy details from Redux store (has contractKey)
       const strategyConfig = availableStrategies.find(s => s.id === selectedStrategy);
@@ -631,7 +631,7 @@ const StrategyConfigPanel = ({
       }
 
       // Get PositionVault contract instance with signer
-      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+      const vaultContract = getVaultContract(vaultAddress, readProvider).connect(signer);
 
       // Get strategy contract interface from config using correct contract key
       const strategyContract = new ethers.Contract(

@@ -3,7 +3,7 @@ import { Card, Spinner, Badge, Button } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
 import { ethers } from "ethers";
-import { useProvider } from "../../contexts/ProviderContext";
+import { useReadProvider } from "../../hooks/useReadProvider";
 
 // FUM Library imports
 import { AdapterFactory } from "fum_library/adapters";
@@ -17,7 +17,7 @@ import PriceRangeChart from "../common/PriceRangeChart";
 export default function PositionCard({ position, inVault = false, vaultAddress = null }) {
   const router = useRouter();
   const { address, chainId } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { provider } = useReadProvider();
   const pools = useSelector((state) => state.pools);
   const poolData = pools[position.pool];
 

@@ -19,7 +19,7 @@ import { setPools } from "@/redux/poolSlice";
 import { setTokens } from "@/redux/tokensSlice";
 import { useToast } from "../../context/ToastContext";
 import { AdapterFactory } from "fum_library/adapters";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useReadProvider } from '../../hooks/useReadProvider';
 import { formatPrice, formatFeeDisplay, getPlatformColor, getPlatformLogo } from "fum_library/helpers";
 import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingecko";
 
@@ -69,7 +69,7 @@ export default function PositionDetailPage() {
   const tokens = useSelector((state) => state.tokens);
   const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { provider } = useReadProvider();
   const { lastUpdate, resourcesUpdating } = useSelector((state) => state.updates);
   const hasAttemptedFetch = useRef(false);
   const positionsRef = useRef(positions);

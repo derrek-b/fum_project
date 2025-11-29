@@ -8,7 +8,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 // CSS to hide number input spinner arrows
@@ -41,7 +41,7 @@ export default function ClosePositionModal({
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address, chainId } = useSelector(state => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner } = useProviders();
 
   // State for burn option
   const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended
@@ -103,8 +103,8 @@ export default function ClosePositionModal({
 
   // Function to close position using the adapter
   const closePosition = async (shouldBurn, slippageTolerance) => {
-    // Get the appropriate adapter
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
+    // Get the appropriate adapter (uses read provider)
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId, readProvider);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");
@@ -118,7 +118,7 @@ export default function ClosePositionModal({
       const txData = await adapter.generateRemoveLiquidityData({
         position,
         percentage: 100, // Remove 100% to close
-        provider,
+        provider: readProvider,
         walletAddress: address,
         poolData,
         token0Data,
@@ -128,7 +128,7 @@ export default function ClosePositionModal({
       });
 
       // Get signer to send transaction
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Send the transaction
       const tx = await signer.sendTransaction(txData);

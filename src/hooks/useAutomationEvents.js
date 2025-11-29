@@ -10,17 +10,16 @@ import {
 import { triggerUpdate } from '../redux/updateSlice';
 import { updateVault, appendVaultTransaction } from '../redux/vaultsSlice';
 
-const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL || 'http://localhost:3001/events';
+const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL;
 
-// Events that should trigger a data refresh
+// Events that should trigger a full data refresh
 const REFRESH_TRIGGER_EVENTS = [
-  'NewPositionCreated',
-  'PositionsClosed',
-  'PositionRebalanced',
-  'LiquidityAddedToPosition',
-  'FeesCollected',
-  'TokensSwapped',
-  'VaultUnrecoverable'
+  'NewPositionCreated',     // New position minted
+  'PositionsClosed',        // Position(s) burned
+  'LiquidityAddedToPosition', // Liquidity added to existing position
+  'FeesCollected',          // Fees collected, token balances changed
+  'TokensSwapped',          // Tokens swapped, balances changed
+  'VaultUnrecoverable'      // Vault blacklisted
 ];
 
 /**

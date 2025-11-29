@@ -5,7 +5,7 @@ import { useSelector } from "react-redux";
 import { ethers } from "ethers";
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from "../../contexts/ProviderContext";
+import { useProviders } from "../../hooks/useProviders";
 import Image from "next/image";
 
 // CSS to hide number input spinner arrows
@@ -48,7 +48,7 @@ const ERC20_ABI = [
 
 const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const { address: userAddress, chainId } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const { showSuccess, showError } = useToast();
 
   // State
@@ -77,12 +77,12 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   // Fetch user's balance for selected token
   useEffect(() => {
     const fetchUserBalance = async () => {
-      if (!selectedToken || !userAddress || !provider || !show) return;
+      if (!selectedToken || !userAddress || !isReadReady || !show) return;
 
       setIsLoading(true);
       try {
         const tokenAddress = selectedToken.addresses[chainId];
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider);
         const balance = await tokenContract.balanceOf(userAddress);
         const formattedBalance = ethers.utils.formatUnits(balance, selectedToken.decimals);
         setUserBalance(formattedBalance);
@@ -97,7 +97,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     };
 
     fetchUserBalance();
-  }, [selectedToken, userAddress, provider, chainId, show]);
+  }, [selectedToken, userAddress, readProvider, isReadReady, chainId, show]);
 
   // Handle token selection
   const handleTokenSelect = (token) => {
@@ -130,7 +130,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
 
   // Handle deposit
   const handleDeposit = async () => {
-    if (!selectedToken || !amount || !userAddress || !provider) {
+    if (!selectedToken || !amount || !userAddress || !isWriteReady) {
       setError("Please select a token and enter an amount");
       return;
     }
@@ -159,7 +159,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     try {
       const tokenAddress = selectedToken.addresses[chainId];
 
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
 
       // Convert amount to token units

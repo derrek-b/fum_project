@@ -18,7 +18,7 @@ import AutomationModal from '../../components/vaults/AutomationModal';
 import PositionSelectionModal from "../../components/vaults/PositionSelectionModal";
 import RefreshControls from "../../components/common/RefreshControls";
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVault } from "../../redux/vaultsSlice";
 import { loadVaultData, getVaultData, loadVaultTokenBalances, calculateVaultAPY } from '../../utils/vaultsHelpers';
@@ -77,7 +77,7 @@ export default function VaultDetailPage() {
   const pools = useSelector((state) => state.pools);
   const tokens = useSelector((state) => state.tokens);
   const { chainId, address: userAddress, isConnected, isReconnecting } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const lastUpdate = useSelector((state) => state.updates.lastUpdate);
   const vaultFromRedux = useSelector((state) =>
     state.vaults.userVaults.find(v => v.address === vaultAddress)
@@ -118,15 +118,15 @@ export default function VaultDetailPage() {
 
   // Create loadData function to replace the useVaultDetailData hook (memoized)
   const loadData = useCallback(async () => {
-    if (!vaultAddress || !provider || !chainId) {
+    if (!vaultAddress || !isReadReady || !chainId) {
       return;
     }
 
     // Only show loading spinner on initial load, not on refreshes
     if (!vault) {
       setIsLoading(true);
-      // Use our loadVaultData utility function to load all the user's vault data
-      const loadResult = await loadVaultData(userAddress, provider, chainId, dispatch, {
+      // Use our loadVaultData utility function to load all the user's vault data (uses dedicated read provider)
+      const loadResult = await loadVaultData(userAddress, readProvider, chainId, dispatch, {
         showError,
         showSuccess
       });
@@ -140,7 +140,7 @@ export default function VaultDetailPage() {
 
     try {
       // Load this specific vault's data
-      const result = await getVaultData(vaultAddress, provider, chainId, dispatch, {
+      const result = await getVaultData(vaultAddress, readProvider, chainId, dispatch, {
         showError,
         showSuccess
       });
@@ -166,14 +166,14 @@ export default function VaultDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [vaultAddress, provider, chainId, userAddress, dispatch, showError, showSuccess]);
+  }, [vaultAddress, readProvider, isReadReady, chainId, userAddress, dispatch, showError, showSuccess]);
 
   // Call loadData when dependencies change or refresh is triggered
   useEffect(() => {
     if (vaultAddress) {
       loadData();
     }
-  }, [vaultAddress, userAddress, provider, chainId, lastUpdate]);
+  }, [vaultAddress, userAddress, isReadReady, chainId, lastUpdate]);
 
   // Handle token withdrawal (for owner) - memoized
   const handleWithdrawToken = useCallback(async (token) => {
@@ -226,7 +226,7 @@ export default function VaultDetailPage() {
 
   // Add this new function to handle the actual transaction after confirmation - memoized
   const handleConfirmAutomation = useCallback(async () => {
-    if (!vaultAddress || !provider) {
+    if (!vaultAddress || !isWriteReady) {
       showError("Unable to connect to your wallet");
       setShowAutomationModal(false);
       return;
@@ -236,10 +236,10 @@ export default function VaultDetailPage() {
 
     try {
       // Get signer
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Get vault contract with signer
-      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+      const vaultContract = getVaultContract(vaultAddress, readProvider).connect(signer);
 
       // Check if the vault has a strategy set before enabling automation
       if (vaultFromRedux.strategyAddress === "0x0000000000000000000000000000000000000000") {
@@ -318,7 +318,7 @@ export default function VaultDetailPage() {
       setIsProcessingAutomation(false);
       setShowAutomationModal(false);
     }
-  }, [vaultAddress, provider, showError, showSuccess, vaultFromRedux, isEnablingAutomation, pendingExecutorAddress, dispatch]);
+  }, [vaultAddress, readProvider, getSigner, isWriteReady, showError, showSuccess, vaultFromRedux, isEnablingAutomation, pendingExecutorAddress, dispatch]);
 
   // Iinitialize toggle based on executor address
   useEffect(() => {
@@ -915,7 +915,7 @@ export default function VaultDetailPage() {
           show={showDepositModal}
           onHide={() => setShowDepositModal(false)}
           vaultAddress={vaultAddress}
-          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
+          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, readProvider, chainId, dispatch)}
         />
 
         {/* Token Withdraw Modal */}
@@ -928,7 +928,7 @@ export default function VaultDetailPage() {
           vaultAddress={vaultAddress}
           token={selectedWithdrawToken}
           ownerAddress={vaultFromRedux?.owner}
-          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch)}
+          onTokensUpdated={() => loadVaultTokenBalances(vaultAddress, readProvider, chainId, dispatch)}
         />
 
         {/* Automation Modal */}

@@ -8,7 +8,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 // CSS for custom slider styling and hiding number input spinners
@@ -61,7 +61,7 @@ export default function RemoveLiquidityModal({
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address, chainId } = useSelector(state => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner } = useProviders();
 
   // State for the percentage slider
   const [percentage, setPercentage] = useState(100);
@@ -148,8 +148,8 @@ export default function RemoveLiquidityModal({
 
   // Function to remove liquidity using the adapter
   const removeLiquidity = async (percentage, slippageTolerance) => {
-    // Get the appropriate adapter
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
+    // Get the appropriate adapter (uses read provider)
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId, readProvider);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");
@@ -163,7 +163,7 @@ export default function RemoveLiquidityModal({
       const txData = await adapter.generateRemoveLiquidityData({
         position,
         percentage,
-        provider,
+        provider: readProvider,
         walletAddress: address,
         poolData,
         token0Data,
@@ -173,7 +173,7 @@ export default function RemoveLiquidityModal({
       });
 
       // Get signer to send transaction
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Send the transaction
       const tx = await signer.sendTransaction(txData);

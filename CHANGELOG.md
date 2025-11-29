@@ -6,10 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added
-- Completing automation pipeline with transaction execution
-- Performance metrics for strategy execution
-- Strategy history tracking
+
+## [0.7.0] - 2025-01-29
+### Dual Provider Architecture
+
+Separates read operations (dedicated RPC) from write operations (wallet provider) for improved performance and real-time data updates.
+
+#### **New Provider Hooks**
+- **NEW**: `useReadProvider` hook - For read-only blockchain operations using dedicated RPC
+- **NEW**: `useWriteProvider` hook - For write operations requiring wallet signing
+- **NEW**: `useProviders` hook - Combined access to both read and write providers
+
+#### **ProviderContext Refactor**
+- **NEW**: `readProvider` state - Dedicated JsonRpcProvider from chain RPC config
+- **NEW**: `chainId` exposed in context value
+- **NEW**: `createReadProvider()` function - Creates RPC provider using `getChainRpcUrls()`
+- **FEATURE**: Automatic read provider creation when wallet connects
+- **FEATURE**: Fallback to wallet provider if dedicated RPC unavailable
+
+#### **Component Migration**
+- **UPDATED**: Read-only components use `useReadProvider` (PositionContainer, PositionCard, position/[id])
+- **UPDATED**: Write-only components use `useWriteProvider` (CreateVaultModal)
+- **UPDATED**: Mixed components use `useProviders` (VaultsContainer, vault/[address], all modals)
+- **UPDATED**: Demo page uses `getChainRpcUrls()` from chain config
+
+#### **SSE Refresh Events**
+- **UPDATED**: Individual action events trigger refreshes (NewPositionCreated, TokensSwapped, etc.)
+- **REMOVED**: Redundant checkpoint events (MonitoringStarted, PositionRebalanced)
+- **RESULT**: Real-time UI updates as automation actions complete
+
+#### **Landing Page**
+- **NEW**: Static landing page with navigation links (Vaults, Positions, Demo)
+- **REMOVED**: Auto-redirect logic that caused race conditions with wallet reconnection
+
+#### **Error Handling**
+- **NEW**: Custom `_error.js` page for 404 and 500 errors
+- **FEATURE**: Branded error page with retry button (preserves URL params)
+- **FEATURE**: Different messaging for "Page Not Found" vs "Something Went Wrong"
+
+#### **Impact**
+- **PERFORMANCE**: Read operations use dedicated RPC without MetaMask HTTP lag
+- **REAL-TIME**: UI updates immediately after each automation action
+- **RELIABILITY**: Fallback to wallet provider if RPC unavailable
+- **UX**: Clean landing page, professional error handling
+
+**Status**: ✅ Dual provider architecture complete
+**Breaking Changes**: None (internal refactor)
+**Impact**: Significant improvement in data freshness and real-time updates
 
 ## [0.6.0] - 2025-01-28
 ### Demo Page & Transaction History

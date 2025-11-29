@@ -1556,6 +1556,9 @@ describe("PositionVault - 0.4.3", function() {
     });
 
     describe("V3 Swap Commands (0x00, 0x01)", function() {
+      // ADDRESS_THIS constant used by Universal Router for multi-hop swaps
+      const ADDRESS_THIS = "0x0000000000000000000000000000000000000002";
+
       it("should allow V3_SWAP_EXACT_IN with vault as recipient", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
@@ -1566,10 +1569,22 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
 
-      it("should reject V3_SWAP_EXACT_IN with non-vault recipient", async function() {
+      it("should allow V3_SWAP_EXACT_IN with ADDRESS_THIS as recipient (multi-hop)", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        const input = encodeV3SwapInput(ADDRESS_THIS, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+      });
+
+      it("should reject V3_SWAP_EXACT_IN with non-vault/non-router recipient", async function() {
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
         const path = createMockPath(tokenAddress, tokenAddress);
@@ -1578,10 +1593,10 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
 
-      it("should reject V3_SWAP_EXACT_OUT with non-vault recipient", async function() {
+      it("should reject V3_SWAP_EXACT_OUT with non-vault/non-router recipient", async function() {
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
         const path = createMockPath(tokenAddress, tokenAddress);
@@ -1590,11 +1605,14 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_OUT], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
     });
 
     describe("V2 Swap Commands (0x08, 0x09)", function() {
+      // ADDRESS_THIS constant used by Universal Router for multi-hop swaps
+      const ADDRESS_THIS = "0x0000000000000000000000000000000000000002";
+
       it("should allow V2_SWAP_EXACT_IN with vault as recipient", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
@@ -1605,10 +1623,22 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
 
-      it("should reject V2_SWAP_EXACT_IN with non-vault recipient", async function() {
+      it("should allow V2_SWAP_EXACT_IN with ADDRESS_THIS as recipient (multi-hop)", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = [tokenAddress, tokenAddress];
+
+        const input = encodeV2SwapInput(ADDRESS_THIS, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+      });
+
+      it("should reject V2_SWAP_EXACT_IN with non-vault/non-router recipient", async function() {
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
         const path = [tokenAddress, tokenAddress];
@@ -1617,10 +1647,10 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
 
-      it("should reject V2_SWAP_EXACT_OUT with non-vault recipient", async function() {
+      it("should reject V2_SWAP_EXACT_OUT with non-vault/non-router recipient", async function() {
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
         const path = [tokenAddress, tokenAddress];
@@ -1629,7 +1659,7 @@ describe("PositionVault - 0.4.3", function() {
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_OUT], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
     });
 
@@ -1649,19 +1679,94 @@ describe("PositionVault - 0.4.3", function() {
       });
     });
 
-    describe("Blocked Commands", function() {
-      it("should reject SWEEP command (0x04)", async function() {
+    describe("SWEEP Command (0x04)", function() {
+      // Helper to encode SWEEP input: (address token, address recipient, uint256 amountMin)
+      function encodeSweepInput(token, recipient, amountMin) {
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        return abiCoder.encode(["address", "address", "uint256"], [token, recipient, amountMin]);
+      }
+
+      it("should allow SWEEP command with vault as recipient", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
         const tokenAddress = await token.getAddress();
 
-        const input = encodeGenericInput(tokenAddress, vaultAddress, 0);
+        const input = encodeSweepInput(tokenAddress, vaultAddress, 0);
         const calldata = encodeRouterExecute([CMD.SWEEP], [input]);
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+          .to.not.be.revertedWith("PositionVault: sweep recipient must be vault");
       });
 
+      it("should reject SWEEP command with non-vault recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+
+        const input = encodeSweepInput(tokenAddress, user1.address, 0);
+        const calldata = encodeRouterExecute([CMD.SWEEP], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: sweep recipient must be vault");
+      });
+    });
+
+    describe("Multi-hop Swap Pattern (swap + SWEEP)", function() {
+      // ADDRESS_THIS constant used by Universal Router for multi-hop swaps
+      const ADDRESS_THIS = "0x0000000000000000000000000000000000000002";
+
+      // Helper to encode SWEEP input
+      function encodeSweepInput(token, recipient, amountMin) {
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        return abiCoder.encode(["address", "address", "uint256"], [token, recipient, amountMin]);
+      }
+
+      it("should allow multi-hop pattern: V3_SWAP to ADDRESS_THIS + SWEEP to vault", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Multi-hop: swap output stays in router, then SWEEP sends to vault
+        const swapInput = encodeV3SwapInput(ADDRESS_THIS, 1000, 900, path, true);
+        const sweepInput = encodeSweepInput(tokenAddress, vaultAddress, 900);
+        const calldata = encodeRouterExecute(
+          [CMD.V3_SWAP_EXACT_IN, CMD.SWEEP],
+          [swapInput, sweepInput]
+        );
+
+        // Validation should pass - if it fails, it should be "swap failed" from mock router
+        // not from our validation checks
+        try {
+          await vault.swap([routerAddress], [calldata]);
+        } catch (error) {
+          // Mock router doesn't execute real swaps, so "swap failed" is expected
+          // But validation errors should NOT occur
+          expect(error.message).to.include("swap failed");
+          expect(error.message).to.not.include("swap recipient must be vault or router");
+          expect(error.message).to.not.include("sweep recipient must be vault");
+          expect(error.message).to.not.include("command not allowed");
+        }
+      });
+
+      it("should reject multi-hop pattern if SWEEP recipient is not vault", async function() {
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Multi-hop with SWEEP to wrong recipient
+        const swapInput = encodeV3SwapInput(ADDRESS_THIS, 1000, 900, path, true);
+        const sweepInput = encodeSweepInput(tokenAddress, user1.address, 900);
+        const calldata = encodeRouterExecute(
+          [CMD.V3_SWAP_EXACT_IN, CMD.SWEEP],
+          [swapInput, sweepInput]
+        );
+
+        await expect(vault.swap([routerAddress], [calldata]))
+          .to.be.revertedWith("PositionVault: sweep recipient must be vault");
+      });
+    });
+
+    describe("Blocked Commands", function() {
       it("should reject TRANSFER command (0x05)", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
@@ -1757,7 +1862,7 @@ describe("PositionVault - 0.4.3", function() {
         );
 
         await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
 
       it("should reject if any command is blocked", async function() {
@@ -1767,10 +1872,11 @@ describe("PositionVault - 0.4.3", function() {
         const path = createMockPath(tokenAddress, tokenAddress);
 
         const validSwap = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
-        const blockedCmd = encodeGenericInput(tokenAddress, vaultAddress, 0);
+        const blockedCmd = encodeGenericInput(tokenAddress, vaultAddress, 1000);
 
+        // Use TRANSFER (0x05) as the blocked command
         const calldata = encodeRouterExecute(
-          [CMD.V3_SWAP_EXACT_IN, CMD.SWEEP],
+          [CMD.V3_SWAP_EXACT_IN, CMD.TRANSFER],
           [validSwap, blockedCmd]
         );
 
@@ -1810,7 +1916,7 @@ describe("PositionVault - 0.4.3", function() {
         const swap2Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap2Input]);
 
         await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault");
+          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
       });
     });
 

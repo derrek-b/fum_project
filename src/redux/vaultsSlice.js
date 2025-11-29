@@ -143,22 +143,13 @@ const vaultsSlice = createSlice({
           });
       }
     },
-    // !!!!!UPDATED!!!!!
     updateVaultTokenBalances: (state, action) => {
       const { vaultAddress, tokenBalances } = action.payload;
       const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
 
       if (vaultIndex !== -1) {
-        // Initialize tokenBalances object if it doesn't exist
-        if (!state.userVaults[vaultIndex].tokenBalances) {
-          state.userVaults[vaultIndex].tokenBalances = {};
-        }
-
-        // Update token balances in the vault object
-        state.userVaults[vaultIndex].tokenBalances = {
-          ...state.userVaults[vaultIndex].tokenBalances,
-          ...tokenBalances
-        };
+        // Replace token balances entirely (don't merge) so 0-balance tokens are removed
+        state.userVaults[vaultIndex].tokenBalances = tokenBalances;
       }
     },
     updateVaultMetrics: (state, action) => {

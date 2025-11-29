@@ -14,7 +14,7 @@ import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingeck
 
 // Local project imports
 import { useToast } from '../../context/ToastContext.js';
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { triggerUpdate } from '../../redux/updateSlice.js';
 import TransactionProgressModal from '../common/TransactionProgressModal';
 
@@ -49,7 +49,7 @@ export default function AddLiquidityModal({
 
   // Get wallet and chain data from Redux
   const { address, chainId } = useSelector(state => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, writeProvider, getSigner } = useProviders();
 
   // Get auto-refresh state to manage pausing during liquidity addition
   const { autoRefresh } = useSelector(state => state.updates);
@@ -154,15 +154,15 @@ export default function AddLiquidityModal({
 
   // Get adapter for the selected platform
   const adapter = useMemo(() => {
-    if (!provider || !selectedPlatform || !chainId) return null;
+    if (!readProvider || !selectedPlatform || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(selectedPlatform, chainId, provider);
+      return AdapterFactory.getAdapter(selectedPlatform, chainId, readProvider);
     } catch (error) {
       console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
       showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);
       return null;
     }
-  }, [selectedPlatform, chainId, provider, showError]);
+  }, [selectedPlatform, chainId, readProvider, showError]);
 
   // Calculate USD values if token prices are available
   // Use tokenPrices prop if provided, otherwise use localTokenPrices (fetched for new positions)
@@ -308,7 +308,7 @@ export default function AddLiquidityModal({
         }
 
         // Get token balances
-        if (token0Data.address && token1Data.address && provider && address) {
+        if (token0Data.address && token1Data.address && readProvider && address) {
           fetchTokenBalances(token0Data.address, token1Data.address);
         }
 
@@ -338,14 +338,14 @@ export default function AddLiquidityModal({
         showError("Error loading position data. Please try again later.");
       }
     }
-  }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, provider, adapter, showError]);
+  }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, readProvider, adapter, showError]);
 
   // Fetch token balances when token addresses change
   useEffect(() => {
-    if (!isExistingPosition && token0Address && token1Address && provider && address) {
+    if (!isExistingPosition && token0Address && token1Address && readProvider && address) {
       fetchTokenBalances(token0Address, token1Address);
     }
-  }, [token0Address, token1Address, provider, address, isExistingPosition]);
+  }, [token0Address, token1Address, readProvider, address, isExistingPosition]);
 
   // Load pool price when both tokens and fee tier are selected
   useEffect(() => {
@@ -354,10 +354,10 @@ export default function AddLiquidityModal({
     if (!isExistingPosition &&
         token0Address && token0Address !== "" &&
         token1Address && token1Address !== "" &&
-        selectedFeeTier && provider && adapter) {
+        selectedFeeTier && readProvider && adapter) {
       fetchPoolPrice();
     }
-  }, [token0Address, token1Address, selectedFeeTier, provider, adapter, isExistingPosition]);
+  }, [token0Address, token1Address, selectedFeeTier, readProvider, adapter, isExistingPosition]);
 
   // Fetch token prices for new positions when tokens are selected
   useEffect(() => {
@@ -491,7 +491,7 @@ export default function AddLiquidityModal({
 
   // Fetch token balances for user
   const fetchTokenBalances = async (address0, address1) => {
-    if (!provider || !address) {
+    if (!readProvider || !address) {
       console.error("Provider or address missing");
       return;
     }
@@ -504,8 +504,8 @@ export default function AddLiquidityModal({
       ];
 
       // Create contract instances
-      const token0Contract = new ethers.Contract(address0, erc20ABI, provider);
-      const token1Contract = new ethers.Contract(address1, erc20ABI, provider);
+      const token0Contract = new ethers.Contract(address0, erc20ABI, readProvider);
+      const token1Contract = new ethers.Contract(address1, erc20ABI, readProvider);
 
       // Get balances and decimals
       const [balance0, balance1] = await Promise.all([
@@ -549,7 +549,7 @@ export default function AddLiquidityModal({
 
   // Fetch pool price for selected tokens and fee tier using the adapter
   const fetchPoolPrice = async () => {
-    if (!token0Address || !token1Address || !selectedFeeTier || !provider || !adapter) {
+    if (!token0Address || !token1Address || !selectedFeeTier || !readProvider || !adapter) {
       return;
     }
 
@@ -588,8 +588,8 @@ export default function AddLiquidityModal({
             sortedToken1 = token1Info;
           }
 
-          // Get chainId from provider
-          const network = await provider.getNetwork();
+          // Get chainId from read provider
+          const network = await readProvider.getNetwork();
           const chainId = Number(network.chainId);
 
           if (!chainId) {
@@ -643,7 +643,7 @@ export default function AddLiquidityModal({
         'function liquidity() external view returns (uint128)'
       ];
 
-      const poolContract = new ethers.Contract(poolAddress, poolABI, provider);
+      const poolContract = new ethers.Contract(poolAddress, poolABI, readProvider);
 
       try {
         // Try to get the pool data
@@ -1020,7 +1020,7 @@ export default function AddLiquidityModal({
       ).toString();
 
       // Get signer
-      const signer = provider.getSigner(address);
+      const signer = getSigner();
 
       // ERC20 ABI for approve and allowance
       const erc20ABI = [
@@ -1030,7 +1030,7 @@ export default function AddLiquidityModal({
 
       // Step 1: Check and approve token0 if needed
       if (token0AmountWei !== "0") {
-        const token0Contract = new ethers.Contract(token0Data.address, erc20ABI, provider);
+        const token0Contract = new ethers.Contract(token0Data.address, erc20ABI, readProvider);
         const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
 
         if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
@@ -1049,7 +1049,7 @@ export default function AddLiquidityModal({
 
       // Step 2: Check and approve token1 if needed
       if (token1AmountWei !== "0") {
-        const token1Contract = new ethers.Contract(token1Data.address, erc20ABI, provider);
+        const token1Contract = new ethers.Contract(token1Data.address, erc20ABI, readProvider);
         const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
 
         if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
@@ -1071,7 +1071,7 @@ export default function AddLiquidityModal({
         position: params.position,
         token0Amount: token0AmountWei,
         token1Amount: token1AmountWei,
-        provider,
+        provider: readProvider,
         poolData,
         token0Data,
         token1Data,
@@ -1157,7 +1157,7 @@ export default function AddLiquidityModal({
       ).toString();
 
       // Get signer
-      const signer = provider.getSigner(address);
+      const signer = getSigner();
 
       // ERC20 ABI for approve and allowance
       const erc20ABI = [
@@ -1167,7 +1167,7 @@ export default function AddLiquidityModal({
 
       // Step 1: Check and approve token0 if needed
       if (token0AmountWei !== "0") {
-        const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, provider);
+        const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, readProvider);
         const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
 
         if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
@@ -1185,7 +1185,7 @@ export default function AddLiquidityModal({
 
       // Step 2: Check and approve token1 if needed
       if (token1AmountWei !== "0") {
-        const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, provider);
+        const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, readProvider);
         const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
 
         if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
@@ -1223,7 +1223,7 @@ export default function AddLiquidityModal({
         },
         token0Amount: token0AmountWei,
         token1Amount: token1AmountWei,
-        provider,
+        provider: readProvider,
         walletAddress: address,
         poolData: localPoolData,
         token0Data: sortedToken0Data,

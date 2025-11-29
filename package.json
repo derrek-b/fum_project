@@ -1,6 +1,6 @@
 {
   "name": "fum",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -28,7 +28,7 @@
     "@web3modal/ethereum": "^2.7.1",
     "bootstrap": "^5.3.3",
     "ethers": "^5.7.2",
-    "fum_library": "file:../fum_library/fum_library-0.22.2.tgz",
+    "fum_library": "file:../fum_library/fum_library-0.23.0.tgz",
     "next": "15.1.7",
     "react": "^19.0.0",
     "react-bootstrap": "^2.10.9",

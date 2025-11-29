@@ -10,7 +10,7 @@ import { fetchVaultTrackerData, calculateVaultAPY } from '../utils/vaultsHelpers
 import { updateVaultTrackerData } from '../redux/vaultsSlice';
 import { formatTimestamp } from "fum_library/helpers";
 import { getStrategyDetails } from "fum_library/helpers";
-import { getChainConfig } from "fum_library/helpers/chainHelpers";
+import { getChainConfig, getChainRpcUrls } from "fum_library/helpers/chainHelpers";
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain/contracts';
 import * as LucideIcons from 'lucide-react';
 import { Wifi, WifiOff } from 'lucide-react';
@@ -64,9 +64,10 @@ export default function DemoPage() {
       try {
         setIsLoading(true);
 
-        // Create a read-only provider (use Ganache localhost for demo)
-        const rpcUrl = "http://localhost:8545";
-        const readProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
+        // Create a read-only provider using chain config (local dev chain 1337)
+        const demoChainId = 1337;
+        const rpcUrls = getChainRpcUrls(demoChainId);
+        const readProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
         setProvider(readProvider);
 
         // Get network info

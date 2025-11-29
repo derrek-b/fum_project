@@ -1,22 +1,7 @@
-import { useEffect } from 'react';
-import { useRouter } from 'next/router';
-import { useSelector } from 'react-redux';
 import Head from 'next/head';
+import Link from 'next/link';
 
 export default function Home() {
-  const router = useRouter();
-  const { isConnected } = useSelector((state) => state.wallet);
-
-  useEffect(() => {
-    const redirectTimer = setTimeout(() => {
-      // Redirect to vaults if wallet connected, otherwise to demo
-      router.push(isConnected ? '/vaults' : '/demo');
-    }, 1000);
-
-    // Clean up the timeout if component unmounts
-    return () => clearTimeout(redirectTimer);
-  }, [router, isConnected]);
-
   return (
     <div>
       <Head>
@@ -33,12 +18,26 @@ export default function Home() {
         <img
           src="/Logo.svg"
           alt="D-fied Logo"
-          width="100"
-          height="100"
-          className="mb-4"
+          width="200"
+          height="200"
+          style={{ marginBottom: '1rem' }}
         />
-        <h2>D-fied</h2>
-        <p>{isConnected ? 'Loading Vaults Dashboard...' : 'Loading Demo...'}</p>
+        <h1 style={{ fontSize: '3.5rem', marginBottom: '0.5rem' }}>D-fied</h1>
+        <p style={{ color: '#666', marginBottom: '3rem', fontSize: '1.1rem' }}>DeFi Liquidity Management</p>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', fontSize: '1.625rem', fontWeight: 600 }}>
+          <Link href="/vaults" style={{ color: 'var(--crimson-700)', textDecoration: 'none' }}>
+            Vaults
+          </Link>
+          <span style={{ color: 'var(--neutral-700)' }}>|</span>
+          <Link href="/positions" style={{ color: 'var(--crimson-700)', textDecoration: 'none' }}>
+            Positions
+          </Link>
+          <span style={{ color: 'var(--neutral-700)' }}>|</span>
+          <Link href="/demo" style={{ color: 'var(--blue-accent)', textDecoration: 'none' }}>
+            Demo
+          </Link>
+        </div>
       </div>
     </div>
   );

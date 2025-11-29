@@ -6,7 +6,7 @@ import { ethers } from "ethers";
 import { getTokenAddress } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from "../../contexts/ProviderContext";
+import { useProviders } from "../../hooks/useProviders";
 
 // CSS to hide number input spinner arrows
 const numberInputStyles = `
@@ -25,7 +25,7 @@ const numberInputStyles = `
 
 const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, onTokensUpdated }) => {
   const { chainId } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isWriteReady } = useProviders();
   const { showSuccess, showError } = useToast();
 
   // State
@@ -69,7 +69,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
 
   // Handle withdrawal
   const handleWithdraw = async () => {
-    if (!token || !amount || !ownerAddress || !provider) {
+    if (!token || !amount || !ownerAddress || !isWriteReady) {
       setError("Missing required information");
       return;
     }
@@ -100,8 +100,8 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
       const tokenAddress = getTokenAddress(token.symbol, chainId);
 
       // Get vault contract with signer
-      const signer = await provider.getSigner();
-      const vaultContract = getVaultContract(vaultAddress, provider).connect(signer);
+      const signer = await getSigner();
+      const vaultContract = getVaultContract(vaultAddress, readProvider).connect(signer);
 
       // Convert amount to token units
       const amountInUnits = ethers.utils.parseUnits(amount, token.decimals);

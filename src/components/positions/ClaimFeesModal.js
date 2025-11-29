@@ -9,7 +9,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
-import { useProvider } from '../../contexts/ProviderContext';
+import { useProviders } from '../../hooks/useProviders';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function ClaimFeesModal({
@@ -25,7 +25,7 @@ export default function ClaimFeesModal({
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address, chainId } = useSelector(state => state.wallet);
-  const { provider } = useProvider();
+  const { readProvider, getSigner, isReadReady } = useProviders();
 
   // State for operation status
   const [isClaiming, setIsClaiming] = useState(false);
@@ -58,8 +58,8 @@ export default function ClaimFeesModal({
 
   // Function to claim fees using the adapter
   const claimFees = async () => {
-    // Get the appropriate adapter
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
+    // Get the appropriate adapter (uses read provider for initialization)
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId, readProvider);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");
@@ -69,10 +69,10 @@ export default function ClaimFeesModal({
     setOperationError(null);
 
     try {
-      // Generate transaction data for claiming fees
+      // Generate transaction data for claiming fees (uses read provider for data lookup)
       const txData = await adapter.generateClaimFeesData({
         positionId: position.id,
-        provider,
+        provider: readProvider,
         walletAddress: address,
         token0Address: token0Data.address,
         token1Address: token1Data.address,
@@ -81,7 +81,7 @@ export default function ClaimFeesModal({
       });
 
       // Get signer to send transaction
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
 
       // Send the transaction
       const tx = await signer.sendTransaction(txData);

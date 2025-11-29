@@ -21,6 +21,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     // EIP-1271 magic value for valid signatures
     bytes4 constant internal MAGICVALUE = 0x1626ba7e;
 
+    // Universal Router special address for "keep tokens in router" (used in multi-hop swaps)
+    // See: https://docs.uniswap.org/contracts/universal-router/technical-reference
+    address constant internal ADDRESS_THIS = address(2);
+
     // Vault owner with full control
     address public owner;
 
@@ -176,16 +180,20 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
 
     /**
      * @notice Validates Universal Router swap commands
-     * @dev Only allows V2/V3 swap commands and PERMIT2_PERMIT; blocks everything else
+     * @dev Only allows V2/V3 swap commands, SWEEP, and PERMIT2_PERMIT; blocks everything else
      * @param data The calldata being sent to the Universal Router
      *
      * Allowed commands:
-     * - V3_SWAP_EXACT_IN (0x00): Validate recipient = vault
-     * - V3_SWAP_EXACT_OUT (0x01): Validate recipient = vault
-     * - V2_SWAP_EXACT_IN (0x08): Validate recipient = vault
-     * - V2_SWAP_EXACT_OUT (0x09): Validate recipient = vault
+     * - V3_SWAP_EXACT_IN (0x00): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
+     * - V3_SWAP_EXACT_OUT (0x01): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
+     * - SWEEP (0x04): Validate recipient = vault (ensures tokens end up in vault)
+     * - V2_SWAP_EXACT_IN (0x08): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
+     * - V2_SWAP_EXACT_OUT (0x09): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
      * - PERMIT2_PERMIT (0x0a): Allowed (no recipient concern)
      * All other commands are blocked.
+     *
+     * Multi-hop swaps use ADDRESS_THIS as intermediate recipient (tokens stay in router),
+     * then SWEEP sends the final output to the vault.
      */
     function _validateUniversalRouterSwap(bytes calldata data) internal view {
         require(data.length >= 4, "PositionVault: invalid calldata");
@@ -206,8 +214,19 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
                     (address, uint256, uint256, bytes, bool)
                 );
                 require(
+                    recipient == address(this) || recipient == ADDRESS_THIS,
+                    "PositionVault: swap recipient must be vault or router"
+                );
+            }
+            // SWEEP (0x04) - sends tokens from router to recipient, must be vault
+            else if (command == 0x04) {
+                (, address recipient, ) = abi.decode(
+                    inputs[i],
+                    (address, address, uint256)
+                );
+                require(
                     recipient == address(this),
-                    "PositionVault: swap recipient must be vault"
+                    "PositionVault: sweep recipient must be vault"
                 );
             }
             // V2_SWAP_EXACT_IN (0x08) or V2_SWAP_EXACT_OUT (0x09)
@@ -217,13 +236,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
                     (address, uint256, uint256, address[], bool)
                 );
                 require(
-                    recipient == address(this),
-                    "PositionVault: swap recipient must be vault"
+                    recipient == address(this) || recipient == ADDRESS_THIS,
+                    "PositionVault: swap recipient must be vault or router"
                 );
             }
             // PERMIT2_PERMIT (0x0a) - allowed, no recipient validation needed
             else if (command == 0x0a) {
-                // Allowed
+                // Allowed - gasless approval
             }
             // All other commands are blocked
             else {

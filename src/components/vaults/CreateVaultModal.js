@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Modal, Button, Form, Spinner, Alert } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
-import { useProvider } from '../../contexts/ProviderContext';
+import { useWriteProvider } from '../../hooks/useWriteProvider';
 import { createVault } from 'fum_library/blockchain/contracts';
 import { triggerUpdate } from "../../redux/updateSlice";
 import { useRouter } from "next/router";
@@ -18,7 +18,7 @@ export default function CreateVaultModal({
 
   // Get data from Redux store
   const { address } = useSelector((state) => state.wallet);
-  const { provider } = useProvider();
+  const { provider, getSigner } = useWriteProvider();
 
   // Form state for vault info
   const [vaultName, setVaultName] = useState("");
@@ -34,7 +34,7 @@ export default function CreateVaultModal({
     }
 
     try {
-      const signer = await provider.getSigner();
+      const signer = await getSigner();
       const vaultAddress = await createVault(vaultName, signer);
       return vaultAddress;
     } catch (error) {
