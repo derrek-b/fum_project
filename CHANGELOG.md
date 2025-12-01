@@ -1,5 +1,23 @@
 # F.U.M. Project Changelog
 
+## [0.17.0] Buffer Swap Threshold & Config Cleanup - 2025-12-01
+
+### Minimum Buffer Swap Value Threshold
+
+Integrated library's new `minBufferSwapValue` config to prevent economically irrational dust swaps.
+
+#### **BabyStepsStrategy.js**
+- **NEW**: Import `getMinBufferSwapValue` from fum_library
+- **NEW**: Filter in `swapRemainingTokens5050()` skips tokens below USD threshold
+- **IMPACT**: Prevents gas waste on dust swaps (e.g., 1 wei swap costing $2.65 in gas)
+
+#### **VaultDataService.js**
+- **REMOVED**: `enabled` property check in `inferPlatformFromReceipt()` (adapting to library v0.24.0)
+
+**Status**: ✅ Integration complete
+**Breaking Changes**: None
+**Dependency**: Requires fum_library v0.24.0+
+
 ## [0.16.0] Transaction History & Demo Support - 2025-01-28
 
 ### Vault REST API & Transaction Logging
