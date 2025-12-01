@@ -110,13 +110,12 @@ function validateSubgraphs(platformId, subgraphs, chains) {
     throw new Error(`Platform ${platformId} subgraphs must be an object`);
   }
 
-  // Get chains that have this platform enabled
-  const enabledChainIds = [];
+  // Get chains that have this platform configured
+  const configuredChainIds = [];
   Object.entries(chains).forEach(([chainId, chain]) => {
-    if (chain.platformAddresses && 
-        chain.platformAddresses[platformId] && 
-        chain.platformAddresses[platformId].enabled === true) {
-      enabledChainIds.push(chainId);
+    if (chain.platformAddresses &&
+        chain.platformAddresses[platformId]) {
+      configuredChainIds.push(chainId);
     }
   });
 
@@ -147,16 +146,16 @@ function validateSubgraphs(platformId, subgraphs, chains) {
       throw new Error(`Platform ${platformId} subgraphs references unknown chain ID '${chainId}'. Available chains: [${Object.keys(chains).join(', ')}]`);
     }
 
-    // Validate platform is enabled on this chain
-    if (!enabledChainIds.includes(chainId)) {
-      throw new Error(`Platform ${platformId} subgraphs references chain '${chainId}' but platform is not enabled on that chain`);
+    // Validate platform is configured on this chain
+    if (!configuredChainIds.includes(chainId)) {
+      throw new Error(`Platform ${platformId} subgraphs references chain '${chainId}' but platform is not configured on that chain`);
     }
   });
 
-  // Validate all enabled chains have subgraphs defined
-  const missingSubgraphs = enabledChainIds.filter(chainId => !subgraphs[chainId]);
+  // Validate all configured chains have subgraphs defined
+  const missingSubgraphs = configuredChainIds.filter(chainId => !subgraphs[chainId]);
   if (missingSubgraphs.length > 0) {
-    throw new Error(`Platform ${platformId} missing subgraphs for enabled chains: [${missingSubgraphs.join(', ')}]`);
+    throw new Error(`Platform ${platformId} missing subgraphs for configured chains: [${missingSubgraphs.join(', ')}]`);
   }
 }
 

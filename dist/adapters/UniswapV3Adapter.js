@@ -71,11 +71,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   constructor(chainId, provider) {
     super(chainId, "uniswapV3", "Uniswap V3");
 
-    // Cache platform addresses
+    // Cache platform addresses (getPlatformAddresses throws if not configured)
     this.addresses = getPlatformAddresses(chainId, "uniswapV3");
-    if (!this.addresses || !this.addresses.enabled) {
-      throw new Error(`Uniswap V3 not available on chain ${chainId}`);
-    }
 
     // Cache platform configuration data
     this.feeTiers = getPlatformFeeTiers("uniswapV3");

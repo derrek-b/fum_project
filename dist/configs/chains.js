@@ -19,6 +19,7 @@ const chains = {
     executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
     executorAddress: "0x0",
     minDeploymentForGas: 10,
+    minBufferSwapValue: 0.10,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -26,7 +27,6 @@ const chains = {
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
         universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-        enabled: true,
       },
     },
   },
@@ -45,6 +45,7 @@ const chains = {
     executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
     minDeploymentForGas: 10,
+    minBufferSwapValue: 0.10,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -52,7 +53,6 @@ const chains = {
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Same as Arbitrum since it's a fork
         universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Same as Arbitrum since it's a fork
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // Same as Arbitrum since it's a fork
-        enabled: true,
       },
     },
   },
@@ -71,6 +71,7 @@ const chains = {
     executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
     minDeploymentForGas: 100,
+    minBufferSwapValue: 1.00,
     platformAddresses: {
       uniswapV3: {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -78,7 +79,6 @@ const chains = {
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
         universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-        enabled: true,
       },
     },
   },

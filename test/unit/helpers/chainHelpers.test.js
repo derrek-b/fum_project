@@ -15,7 +15,8 @@ import {
   lookupSupportedChainIds,
   getPlatformAddresses,
   lookupChainPlatformIds,
-  getMinDeploymentForGas
+  getMinDeploymentForGas,
+  getMinBufferSwapValue
 } from '../../../src/helpers/chainHelpers.js';
 
 describe('Chain Helpers', () => {
@@ -427,7 +428,6 @@ describe('Chain Helpers', () => {
 
         expect(addresses).toBeDefined();
         expect(typeof addresses).toBe('object');
-        expect(addresses.enabled).toBe(true);
         expect(addresses.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
         expect(addresses.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
         expect(addresses.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
@@ -439,40 +439,10 @@ describe('Chain Helpers', () => {
 
         expect(addresses).toBeDefined();
         expect(typeof addresses).toBe('object');
-        expect(addresses.enabled).toBe(true);
         expect(addresses.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
         expect(addresses.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
         expect(addresses.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
         expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
-      });
-
-      it('should return null for disabled platform', async () => {
-        // Mock chains config with disabled platform
-        vi.doMock('../../../src/configs/chains.js', () => ({
-          default: {
-            999: {
-              name: 'Test Chain With Disabled Platform',
-              rpcUrls: ['http://test.com'],
-              executorAddress: '0x123',
-              platformAddresses: {
-                uniswapV3: {
-                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-                  enabled: false // Disabled platform
-                }
-              }
-            }
-          }
-        }));
-
-        // Reset modules to use the mocked config
-        vi.resetModules();
-        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
-
-        expect(chainHelpers.getPlatformAddresses(999, 'uniswapV3')).toBeNull();
-
-        // Restore original config
-        vi.doUnmock('../../../src/configs/chains.js');
-        vi.resetModules();
       });
     });
 
@@ -542,27 +512,23 @@ describe('Chain Helpers', () => {
         expect(chain1337Platforms).toContain('uniswapV3');
       });
 
-
-      it('should only return enabled platforms', async () => {
-        // Mock chains config with both enabled and disabled platforms
+      it('should return all configured platforms', async () => {
+        // Mock chains config with multiple platforms
         vi.doMock('../../../src/configs/chains.js', () => ({
           default: {
             999: {
-              name: 'Test Chain With Mixed Platforms',
+              name: 'Test Chain With Multiple Platforms',
               rpcUrls: ['http://test.com'],
               executorAddress: '0x123',
               platformAddresses: {
                 uniswapV3: {
                   factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-                  enabled: true
                 },
                 aaveV3: {
                   factoryAddress: '0x789',
-                  enabled: false
                 },
                 compound: {
                   factoryAddress: '0xabc',
-                  enabled: true
                 }
               }
             }
@@ -576,8 +542,9 @@ describe('Chain Helpers', () => {
         const platformIds = chainHelpers.lookupChainPlatformIds(999);
 
         expect(platformIds).toContain('uniswapV3');
+        expect(platformIds).toContain('aaveV3');
         expect(platformIds).toContain('compound');
-        expect(platformIds).not.toContain('aaveV3'); // disabled platform should not be returned
+        expect(platformIds).toHaveLength(3);
 
         // Restore original config
         vi.doUnmock('../../../src/configs/chains.js');
@@ -645,7 +612,7 @@ describe('Chain Helpers', () => {
               rpcUrls: ['http://test.com'],
               executorAddress: '0x123',
               platformAddresses: {
-                uniswapV3: { enabled: true, factoryAddress: '0x456' }
+                uniswapV3: { factoryAddress: '0x456' }
               }
               // No minDeploymentForGas property
             }
@@ -669,6 +636,62 @@ describe('Chain Helpers', () => {
         expect(() => getMinDeploymentForGas('1')).toThrow('chainId must be a number');
         expect(() => getMinDeploymentForGas(0)).toThrow('chainId must be greater than 0');
         expect(() => getMinDeploymentForGas(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getMinBufferSwapValue', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getMinBufferSwapValue(1)).toBe('number');
+        expect(typeof getMinBufferSwapValue(42161)).toBe('number');
+        expect(typeof getMinBufferSwapValue(1337)).toBe('number');
+      });
+
+      it('should return expected values for each chain', () => {
+        expect(getMinBufferSwapValue(42161)).toBe(0.10);  // Arbitrum
+        expect(getMinBufferSwapValue(1337)).toBe(0.10);   // Local
+        expect(getMinBufferSwapValue(1)).toBe(1.00);      // Ethereum
+      });
+
+      it('should return values >= 0', () => {
+        expect(getMinBufferSwapValue(1)).toBeGreaterThanOrEqual(0);
+        expect(getMinBufferSwapValue(42161)).toBeGreaterThanOrEqual(0);
+        expect(getMinBufferSwapValue(1337)).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMinBufferSwapValue(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when minBufferSwapValue is not configured', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              rpcUrl: 'http://localhost:8545',
+              // minBufferSwapValue intentionally missing
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getMinBufferSwapValue(777)).toThrow('No minimum buffer swap value configured for chain 777');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMinBufferSwapValue(null)).toThrow('chainId parameter is required');
+        expect(() => getMinBufferSwapValue(undefined)).toThrow('chainId parameter is required');
+        expect(() => getMinBufferSwapValue('1')).toThrow('chainId must be a number');
+        expect(() => getMinBufferSwapValue(0)).toThrow('chainId must be greater than 0');
+        expect(() => getMinBufferSwapValue(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

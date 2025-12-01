@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-11-28T15:57:46.736Z
+Generated on: 2025-12-01T15:08:39.134Z
 
 ## Table of Contents
 
@@ -228,6 +228,7 @@ Token configuration with addresses on multiple chains
 - `getPlatformAddresses` (function)
 - `lookupChainPlatformIds` (function)
 - `getMinDeploymentForGas` (function)
+- `getMinBufferSwapValue` (function)
 
 ---
 

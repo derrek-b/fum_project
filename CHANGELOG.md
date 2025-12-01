@@ -5,6 +5,39 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2025-12-01
+
+### Added - Minimum Buffer Swap Value Threshold
+
+Added chain-configurable minimum USD threshold for buffer swaps to prevent economically irrational swaps (e.g., swapping 1 wei worth $0.00 for $2.65 in gas).
+
+#### **Chain Configuration (`chains.js`)**
+- Added `minBufferSwapValue` property to all chains:
+  - Arbitrum (42161): $0.10
+  - Local (1337): $0.10
+  - Ethereum (1): $1.00
+
+#### **New Helper Function (`chainHelpers.js`)**
+- `getMinBufferSwapValue(chainId)`: Returns minimum buffer swap value in USD for the specified chain
+  - Validates chainId parameter
+  - Throws if chain not supported or value not configured
+  - Used by automation service to skip dust swaps below threshold
+
+**Usage**: Buffer swaps below the threshold are skipped with a log message, preventing gas waste on economically irrational trades.
+
+### Removed - `enabled` Property from Platform Addresses
+
+Removed the `enabled` property from `platformAddresses` in chain configuration. Platform presence in config now implicitly indicates enabled status (YAGNI - the property was never used to disable platforms).
+
+#### **Files Changed**
+- **`chains.js`**: Removed `enabled: true` from all platform entries (Arbitrum, Local, Ethereum)
+- **`chainHelpers.js`**:
+  - `getPlatformAddresses()`: Removed check for `platformConfig.enabled`
+  - `lookupChainPlatformIds()`: Simplified to return all platform IDs (removed filter)
+- **`UniswapV3Adapter.js`**: Removed `addresses.enabled` check from constructor
+
+**Breaking Change**: Code that explicitly checked `platformAddresses.*.enabled` will need to be updated. However, this property was internal and not part of the public API.
+
 ## [0.23.0] - 2025-01-28
 
 ### Changed - Baby Steps Strategy Templates Production-Ready

@@ -91,7 +91,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should cache platform addresses', () => {
         expect(adapter.addresses).toBeDefined();
         expect(adapter.addresses).toBeTypeOf('object');
-        expect(adapter.addresses.enabled).toBe(true);
         expect(adapter.addresses.factoryAddress).toBeDefined();
         expect(adapter.addresses.positionManagerAddress).toBeDefined();
         expect(adapter.addresses.routerAddress).toBeDefined();

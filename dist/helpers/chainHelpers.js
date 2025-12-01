@@ -233,7 +233,7 @@ export function lookupSupportedChainIds() {
  * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
  * @param {string} platformId - The platform identifier (e.g., 'uniswapV3', 'aaveV3')
- * @returns {Object|null} Platform addresses object with factoryAddress and positionManagerAddress - null if disabled
+ * @returns {Object} Platform addresses object with factoryAddress and positionManagerAddress
  * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
  * @throws {Error} If chain is not supported
  * @throws {Error} If no platform addresses are configured for the chain
@@ -243,17 +243,9 @@ export function lookupSupportedChainIds() {
  * // Get Uniswap V3 addresses on Ethereum
  * const addresses = getPlatformAddresses(1, 'uniswapV3');
  * // Returns: {
- * //   enabled: true,
  * //   factoryAddress: "0x1F984...",
  * //   positionManagerAddress: "0xC3650..."
  * // }
- *
- * @example
- * // Check if platform is enabled before using
- * const platformConfig = getPlatformAddresses(chainId, platformId);
- * if (!platformConfig) {
- *   console.error(`Platform ${platformId} is disabled on chain ${chainId}`);
- * }
  * @since 1.0.0
  */
 export function getPlatformAddresses(chainId, platformId) {
@@ -285,10 +277,6 @@ export function getPlatformAddresses(chainId, platformId) {
     throw new Error(`Platform ${platformId} not configured for chain ${chainId}`);
   }
 
-  if (!platformConfig.enabled) {
-    return null; // Platform disabled (business decision)
-  }
-
   return platformConfig;
 }
 
@@ -296,7 +284,7 @@ export function getPlatformAddresses(chainId, platformId) {
  * Lookup all platform IDs available on a specific chain
  * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {Array<string>} Array of enabled platform IDs for the chain
+ * @returns {Array<string>} Array of platform IDs for the chain
  * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
  * @throws {Error} If chain is not supported
  * @throws {Error} If no platform addresses are configured for the chain
@@ -327,9 +315,7 @@ export function lookupChainPlatformIds(chainId) {
     throw new Error(`No platform addresses configured for chain ${chainId}`);
   }
 
-  return Object.entries(chainConfig.platformAddresses)
-    .filter(([_, config]) => config.enabled)
-    .map(([id, _]) => id);
+  return Object.keys(chainConfig.platformAddresses);
 }
 
 /**
@@ -371,4 +357,45 @@ export function getMinDeploymentForGas(chainId) {
   }
 
   return config.minDeploymentForGas;
+}
+
+/**
+ * Get minimum buffer swap value for a specific chain
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number} Minimum buffer swap value in USD - swaps below this threshold are skipped
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no minimum buffer swap value is configured for the chain
+ * @example
+ * // Get minimum buffer swap value for Arbitrum (low gas)
+ * const minValue = getMinBufferSwapValue(42161);
+ * // Returns: 0.10 (USD)
+ *
+ * @example
+ * // Get minimum buffer swap value for Ethereum (high gas)
+ * const minValue = getMinBufferSwapValue(1);
+ * // Returns: 1.00 (USD)
+ *
+ * @example
+ * // Use in strategy logic to skip dust swaps
+ * const minSwapValue = getMinBufferSwapValue(chainId);
+ * if (tokenUSDValue < minSwapValue) {
+ *   // Skip this swap - not economically rational
+ * }
+ * @since 1.0.0
+ */
+export function getMinBufferSwapValue(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (typeof config.minBufferSwapValue !== 'number' || !Number.isFinite(config.minBufferSwapValue) || config.minBufferSwapValue < 0) {
+    throw new Error(`No minimum buffer swap value configured for chain ${chainId}`);
+  }
+
+  return config.minBufferSwapValue;
 }

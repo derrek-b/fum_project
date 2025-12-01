@@ -119,11 +119,6 @@ function validatePlatformAddresses(chainId, platformAddresses) {
         throw new Error(`Chain ${chainId} platformAddresses.${platformId}.${addressProp} must be a valid Ethereum address`);
       }
     });
-
-    // Validate enabled property
-    if (typeof platformConfig.enabled !== 'boolean') {
-      throw new Error(`Chain ${chainId} platformAddresses.${platformId}.enabled must be a boolean`);
-    }
   });
 }
 
