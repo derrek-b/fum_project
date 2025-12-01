@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-12-01
+### PositionVault Contract Update
+
+Added empty batch validation to all batch functions to prevent accidental no-op calls.
+
+#### **PositionVault.sol (v0.4.3)**
+- **NEW**: `require(targets.length > 0, "PositionVault: empty batch")` added to all 8 batch functions:
+  - `execute()`, `swap()`, `approve()`, `mint()`
+  - `increaseLiquidity()`, `decreaseLiquidity()`, `collect()`, `burn()`
+- **IMPACT**: Prevents gas waste on empty transaction batches
+
+#### **Tests**
+- **NEW**: "Empty Batch Validation" test suite with 8 tests (one per function)
+- **UPDATED**: Version test expects v0.4.3
+
+**Status**: ✅ Contract ready for deployment
+**Breaking Changes**: Empty arrays now revert instead of silently succeeding
+
 ## [0.7.0] - 2025-01-29
 ### Dual Provider Architecture
 

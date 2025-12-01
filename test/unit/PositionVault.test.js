@@ -125,6 +125,57 @@ describe("PositionVault - 0.4.3", function() {
     });
   });
 
+  // Test for empty batch validation
+  describe("Empty Batch Validation", function() {
+    it("should reject execute() with empty arrays", async function() {
+      await expect(
+        vault.execute([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject swap() with empty arrays", async function() {
+      await expect(
+        vault.swap([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject approve() with empty arrays", async function() {
+      await expect(
+        vault.approve([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject mint() with empty arrays", async function() {
+      await expect(
+        vault.mint([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject increaseLiquidity() with empty arrays", async function() {
+      await expect(
+        vault.increaseLiquidity([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject decreaseLiquidity() with empty arrays", async function() {
+      await expect(
+        vault.decreaseLiquidity([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject collect() with empty arrays", async function() {
+      await expect(
+        vault.collect([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+
+    it("should reject burn() with empty arrays", async function() {
+      await expect(
+        vault.burn([], [])
+      ).to.be.revertedWith("PositionVault: empty batch");
+    });
+  });
+
   // Test for position withdrawal security
   describe("Position Withdrawal", function() {
     const tokenId = BigInt(1);
@@ -291,7 +342,7 @@ describe("PositionVault - 0.4.3", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("0.4.2");
+      expect(await vault.getVersion()).to.equal("0.4.3");
     });
   });
 

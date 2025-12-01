@@ -121,6 +121,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -156,6 +157,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -315,6 +317,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -362,6 +365,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -403,6 +407,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -447,6 +452,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -518,6 +524,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -560,6 +567,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
 
         results = new bool[](targets.length);
 
@@ -686,6 +694,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.4.2";
+        return "0.4.3";
     }
 }
