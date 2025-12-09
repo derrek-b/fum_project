@@ -1,25 +1,21 @@
 {
   "name": "fum_automation",
-  "version": "0.17.0",
+  "version": "1.0.0",
+  "author": "Derrek Brack & Claude Code",
+  "license": "SEE LICENSE IN LICENSE.md",
   "description": "DeFi liquidity position management automation",
-  "main": "index.js",
+  "private": true,
   "type": "module",
   "scripts": {
     "script": "tsx",
     "dev:link": "npm link fum_library",
     "dev:unlink": "npm unlink fum_library && npm install file:../fum_library",
     "start": "tsx scripts/start-automation.js",
-    "start:test": "tsx scripts/start-automation.js test/.env.test",
-    "start:local": "tsx scripts/start-automation.js .env.local",
     "ganache": "node ../fum/scripts/start-ganache.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
-  "keywords": [],
-  "author": "The D-Nice",
-  "private": true,
-  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@uniswap/permit2-sdk": "^1.4.0",
     "@uniswap/sdk-core": "^7.7.2",
@@ -29,7 +25,7 @@
     "@uniswap/v3-sdk": "^3.25.2",
     "axios": "^1.9.0",
     "ethers": "^5.7.2",
-    "fum_library": "file:../fum_library/fum_library-0.24.0.tgz",
+    "fum_library": "file:../fum_library/fum_library-1.0.0.tgz",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
   },

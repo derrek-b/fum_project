@@ -42,7 +42,7 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
     }
 
     // Setup blockchain environment on port 8547 (to avoid conflicts with 0202 and 1111 tests)
-    testEnv = await setupTestBlockchain({ port: 8547 });
+    testEnv = await setupTestBlockchain({ port: 8548 });
 
     // Create test vault with 2 aligned positions and 2 aligned tokens using new setup
     testVault = await setupTestVault(

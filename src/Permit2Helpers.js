@@ -150,6 +150,8 @@ export async function generatePermit2Signature({
     const deadline = Math.floor(Date.now() / 1000 + deadlineMinutes * 60);
 
     // Build EIP-712 domain
+    // Note: Permit2 dynamically re-computes DOMAIN_SEPARATOR when block.chainid differs from
+    // its initial deployment chainId. So on a fork (chainId 1337), Permit2 expects chainId 1337.
     const domain = {
       name: PERMIT2_DOMAIN_NAME,
       chainId: chainId,

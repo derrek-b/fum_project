@@ -8,48 +8,56 @@ The `VaultDataService` class is a centralized service for loading, managing, and
 
 - **Centralized Data Management**: Single source of truth for all vault data
 - **Enhanced Position Data**: Automatically enriches positions with complete token metadata
-- **Intelligent Caching**: Time-based cache with configurable refresh intervals  
+- **Intelligent Caching**: In-memory cache for fast vault data access
 - **Real-time Updates**: Event-driven architecture for data changes
 - **Automation Integration**: Seamlessly integrates with strategies and automation workflows
-- **Performance Optimized**: Minimizes blockchain calls through efficient caching
+- **Platform Adapters**: Works with platform adapters for position discovery
 
 ## Class Definition
 
 ```javascript
 class VaultDataService {
   constructor(eventManager)
-  
+
   // Initialization
-  initialize(provider, chainId, refreshInterval): void
-  
+  initialize(provider, chainId): void
+  setTokens(tokens): void
+  setAdapters(adapters): void
+  setPoolData(poolData): void
+
   // Data loading methods
-  async loadVault(vaultAddress, forceRefresh): Promise<Object>
-  async loadUserVaults(userAddress, forceRefresh): Promise<Array>
   async getVault(vaultAddress, forceRefresh): Promise<Object>
-  async refreshVaultPositions(vaultAddress): Promise<Array>
-  
-  // Dynamic state and calculations
-  async getDynamicVaultState(vaultAddress, position, currentTick, sqrtPriceX96): Promise<Object>
-  
+  async loadVaultData(vaultAddress): Promise<Object>
+
+  // Refresh methods
+  async refreshPositionsAndTokens(vaultAddress): Promise<boolean>
+  async fetchAssetValues(vault, cacheDuration): Promise<Object>
+
   // Vault updates
-  async updateVaultAfterRebalance(vaultAddress, transactionReceipt): Promise<boolean>
   async removePosition(vaultAddress, positionId): Promise<boolean>
   async updateTargetTokens(vaultAddress, newTokens): Promise<boolean>
   async updateTargetPlatforms(vaultAddress, newPlatforms): Promise<boolean>
   async updateVaultStrategy(vaultAddress, newStrategyAddress): Promise<boolean>
-  
-  // Data access methods  
+
+  // Data access methods
   getAllVaults(): Array
   getVaultPositions(vaultAddress): Array
   getPosition(positionId): Object|null
-  getPool(poolAddress): Object|null
-  getToken(tokenAddress): Object|null
+  getVaultStrategyId(vaultAddress): string|null
   getVaultsByFilter(filterFn): Array
   getVaultsByStrategy(strategyId): Array
-  
-  // Utility methods
+  hasActiveStrategy(vaultAddress): boolean
+  hasVault(vaultAddress): boolean
+
+  // Cache management
+  removeVault(vaultAddress): boolean
   clearCache(): void
-  subscribe(eventType, handler): void
+
+  // Events and utilities
+  getAvailableEvents(): Array<string>
+  subscribe(eventType, handler): Function
+  async computePoolAddress(token0, token1, fee, platform, chainId, adapter): Promise<string>
+  async getDynamicVaultState(vaultAddress, position, currentTick, sqrtPriceX96, adapter): Promise<Object>
 }
 ```
 
@@ -67,12 +75,12 @@ Creates a new VaultDataService instance.
 
 **Properties Initialized:**
 - `vaults` - Map of vault address to vault data
-- `positions` - Map of position ID to enhanced position data  
-- `poolData` - Shared pool data cache
-- `tokenData` - Shared token data cache
+- `eventManager` - Reference to EventManager
 - `provider` - Ethereum provider (set during initialization)
 - `chainId` - Chain ID (set during initialization)
-- `refreshInterval` - Cache refresh interval (set during initialization)
+- `adapters` - Platform adapters (set by AutomationService)
+- `poolData` - Pool data cache (set by AutomationService)
+- `tokens` - Token configurations (set by AutomationService)
 
 **Example:**
 
@@ -88,7 +96,7 @@ const vaultDataService = new VaultDataService(eventManager);
 
 ## Initialization
 
-### initialize(provider, chainId, refreshInterval)
+### initialize(provider, chainId)
 
 Initialize the data service with provider and chain configuration.
 
@@ -98,135 +106,60 @@ Initialize the data service with provider and chain configuration.
 |-----------|------|----------|-------------|
 | provider | `ethers.Provider` | Yes | Ethers provider instance |
 | chainId | `number` | Yes | Chain ID for the network |
-| refreshInterval | `number` | Yes | Cache refresh interval in milliseconds (min: 5000ms) |
-
-**Validation:**
-- `refreshInterval` is required (no defaults allowed in production)
-- `refreshInterval` must be at least 5000ms to prevent excessive data refreshing
 
 **Example:**
 
 ```javascript
 import { ethers } from 'ethers';
 
-const provider = new ethers.providers.JsonRpcProvider('https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY');
+const provider = new ethers.providers.WebSocketProvider('wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY');
 const chainId = 42161; // Arbitrum
 
-// Initialize with 5-minute refresh interval
-vaultDataService.initialize(provider, chainId, 300000);
+vaultDataService.initialize(provider, chainId);
 ```
 
-**Throws:**
-- `Error` - If refreshInterval is not provided or less than 5000ms
+**Events Emitted:**
+- `initialized` - `{ chainId }`
+
+---
+
+### setTokens(tokens)
+
+Set the tokens configuration reference from AutomationService.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| tokens | `Object` | Yes | Token configurations keyed by symbol |
+
+---
+
+### setAdapters(adapters)
+
+Set the adapter cache reference from AutomationService.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| adapters | `Map` | Yes | Map of platform adapters from AutomationService |
+
+---
+
+### setPoolData(poolData)
+
+Set the pool data cache reference from AutomationService.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| poolData | `Object` | Yes | Pool data object from AutomationService |
 
 ---
 
 ## Data Loading Methods
-
-### loadVault(vaultAddress, forceRefresh = false)
-
-Load comprehensive data for a specific vault including positions, tokens, and metadata.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| vaultAddress | `string` | Yes | - | Vault address to load |
-| forceRefresh | `boolean` | No | `false` | Force refresh even if cached data exists |
-
-**Returns:**
-`Promise<Object>` - The vault data object
-
-**Vault Data Structure:**
-```typescript
-interface VaultData {
-  address: string;
-  owner: string;
-  hasActiveStrategy: boolean;
-  strategyAddress: string;
-  strategy: {
-    strategyId: string;
-    selectedTokens: string[];
-    selectedPlatforms: string[];
-    parameters: Object;
-  };
-  tokens: {
-    [tokenAddress: string]: {
-      address: string;
-      symbol: string;
-      decimals: number;
-      balance: string; // Wei amount as string
-    };
-  };
-  positions: string[]; // Array of position IDs
-  targetTokens: string[];
-  targetPlatforms: string[];
-  adapters: Object;
-  lastUpdated: number;
-}
-```
-
-**Example:**
-
-```javascript
-// Load vault data
-const vaultData = await vaultDataService.loadVault('0x123...abc');
-console.log(`Vault has ${vaultData.positions.length} positions`);
-
-// Force refresh vault data
-const freshData = await vaultDataService.loadVault('0x123...abc', true);
-```
-
-**Events Emitted:**
-- `vaultLoading` - When vault loading starts
-- `vaultLoaded` - When vault loading completes successfully
-- `vaultLoadError` - When vault loading fails
-
-**Throws:**
-- `Error` - If service not initialized
-- `Error` - If vault loading fails
-
----
-
-### loadUserVaults(userAddress, forceRefresh = false)
-
-Load all vaults for a specific user address.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| userAddress | `string` | Yes | - | User address to load vaults for |
-| forceRefresh | `boolean` | No | `false` | Force refresh even if cached data exists |
-
-**Returns:**
-`Promise<Array>` - Array of vault data objects
-
-**Process Flow:**
-1. Validates user address format
-2. Checks cache validity based on refresh interval
-3. Loads all user vault data from blockchain
-4. Enhances position data with token metadata
-5. Updates internal caches
-6. Returns array of vault objects
-
-**Example:**
-
-```javascript
-const userVaults = await vaultDataService.loadUserVaults('0x456...def');
-console.log(`User has ${userVaults.length} vaults`);
-
-for (const vault of userVaults) {
-  console.log(`Vault ${vault.address}: ${vault.positions.length} positions`);
-}
-```
-
-**Events Emitted:**
-- `userVaultsLoading` - When user vault loading starts
-- `userVaultsLoaded` - When user vault loading completes
-- `userVaultsLoadError` - When user vault loading fails
-
----
 
 ### getVault(vaultAddress, forceRefresh = false)
 
@@ -243,9 +176,9 @@ Get vault data with automatic loading if not cached.
 `Promise<Object>` - The vault data object
 
 **Behavior:**
-- Returns cached data if available and not stale
-- Automatically calls `loadVault()` if data not cached or stale
-- Respects cache refresh interval unless `forceRefresh` is true
+- Returns cached data if available and `forceRefresh` is false
+- Automatically calls `loadVaultData()` if data not cached
+- Normalizes vault address using `ethers.utils.getAddress()`
 
 **Example:**
 
@@ -253,164 +186,173 @@ Get vault data with automatic loading if not cached.
 // Get vault data (uses cache if available)
 const vault = await vaultDataService.getVault('0x123...abc');
 
-// Force fresh data
+// Force fresh data from blockchain
 const freshVault = await vaultDataService.getVault('0x123...abc', true);
 ```
 
 ---
 
-### refreshVaultPositions(vaultAddress)
+### loadVaultData(vaultAddress)
 
-Refresh position data for a specific vault.
+Load comprehensive data for a specific vault from blockchain with retry logic.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Vault address to refresh positions for |
+| vaultAddress | `string` | Yes | Vault address to load |
 
 **Returns:**
-`Promise<Array>` - Updated array of enhanced position objects
+`Promise<Object>` - The vault data object
 
-**Process Flow:**
-1. Loads latest position data from blockchain
-2. Enhances positions with token metadata
-3. Updates vault's position array
-4. Updates position cache
-5. Creates adapters for vault platforms
-
-**Enhanced Position Structure:**
-```typescript
-interface EnhancedPosition {
-  id: string;
-  vaultAddress: string;
-  pool: string;
-  token0: {
-    address: string;
-    symbol: string;
-    decimals: number;
-  };
-  token1: {
-    address: string; 
-    symbol: string;
-    decimals: number;
-  };
-  tickLower: number;
-  tickUpper: number;
-  liquidity: string;
-  fee: number;
-  protocol: string;
-  platform: string;
-  chainId: number;
-}
-```
-
-**Example:**
-
+**Vault Data Structure:**
 ```javascript
-const positions = await vaultDataService.refreshVaultPositions('0x123...abc');
-console.log(`Refreshed ${positions.length} positions`);
-
-for (const position of positions) {
-  console.log(`Position ${position.id}: ${position.token0.symbol}/${position.token1.symbol}`);
+{
+  address: '0x...',                    // Normalized vault address
+  owner: '0x...',                      // Vault owner address
+  chainId: 42161,                      // Chain ID
+  strategyAddress: '0x...',            // Strategy contract address
+  strategy: {
+    strategyId: 'bob',                 // Strategy identifier
+    strategyAddress: '0x...',          // Strategy contract address
+    parameters: {                      // Mapped strategy parameters
+      tickSpread: 100,
+      feeThreshold: 50,
+      // ... other strategy-specific params
+    }
+  },
+  tokens: {                            // Token balances keyed by symbol
+    'USDC': '1000000000',              // Balance in wei
+    'WETH': '500000000000000000',
+    'ARB': '0'
+  },
+  positions: {                         // Positions keyed by position ID
+    '12345': {
+      id: '12345',
+      pool: '0xPoolAddress',
+      tickLower: -887220,
+      tickUpper: 887220,
+      liquidity: '1000000000',
+      // ... other position data
+    }
+  },
+  targetTokens: ['USDC', 'WETH'],      // Configured target tokens
+  targetPlatforms: ['uniswapv3'],      // Configured target platforms
+  lastUpdated: 1700000000000           // Timestamp
 }
 ```
 
 **Events Emitted:**
-- `positionsRefreshing` - When position refresh starts
-- `positionsRefreshed` - When position refresh completes
+- `vaultLoading` - `vaultAddress`
+- `vaultLoadRetrying` - `{ vaultAddress, attempt, error }` (on retry)
+- `vaultLoaded` - `{ vaultAddress, positionCount, positionIds, tokenCount, strategyId, targetTokens, targetPlatforms, owner }`
+- `vaultLoadError` - `vaultAddress, errorMessage`
+- `TokenBalancesFetched` - `{ vaultAddress, balances, tokenCount, timestamp }`
+- `PoolDataFetched` - `{ poolData, source, vaultAddress }`
+
+**Throws:**
+- `Error` - If service not initialized
+- `Error` - If vault has no strategy configured
+- `Error` - If vault loading fails after retries
+
+**Example:**
+
+```javascript
+try {
+  const vaultData = await vaultDataService.loadVaultData('0x123...abc');
+  console.log(`Loaded ${Object.keys(vaultData.positions).length} positions`);
+} catch (error) {
+  console.error('Failed to load vault:', error.message);
+}
+```
 
 ---
 
-## Dynamic State and Calculations
+## Refresh Methods
 
-### getDynamicVaultState(vaultAddress, position, currentTick, sqrtPriceX96)
+### refreshPositionsAndTokens(vaultAddress)
 
-Calculate dynamic state for a vault position at current market conditions.
+Refresh both positions and token balances for a vault.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Vault address |
-| position | `Object` | Yes | Position object |
-| currentTick | `number` | Yes | Current pool tick |
-| sqrtPriceX96 | `BigInt` | Yes | Current sqrt price in X96 format |
+| vaultAddress | `string` | Yes | Vault address to refresh |
 
 **Returns:**
-`Promise<Object>` - Dynamic state object
+`Promise<boolean>` - True if refresh successful
 
-**Dynamic State Structure:**
-```typescript
-interface DynamicState {
-  currentTick: number;
-  sqrtPriceX96: string;
-  inRange: boolean;
-  currentPrice: number;
-  token0Amount: string;
-  token1Amount: string;
-  totalValueUSD: number;
-  utilizationRate: number;
-  feeAPR: number;
-  impermanentLoss: number;
-}
-```
+**Events Emitted:**
+- `positionsRefreshing` - `vaultAddress`
+- `positionsRefreshed` - `vaultAddress, positions`
+- `positionsRefreshError` - `vaultAddress, errorMessage`
 
 **Example:**
 
 ```javascript
-const position = positions[0];
-const dynamicState = await vaultDataService.getDynamicVaultState(
-  vault.address,
-  position,
-  123456,
-  BigInt('1234567890123456789012345678901234567890')
-);
+const success = await vaultDataService.refreshPositionsAndTokens('0x123...abc');
+if (success) {
+  console.log('Vault data refreshed');
+}
+```
 
-console.log(`Position is ${dynamicState.inRange ? 'in range' : 'out of range'}`);
-console.log(`Total value: $${dynamicState.totalValueUSD}`);
+---
+
+### fetchAssetValues(vault, cacheDuration)
+
+Fetch USD values for all vault assets (positions + token balances).
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| vault | `Object` | Yes | - | Vault object with positions and tokens |
+| cacheDuration | `number` | No | 5000ms | Cache duration for price fetching |
+
+**Returns:**
+`Promise<Object>` - Asset values with tokens and positions data
+
+**Return Structure:**
+```javascript
+{
+  tokens: {
+    'USDC': { price: 1.0, usdValue: 1000.00 },
+    'WETH': { price: 2000.00, usdValue: 5000.00 }
+  },
+  positions: {
+    '12345': {
+      token0Amount: '1000000',
+      token1Amount: '500000000000000000',
+      token0UsdValue: 1000.00,
+      token1UsdValue: 1000.00,
+      token0Price: 1.0,
+      token1Price: 2000.00
+    }
+  },
+  poolData: {
+    '0xPoolAddress': { /* fresh pool data */ }
+  },
+  totalTokenValue: 6000.00,
+  totalPositionValue: 2000.00,
+  totalVaultValue: 8000.00
+}
+```
+
+**Events Emitted:**
+- `AssetValuesFetched` - `{ vaultAddress, tokenCount, positionCount, totalTokenValue, totalPositionValue, totalVaultValue, assetData, timestamp }`
+
+**Example:**
+
+```javascript
+const vault = await vaultDataService.getVault('0x123...abc');
+const assetValues = await vaultDataService.fetchAssetValues(vault);
+console.log(`Total vault value: $${assetValues.totalVaultValue.toFixed(2)}`);
 ```
 
 ---
 
 ## Vault Update Methods
-
-### updateVaultAfterRebalance(vaultAddress, transactionReceipt)
-
-Update vault data after a rebalance transaction completes.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| vaultAddress | `string` | Yes | Vault address that was rebalanced |
-| transactionReceipt | `Object` | Yes | Ethereum transaction receipt |
-
-**Returns:**
-`Promise<boolean>` - Success status
-
-**Process Flow:**
-1. Refreshes vault position data
-2. Updates cached position information
-3. Emits position update events
-4. Returns success status
-
-**Example:**
-
-```javascript
-// After executing rebalance transaction
-const receipt = await rebalanceTx.wait();
-const success = await vaultDataService.updateVaultAfterRebalance(
-  vault.address,
-  receipt
-);
-
-if (success) {
-  console.log('Vault data updated after rebalance');
-}
-```
-
----
 
 ### removePosition(vaultAddress, positionId)
 
@@ -426,20 +368,15 @@ Remove a position from vault data and clean up associated caches.
 **Returns:**
 `Promise<boolean>` - Whether position was successfully removed
 
-**Example:**
-
-```javascript
-const removed = await vaultDataService.removePosition(vault.address, '12345');
-if (removed) {
-  console.log('Position removed successfully');
-}
-```
+**Events Emitted:**
+- `positionRemoved` - `vaultAddress, positionId`
+- `positionRemoveError` - `vaultAddress, positionId, errorMessage`
 
 ---
 
 ### updateTargetTokens(vaultAddress, newTokens)
 
-Update the target tokens for a vault.
+Update the target tokens for a vault in cache.
 
 **Parameters:**
 
@@ -451,20 +388,15 @@ Update the target tokens for a vault.
 **Returns:**
 `Promise<boolean>` - Success status
 
-**Example:**
-
-```javascript
-const success = await vaultDataService.updateTargetTokens(
-  vault.address,
-  ['USDC', 'WETH', 'ARB']
-);
-```
+**Events Emitted:**
+- `targetTokensUpdated` - `vaultAddress, newTokens`
+- `targetTokensUpdateError` - `vaultAddress, errorMessage`
 
 ---
 
-### updateTargetPlatforms(vaultAddress, newPlatforms) 
+### updateTargetPlatforms(vaultAddress, newPlatforms)
 
-Update the target platforms for a vault.
+Update the target platforms for a vault in cache.
 
 **Parameters:**
 
@@ -476,20 +408,15 @@ Update the target platforms for a vault.
 **Returns:**
 `Promise<boolean>` - Success status
 
-**Example:**
-
-```javascript
-const success = await vaultDataService.updateTargetPlatforms(
-  vault.address,
-  ['uniswap_v3', 'camelot']
-);
-```
+**Events Emitted:**
+- `targetPlatformsUpdated` - `vaultAddress, newPlatforms`
+- `targetPlatformsUpdateError` - `vaultAddress, errorMessage`
 
 ---
 
 ### updateVaultStrategy(vaultAddress, newStrategyAddress)
 
-Update the strategy address for a vault.
+Update the strategy address for a vault in cache.
 
 **Parameters:**
 
@@ -501,14 +428,9 @@ Update the strategy address for a vault.
 **Returns:**
 `Promise<boolean>` - Success status
 
-**Example:**
-
-```javascript
-const success = await vaultDataService.updateVaultStrategy(
-  vault.address,
-  '0xNewStrategyAddress'
-);
-```
+**Events Emitted:**
+- `strategyChanged` - `vaultAddress, newStrategyAddress`
+- `strategyChangeError` - `vaultAddress, errorMessage`
 
 ---
 
@@ -521,18 +443,11 @@ Get all cached vault data.
 **Returns:**
 `Array` - Array of all vault objects
 
-**Example:**
-
-```javascript
-const allVaults = vaultDataService.getAllVaults();
-console.log(`Total vaults cached: ${allVaults.length}`);
-```
-
 ---
 
 ### getVaultPositions(vaultAddress)
 
-Get positions for a specific vault.
+Get positions for a specific vault as an array.
 
 **Parameters:**
 
@@ -541,20 +456,13 @@ Get positions for a specific vault.
 | vaultAddress | `string` | Yes | Vault address |
 
 **Returns:**
-`Array` - Array of enhanced position objects
-
-**Example:**
-
-```javascript
-const positions = vaultDataService.getVaultPositions('0x123...abc');
-console.log(`Vault has ${positions.length} positions`);
-```
+`Array` - Array of position objects (empty array if vault not found)
 
 ---
 
 ### getPosition(positionId)
 
-Get a specific position by ID.
+Get a specific position by ID by searching all cached vaults.
 
 **Parameters:**
 
@@ -565,44 +473,20 @@ Get a specific position by ID.
 **Returns:**
 `Object|null` - Position object or null if not found
 
-**Example:**
-
-```javascript
-const position = vaultDataService.getPosition('12345');
-if (position) {
-  console.log(`Position: ${position.token0.symbol}/${position.token1.symbol}`);
-}
-```
-
 ---
 
-### getPool(poolAddress)
+### getVaultStrategyId(vaultAddress)
 
-Get pool data by address.
+Get the strategy ID for a vault from cache.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| poolAddress | `string` | Yes | Pool contract address |
+| vaultAddress | `string` | Yes | Vault address |
 
 **Returns:**
-`Object|null` - Pool data object or null if not found
-
----
-
-### getToken(tokenAddress)
-
-Get token data by address.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| tokenAddress | `string` | Yes | Token contract address |
-
-**Returns:**
-`Object|null` - Token data object or null if not found
+`string|null` - Strategy ID or null if vault not found
 
 ---
 
@@ -624,12 +508,12 @@ Get vaults matching a filter function.
 ```javascript
 // Get vaults with active strategies
 const activeVaults = vaultDataService.getVaultsByFilter(
-  vault => vault.hasActiveStrategy
+  vault => !!vault.strategy
 );
 
-// Get vaults with more than 2 positions
-const multiPositionVaults = vaultDataService.getVaultsByFilter(
-  vault => vault.positions.length > 2
+// Get vaults with positions
+const vaultsWithPositions = vaultDataService.getVaultsByFilter(
+  vault => Object.keys(vault.positions).length > 0
 );
 ```
 
@@ -643,32 +527,108 @@ Get vaults using a specific strategy.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| strategyId | `string` | Yes | Strategy identifier |
+| strategyId | `string` | Yes | Strategy identifier (case-insensitive) |
 
 **Returns:**
 `Array` - Array of vault objects using the strategy
 
-**Example:**
+---
 
-```javascript
-const bobVaults = vaultDataService.getVaultsByStrategy('bob');
-console.log(`${bobVaults.length} vaults using Baby Steps strategy`);
-```
+### hasActiveStrategy(vaultAddress)
+
+Check if a vault has an active strategy.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| vaultAddress | `string` | Yes | Vault address to check |
+
+**Returns:**
+`boolean` - True if vault has active strategy
 
 ---
 
-## Utility Methods
+### hasVault(vaultAddress)
+
+Check if a vault exists in the cache.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| vaultAddress | `string` | Yes | Address of the vault to check |
+
+**Returns:**
+`boolean` - True if vault exists in cache
+
+---
+
+## Cache Management
+
+### removeVault(vaultAddress)
+
+Remove a specific vault from the cache.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| vaultAddress | `string` | Yes | Address of the vault to remove |
+
+**Returns:**
+`boolean` - True if vault was removed, false if it didn't exist
+
+**Events Emitted:**
+- `vaultRemoved` - `vaultAddress`
+
+---
 
 ### clearCache()
 
 Clear all cached data.
 
-**Example:**
+**Events Emitted:**
+- `cacheCleared`
 
-```javascript
-vaultDataService.clearCache();
-console.log('All cached data cleared');
-```
+---
+
+## Events and Utilities
+
+### getAvailableEvents()
+
+Get list of all events that can be emitted by this service.
+
+**Returns:**
+`Array<string>` - Array of event names
+
+**Available Events:**
+- `initialized` - Service initialized
+- `vaultLoading` - Vault loading started
+- `vaultLoaded` - Vault loading completed
+- `vaultLoadError` - Vault loading failed
+- `userVaultsLoading` - User vaults loading started
+- `userVaultsLoaded` - User vaults loading completed
+- `userVaultsLoadError` - User vaults loading failed
+- `positionsRefreshing` - Position refresh started
+- `positionsRefreshed` - Position refresh completed
+- `positionsRefreshError` - Position refresh failed
+- `refreshIntervalChanged` - Refresh interval changed
+- `cacheCleared` - Cache cleared
+- `dynamicDataFetched` - Dynamic vault state fetched
+- `dynamicDataError` - Dynamic data fetch failed
+- `vaultRebalanceUpdating` - Vault rebalance update started
+- `vaultRebalanceUpdated` - Vault rebalance update completed
+- `vaultRebalanceError` - Vault rebalance update failed
+- `targetTokensUpdated` - Target tokens updated
+- `targetTokensUpdateError` - Target tokens update failed
+- `targetPlatformsUpdated` - Target platforms updated
+- `targetPlatformsUpdateError` - Target platforms update failed
+- `positionRemoved` - Position removed from cache
+- `positionRemoveError` - Position removal failed
+- `adaptersCreated` - Adapters created
+- `adaptersCreateError` - Adapter creation failed
+- `poolAddressCalculated` - Pool address calculated
 
 ---
 
@@ -683,118 +643,94 @@ Subscribe to VaultDataService events.
 | eventType | `string` | Yes | Event type to subscribe to |
 | handler | `Function` | Yes | Event handler function |
 
-**Available Events:**
-- `initialized` - Service initialized
-- `vaultLoading` - Vault loading started
-- `vaultLoaded` - Vault loading completed
-- `vaultLoadError` - Vault loading failed
-- `userVaultsLoading` - User vaults loading started
-- `userVaultsLoaded` - User vaults loading completed  
-- `userVaultsLoadError` - User vaults loading failed
-- `positionsRefreshing` - Position refresh started
-- `positionsRefreshed` - Position refresh completed
+**Returns:**
+`Function` - Unsubscribe function
 
 **Example:**
 
 ```javascript
 // Subscribe to vault loading events
-vaultDataService.subscribe('vaultLoaded', (vaultAddress, vaultData) => {
-  console.log(`Vault ${vaultAddress} loaded with ${vaultData.positions.length} positions`);
+const unsubscribe = vaultDataService.subscribe('vaultLoaded', (data) => {
+  console.log(`Vault ${data.vaultAddress} loaded with ${data.positionCount} positions`);
 });
 
-// Subscribe to error events
-vaultDataService.subscribe('vaultLoadError', (vaultAddress, error) => {
-  console.error(`Failed to load vault ${vaultAddress}: ${error}`);
-});
+// Later: unsubscribe();
 ```
 
 ---
 
-## Integration Examples
+### computePoolAddress(token0, token1, fee, platform, chainId, adapter)
 
-### Basic Usage
+Calculate pool address deterministically.
 
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| token0 | `string` | Yes | - | Token0 address |
+| token1 | `string` | Yes | - | Token1 address |
+| fee | `number` | Yes | - | Fee tier (e.g., 500, 3000, 10000) |
+| platform | `string` | Yes | - | Platform identifier (e.g., 'uniswapv3') |
+| chainId | `number` | No | current | Chain ID |
+| adapter | `Object` | No | null | Platform adapter instance |
+
+**Returns:**
+`Promise<string>` - Computed pool address
+
+---
+
+### getDynamicVaultState(vaultAddress, position, currentTick, sqrtPriceX96, adapter)
+
+Calculate dynamic state for a vault position at current market conditions.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| vaultAddress | `string` | Yes | Vault address |
+| position | `Object` | Yes | Position object with pool information |
+| currentTick | `number` | Yes | Current pool tick |
+| sqrtPriceX96 | `string` | Yes | Current sqrt price in X96 format |
+| adapter | `Object` | Yes | Platform adapter instance for fee calculations |
+
+**Returns:**
+`Promise<Object>` - Dynamic state object
+
+**Dynamic State Structure:**
 ```javascript
-import { ethers } from 'ethers';
-import EventManager from './EventManager.js';
-import VaultDataService from './VaultDataService.js';
-
-// Setup
-const eventManager = new EventManager();
-const vaultDataService = new VaultDataService(eventManager);
-const provider = new ethers.providers.JsonRpcProvider('https://arb-mainnet.g.alchemy.com/v2/key');
-
-// Initialize
-await vaultDataService.initialize(provider, 42161, 300000); // 5 minute refresh
-
-// Load user vaults
-const vaults = await vaultDataService.loadUserVaults('0x123...abc');
-
-// Work with specific vault
-const vault = vaults[0];
-const positions = await vaultDataService.refreshVaultPositions(vault.address);
-
-// Get dynamic state for a position
-const position = positions[0];
-const dynamicState = await vaultDataService.getDynamicVaultState(
-  vault.address,
-  position,
-  123456,
-  BigInt('1234567890123456789012345678901234567890')
-);
-
-console.log(`Position value: $${dynamicState.totalValueUSD}`);
-```
-
-### Event Monitoring
-
-```javascript
-// Monitor all vault data events
-vaultDataService.subscribe('vaultLoaded', (vaultAddress, vaultData) => {
-  console.log(`✅ Vault ${vaultAddress} loaded`);
-});
-
-vaultDataService.subscribe('vaultLoadError', (vaultAddress, error) => {
-  console.error(`❌ Vault ${vaultAddress} failed: ${error}`);
-});
-
-vaultDataService.subscribe('positionsRefreshed', (vaultAddress, positions) => {
-  console.log(`🔄 Refreshed ${positions.length} positions for ${vaultAddress}`);
-});
-```
-
-### Strategy Integration
-
-```javascript
-// In a strategy implementation
-class MyStrategy extends StrategyBase {
-  async evaluateState(vault, dynamicState, pool, currentTick, sqrtPriceX96, params) {
-    // Get fresh vault data
-    const vaultData = await this.service.vaultDataService.getVault(vault.address);
-    
-    // Get all positions
-    const positions = this.service.vaultDataService.getVaultPositions(vault.address);
-    
-    // Calculate dynamic state for each position
-    for (const position of positions) {
-      const state = await this.service.vaultDataService.getDynamicVaultState(
-        vault.address,
-        position,
-        currentTick,
-        sqrtPriceX96
-      );
-      
-      if (!state.inRange) {
-        return {
-          needsRebalance: true,
-          reason: `Position ${position.id} is out of range`
-        };
+{
+  positions: {
+    '12345': {
+      inRange: true,     // Whether position is currently in range
+      fees: {
+        token0: '1.234', // Formatted uncollected fees
+        token1: '0.567'
       }
     }
-    
-    return { needsRebalance: false };
   }
 }
+```
+
+**Events Emitted:**
+- `dynamicDataFetched` - `vaultAddress, dynamicData`
+- `dynamicDataError` - `vaultAddress, positionId, errorMessage`
+
+---
+
+## Integration with AutomationService
+
+The VaultDataService is automatically initialized by the AutomationService:
+
+```javascript
+// AutomationService sets up the VaultDataService
+this.vaultDataService = new VaultDataService(this.eventManager);
+this.vaultDataService.initialize(this.provider, this.chainId);
+this.vaultDataService.setTokens(this.tokens);
+this.vaultDataService.setAdapters(this.adapters);
+this.vaultDataService.setPoolData(this.poolData);
+
+// Access through AutomationService
+const vault = await automationService.vaultDataService.getVault(vaultAddress);
 ```
 
 ---
@@ -806,36 +742,39 @@ class MyStrategy extends StrategyBase {
 ```javascript
 // Service not initialized
 try {
-  await vaultDataService.loadVault('0x123...abc');
+  await vaultDataService.loadVaultData('0x123...abc');
 } catch (error) {
   if (error.message.includes('not initialized')) {
     console.error('Must call initialize() first');
   }
 }
 
-// Invalid refresh interval
+// No strategy configured
 try {
-  vaultDataService.initialize(provider, chainId, 1000); // Too low
+  await vaultDataService.loadVaultData('0x123...abc');
 } catch (error) {
-  console.error('Refresh interval must be at least 5000ms');
+  if (error.message.includes('no strategy set')) {
+    console.error('Vault must have a strategy configured');
+  }
 }
 
-// Vault loading failures
+// Adapters not set
 try {
-  const vault = await vaultDataService.loadVault('0x123...abc');
+  await vaultDataService.loadVaultData('0x123...abc');
 } catch (error) {
-  console.error('Failed to load vault:', error.message);
-  // Handle gracefully - maybe retry or use cached data
+  if (error.message.includes('Adapters not initialized')) {
+    console.error('AutomationService must call setAdapters() first');
+  }
 }
 ```
 
 ### Best Practices
 
-1. **Always Initialize**: Call `initialize()` before any data operations
+1. **Always Initialize**: Call `initialize()` then setter methods before data operations
 2. **Handle Cache Misses**: Be prepared for null returns from getter methods
 3. **Monitor Events**: Subscribe to error events for robust error handling
-4. **Use Appropriate Refresh**: Balance data freshness with performance
-5. **Validate Addresses**: Use proper address formatting and validation
+4. **Use getVault()**: Prefer `getVault()` over `loadVaultData()` for cache efficiency
+5. **Validate Addresses**: Addresses are normalized internally, but validate input
 
 ---
 

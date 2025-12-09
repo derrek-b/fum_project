@@ -53,7 +53,7 @@ describe('Swap Event Detection', () => {
 
   beforeAll(async () => {
     // Setup Ganache fork
-    testEnv = await setupTestBlockchain({ port: 8547 });
+    testEnv = await setupTestBlockchain({ port: 8551 });
     console.log('Ganache fork started');
 
     // Fund signer[1] for market manipulation (swaps)

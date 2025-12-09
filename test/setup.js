@@ -1,6 +1,6 @@
 /**
  * Global Test Setup
- * 
+ *
  * This file runs before all tests to configure the test environment.
  * Uses fum_library test environment for consistent testing approach.
  */
@@ -9,11 +9,18 @@ import { vi } from 'vitest';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initFumLibrary } from 'fum_library';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load test environment variables from test/.env.test
-dotenv.config({ path: path.join(__dirname, '.env.test') });
+// Load environment variables from .env.local
+dotenv.config({ path: path.join(__dirname, '../.env.local') });
+
+// Initialize fum_library with API keys for adapter initialization
+initFumLibrary({
+  alchemyApiKey: process.env.ALCHEMY_API_KEY,
+  coingeckoApiKey: process.env.COINGECKO_API_KEY,
+});
 
 // Suppress console output during tests (optional)
 if (process.env.QUIET_TESTS === 'true') {

@@ -74,26 +74,20 @@ Creates a new AutomationService instance with the specified configuration.
 ```typescript
 interface AutomationConfig {
   // Required core configuration
-  automationServiceAddress: string    // Automation service contract address
-  pollInterval: number               // Polling interval in milliseconds (min: 1000ms)
-  debug: boolean                     // Debug logging flag (must be explicit)
-  chainId: number                    // Blockchain chain ID
-  
-  // Network configuration
-  wsUrl?: string                     // WebSocket RPC URL (preferred)
-  rpcUrl?: string                    // HTTP RPC URL (fallback)
-  
-  // Contract addresses
-  factoryAddress: string             // VaultFactory contract address
-  bobStrategyAddress: string         // BabySteps strategy contract address
-  parrisStrategyAddress: string      // ParrisIsland strategy contract address
-  
-  // Data management
-  dataRefreshInterval: number        // Data refresh interval (min: 10000ms)
-  defaultPlatform?: string          // Default DeFi platform
-  
-  // Optional performance tuning
-  gasPrice?: string                 // Gas price configuration
+  automationServiceAddress: string    // Executor contract address (0x-prefixed)
+  chainId: number                     // Blockchain chain ID
+  wsUrl: string                       // WebSocket RPC URL for event streaming
+  debug: boolean                      // Debug logging flag
+  envPath: string                     // Path to .env file to load
+
+  // Required operational configuration
+  blacklistFilePath: string           // Path to blacklist JSON file
+  retryIntervalMs: number             // Interval between retry cycles (milliseconds)
+  maxFailureDurationMs: number        // Max time before vault is blacklisted (milliseconds)
+  ssePort: number                     // Port for SSE event streaming server
+
+  // Optional configuration
+  trackingDataDir?: string            // Directory for vault tracking data (default: './data/vaults')
 }
 ```
 
@@ -101,23 +95,39 @@ interface AutomationConfig {
 
 ```javascript
 const automationService = new AutomationService({
+  // Required
   automationServiceAddress: '0x1234567890123456789012345678901234567890',
-  pollInterval: 60000,              // 1 minute
-  debug: true,
-  chainId: 42161,                   // Arbitrum
+  chainId: 42161,                     // Arbitrum
   wsUrl: 'wss://arb-mainnet.g.alchemy.com/v2/your-key',
-  factoryAddress: '0xFactoryAddress',
-  bobStrategyAddress: '0xBobStrategyAddress',
-  parrisStrategyAddress: '0xParrisStrategyAddress',
-  dataRefreshInterval: 300000,      // 5 minutes
-  defaultPlatform: 'uniswap_v3'
+  debug: true,
+  envPath: './.env',
+
+  // Operational
+  blacklistFilePath: './data/blacklist.json',
+  retryIntervalMs: 60000,             // Retry failed vaults every 1 minute
+  maxFailureDurationMs: 3600000,      // Blacklist after 1 hour of failures
+  ssePort: 3001,                      // SSE server on port 3001
+
+  // Optional
+  trackingDataDir: './data/vaults'    // Where to store vault tracking data
 });
 ```
 
 **Validation:**
 - Throws `Error` if required configuration is missing
-- Validates polling intervals to prevent excessive blockchain calls
-- Requires explicit debug flag setting
+- Validates `automationServiceAddress` is a valid Ethereum address
+- Validates `chainId` is a positive integer
+- Validates `wsUrl` starts with `ws://` or `wss://`
+- Validates `debug` is explicitly set to a boolean
+- Validates `retryIntervalMs` and `maxFailureDurationMs` are positive integers
+- Validates `ssePort` is a number
+
+**Initialized Components:**
+- `EventManager` - Centralized event handling
+- `VaultDataService` - Vault data management
+- `Tracker` - Performance monitoring and transaction logging
+- `SSEBroadcaster` - Real-time event streaming to frontend
+- `BabyStepsStrategy` - Strategy implementation
 
 ---
 
@@ -956,15 +966,18 @@ try {
 import AutomationService from './src/AutomationService.js';
 
 const config = {
+  // Required
   automationServiceAddress: '0x...',
-  pollInterval: 60000,
-  debug: true,
   chainId: 42161,
   wsUrl: 'wss://arb-mainnet.g.alchemy.com/v2/your-key',
-  factoryAddress: '0x...',
-  bobStrategyAddress: '0x...',
-  parrisStrategyAddress: '0x...',
-  dataRefreshInterval: 300000
+  debug: true,
+  envPath: './.env',
+
+  // Operational
+  blacklistFilePath: './data/blacklist.json',
+  retryIntervalMs: 60000,
+  maxFailureDurationMs: 3600000,
+  ssePort: 3001
 };
 
 const service = new AutomationService(config);

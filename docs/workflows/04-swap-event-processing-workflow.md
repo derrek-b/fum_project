@@ -1,19 +1,19 @@
 # Swap Event Detection & Processing Workflow
 
-**Workflow ID**: 04  
-**Trigger**: Blockchain pool Swap events affecting monitored vault positions  
-**Purpose**: Detect price changes and execute automated position management (emergency exits, rebalancing, fee collection)  
+**Workflow ID**: 04
+**Trigger**: Blockchain pool Swap events affecting monitored vault positions
+**Purpose**: Detect price changes and execute automated position management (emergency exits, rebalancing, fee collection)
 **Complexity**: High (real-time event processing, complex decision logic, automated transaction execution)
 
 ## Overview
 
-The Swap Event Detection & Processing Workflow monitors DEX pool swap events in real-time to detect price movements that affect monitored vault positions. When price changes are detected, the system evaluates whether emergency action is needed, positions require rebalancing, or fees should be reinvested. This is the core automated trading logic that keeps vault positions optimized and protects against excessive losses.
+The Swap Event Detection & Processing Workflow monitors DEX pool swap events in real-time to detect price movements that affect monitored vault positions. When price changes are detected, the system evaluates whether emergency action is needed, positions require rebalancing, or fees should be collected. This is the core automated trading logic that keeps vault positions optimized and protects against excessive losses.
 
 ## Real-Time Event-Driven Trigger
 
-**Source**: DEX pool contracts (Uniswap V3, etc.)  
-**Entry Point**: Swap(address,address,int256,int256,uint160,uint128,int24) events on monitored pools  
-**Detection**: EventManager filter listeners registered for each vault's position pools  
+**Source**: DEX pool contracts (Uniswap V3, etc.)
+**Entry Point**: Swap(address,address,int256,int256,uint160,uint128,int24) events on monitored pools
+**Detection**: EventManager filter listeners registered for each vault's position pools
 **Prerequisites**: Vault authorized and monitoring active, swap event listeners registered for position pools
 
 ## Complete Function Call Chain
@@ -21,170 +21,206 @@ The Swap Event Detection & Processing Workflow monitors DEX pool swap events in 
 ```
 🎯 Blockchain Event: Pool.Swap(sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick)
     ↓
-📡 EventManager Pool Monitoring
-    ├── subscribeToSwapEvents() [Previously registered during vault setup]
-    │   ├── Monitor unique pools from vault positions
-    │   ├── Register filter listener per pool
-    │   └── Extract platform-specific pool ABI
+📡 EventManager Pool Monitoring (src/EventManager.js)
+    ├── subscribeToSwapEvents(vault, provider) [Previously registered during vault setup]
+    │   ├── Get unique pools from vault positions
+    │   ├── Get platform adapter for pool ABI
+    │   └── Register filter listener per pool via registerFilterListener()
     ├── Pool swap event filter matches
-    └── handleSwapEvent(log) [Internal handler per pool]
-        ├── Parse swap event using platform adapter ABI
-        │   ├── Extract currentTick from event.args.tick
-        │   └── Extract sqrtPriceX96 from event.args.sqrtPriceX96
-        ├── Find affected positions in the pool
-        │   └── Filter vault.positions by pool address
-        └── Emit event for each affected position
-            └── eventManager.emit('SwapEventDetected', { vault, position, currentTick, sqrtPriceX96 })
+    └── handleSwapEvent(log) [Internal handler per pool, line 747]
+        ├── Parse log to get basic event info
+        └── Emit 'SwapEventDetected' with event data
+            └── eventManager.emit('SwapEventDetected', { vaultAddress, poolAddress, platform, log })
                 ↓
-🎬 AutomationService Event Handler
-    └── handleSwapEvent(vault, position, currentTick, sqrtPriceX96) [Subscribed in constructor]
-        ├── Service shutdown check
-        ├── Vault locking (prevent race conditions)
-        │   └── lockVault(vault.address) [Skip if already locked]
+🎬 AutomationService Event Handler (src/AutomationService.js:243)
+    └── handleSwapEvent(vaultAddress, poolAddress, platform, log) [line 1410]
+        ├── Shutdown check - return if isShuttingDown
+        ├── Vault locking - lockVault(vaultAddress)
+        │   └── Skip if already locked (returns false)
+        ├── Get vault data
+        │   └── vaultDataService.getVault(vaultAddress)
+        ├── Get strategy instance
+        │   └── this.strategies[vault.strategy.strategyId]
         ├── Strategy delegation
-        │   └── strategy.handlePriceChange(vault, position, currentTick, sqrtPriceX96) [BabyStepsStrategy]
-        │       ├── FIRST: Emergency Exit Check (Highest Priority)
-        │       │   └── checkEmergencyExitTrigger(vault, position, currentTick)
-        │       │       ├── Get cached baseline tick from emergencyExitBaseline[vault.address]
-        │       │       ├── Get emergencyExitTrigger from vault.strategy.parameters
-        │       │       ├── Calculate price movement: |((1.0001^tickDiff - 1) * 100)|%
-        │       │       └── Return true if movement >= trigger threshold
-        │       │           ↓ [IF EMERGENCY EXIT TRIGGERED]
-        │       │   └── executeEmergencyExit(vault, position, currentTick)
-        │       │       ├── Step 1: Close ALL positions immediately
-        │       │       │   └── closeNonAlignedPositions(vault, allPositions)
-        │       │       │       ├── Batch position closing transactions
-        │       │       │       ├── Execute closures via adapters
-        │       │       │       └── Update vault state
-        │       │       ├── Step 2: Mark vault as unrecoverable
-        │       │       │   └── eventManager.emit('VaultUnrecoverable')
-        │       │       │       ├── Triggers blacklisting workflow
-        │       │       │       ├── Vault removed from monitoring
-        │       │       │       └── Manual intervention required
-        │       │       └── Step 3: Send urgent notification
-        │       │           └── sendTelegramMessage('🚨 EMERGENCY EXIT')
-        │       │           ↓ [WORKFLOW ENDS - NO FURTHER PROCESSING]
-        │       ├── THEN: Normal Position Management
-        │       │   └── checkRebalanceNeeded(position, currentTick, parameters)
-        │       │       ├── Check if position is out of range
-        │       │       │   └── currentTick < tickLower || currentTick > tickUpper
-        │       │       ├── Check threshold distances
-        │       │       │   ├── Calculate distance to upper/lower bounds
-        │       │       │   ├── Convert to percentage of range
-        │       │       │   └── Compare to rebalanceThresholdUpper/Lower
-        │       │       └── Return true if rebalance needed
-        │       │           ↓ [IF REBALANCE NEEDED]
-        │       │   └── rebalancePosition(vault, position, currentTick)
-        │       │       ├── Step 1: Close out-of-range position
-        │       │       │   └── closeNonAlignedPositions(vault, { [position.id]: position })
-        │       │       ├── Step 2: Refresh token balances
-        │       │       │   └── vaultDataService.fetchTokenBalances(vault.address, tokens)
-        │       │       ├── Step 3: Calculate available deployment
-        │       │       │   └── calculateAvailableDeployment(vault)
-        │       │       │       ├── Calculate total vault value
-        │       │       │       ├── Apply maxUtilization percentage
-        │       │       │       └── Determine deployable capital
-        │       │       ├── Step 4: Create new position with available capital
-        │       │       │   └── createNewPosition(vault, availableDeployment, assetValues)
-        │       │       │       ├── Determine optimal pool and tick range
-        │       │       │       ├── Execute position creation transactions
-        │       │       │       └── Update vault state
-        │       │       ├── Step 5: Refresh vault data
-        │       │       │   └── vaultDataService.refreshPositionsAndTokens(vault.address)
-        │       │       └── Step 6: Emit success event
-        │       │           └── eventManager.emit('PositionRebalanced')
-        │       │               ├── Triggers swap listener refresh
-        │       │               └── Updates monitoring for new position
-        │       │           ↓ [WORKFLOW ENDS - REBALANCE COMPLETE]
-        │       └── ELSE: Position In Range - Check Fee Collection
-        │           └── evaluateFeeReinvestment(vault, dynamicData, position, currentTick, sqrtPriceX96, params)
-        │               ├── Check if feeReinvestment enabled in parameters
-        │               ├── Get updated vault data for current fees
-        │               │   └── vaultDataService.getVault(vault.address)
-        │               ├── Find positions in the same pool
-        │               │   └── Filter positions by pool address
-        │               ├── Process fees for each position
-        │               │   ├── Calculate fee values in USD
-        │               │   ├── Check against reinvestmentTrigger threshold
-        │               │   └── Execute fee collection if above threshold
-        │               └── Return whether any action was taken
-        │                   ↓ [WORKFLOW ENDS - FEE PROCESSING COMPLETE OR NO ACTION]
-        ├── Error handling and notification
-        │   └── sendTelegramMessage('⚠️ Error processing price event')
-        └── Vault unlocking
-            └── unlockVault(vault.address) [Always executed in finally]
+        │   └── strategy.handleSwapEvent(vault, poolAddress, platform, log)
+        │       ↓
+🎮 BabyStepsStrategy (src/strategies/BabyStepsStrategy.js:2985)
+    └── handleSwapEvent(vault, poolAddress, platform, log)
+        ├── Get platform-specific handler
+        │   └── BabyStepsStrategyFactory.getHandler(platform, this)
+        │       └── Returns UniswapV3BabyStepsStrategy for 'uniswapv3'
+        ├── If no handler found
+        │   └── Emit 'VaultUnrecoverable' with reason
+        └── Delegate to platform handler
+            └── handler.handleSwapEvent(vault, poolAddress, log)
+                ↓
+⚡ UniswapV3BabyStepsStrategy (src/strategies/babySteps/UniswapV3BabyStepsStrategy.js:60)
+    └── handleSwapEvent(vault, poolAddress, log)
+        ├── Parse Uniswap V3 swap event
+        │   ├── Extract currentTick from decoded.args.tick
+        │   └── Extract sqrtPriceX96 from decoded.args.sqrtPriceX96
+        ├── Find affected position in the pool
+        │   └── Object.values(vault.positions).find(pos => pos.pool === poolAddress)
+        ├── If no position found
+        │   └── Emit 'VaultUnrecoverable' and throw error
+        ├── FIRST: Emergency Exit Check (Highest Priority)
+        │   └── checkEmergencyExitTrigger(vault, position, currentTick) [line 145]
+        │       ├── Get cached baseline tick from parent.emergencyExitBaseline[vault.address]
+        │       ├── Get emergencyExitTrigger from vault.strategy.parameters
+        │       ├── Get pool metadata and token data
+        │       ├── Convert ticks to prices using adapter.tickToPrice()
+        │       ├── Calculate price movement percentage
+        │       └── Return true if movement >= trigger threshold
+        │           ↓ [IF EMERGENCY EXIT TRIGGERED]
+        │   └── parent.executeEmergencyExit(vault, position, currentTick)
+        │       ├── Step 1: Close ALL positions immediately
+        │       │   └── closePositions(vault, allPositions)
+        │       ├── Step 2: Emit VaultUnrecoverable event
+        │       │   └── Triggers blacklisting workflow
+        │       └── Step 3: Send urgent notification
+        │           └── sendTelegramMessage('🚨 EMERGENCY EXIT')
+        │           ↓ [WORKFLOW ENDS - NO FURTHER PROCESSING]
+        ├── THEN: Rebalance Check
+        │   └── checkRebalanceNeeded(position, currentTick, params) [line 212]
+        │       ├── Check if position is out of range
+        │       │   └── currentTick < tickLower || currentTick > tickUpper
+        │       ├── Check threshold distances
+        │       │   ├── Calculate lowerPercent = (currentTick - tickLower) / rangeSize * 100
+        │       │   ├── Calculate upperPercent = (tickUpper - currentTick) / rangeSize * 100
+        │       │   └── Compare to rebalanceThresholdLower/Upper
+        │       └── Return true if rebalance needed
+        │           ↓ [IF REBALANCE NEEDED]
+        │   └── parent.rebalancePosition(vault, position, currentTick)
+        │       ├── Step 1: Close out-of-range position
+        │       │   └── closePositions(vault, { [position.id]: position })
+        │       ├── Step 2: Extract fees from closure events
+        │       │   └── extractFeesFromClosureEvents(receipt, positionMetadata)
+        │       ├── Step 3: Refresh token balances
+        │       │   └── vaultDataService.refreshPositionsAndTokens(vault.address)
+        │       ├── Step 4: Calculate available deployment
+        │       │   └── calculateAvailableDeployment(vault)
+        │       ├── Step 5: Create new position with available capital
+        │       │   └── createNewPosition(vault, availableDeployment, assetValues)
+        │       ├── Step 6: Refresh vault data
+        │       │   └── vaultDataService.refreshPositionsAndTokens(vault.address)
+        │       └── Step 7: Emit success event
+        │           └── eventManager.emit('PositionRebalanced')
+        │           ↓ [WORKFLOW ENDS - REBALANCE COMPLETE]
+        └── ELSE: Fee Collection Check (Position In Range)
+            └── checkFeesToCollect(vault, position) [line ~240]
+                ├── Check if fees are above threshold
+                └── Return true if collection needed
+                    ↓ [IF FEES NEED COLLECTION]
+            └── parent.collectFees(vault, position)
+                ├── Execute fee collection transaction
+                ├── Emit FeesCollected event
+                └── Update vault state
+                    ↓ [WORKFLOW ENDS - FEE COLLECTION COMPLETE OR NO ACTION]
+        ├── Error handling and re-throw
+        │   └── Errors propagate up for vault blacklisting
+        └── Vault unlocking (in finally block of AutomationService)
+            └── unlockVault(vaultAddress) [Always executed]
 ```
 
 ## Function Inventory by Module
 
 ### EventManager.js - Event Detection (USED)
-- **subscribeToSwapEvents**: Swap event monitoring setup for vault pools
-- **handleSwapEvent**: Internal swap event processing (per pool)
-- **emit**: Internal event emission (SwapEventDetected)
+- **subscribeToSwapEvents(vault, provider)**: Swap event monitoring setup for vault pools
+- **handleSwapEvent(log)**: Internal swap event processing (per pool)
+- **emit('SwapEventDetected', {...})**: Event emission with `vaultAddress, poolAddress, platform, log`
 - **registerFilterListener**: Swap filter registration per pool
 
 ### AutomationService.js - Event Orchestration (USED)
-- **handleSwapEvent**: Main swap event handler (event subscriber)
+- **handleSwapEvent(vaultAddress, poolAddress, platform, log)**: Main swap event handler
 - **lockVault/unlockVault**: Race condition prevention
-- **sendTelegramMessage**: Error notifications
+- **sendTelegramMessage**: Error and emergency notifications
+- **vaultDataService.getVault**: Vault data retrieval
 
-### BabyStepsStrategy.js - Core Decision Logic (USED)
-- **handlePriceChange**: Main price change processing logic
-- **checkEmergencyExitTrigger**: Emergency exit condition evaluation
-- **executeEmergencyExit**: Emergency exit execution
-- **checkRebalanceNeeded**: Rebalancing condition evaluation
-- **rebalancePosition**: Position rebalancing execution
-- **evaluateFeeReinvestment**: Fee collection evaluation and execution
+### BabyStepsStrategy.js - Strategy Delegation (USED)
+- **handleSwapEvent(vault, poolAddress, platform, log)**: Delegates to platform-specific handler
+- **BabyStepsStrategyFactory.getHandler(platform, this)**: Gets platform-specific handler
+- **executeEmergencyExit(vault, position, currentTick)**: Emergency exit execution
+- **rebalancePosition(vault, position, currentTick)**: Position rebalancing execution
+- **collectFees(vault, position)**: Fee collection execution
+- **closePositions(vault, positions)**: Position closure execution
+- **calculateAvailableDeployment(vault)**: Capital deployment calculation
+- **createNewPosition(vault, deployment, assetValues)**: New position creation
 
-### BabyStepsStrategy.js - Supporting Functions (USED)
-- **closeNonAlignedPositions**: Position closure execution
-- **calculateAvailableDeployment**: Capital deployment calculation
-- **createNewPosition**: New position creation
-- **getVaultData**: Fresh vault data retrieval
+### UniswapV3BabyStepsStrategy.js - Platform-Specific Logic (USED)
+- **handleSwapEvent(vault, poolAddress, log)**: Platform-specific swap handling
+- **checkEmergencyExitTrigger(vault, position, currentTick)**: Emergency exit evaluation
+- **checkRebalanceNeeded(position, currentTick, params)**: Rebalance evaluation
+- **checkFeesToCollect(vault, position)**: Fee collection evaluation
 
 ### VaultDataService.js - Data Management (USED)
-- **getVault**: Vault data retrieval with refresh
-- **fetchTokenBalances**: Token balance updates
-- **refreshPositionsAndTokens**: Complete vault data refresh
-- **getVaultPositions**: Position data retrieval
+- **getVault(vaultAddress)**: Vault data retrieval
+- **refreshPositionsAndTokens(vaultAddress)**: Complete vault data refresh
 
 ## Three Decision Paths
 
 ### Path 1: Emergency Exit (Critical Price Movement)
-**Trigger**: Price movement exceeds emergencyExitTrigger threshold  
-**Action**: Immediate closure of ALL positions, vault blacklisting  
-**Outcome**: Vault removed from monitoring, manual intervention required  
+**Trigger**: Price movement exceeds emergencyExitTrigger threshold
+**Action**: Immediate closure of ALL positions, vault blacklisting
+**Outcome**: Vault removed from monitoring, manual intervention required
 **Notification**: Urgent Telegram alert
+**Key Functions**:
+- `checkEmergencyExitTrigger()` in UniswapV3BabyStepsStrategy
+- `executeEmergencyExit()` in BabyStepsStrategy
 
 ### Path 2: Position Rebalancing (Position Out of Range or Near Boundary)
-**Trigger**: Position out of range OR approaching rebalance thresholds  
-**Action**: Close current position, create new position in optimal range  
-**Outcome**: Vault continues automated management with new position  
+**Trigger**: Position out of range OR approaching rebalance thresholds
+**Action**: Close current position, create new position in optimal range
+**Outcome**: Vault continues automated management with new position
 **Events**: PositionRebalanced → triggers swap listener refresh
+**Key Functions**:
+- `checkRebalanceNeeded()` in UniswapV3BabyStepsStrategy
+- `rebalancePosition()` in BabyStepsStrategy
 
 ### Path 3: Fee Collection or No Action (Position In Range)
-**Trigger**: Position within acceptable range  
-**Action**: Check for fee collection opportunities, collect if above threshold  
-**Outcome**: Vault continues monitoring, fees collected if warranted  
-**Events**: Fee collection events (if applicable)
+**Trigger**: Position within acceptable range
+**Action**: Check for fee collection opportunities, collect if above threshold
+**Outcome**: Vault continues monitoring, fees collected if warranted
+**Events**: FeesCollected (if applicable)
+**Key Functions**:
+- `checkFeesToCollect()` in UniswapV3BabyStepsStrategy
+- `collectFees()` in BabyStepsStrategy
+
+## Event Signature Changes
+
+### SwapEventDetected Event Structure
+```javascript
+{
+  vaultAddress: '0x...',   // Address of the vault with position in this pool
+  poolAddress: '0x...',    // Pool contract address where swap occurred
+  platform: 'uniswapv3',   // Platform identifier
+  log: {                   // Raw event log
+    address: '0x...',
+    topics: [...],
+    data: '0x...',
+    blockNumber: 12345678,
+    transactionHash: '0x...'
+  }
+}
+```
 
 ## Success and Failure Scenarios
 
 ### Success Paths
 1. **Emergency Exit Success** → All positions closed, vault blacklisted, manual intervention triggered
 2. **Rebalance Success** → Old position closed, new position created, monitoring updated
-3. **Fee Collection Success** → Fees collected and reinvested
+3. **Fee Collection Success** → Fees collected (and optionally reinvested)
 4. **No Action Success** → Position monitoring continues unchanged
 
 ### Error Scenarios
-1. **Event Processing Errors** → Error logged, Telegram notification sent, vault unlocked
-2. **Emergency Exit Failures** → Partial position closure, manual intervention still triggered
-3. **Rebalance Failures** → Position closure may succeed but new position creation fails
-4. **Fee Collection Failures** → Fees not collected, monitoring continues
+1. **No Handler for Platform** → VaultUnrecoverable emitted, vault blacklisted
+2. **No Position for Pool** → VaultUnrecoverable emitted, vault blacklisted
+3. **Emergency Exit Failures** → Partial position closure, manual intervention still triggered
+4. **Rebalance Failures** → Position closure may succeed but new position creation fails
+5. **Fee Collection Failures** → Fees not collected, monitoring continues
 
 ### Error Recovery
 - **Vault locking** → Always unlocked in finally block
-- **Failed operations** → Logged for debugging, service continues
+- **Failed operations** → Errors re-thrown to trigger vault blacklisting
 - **Telegram notifications** → Error alerts sent for monitoring
 
 ## Event Flow During Processing
@@ -194,14 +230,32 @@ The Swap Event Detection & Processing Workflow monitors DEX pool swap events in 
 - **SwapEventDetected** (internal): Triggers processing workflow
 
 ### Events Emitted During Processing
-- **VaultUnrecoverable**: Emergency exit triggered (leads to blacklisting)
+- **VaultUnrecoverable**: No handler, missing position, or emergency exit (leads to blacklisting)
 - **PositionRebalanced**: Successful rebalancing (triggers listener refresh)
-- **Fee collection events**: Successful fee reinvestment (if applicable)
+- **FeesCollected**: Successful fee collection
 
 ### Notifications
 - **Emergency Exit**: Urgent Telegram alert with details
 - **Processing Errors**: Error notifications for debugging
-- **Success notifications**: May be sent for significant actions
+
+## Platform-Specific Handler Architecture
+
+The strategy uses a factory pattern for platform-specific implementations:
+
+```javascript
+// In BabyStepsStrategy.handleSwapEvent()
+const handler = BabyStepsStrategyFactory.getHandler(platform, this);
+await handler.handleSwapEvent(vault, poolAddress, log);
+```
+
+**Available Handlers**:
+- `UniswapV3BabyStepsStrategy` - For Uniswap V3 pools
+
+Each handler implements:
+- `handleSwapEvent(vault, poolAddress, log)` - Main entry point
+- `checkEmergencyExitTrigger(vault, position, currentTick)` - Emergency evaluation
+- `checkRebalanceNeeded(position, currentTick, params)` - Rebalance evaluation
+- `checkFeesToCollect(vault, position)` - Fee collection evaluation
 
 ## Real-Time Processing Characteristics
 
@@ -210,23 +264,23 @@ The Swap Event Detection & Processing Workflow monitors DEX pool swap events in 
 - **Event filtering**: Only processes swaps affecting monitored positions
 - **Efficient parsing**: Platform-specific ABIs for optimal event processing
 
-### Scalability Features  
-- **Per-position processing**: Each position triggers independent evaluation
+### Scalability Features
+- **Per-vault processing**: Each vault triggers independent evaluation
 - **Pool-based monitoring**: Efficient listener management per pool
-- **Graceful degradation**: Individual vault failures don't affect others
+- **Graceful degradation**: Individual vault failures trigger blacklisting without affecting others
 
 ## Critical vs Optional Operations
 
 ### Critical (Must Execute)
 - Swap event detection and parsing
-- Price change evaluation (emergency vs normal)
+- Platform handler delegation
 - Vault locking/unlocking
 - SwapEventDetected event emission
 
 ### Important (Affects Position Management)
 - Emergency exit execution (when triggered)
 - Position rebalancing (when needed)
-- Fee collection (when enabled and profitable)
+- Fee collection (when enabled and above threshold)
 
 ### Optional (Failure is Logged)
 - Telegram notifications
@@ -241,9 +295,10 @@ The Swap Event Detection & Processing Workflow monitors DEX pool swap events in 
 
 ### Depends on Service Infrastructure
 - EventManager swap monitoring setup
-- VaultDataService data management  
+- VaultDataService data management
 - Platform adapters for transaction execution
 - Telegram notification system
+- BabyStepsStrategyFactory for handler resolution
 
 ## End States
 
@@ -253,18 +308,18 @@ The Swap Event Detection & Processing Workflow monitors DEX pool swap events in 
 - **Manual intervention** required to resume operations
 - **Service continues** monitoring other vaults
 
-### Rebalance End State  
+### Rebalance End State
 - **New position created** in optimal range
 - **Monitoring updated** for new position
 - **Vault continues** automated management
 - **Position tracking** updated for future events
 
 ### Fee Collection End State
-- **Fees collected** and reinvested (if above threshold)
+- **Fees collected** (if above threshold)
 - **Vault continues** normal monitoring
 - **Position unchanged** but fees optimized
 
 ### No Action End State
-- **Position monitoring** continues unchanged  
+- **Position monitoring** continues unchanged
 - **Vault state** preserved
 - **Next swap event** will trigger re-evaluation

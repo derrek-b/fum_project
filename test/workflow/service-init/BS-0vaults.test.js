@@ -11,7 +11,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
   let testEnv;
 
   beforeAll(async () => {
-    testEnv = await setupTestBlockchain();
+    testEnv = await setupTestBlockchain({ port: 8545 });
   });
 
   afterAll(async () => {
@@ -175,9 +175,8 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       // Test 10: ParameterMonitoringRegistered event
       expect(parameterMonitoringEventData).toBeDefined();
       expect(parameterMonitoringEventData.chainId).toBe(service.chainId);
-      expect(parameterMonitoringEventData.strategyAddresses).toHaveLength(2);
+      expect(parameterMonitoringEventData.strategyAddresses).toHaveLength(1);
       expect(parameterMonitoringEventData.strategyAddresses).toContain(service.contracts.bobStrategy.address);
-      expect(parameterMonitoringEventData.strategyAddresses).toContain(service.contracts.parrisStrategy.address);
       expect(parameterMonitoringEventData.listenersRegistered).toEqual(['ParameterUpdated']);
       expect(parameterMonitoringEventData.timestamp).toBeGreaterThan(0);
 
@@ -365,7 +364,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       // Test contracts object structure
       expect(service.contracts).toBeDefined();
       expect(typeof service.contracts).toBe('object');
-      expect(Object.keys(service.contracts).length).toBe(4)
+      expect(Object.keys(service.contracts).length).toBe(2); // factory + bobStrategy
 
       // Test VaultFactory contract
       expect(service.contracts.factory).toBeDefined();
@@ -387,20 +386,6 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       expect(typeof service.contracts.bobStrategy.getVersion).toBe('function');
       expect(typeof service.contracts.bobStrategy.authorizeVault).toBe('function');
       expect(typeof service.contracts.bobStrategy.getAllParameters).toBe('function');
-
-      // Test ParrisIslandStrategy contract
-      expect(service.contracts.parrisStrategy).toBeDefined();
-      expect(service.contracts.parrisStrategy.address).toBe(testEnv.deployedContracts.ParrisIslandStrategy);
-      expect(typeof service.contracts.parrisStrategy.getVersion).toBe('function');
-      expect(typeof service.contracts.parrisStrategy.authorizeVault).toBe('function');
-      expect(typeof service.contracts.parrisStrategy.getAllParameters).toBe('function');
-
-      // Test BatchExecutor contract
-      expect(service.contracts.batchExecutor).toBeDefined();
-      expect(service.contracts.batchExecutor.address).toBe(testEnv.deployedContracts.BatchExecutor);
-      expect(typeof service.contracts.batchExecutor.executeAtomicBatch).toBe('function');
-      expect(typeof service.contracts.batchExecutor.executeSequenceBatch).toBe('function');
-      expect(typeof service.contracts.batchExecutor.getVersion).toBe('function');
 
       // Test special case: Registry has been removed (functionality moved to EventManager)
 
@@ -434,26 +419,21 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       const paramListenerKeys = Object.keys(eventListeners).filter(key =>
         key.includes('parameter-update') && eventListeners[key].type === 'filter'
       );
-      // Should have 2 separate listeners, one for each strategy
-      expect(paramListenerKeys.length).toBe(2);
+      // Should have 1 listener for BabyStepsStrategy
+      expect(paramListenerKeys.length).toBe(1);
 
-      // Test both parameter listeners
+      // Test parameter listener for BabyStepsStrategy
       const bobStrategyAddress = service.contracts.bobStrategy.address;
-      const parrisStrategyAddress = service.contracts.parrisStrategy.address;
 
-      // Find listener for each strategy
+      // Find listener for strategy
       const bobListener = Object.entries(eventListeners).find(([key, listener]) =>
         key.includes('parameter-update') && listener.filter?.address === bobStrategyAddress
       );
-      const parrisListener = Object.entries(eventListeners).find(([key, listener]) =>
-        key.includes('parameter-update') && listener.filter?.address === parrisStrategyAddress
-      );
 
-      // Verify both listeners exist
+      // Verify listener exists
       expect(bobListener).toBeDefined();
-      expect(parrisListener).toBeDefined();
 
-      // Test properties of first listener
+      // Test properties of listener
       const [bobKey, bobListenerObj] = bobListener;
       expect(bobListenerObj.type).toBe('filter');
       expect(bobListenerObj.address).toBe(bobStrategyAddress);
@@ -462,22 +442,10 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       expect(bobListenerObj.chainId).toBe(1337);
       expect(bobListenerObj.filter.address).toBe(bobStrategyAddress);
 
-      // Test properties of second listener
-      const [parrisKey, parrisListenerObj] = parrisListener;
-      expect(parrisListenerObj.type).toBe('filter');
-      expect(parrisListenerObj.address).toBe(parrisStrategyAddress);
-      expect(typeof parrisListenerObj.handler).toBe('function');
-      expect(typeof parrisListenerObj.originalHandler).toBe('function');
-      expect(parrisListenerObj.chainId).toBe(1337);
-      expect(parrisListenerObj.filter.address).toBe(parrisStrategyAddress);
-
-      // Test that listener keys contain expected components
+      // Test that listener key contains expected components
       expect(bobKey).toContain('parameter-update');
       expect(bobKey).toContain('1337');
       expect(bobKey).toContain('strategy-0');
-      expect(parrisKey).toContain('parameter-update');
-      expect(parrisKey).toContain('1337');
-      expect(parrisKey).toContain('strategy-1');
 
       // Test 17: Verify Complete 0-Vault State After Initialization
       // Confirm that with no authorized vaults, the service is in proper empty state
@@ -499,8 +467,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
         const isSystemAddress =
           listener.address === 'global' ||
           listener.address === service.contracts.factory.address.toLowerCase() ||
-          listener.address === service.contracts.bobStrategy.address ||
-          listener.address === service.contracts.parrisStrategy.address;
+          listener.address === service.contracts.bobStrategy.address;
         return !isSystemAddress;
       });
       expect(vaultSpecificListeners.length).toBe(0);
@@ -512,11 +479,10 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       });
       const strategyListeners = Object.keys(eventListeners).filter(key => {
         const listener = eventListeners[key];
-        return listener.address === service.contracts.bobStrategy.address ||
-               listener.address === service.contracts.parrisStrategy.address;
+        return listener.address === service.contracts.bobStrategy.address;
       });
       expect(globalListeners.length).toBe(1); // authorization listener only
-      expect(strategyListeners.length).toBe(2); // 2 strategy parameter listeners
+      expect(strategyListeners.length).toBe(1); // 1 strategy parameter listener (BabyStepsStrategy)
 
       // Test service is ready but managing nothing
       expect(service.isRunning).toBe(true);

@@ -42,7 +42,7 @@ describe('AutomationService Initialization - 1 Vault (0AP/2NP/0AT/2NT)', () => {
     }
 
     // Setup blockchain environment
-    testEnv = await setupTestBlockchain();
+    testEnv = await setupTestBlockchain({ port: 8546 });
 
     // Create test vault with 2 non-aligned positions and 2 non-aligned tokens using new setup
     testVault = await setupTestVault(

@@ -257,7 +257,7 @@ interface FilterListenerOptions {
   provider: ethers.Provider;     // Provider instance
   filter: ethers.EventFilter;    // Event filter
   handler: Function;             // Event handler function
-  vaultAddress: string;          // Associated vault address
+  address: string;               // Associated address (vault, strategy, or 'global')
   eventType: string;             // Type of event
   chainId: number;               // Chain ID
   additionalId?: string;         // Optional additional identifier
@@ -269,7 +269,7 @@ interface FilterListenerOptions {
 | `options.provider` | `ethers.Provider` | Yes | Ethers.js provider instance |
 | `options.filter` | `ethers.EventFilter` | Yes | Event filter object |
 | `options.handler` | `Function` | Yes | Function to handle matching events |
-| `options.vaultAddress` | `string` | Yes | Address of associated vault |
+| `options.address` | `string` | Yes | Associated address (vault address, strategy address, or 'global' for chain-wide listeners) |
 | `options.eventType` | `string` | Yes | Type identifier for the filter |
 | `options.chainId` | `number` | Yes | Blockchain chain ID |
 | `options.additionalId` | `string` | No | Additional identifier for uniqueness |
@@ -695,6 +695,152 @@ const listener = {
   chainId: number              // Chain ID
 };
 ```
+
+## Blockchain Event Subscription Methods
+
+These methods set up blockchain event listeners for specific contract events.
+
+### `subscribeToAuthorizationEvents(chainId, automationServiceAddress, provider)`
+
+Subscribe to vault authorization/revocation events for the automation service.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chainId` | `number` | Yes | Chain ID for the network |
+| `automationServiceAddress` | `string` | Yes | Executor address to monitor |
+| `provider` | `ethers.Provider` | Yes | Ethereum provider |
+
+#### Events Emitted
+
+- `VaultAuthGranted` - When a vault authorizes the automation service
+- `VaultAuthRevoked` - When a vault revokes authorization
+
+#### Example
+
+```javascript
+eventManager.subscribeToAuthorizationEvents(42161, '0xExecutor...', provider);
+// Now listens for ExecutorChanged events and emits VaultAuthGranted/VaultAuthRevoked
+```
+
+---
+
+### `subscribeToVaultConfigEvents(vault, provider)`
+
+Subscribe to configuration change events for a specific vault.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vault` | `Object` | Yes | Vault object with `address` and `chainId` |
+| `provider` | `ethers.Provider` | Yes | Ethereum provider |
+
+#### Events Emitted
+
+- `TargetTokensUpdated` - When vault target tokens change
+- `TargetPlatformsUpdated` - When vault target platforms change
+
+---
+
+### `subscribeToStrategyParameterEvents(chainId, strategyAddresses, provider)`
+
+Subscribe to strategy parameter update events.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `chainId` | `number` | Yes | Chain ID |
+| `strategyAddresses` | `string[]` | Yes | Array of strategy contract addresses |
+| `provider` | `ethers.Provider` | Yes | Ethereum provider |
+
+#### Events Emitted
+
+- `StrategyParameterUpdated` - When strategy parameters are updated on-chain
+
+---
+
+### `subscribeToSwapEvents(vault, provider)`
+
+Subscribe to swap events for all pools associated with vault positions.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vault` | `Object` | Yes | Vault object with positions |
+| `provider` | `ethers.Provider` | Yes | Ethereum provider |
+
+#### Events Emitted
+
+- `SwapEventDetected` - When a swap occurs in a monitored pool
+
+---
+
+### `refreshSwapListeners(vaultAddress, provider)`
+
+Refresh swap listeners after position changes (e.g., after rebalance).
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vaultAddress` | `string` | Yes | Vault address |
+| `provider` | `ethers.Provider` | Yes | Ethereum provider |
+
+---
+
+## Pool Monitoring Methods
+
+### `getMonitoredPools()`
+
+Get array of all pool addresses currently being monitored for swap events.
+
+**Returns:** `string[]` - Array of pool addresses
+
+### `getVaultsForPool(poolAddress)`
+
+Get array of vault addresses monitoring a specific pool.
+
+**Parameters:**
+- `poolAddress` (string) - Pool address to query
+
+**Returns:** `string[]` - Array of vault addresses
+
+### `isPoolMonitored(poolAddress)`
+
+Check if a pool is currently being monitored.
+
+**Parameters:**
+- `poolAddress` (string) - Pool address to check
+
+**Returns:** `boolean` - True if pool is monitored
+
+### `getPoolListenerCount()`
+
+Get the count of active pool listeners.
+
+**Returns:** `number` - Number of pool listeners
+
+---
+
+## Failed Removal Tracking
+
+### `getFailedRemovals()`
+
+Get map of listener removals that failed.
+
+**Returns:** `Map` - Failed removal attempts with error details
+
+### `retryFailedRemovals()`
+
+Retry any failed listener removals.
+
+**Returns:** `Promise<Object>` - Results with success/failure counts
+
+---
 
 ## Integration Patterns
 

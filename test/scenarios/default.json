@@ -1,7 +1,7 @@
 {
   "name": "Default Simple Scenario",
   "description": "Simple test with 1 aligned position and aligned tokens",
-  "port": 8550,
+  "port": 8549,
   "vaultSetup": {
     "vaultName": "Default Test Vault",
     "wrapEthAmount": "10",

@@ -1,7 +1,7 @@
 {
   "name": "0AP/2NP/0AT/2NT Scenario",
   "description": "0 Aligned Positions, 2 Non-aligned Positions, 0 Aligned Tokens, 2 Non-aligned Tokens",
-  "port": 8551,
+  "port": 8560,
   "vaultSetup": {
     "vaultName": "0AP/2NP/0AT/2NT Test Vault",
     "wrapEthAmount": "10",

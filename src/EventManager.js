@@ -650,25 +650,28 @@ class EventManager {
         const vaultAddress = parsed.args[0];
         const paramName = parsed.args[1];
 
+        // Skip if vault is not being monitored (automation not enabled)
+        // When automation is re-enabled, params will be loaded fresh from chain via setupVault
+        if (!this.vaultDataService.hasVault(vaultAddress)) {
+          return;
+        }
+
         console.log(`Strategy parameters updated for vault ${vaultAddress}: ${paramName}`);
 
-        // Check if vault exists in VaultDataService
-        if (this.vaultDataService.hasVault(vaultAddress)) {
-          // Refresh the entire vault data to get latest parameters
-          const refreshed = await this.vaultDataService.getVault(vaultAddress, true);
+        // Refresh the entire vault data to get latest parameters
+        const refreshed = await this.vaultDataService.getVault(vaultAddress, true);
 
-          if (refreshed) {
-            // Emit event instead of calling callback
-            this.emit('StrategyParameterUpdated', {
-              vaultAddress,
-              paramName,
-              log: {
-                level: 'info',
-                message: `✅ [EM Parameter Event Handler] Strategy parameters updated for vault ${vaultAddress}: ${paramName}`,
-                includeData: true
-              }
-            });
-          }
+        if (refreshed) {
+          // Emit event instead of calling callback
+          this.emit('StrategyParameterUpdated', {
+            vaultAddress,
+            paramName,
+            log: {
+              level: 'info',
+              message: `✅ [EM Parameter Event Handler] Strategy parameters updated for vault ${vaultAddress}: ${paramName}`,
+              includeData: true
+            }
+          });
         }
       } catch (error) {
         console.error("❌ [EM Parameter Event Handler] Error handling parameter update event:", error);

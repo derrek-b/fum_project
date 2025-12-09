@@ -39,6 +39,10 @@ export async function setupTestBlockchain(options = {}) {
   const deployedContracts = deployment.addresses;
   const contracts = deployment.contracts;
 
+  // Derive SSE port from Ganache port to ensure uniqueness when running tests in parallel
+  // Port 8545 -> SSE 3090, Port 8546 -> SSE 3091, etc.
+  const ssePort = 3090 + (port - 8545);
+
   // Standard test configuration for AutomationService
   const testConfig = {
     automationServiceAddress: "0xabA472B2EA519490EE10E643A422D578a507197A", // Custom test address (account #4)
@@ -48,7 +52,7 @@ export async function setupTestBlockchain(options = {}) {
     envPath: path.join(__dirname, '../.env.test'),
     blacklistFilePath: path.join(__dirname, '../../data/.vault-blacklist.json'),
     trackingDataDir: path.join(__dirname, '../../data/vaults'),
-    ssePort: 3099, // Use unique port for tests to avoid conflicts
+    ssePort, // Derived from Ganache port to avoid conflicts in parallel tests
     retryIntervalMs: 5000, // 5 seconds between retries
     maxFailureDurationMs: 60000 // 1 minute max failure duration
   };

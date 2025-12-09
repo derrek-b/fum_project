@@ -1,5 +1,38 @@
 # F.U.M. Project Changelog
 
+## [1.0.0] Production Release - 2025-12-09
+
+### Production Release
+
+First production release of fum_automation with complete Baby Steps strategy implementation and comprehensive testing.
+
+#### **Repository Cleanup & Documentation**
+- **ADDED**: LICENSE.md with proprietary license terms
+- **ADDED**: TESTING.md with comprehensive testing documentation
+- **UPDATED**: README.md with GitHub repository links and production configuration notes
+- **UPDATED**: API documentation for AutomationService, EventManager, utilities
+
+#### **Test Infrastructure**
+- **ADDED**: Comprehensive utilities.test.js for retryWithBackoff function
+- **ADDED**: BS-1vault-1020.test.js swap event workflow test
+- **UPDATED**: Workflow tests for improved reliability
+- **UPDATED**: Ganache setup and test configuration
+- **UPDATED**: Scenario configurations (0202, 1111, 2020, default)
+
+#### **Helper Refactoring**
+- **ADDED**: Permit2Helpers.js for permit2 signature utilities
+- **REFACTORED**: helpers.js improvements for production reliability
+- **UPDATED**: UniswapV3BabyStepsStrategy for improved swap handling
+
+#### **Configuration Updates**
+- **UPDATED**: Environment example with production recommendations
+- **UPDATED**: Dependency to fum_library v1.0.0
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None from v0.17.0
+**Dependency**: Requires fum_library v1.0.0
+**Impact**: Ready for mainnet deployment
+
 ## [0.17.0] Buffer Swap Threshold & Config Cleanup - 2025-12-01
 
 ### Minimum Buffer Swap Value Threshold

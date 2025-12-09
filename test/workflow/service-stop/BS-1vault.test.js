@@ -27,7 +27,7 @@ describe('Service Stop Workflow - 1111 Configuration', () => {
 
   beforeAll(async () => {
     // 1. Setup blockchain on port 8549 (different from other tests)
-    testEnv = await setupTestBlockchain({ port: 8549 });
+    testEnv = await setupTestBlockchain({ port: 8550 });
 
     // 2. Create test vault with simple fast setup
     testVault = await setupTestVault(

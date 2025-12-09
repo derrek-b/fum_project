@@ -37,7 +37,7 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
 
   beforeAll(async () => {
     // 1. Setup blockchain on port 8547 (different from other tests)
-    testEnv = await setupTestBlockchain({ port: 8547 });
+    testEnv = await setupTestBlockchain({ port: 8552 });
 
     // 2. Initialize and start the automation service FIRST
     service = new AutomationService(testEnv.testConfig);
@@ -207,10 +207,10 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
 
     // Validate token amounts added to position using combination approach
     // Non-zero check (sanity - something was deployed)
-    expect(ethers.BigNumber.from(liquidityEvent.token0Used).gt(0)).toBe(true);
-    expect(ethers.BigNumber.from(liquidityEvent.token1Used).gt(0)).toBe(true);
+    expect(ethers.BigNumber.from(liquidityEvent.actualToken0).gt(0)).toBe(true);
+    expect(ethers.BigNumber.from(liquidityEvent.actualToken1).gt(0)).toBe(true);
 
-    console.log(`✅ Token amounts verified: ${liquidityEvent.token0Used} token0, ${liquidityEvent.token1Used} token1`);
+    console.log(`✅ Token amounts verified: ${liquidityEvent.actualToken0} token0, ${liquidityEvent.actualToken1} token1`);
   });
 
   it('should set up monitoring for the authorized vault', async () => {

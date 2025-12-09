@@ -4,148 +4,181 @@ Automated liquidity management service for the F.U.M. (Friendly Uniswap Manager)
 
 ## Overview
 
-The F.U.M. Automation service provides 24/7 automated management of liquidity positions across various DeFi platforms. It monitors on-chain events, evaluates positions against strategy parameters, and executes rebalances, fee collection, and other optimization tasks.
+The F.U.M. Automation service provides 24/7 automated management of liquidity positions across DeFi platforms. It monitors on-chain events, evaluates positions against strategy parameters, and executes rebalances, fee collection, and other optimization tasks.
 
 ## Features
 
 - **Event-Driven Architecture**: Real-time monitoring of price movements and fee accrual
-- **Multi-Strategy Support**: Implements various liquidity management strategies including:
-  - **Parris Island Strategy**: Advanced adaptive range management with learning capabilities
-  - **Baby Steps Strategy**: Simplified strategy with essential parameters for beginner users
+- **Strategy Support**: Baby Steps Strategy for simplified liquidity management
 - **Multi-Platform Support**: Adaptable to different DEXes through platform-specific implementations
 - **Secure Vault Integration**: Integrates with F.U.M. vault contracts via authorized service relationships
+- **SSE Broadcasting**: Real-time event streaming to connected clients
 - **Flexible Notification System**: Supports Telegram alerts for key events and actions
-- **Extensible Strategy Framework**: Base classes for creating custom strategies
 
 ## Architecture
 
 The automation service consists of several core components:
 
 - **AutomationService**: Central service managing vault authorization and coordinating operations
-- **VaultRegistry**: Handles vault authorization events and maintains the list of authorized vaults
-- **EventManager**: Centralized event handling system for contract events
+- **EventManager**: Centralized event handling system for contract and internal events
 - **VaultDataService**: Caching and data management layer for vault information
 - **Strategy Classes**: Implements strategy-specific logic and monitoring
+- **SSEBroadcaster**: Server-Sent Events for real-time client updates
+- **Tracker**: Transaction history and performance tracking
+
+## Prerequisites
+
+### Repository Structure
+
+The F.U.M. ecosystem requires repositories to be cloned as siblings:
+
+```
+code/
+├── fum/              # Frontend + Smart Contracts
+├── fum_library/      # Shared utilities (required)
+└── fum_automation/   # This repository
+```
+
+### fum_library Setup
+
+fum_library must be built before installing dependencies:
+
+```bash
+# Clone fum_library if not already present
+cd ..
+git clone https://github.com/derrek-b/fum_library.git
+
+# Build and pack the library
+cd fum_library
+npm install
+npm run build && npm pack
+
+# Return to fum_automation
+cd ../fum_automation
+```
+
+## Installation
+
+```bash
+# Install dependencies (requires fum_library to be built first)
+npm install
+
+# Copy environment template
+cp .env.example .env.local
+
+# Edit .env.local with your configuration
+```
+
+## Configuration
+
+Copy `.env.example` to `.env.local` and configure:
+
+### Required Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CHAIN_ID` | Network ID (1337=Ganache, 42161=Arbitrum One) |
+| `WS_URL` | WebSocket RPC endpoint for real-time events |
+| `AUTOMATION_PRIVATE_KEY` | Private key for executor wallet (signs transactions) |
+| `SSE_PORT` | Port for Server-Sent Events HTTP server |
+| `RETRY_INTERVAL_MS` | Interval between retry cycles for failed vaults |
+| `MAX_FAILURE_DURATION_MS` | Time before a failing vault is blacklisted |
+| `THEGRAPH_API_KEY` | The Graph API key for subgraph queries |
+| `ALCHEMY_API_KEY` | Alchemy API key for Arbitrum RPC (see note below) |
+
+> **Note on ALCHEMY_API_KEY**: Required for both production AND local testing. In production (chainId 42161), it's used for Arbitrum RPC URLs. In local testing (chainId 1337), the AlphaRouter still needs Arbitrum RPC for swap routing.
+
+### Optional Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEBUG` | `false` | Enable verbose logging |
+| `BLACKLIST_PATH` | `./data/blacklist.json` | Path to vault blacklist file |
+| `TRACKING_DATA_DIR` | `./data/vaults` | Directory for vault tracking data |
+| `COINGECKO_API_KEY` | - | CoinGecko API key for token prices (see note below) |
+| `TELEGRAM_BOT_API_KEY` | - | Telegram bot API key for notifications |
+| `TELEGRAM_CHAT_ID` | - | Telegram chat ID for notifications |
+
+> **Note on COINGECKO_API_KEY**: While technically optional, this is **strongly recommended for production**. Without it, the free CoinGecko tier's rate limits will cause price fetching failures under normal operating conditions. For local testing, the lower request volume may stay within free tier limits.
 
 ## Usage
 
 ```bash
-# Install dependencies
-npm install
-
 # Run automation service
 npm run start
-# or
-node scripts/test-automation.js
 
-# Run automation service with web-based log viewer
-npm run start:logs
-# or
-node scripts/test-automation.js --logs
-
-# Customize log server port
-node scripts/test-automation.js --logs --log-port 8080
+# Run with debug logging
+DEBUG=true npm run start
 ```
 
-### Log Viewer
-
-The automation service includes a web-based log viewer for easier monitoring. When enabled with the `--logs` flag, the viewer is available at:
-
-```
-http://localhost:3000
-```
-
-Features:
-- Real-time log updates
-- Filtering by level (info, warn, error) and source
-- Text search functionality
-- Auto-scrolling toggle
-- Export logs to JSON
-
-## Configuration
-
-The automation service requires the following environment variables:
-
-```
-# RPC/WS Configuration
-WS_URL=wss://your-websocket-endpoint
-RPC_URL=https://your-rpc-endpoint
-CHAIN_ID=1337
-
-# Contract Addresses
-FACTORY_ADDRESS=0x...
-PARRIS_STRATEGY_ADDRESS=0x...
-BOB_STRATEGY_ADDRESS=0x...
-AUTOMATION_ADDRESS=0x...
-
-# Notification Settings
-TELEGRAM_BOT_API_KEY=your-bot-key
-TELEGRAM_CHAT_ID=your-chat-id
-
-# Environment Variables
-# Configure these environment variables to control the service behavior
-```
+The service will:
+1. Connect to the blockchain via WebSocket
+2. Initialize platform adapters (UniswapV3)
+3. Load authorized vaults from the VaultFactory
+4. Start monitoring positions and events
+5. Expose SSE endpoint at `http://localhost:{SSE_PORT}/events`
 
 ## Strategies
 
-### Parris Island Strategy
-
-Advanced liquidity management strategy:
-
-- Configurable position range parameters
-- Fee reinvestment capabilities
-- Risk management controls
-- Designed for more sophisticated beginner users
-
 ### Baby Steps Strategy
 
-A simplified strategy for easier management:
+A simplified strategy for liquidity management:
 
-- Streamlined parameter set
-- Basic monitoring capabilities
-- Simplified risk management
-- Designed for beginners and education
+- Configurable position range parameters (upper/lower range, thresholds)
+- Fee reinvestment capabilities
+- Automatic rebalancing when price moves out of range
+- Token swap handling for non-aligned assets
+- Designed for beginners and straightforward use cases
 
 ## Platform Support
 
-Each strategy can be implemented for different platforms:
-
-- **UniswapV3**: Complete implementation for Uniswap V3 pools
-- **PancakeSwap**: Coming soon
-- **More platforms**: Extensible architecture supports additional platforms
-
-## Development
-
-The project follows a modular architecture that makes it easy to extend:
-
-1. **Adding new strategies**: Extend the `StrategyBase` class and implement required methods
-2. **Adding platform support**: Create platform-specific implementations in strategy subfolders
-3. **Custom event handlers**: Register with the centralized EventManager
+- **UniswapV3**: Complete implementation for Uniswap V3 pools on Arbitrum
+- Additional platforms can be added through the extensible adapter architecture
 
 ## Testing
 
-The automation service includes a comprehensive testing framework for unit, integration, and scenario-based testing. See the [TESTING.md](TESTING.md) guide for detailed information on:
+See [TESTING.md](TESTING.md) for comprehensive testing documentation including:
 
-- Available test fixtures
-- Pre-configured test scenarios
-- Testing with Ganache forked networks
-- Mocking blockchain events
-- Testing best practices
+- Unit tests for configuration and utilities
+- Workflow tests with real blockchain interactions
+- Custom test scenarios via JSON configuration
+- Test naming conventions
 
 ```bash
-# Run unit tests
+# Run all tests
 npm test
 
-# Run integration tests
-npm run test:integration
+# Run unit tests only
+npm test test/unit
 
-# Run test scenarios
-node scripts/test-runner.js --scenario=price-movement
+# Run workflow tests only
+npm test test/workflow
+
+# Run specific test
+npm test test/workflow/service-init/BS-0vaults.test.js
+
+# Watch mode
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
 ```
+
+## Development
+
+The project follows a modular architecture:
+
+1. **Adding platform support**: Create platform-specific strategy implementations in `src/strategies/{strategyName}/`
+2. **Custom event handlers**: Register with the centralized EventManager
+3. **Extending strategies**: Implement new strategies by extending the base strategy class
+
+## Full Ecosystem Testing
+
+For integration testing with the complete F.U.M. stack (frontend + automation + blockchain), see [fum/TESTING.md](../fum/TESTING.md).
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE.md](LICENSE.md) for details.
 
 ## Version History
 

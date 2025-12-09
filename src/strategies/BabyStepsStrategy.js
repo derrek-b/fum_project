@@ -2385,7 +2385,7 @@ class BabyStepsStrategy extends StrategyBase {
             this.serviceConfig.chainId,
             poolData.platform,
             tvlAveragingPeriod,
-            process.env.NEXT_PUBLIC_THEGRAPH_API_KEY
+            process.env.THEGRAPH_API_KEY
           ),
           'TheGraph TVL',
           this
@@ -2424,7 +2424,7 @@ class BabyStepsStrategy extends StrategyBase {
           poolAddress,
           this.serviceConfig.chainId,
           poolData.platform,
-          process.env.NEXT_PUBLIC_THEGRAPH_API_KEY
+          process.env.THEGRAPH_API_KEY
         ),
         'TheGraph PoolAge',
         this
@@ -2742,7 +2742,7 @@ class BabyStepsStrategy extends StrategyBase {
           this.chainId,
           adapter.platformId,
           1, // 1 day average for speed
-          process.env.NEXT_PUBLIC_THEGRAPH_API_KEY
+          process.env.THEGRAPH_API_KEY
         );
         return { ...pool, tvl };
       } catch (error) {

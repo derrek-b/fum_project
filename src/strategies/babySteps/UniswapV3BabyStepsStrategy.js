@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
-import { generatePermit2Signature } from '../../helpers.js';
+import { generatePermit2Signature } from '../../Permit2Helpers.js';
 
 // Permit2 address is a constant (same on all chains)
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';

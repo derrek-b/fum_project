@@ -20,7 +20,6 @@ import { getContract, getVaultFactory, getAuthorizedVaults } from 'fum_library/b
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import axios from 'axios';
-import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -43,7 +42,6 @@ class AutomationService {
    * @param {number} config.chainId - Blockchain chain ID
    * @param {string} config.wsUrl - WebSocket RPC URL (required for real-time event streaming)
    * @param {boolean} [config.debug=false] - Enable debug logging
-   * @param {string} config.envPath - Path to environment file to load
    * @param {number} config.retryIntervalMs - Interval between retry cycles for failed vaults (in milliseconds)
    * @throws {Error} If required configuration is missing
    * @since 1.0.0
@@ -60,12 +58,10 @@ class AutomationService {
     this._validateWebSocketUrl(config.wsUrl);
     this._validateBoolean(config.debug);
 
-    // Load environment file
-    dotenv.config({ path: config.envPath, override: true });
-
-    // Validate blacklistFilePath is required
-    if (!config.blacklistFilePath || typeof config.blacklistFilePath !== 'string') {
-      throw new Error('blacklistFilePath is required in configuration and must be a string path');
+    // Validate blacklistFilePath (optional, defaults to './data/blacklist.json')
+    const blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
+    if (typeof blacklistFilePath !== 'string') {
+      throw new Error('blacklistFilePath must be a string path');
     }
 
     // Validate trackingDataDir (optional, defaults to './data/vaults')
@@ -114,7 +110,7 @@ class AutomationService {
 
     // Blacklisted vaults (persistent failures) - prevents infinite retry loops
     this.blacklistedVaults = new Map(); // vaultAddress → { reason, blacklistedAt, firstFailure, lastError, attempts }
-    this.blacklistFilePath = config.blacklistFilePath;
+    this.blacklistFilePath = blacklistFilePath;
     this.maxFailureDuration = config.maxFailureDurationMs;
 
     // Initialize centralized event manager
@@ -320,8 +316,7 @@ class AutomationService {
 
       // Subscribe to strategy parameter updates from our known strategy contracts
       const strategyAddresses = [
-        this.contracts.bobStrategy.address,
-        this.contracts.parrisStrategy.address
+        this.contracts.bobStrategy.address
       ];
 
       this.eventManager.subscribeToStrategyParameterEvents(this.chainId, strategyAddresses, this.provider);
@@ -497,16 +492,12 @@ class AutomationService {
 
       this.contracts = {
         factory: await getVaultFactory(this.provider),
-        bobStrategy: await getContract('bob', this.provider),
-        parrisStrategy: await getContract('parris', this.provider),
-        batchExecutor: await getContract('BatchExecutor', this.provider)
+        bobStrategy: await getContract('bob', this.provider)
       };
 
       // Log initialized contract addresses
       this.log(`Using VaultFactory address: ${this.contracts.factory.address}`);
       this.log(`Using BabySteps strategy address: ${this.contracts.bobStrategy.address}`);
-      this.log(`Using ParrisIsland strategy address: ${this.contracts.parrisStrategy.address}`);
-      this.log(`Using BatchExecutor address: ${this.contracts.batchExecutor.address}`);
 
       // Share factory contract with registry
 

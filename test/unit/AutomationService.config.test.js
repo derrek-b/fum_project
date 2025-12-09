@@ -332,21 +332,19 @@ describe('AutomationService Configuration Validation', () => {
   });
 
   describe('blacklistFilePath validation', () => {
-    it('should throw for missing blacklistFilePath', () => {
-      expect(() => new AutomationService(configWithout('blacklistFilePath'))).toThrow(
-        'blacklistFilePath is required in configuration and must be a string path'
-      );
+    it('should use default when blacklistFilePath is missing', () => {
+      const service = new AutomationService(configWithout('blacklistFilePath'));
+      expect(service.blacklistFilePath).toBe('./data/blacklist.json');
     });
 
-    it('should throw for null blacklistFilePath', () => {
-      expect(() => new AutomationService(configWith('blacklistFilePath', null))).toThrow(
-        'blacklistFilePath is required in configuration and must be a string path'
-      );
+    it('should use default when blacklistFilePath is null', () => {
+      const service = new AutomationService(configWith('blacklistFilePath', null));
+      expect(service.blacklistFilePath).toBe('./data/blacklist.json');
     });
 
     it('should throw for non-string blacklistFilePath', () => {
       expect(() => new AutomationService(configWith('blacklistFilePath', 12345))).toThrow(
-        'blacklistFilePath is required in configuration and must be a string path'
+        'blacklistFilePath must be a string path'
       );
     });
 
