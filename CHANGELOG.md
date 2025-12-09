@@ -5,6 +5,34 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2025-12-09
+
+### Node.js 22+ & Deployment Preparation
+
+Updates for Railway/Vercel deployment compatibility and developer workflow improvements.
+
+#### **Node.js Compatibility**
+- **UPDATED**: Minimum Node.js version to 22+ (required for ES module JSON import syntax `with { type: 'json' }`)
+- **ADDED**: `.nvmrc` file for nvm auto-switching
+- **UPDATED**: README.md Node badge to reflect 22+ requirement
+
+#### **Bug Fixes**
+- **FIXED**: Strategy icon "Steps" → "Footprints" (Steps doesn't exist in lucide-react)
+- **FIXED**: Added named export for `platforms` in platforms.js (was only default export)
+- **FIXED**: Removed duplicate `validateChainId` from platformHelpers.js (now imports from chainHelpers)
+
+#### **Developer Workflow**
+- **ADDED**: `npm run sync` - Creates symlinks to fum and fum_automation for local development
+- **ADDED**: `npm run unsync` - Restores GitHub dependencies
+- **UPDATED**: `npm run pack` - Now checks if sibling directories exist before attempting install
+- **UPDATED**: All scripts gracefully skip missing sibling projects with clear messages
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Impact**: Deployment compatibility, developer experience
+
+---
+
 ## [1.0.0] - 2025-12-09
 
 ### Production Release

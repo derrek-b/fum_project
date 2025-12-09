@@ -6,34 +6,7 @@
  */
 
 import platforms from '../configs/platforms.js';
-import { getPlatformAddresses } from './chainHelpers.js';
-
-/**
- * Validate chainId parameter using established validation pattern
- * @param {any} chainId - The value to validate as a chainId
- * @throws {Error} If chainId is not a valid number
- */
-export function validateChainId(chainId) {
-  if (chainId === null || chainId === undefined) {
-    throw new Error('chainId parameter is required');
-  }
-
-  if (typeof chainId !== 'number') {
-    throw new Error('chainId must be a number');
-  }
-
-  if (!Number.isFinite(chainId)) {
-    throw new Error('chainId must be a finite number');
-  }
-
-  if (!Number.isInteger(chainId)) {
-    throw new Error('chainId must be an integer');
-  }
-
-  if (chainId <= 0) {
-    throw new Error('chainId must be greater than 0');
-  }
-}
+import { getPlatformAddresses, validateChainId } from './chainHelpers.js';
 
 /**
  * Validate platformId parameter using established validation pattern

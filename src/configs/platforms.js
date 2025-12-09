@@ -46,4 +46,5 @@ const platforms = {
   // Add other platforms here as needed
 };
 
+export { platforms };
 export default platforms;

@@ -67,7 +67,7 @@ const strategies = {
     name: "Baby Steps",
     subtitle: "Baby Step into Liquidity Management",
     description: "A simplified strategy for beginner position management w/ only essential controls",
-    icon: "Steps",
+    icon: "Footprints",
     color: "gold",
     borderColor: "black",
     textColor: "black",

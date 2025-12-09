@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-09T14:00:27.172Z
+Generated on: 2025-12-09T22:17:10.905Z
 
 ## Table of Contents
 
@@ -271,7 +271,6 @@ Token configuration with addresses on multiple chains
 - from `./chainHelpers.js`
 
 **Exports:**
-- `validateChainId` (function)
 - `validatePlatformId` (function)
 - `getPlatformMetadata` (function)
 - `getPlatformName` (function)

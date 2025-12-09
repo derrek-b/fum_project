@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-0.24.0-blue.svg)
 ![License](https://img.shields.io/badge/license-Proprietary-red.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)
 ![Status](https://img.shields.io/badge/status-beta-yellow.svg)
 
 A comprehensive JavaScript library for DeFi liquidity management, focusing on Uniswap V3 positions and automated strategy execution.

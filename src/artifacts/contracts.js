@@ -819,7 +819,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24"
+      "1337": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24",
+      "42161": "0x27eC094D03436d0401A18D57cC1Ae66f1108f70B"
     }
   },
   "PositionVault": {
@@ -1927,7 +1928,8 @@
       }
     ],
     "addresses": {
-      "1337": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab"
+      "1337": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
+      "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
   }
 };
