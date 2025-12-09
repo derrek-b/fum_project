@@ -1,5 +1,31 @@
 # F.U.M. Project Changelog
 
+## [1.0.1] - 2025-12-09
+
+### Node.js 22+ & Deployment Preparation
+
+Updates for Railway deployment compatibility and ES module JSON import fixes.
+
+#### **Node.js Compatibility**
+- **UPDATED**: Minimum Node.js version to 22+ (required for ES module JSON import syntax `with { type: 'json' }`)
+- **ADDED**: `.nvmrc` file for nvm auto-switching
+- **ADDED**: `engines.node: ">=22.0.0"` in package.json
+
+#### **Bug Fixes**
+- **FIXED**: JSON import syntax in BabyStepsStrategy.js (`assert` → `with`)
+- **FIXED**: Added missing JSON import attribute in VaultDataService.js
+
+#### **Documentation**
+- **UPDATED**: TESTING.md with sync/unsync workflow documentation
+- **UPDATED**: CLAUDE.md with updated commands
+- **UPDATED**: Clarified address mismatch error handling in troubleshooting
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Dependency**: Requires fum_library v1.0.1
+
+---
+
 ## [1.0.0] Production Release - 2025-12-09
 
 ### Production Release

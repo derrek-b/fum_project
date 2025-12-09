@@ -24,7 +24,7 @@ import {
   getAllTokenSymbols,
   AdapterFactory
 } from 'fum_library';
-import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json';
+import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 const ERC20ABI = ERC20ARTIFACT.abi;
 
 /**

@@ -47,20 +47,14 @@ COINGECKO_API_KEY=your_coingecko_api_key
 
 ### Dependencies
 
-Ensure fum_library is built and installed:
+The GitHub dependency works out of the box for running tests. Workflow tests deploy their own contracts and save addresses to the installed fum_library in `node_modules/`.
+
+**Only use symlinks if you need to Test local fum_library changes**
 
 ```bash
 cd ../fum_library
-npm run pack
+npm run sync  # Creates symlinks to fum and fum_automation
 ```
-
-> **Note:** If you don't have the `fum` frontend project set up, the pack script will fail when trying to install there. Use this alternative:
-> ```bash
-> cd ../fum_library
-> npm run build && npm pack
-> cd ../fum_automation
-> npm install ../fum_library/fum_library-*.tgz
-> ```
 
 ## Running Tests
 
@@ -316,10 +310,14 @@ Ensure `ALCHEMY_API_KEY` is set in `.env.local`. This is required for workflow t
 
 ### "Address mismatch" errors
 
-Contract addresses are deterministic based on deployer nonce. If addresses don't match:
-1. The test will auto-save new addresses
-2. Re-run the test to use updated addresses
-3. Run `npm run pack` in fum_library to sync
+Contract addresses are deterministic based on deployer nonce. If deployed addresses don't match stored addresses, the test **fails fast and exits** to avoid running with incorrect addresses.
+
+This is expected behavior on first run or after changes:
+1. The test exits with error "DETERMINISTIC ADDRESS VALIDATION FAILED"
+2. Before exiting, it auto-saves the new addresses to fum_library (both src/ and dist/)
+3. **Re-run the test** - it will now use the updated addresses and pass
+
+If using the GitHub dependency instead of symlinks, you'll need to run `npm run sync` in fum_library first so the saved addresses are available.
 
 ### Port conflicts
 
@@ -337,7 +335,11 @@ Workflow tests have extended timeouts (30-180 seconds). If tests still timeout:
 If tests fail with contract-related errors after code changes:
 ```bash
 cd ../fum_library
-npm run pack
+npm run build  # Copies src/ to dist/
 ```
 
-This rebuilds the library and reinstalls it in fum_automation.
+If using the GitHub dependency instead of symlinks:
+```bash
+cd ../fum_library
+npm run sync  # Sets up symlinks for local development
+```

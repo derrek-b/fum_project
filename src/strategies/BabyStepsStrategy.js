@@ -11,7 +11,7 @@ import { ethers } from 'ethers';
 import StrategyBase from './StrategyBase.js';
 import { fetchTokenPrices, CACHE_DURATIONS, getStrategyDetails, getPoolTVLAverage, getPoolAge, getVaultContract, getMinDeploymentForGas, getMinLiquidityAmount, getMinDeploymentMultiplier, getMinBufferSwapValue } from 'fum_library';
 import { retryExternalService } from '../RetryHelper.js';
-import ERC20ABI from '@openzeppelin/contracts/build/contracts/ERC20.json' assert { type: 'json' };
+import ERC20ABI from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import BabyStepsStrategyFactory from './babySteps/BabyStepsStrategyFactory.js';
 
 // Permit2 address is a constant (same on all chains)

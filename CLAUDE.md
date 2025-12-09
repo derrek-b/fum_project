@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- Run a script: `npm run script path/to/script.js` or `tsx path/to/script.js`
-- Run test automation: `npm run start` or `npm run script scripts/test-automation.js`
-- Run test automation with log server: `npm run start:logs` or `npm run script scripts/test-automation.js --logs`
-- Customize log server port: `npm run script scripts/test-automation.js --logs --log-port 8080`
-- Pack and reinstall fum_library: `npm run pack`
+- Run automation service: `npm run start`
+- Run tests: `npm test`
+- Run tests in watch mode: `npm run test:watch`
+- Sync fum_library for local development: `cd ../fum_library && npm run sync`
+- Restore GitHub dependency: `cd ../fum_library && npm run unsync`
 
 ## Code Style Guidelines
 
