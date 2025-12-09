@@ -1,5 +1,5 @@
 require("@nomicfoundation/hardhat-toolbox");
-require("dotenv").config();
+require("dotenv").config({ override: true });
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -10,7 +10,7 @@ module.exports = {
         enabled: true,
         runs: 200
       },
-      viaIR: true  // Add this line to enable IR-based compilation
+      viaIR: true
     },
   },
   networks: {
