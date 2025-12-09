@@ -1,65 +1,45 @@
 # Sequence Diagrams
 
-## Complete Vault Data Fetching Sequence
+## Complete Position Data Fetching Sequence
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
     participant App as Application
-    participant VH as VaultHelpers
     participant BC as Blockchain
-    participant AF as AdapterFactory
     participant UA as UniswapAdapter
     participant PS as PriceService
     participant CG as CoinGecko API
-    
-    User->>App: Request vault data
-    App->>VH: getAllUserVaultData(address, provider, chainId)
-    
-    VH->>BC: getUserVaults(address, provider)
-    BC->>BC: Create contract instance
-    BC-->>VH: Array of vault addresses
-    
-    loop For each vault
-        VH->>VH: getVaultData(vaultAddress)
-        VH->>BC: getVaultInfo(vaultAddress)
-        BC-->>VH: Basic vault info
-        
-        VH->>AF: getAdapter(platformId, provider)
-        AF-->>VH: Platform adapter instance
-        
-        VH->>UA: getPositions(vaultAddress, chainId)
-        UA->>BC: Query position NFTs
-        BC-->>UA: Position token IDs
-        
-        loop For each position
-            UA->>BC: Get position details
-            BC-->>UA: Position data
-            UA->>BC: Get pool data
-            BC-->>UA: Pool state
-            UA->>UA: Calculate token amounts
-            UA->>UA: Calculate uncollected fees
-        end
-        
-        UA-->>VH: Positions with pool/token data
-        
-        VH->>PS: fetchTokenPrices(tokenSymbols, '2-MINUTES')
-        PS->>PS: Check cache
-        
-        alt Cache miss
-            PS->>CG: Batch price request
-            CG-->>PS: Price data
-            PS->>PS: Update cache
-        end
-        
-        PS-->>VH: Token prices
-        
-        VH->>VH: Calculate position values
-        VH->>VH: Calculate total TVL
+
+    User->>App: Request position data
+    App->>UA: getPositions(address, provider)
+
+    UA->>BC: Query position NFTs
+    BC-->>UA: Position token IDs
+
+    loop For each position
+        UA->>BC: Get position details
+        BC-->>UA: Position data
+        UA->>BC: Get pool data
+        BC-->>UA: Pool state
+        UA->>UA: Calculate token amounts
+        UA->>UA: Calculate uncollected fees
     end
-    
-    VH-->>App: Aggregated vault data
+
+    UA-->>App: Positions with pool/token data
+
+    App->>PS: fetchTokenPrices(tokenSymbols, cacheDuration)
+    PS->>PS: Check cache
+
+    alt Cache miss
+        PS->>CG: Batch price request
+        CG-->>PS: Price data
+        PS->>PS: Update cache
+    end
+
+    PS-->>App: Token prices
+    App->>App: Calculate position values
     App-->>User: Display results
 ```
 
@@ -127,43 +107,43 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor User
-    participant VH as VaultHelpers
+    participant App as Application
     participant Adapter as UniswapV3Adapter
     participant PM as Position Manager
     participant Pool as Liquidity Pool
-    
+
     Note over User, Pool: Create Position
-    
-    User->>VH: Create position request
-    VH->>Adapter: generateCreatePositionData(params)
+
+    User->>App: Create position request
+    App->>Adapter: generateCreatePositionData(params)
     Adapter->>Adapter: Calculate tick range
     Adapter->>Adapter: Calculate liquidity
-    Adapter-->>VH: Transaction data
-    VH->>PM: mint(params)
+    Adapter-->>App: Transaction data
+    App->>PM: mint(params)
     PM->>Pool: Add liquidity
     Pool-->>PM: Position created
     PM-->>User: Position NFT
-    
+
     Note over User, Pool: Monitor Position
-    
-    User->>VH: Get position data
-    VH->>Adapter: getPositions(address)
+
+    User->>App: Get position data
+    App->>Adapter: getPositions(address)
     Adapter->>PM: positions(tokenId)
     PM-->>Adapter: Position details
     Adapter->>Pool: slot0()
     Pool-->>Adapter: Current pool state
     Adapter->>Adapter: Calculate current value
     Adapter->>Adapter: Calculate fees earned
-    Adapter-->>VH: Position data
-    VH-->>User: Display position
+    Adapter-->>App: Position data
+    App-->>User: Display position
     
     Note over User, Pool: Collect Fees
     
-    User->>VH: Collect fees request
-    VH->>Adapter: generateClaimFeesData(position)
+    User->>App: Collect fees request
+    App->>Adapter: generateClaimFeesData(position)
     Adapter->>Adapter: Calculate fee amounts
-    Adapter-->>VH: Transaction data
-    VH->>PM: collect(params)
+    Adapter-->>App: Transaction data
+    App->>PM: collect(params)
     PM->>Pool: Calculate fees owed
     Pool-->>PM: Fee amounts
     PM->>User: Transfer fees
@@ -171,8 +151,8 @@ sequenceDiagram
     
     Note over User, Pool: Close Position
     
-    User->>VH: Close position request
-    VH->>Adapter: closePosition(params)
+    User->>App: Close position request
+    App->>Adapter: closePosition(params)
     
     Adapter->>Adapter: generateRemoveLiquidityData()
     Adapter->>PM: decreaseLiquidity(params)

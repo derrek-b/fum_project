@@ -19,16 +19,18 @@ C4Context
     System_Ext(defi, "DeFi Protocols", "Uniswap, Sushiswap, etc.")
     System_Ext(ethereum, "Ethereum Network", "Smart contracts and state")
     System_Ext(coingecko, "CoinGecko API", "Price data provider")
-    
+    System_Ext(thegraph, "TheGraph API", "Subgraph data provider")
+
     Rel(user, api, "Uses", "JavaScript/TypeScript")
     Rel(api, adapters, "Delegates to")
     Rel(api, helpers, "Uses")
     Rel(adapters, blockchain, "Uses")
     Rel(helpers, adapters, "Queries")
-    Rel(helpers, services, "Fetches prices")
+    Rel(helpers, services, "Fetches data")
     Rel(blockchain, ethereum, "Reads/Writes", "JSON-RPC")
     Rel(adapters, defi, "Integrates with", "Smart contracts")
-    Rel(services, coingecko, "Fetches data", "REST API")
+    Rel(services, coingecko, "Fetches prices", "REST API")
+    Rel(services, thegraph, "Queries subgraphs", "GraphQL")
 ```
 
 ## Adapter Pattern Implementation
@@ -97,7 +99,7 @@ flowchart TB
     end
     
     subgraph "FUM Library"
-        VH[VaultHelpers]
+        HLP[Helpers]
         AD[Adapters]
         BC[Blockchain Module]
         SVC[Services]
@@ -119,9 +121,9 @@ flowchart TB
     PC --> BC
     PoolC --> AD
     
-    BC --> VH
-    AD --> VH
-    VH --> AGG
+    BC --> HLP
+    AD --> HLP
+    HLP --> AGG
     
     AGG --> CALC
     SVC --> CALC
@@ -131,7 +133,7 @@ flowchart TB
     FORMAT --> POS
     FORMAT --> TVL
     
-    style VH fill:#e1bee7
+    style HLP fill:#e1bee7
     style CALC fill:#ffccbc
     style TVL fill:#c8e6c9
 ```
@@ -148,7 +150,7 @@ graph TB
     end
     
     subgraph "Service Orchestration"
-        VH[Vault Helpers]
+        HLP[Helpers]
         TH[Token Helpers]
         SH[Strategy Helpers]
     end
@@ -165,16 +167,16 @@ graph TB
         CS[Cache Service]
     end
     
-    R1 --> VH
-    R2 --> VH
+    R1 --> HLP
+    R2 --> HLP
     R3 --> UA
     R4 --> UA
     
-    VH --> UA
-    VH --> SA
-    VH --> AA
-    VH --> TH
-    VH --> SH
+    HLP --> UA
+    HLP --> SA
+    HLP --> AA
+    HLP --> TH
+    HLP --> SH
     
     UA --> BC
     SA --> BC
@@ -189,7 +191,7 @@ graph TB
     style R2 fill:#bbdefb
     style R3 fill:#bbdefb
     style R4 fill:#bbdefb
-    style VH fill:#d1c4e9
+    style HLP fill:#d1c4e9
     style BC fill:#ffccbc
 ```
 

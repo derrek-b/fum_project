@@ -1,252 +1,170 @@
-# Testing Documentation for FUM Library
+# FUM Library Test Suite
 
-This document provides detailed information about the testing infrastructure and procedures for the FUM Library. The library utilizes Vitest as its testing framework, offering a fast and feature-rich testing experience for JavaScript/TypeScript projects.
+This directory contains the test suite for fum_library, using Ganache to fork Arbitrum mainnet for realistic integration testing.
 
-## Table of Contents
+## Structure
 
-1. [Getting Started](#getting-started)
-2. [Test Structure](#test-structure)
-3. [Running Tests](#running-tests)
-4. [Writing Tests](#writing-tests)
-5. [Mocking](#mocking)
-6. [Coverage Reports](#coverage-reports)
-7. [Continuous Integration](#continuous-integration)
-8. [Best Practices](#best-practices)
+```
+test/
+├── setup/                    # Test configuration and utilities
+│   ├── ganache-config.js    # Ganache setup and blockchain utilities
+│   └── test-contracts.js    # Contract deployment logic
+├── unit/                    # Unit tests (pure functions)
+│   ├── adapters/           # Adapter unit tests
+│   ├── blockchain/         # Blockchain module tests
+│   ├── configs/            # Config module tests
+│   ├── helpers/            # Helper unit tests
+│   └── services/           # Service unit tests
+├── test-env.js             # Main test environment setup
+├── setup.js                # Global test configuration
+├── .env.test               # Test environment variables
+└── .env.test.example       # Template for test env vars
+```
 
-## Getting Started
+## Quick Start
 
-Ensure you have all the necessary dependencies installed:
+### Basic Test Setup
 
+```javascript
+import { setupTestEnvironment } from './test-env.js';
+
+describe('My Test Suite', () => {
+  let env;
+  
+  beforeAll(async () => {
+    env = await setupTestEnvironment();
+  });
+  
+  afterAll(async () => {
+    await env.teardown();
+  });
+  
+  it('should do something', async () => {
+    // Your test here
+  });
+});
+```
+
+### Environment Options
+
+```javascript
+const env = await setupTestEnvironment({
+  port: 8545,               // Ganache port
+  deployContracts: true,    // Deploy FUM contracts
+  updateContractsFile: false, // Update contracts.js with addresses
+  quiet: true,              // Suppress Ganache logs
+  syncBytecode: false,      // Sync bytecode from fum project
+});
+```
+
+## Key Features
+
+### 1. Ganache Fork
+- Forks Arbitrum mainnet for realistic testing
+- Provides 10 test accounts with 10,000 ETH each
+- Deterministic accounts from mnemonic
+- WebSocket support enabled
+
+### 2. No Mocks
+- Tests use real Uniswap SDK and ethers.js
+- Interact with actual deployed contracts
+- Test real transaction execution and gas costs
+
+### 3. Test Utilities
+- Snapshot/revert for test isolation
+- Time manipulation (increase time, mine blocks)
+- Account impersonation for testing with whale addresses
+- Token balance checking and funding
+
+### 4. Contract Deployment
+- Optional deployment of FUM contracts (VaultFactory, strategies)
+- Automatic bytecode syncing from fum project
+- Updates contracts.js with test addresses
+
+## Environment Variables
+
+**Setup Required Before Running Tests:**
+
+1. **Copy the test environment template:**
+   ```bash
+   cp test/.env.test.example test/.env.test
+   ```
+
+2. **Update test/.env.test with your API keys:**
+   ```bash
+   # In test/.env.test - replace with your actual API keys
+   ALCHEMY_API_KEY=your_actual_api_key_here
+   COINGECKO_API_KEY=CG-your_coingecko_api_key_here
+   THEGRAPH_API_KEY=your_thegraph_api_key_here
+   ```
+
+3. **Tests will automatically load from test/.env.test**
+
+### Available Environment Variables:
 ```bash
-npm install
-```
+# Required: API keys for external services
+ALCHEMY_API_KEY=your_api_key_here      # For forking Arbitrum mainnet
+COINGECKO_API_KEY=your_api_key_here    # For price service tests
+THEGRAPH_API_KEY=your_api_key_here     # For subgraph queries
 
-The testing tools and libraries are included in the `devDependencies` of the project's `package.json`:
-
-- **Vitest**: Primary testing framework
-- **Chai**: Assertion library
-- **Sinon**: Mocking, stubbing, and spying library
-
-## Test Structure
-
-Tests are organized under the `/tests` directory, following a structure that mirrors the source code:
-
-```
-/tests
-├── adapters/                # Tests for adapter modules
-│   └── UniswapV3Adapter.test.js
-├── helpers/                 # Tests for helper modules
-│   ├── chainHelpers.test.js
-│   ├── formatHelpers.test.js
-│   ├── platformHelpers.test.js
-│   ├── strategyHelpers.test.js
-│   ├── tokenHelpers.test.js
-│   └── vaultHelpers.test.js
-├── mocks/                   # Mock data and utilities for testing
-│   ├── contracts.js
-│   ├── data.js
-│   ├── ethers.js
-│   ├── formatHelpersData.js
-│   ├── tokenData.js
-│   └── uniswapv3Data.js
-└── setup.js                 # Global test setup
+# Optional: Test configuration
+QUIET_TESTS=false
+NODE_ENV=test
+GANACHE_PORT=8545
+GANACHE_BLOCK_TIME=0.5
+TEST_TIMEOUT=30000
 ```
 
 ## Running Tests
 
-The following npm scripts are available for running tests:
-
-### Run All Tests (Once)
-
 ```bash
+# Run all tests
 npm test
-```
 
-This command will run all tests in the `/tests` directory once and display the results.
-
-### Watch Mode
-
-```bash
+# Run tests in watch mode
 npm run test:watch
-```
 
-This runs tests in watch mode, which automatically re-runs tests when source or test files change. This is useful during development.
-
-### Code Coverage
-
-```bash
+# Run with coverage
 npm run test:coverage
+
+# Run specific test file
+npm test UniswapV3Adapter.test.js
 ```
 
-Generates a coverage report, showing which parts of the codebase are covered by tests.
+## Test Patterns
 
-### Running Specific Tests
+### Integration Tests
+- Test actual contract interactions
+- Verify on-chain state changes
+- Test transaction reverts and gas usage
+- Use forked mainnet state
 
-To run tests for a specific file or directory:
+### Unit Tests
+- Test pure functions
+- No blockchain interaction needed
+- Fast execution
+- Deterministic results
 
-```bash
-npx vitest run <path/to/test/file-or-directory>
-```
+## Common Test Scenarios
 
-For example:
+Common test patterns used across the test suite:
+- Token amounts (small, medium, large)
+- Uniswap fee tiers (100, 500, 3000, 10000)
+- Price ranges for positions
+- Test vault configurations
+- Deterministic test accounts (10 accounts with 10,000 ETH each)
 
-```bash
-npx vitest run tests/helpers/formatHelpers.test.js
-```
+## Tips
 
-### Test Filtering
+1. **Use Snapshots**: Always snapshot before tests and revert after to ensure isolation
+2. **Check Gas**: Integration tests can help identify gas-intensive operations
+3. **Test Reverts**: Use `expect().rejects.toThrow()` for testing failed transactions
+4. **Time Travel**: Use `increaseTime()` to test time-dependent logic
+5. **Account Impersonation**: Use `impersonateAccount()` when you need to test with specific addresses
 
-You can run specific tests by using the `--testNamePattern` flag (or `-t`):
+## Troubleshooting
 
-```bash
-npx vitest run --testNamePattern="formatPrice"
-```
-
-This will run only tests whose name contains "formatPrice".
-
-## Writing Tests
-
-Tests are written using the Vitest API, which is similar to Jest. Here's a basic template:
-
-```javascript
-import { describe, it, expect } from 'vitest';
-import { functionToTest } from '../../src/path/to/module.js';
-
-describe('moduleName', () => {
-  describe('functionToTest', () => {
-    it('should do something specific', () => {
-      const result = functionToTest(input);
-      expect(result).toBe(expectedOutput);
-    });
-    
-    it('should handle edge cases', () => {
-      const result = functionToTest(edgeCase);
-      expect(result).toEqual(expectedEdgeOutput);
-    });
-  });
-});
-```
-
-### Key Testing Functions
-
-- `describe`: Groups related tests
-- `it`/`test`: Defines a single test
-- `expect`: Creates assertions
-- `beforeEach`/`afterEach`: Run code before/after each test
-- `beforeAll`/`afterAll`: Run code before/after all tests in a block
-
-## Mocking
-
-### Mocking Modules
-
-Vitest provides a `vi.mock()` function to mock modules:
-
-```javascript
-import { describe, it, expect, vi } from 'vitest';
-
-// Mock the entire module
-vi.mock('../../src/configs/tokens.js', () => {
-  return {
-    default: { /* mock token data */ }
-  };
-});
-
-// Import after mocking to get the mocked version
-import { getTokenBySymbol } from '../../src/helpers/tokenHelpers.js';
-```
-
-### Spies and Mocks for Individual Functions
-
-```javascript
-import { describe, it, expect, vi } from 'vitest';
-
-describe('someModule', () => {
-  it('should call a dependency correctly', () => {
-    // Create a spy
-    const spy = vi.spyOn(dependency, 'methodName');
-    
-    // Function under test
-    functionToTest();
-    
-    // Verify the spy was called
-    expect(spy).toHaveBeenCalled();
-    
-    // Restore the spy
-    spy.mockRestore();
-  });
-});
-```
-
-## Coverage Reports
-
-Code coverage reports help identify parts of the codebase that lack test coverage. To generate a coverage report:
-
-```bash
-npm run test:coverage
-```
-
-The report will show:
-- **Statements**: Percentage of statements executed
-- **Branches**: Percentage of control flow branches (if/else, switch) executed
-- **Functions**: Percentage of functions called
-- **Lines**: Percentage of executable lines executed
-
-Reports are generated as HTML in the `/coverage` directory and can be viewed in a browser.
-
-## Continuous Integration
-
-For CI environments, it's recommended to run tests with the following command:
-
-```bash
-npx vitest run --coverage
-```
-
-This ensures that tests are run without watch mode and that coverage reports are generated.
-
-## Best Practices
-
-1. **Test Isolation**: Ensure each test is independent and doesn't rely on the state from other tests.
-
-2. **Real Configs**: Use the actual configuration files from the library rather than mocking them, especially when testing helper functions. This ensures tests are closely aligned with the real behavior.
-
-3. **Pure Function Testing**: For pure functions, test inputs and outputs directly. Include edge cases (null, undefined, empty arrays, etc.).
-
-4. **Mocking External Dependencies**: Only mock external dependencies that would otherwise make tests flaky or slow (e.g., API calls, blockchain connections).
-
-5. **Descriptive Test Names**: Write descriptive test names that explain what's being tested and the expected behavior. Use the format: "should do something when condition".
-
-6. **Maintain Test Code Quality**: Apply the same code quality standards to test code as you do to production code. Keep tests clean, readable, and maintainable.
-
-7. **Test Organization**: Organize tests logically using `describe` blocks. Follow a pattern that mirrors the structure of the code being tested.
-
-8. **Avoid Excessive Mocking**: While mocking is necessary in some cases, excessive mocking can lead to tests that don't reflect the real behavior of the code.
-
-9. **Async Testing**: For asynchronous code, make sure to use `async/await` or return promises to properly handle asynchronous operations.
-
-10. **Test Error Handling**: Don't just test the happy path. Test error scenarios to ensure your code handles failures gracefully.
-
-## Vitest CLI Flags
-
-Vitest offers many command-line flags to customize test runs:
-
-| Flag                    | Description                                          |
-|-------------------------|------------------------------------------------------|
-| `--run`                 | Run tests once (default in CI)                       |
-| `--watch`               | Watch mode (default in dev)                          |
-| `--coverage`            | Generate coverage report                             |
-| `-t, --testNamePattern` | Run tests with names matching the pattern            |
-| `-d, --dir`             | Directory to search for test files                   |
-| `--update`              | Update snapshots                                     |
-| `--threads`             | Whether to run tests in threads                      |
-| `--silent`              | Silent mode (no output)                              |
-| `--reporter`            | Reporter to use                                      |
-| `--ui`                  | Start UI dashboard (requires @vitest/ui)             |
-| `--open`                | Open UI dashboard automatically (with --ui)          |
-| `--api`                 | Serve API for UI dashboard (with --ui)               |
-| `--isolate`             | Isolate environment for each test file               |
-
-For a complete list of options, run:
-
-```bash
-npx vitest --help
-```
+- **Timeout Errors**: Increase test timeout in vitest.config.js
+- **Fork Errors**: Check your RPC URL and network connectivity
+- **Contract Not Found**: Ensure bytecode is synced from fum project
+- **WebSocket Errors**: Normal during cleanup, can be ignored

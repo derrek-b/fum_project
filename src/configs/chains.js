@@ -15,9 +15,7 @@ const chains = {
     },
     rpcUrls: ["https://arb-mainnet.g.alchemy.com/v2"],  // Base URL - API key appended by getChainRpcUrls()
     blockExplorerUrls: ["https://arbiscan.io"],
-    envPK: process.env.ARBITRUM_DEPLOYER_PK,
-    executorEnvPK: process.env.ARBITRUM_EXECUTOR_PK,
-    executorAddress: "0x0",
+    executorAddress: "0x42d9df99e78ba0573b2990d6177d6eef7145c8e6",
     minDeploymentForGas: 10,
     minBufferSwapValue: 0.10,
     platformAddresses: {
@@ -41,8 +39,6 @@ const chains = {
     },
     rpcUrls: ["http://localhost:8545"],
     blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
-    envPK: process.env.LOCAL_DEPLOYER_PK,
-    executorEnvPK: process.env.LOCAL_EXECUTOR_PK,
     executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
     minDeploymentForGas: 10,
     minBufferSwapValue: 0.10,
@@ -67,8 +63,6 @@ const chains = {
     },
     rpcUrls: ["https://cloudflare-eth.com"],
     blockExplorerUrls: ["https://etherscan.io"],
-    envPK: process.env.ETHEREUM_DEPLOYER_PK,
-    executorEnvPK: process.env.ETHEREUM_EXECUTOR_PK,
     executorAddress: "0x0",
     minDeploymentForGas: 100,
     minBufferSwapValue: 1.00,

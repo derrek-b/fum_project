@@ -99,18 +99,6 @@ package "Blockchain" {
 }
 
 package "Helpers" {
-    class VaultHelpers {
-        + mapStrategyParameters(strategyId, params): Object
-        + fetchStrategyParameters(strategyAddress, strategyId, vaultAddress, provider): Promise<Object>
-        + getVaultStrategies(provider, chainId): Promise<Object>
-        + getVaultBasicInfo(vaultAddress, provider, addressToStrategyMap): Promise<Object>
-        + getVaultTokenBalances(vaultAddress, provider, chainId): Promise<Object>
-        + getVaultPositions(vaultAddress, provider, chainId): Promise<Object>
-        + calculatePositionsTVL(positions, poolData, tokenData, provider, chainId): Promise<Object>
-        + getVaultData(vaultAddress, provider, chainId): Promise<Object>
-        + getAllUserVaultData(userAddress, provider, chainId): Promise<Object>
-    }
-    
     class TokenHelpers {
         + getAllTokens(): Object
         + getTokenBySymbol(symbol): Object
@@ -180,15 +168,14 @@ package "Services" {
         + getPriceCache(): Object
         - executeBatch(): Promise<void>
     }
+
+    class TheGraphService {
+        + queryPositions(apiKey, chainId, owner): Promise<Array>
+        + queryVaults(apiKey, chainId, vaultFactory): Promise<Array>
+    }
 }
 
 ' Relationships between packages
-VaultHelpers ..> AdapterFactory : uses
-VaultHelpers ..> ContractManager : uses
-VaultHelpers ..> CoinGeckoService : uses
-VaultHelpers ..> TokenHelpers : uses
-VaultHelpers ..> StrategyHelpers : uses
-
 UniswapV3Adapter ..> FormatHelpers : uses
 TokenHelpers ..> CoinGeckoService : uses
 
@@ -209,12 +196,12 @@ package "FUM Library" {
         interface "IAdapter" as IA
     }
     
-    package "Core Services" {
-        [Vault Helpers] as VH
+    package "Helpers" {
         [Token Helpers] as TH
         [Strategy Helpers] as SH
         [Chain Helpers] as CH
         [Format Helpers] as FH
+        [Platform Helpers] as PLH
     }
     
     package "Infrastructure" {
@@ -236,21 +223,20 @@ cloud "External Services" {
     [Ethereum Network] as ETH
     [Arbitrum Network] as ARB
     [CoinGecko API] as CG
+    [TheGraph API] as TG
 }
 
 ' Internal connections
 API --> AF
-API --> VH
+API --> TH
+API --> SH
 AF --> PA
 PA -up- IA
-VH --> AF
-VH --> TH
-VH --> SH
-VH --> BC
-VH --> PS
+PA --> FH
 TH --> TC
 SH --> SC
 CH --> CC
+PLH --> PLC
 BC --> ABI
 PS --> PC
 PS --> CG

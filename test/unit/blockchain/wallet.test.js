@@ -332,7 +332,7 @@ describe('Wallet - Unit Tests', () => {
           chainId: '0xa4b1',
           chainName: 'Arbitrum One',
           nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-          rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+          rpcUrls: ['https://arb-mainnet.g.alchemy.com/v2'],
           blockExplorerUrls: ['https://arbiscan.io']
         }]);
         expect(mockProvider.send).toHaveBeenNthCalledWith(3, 'wallet_switchEthereumChain', [{ chainId: '0xa4b1' }]);

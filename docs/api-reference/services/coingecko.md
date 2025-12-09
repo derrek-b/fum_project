@@ -1,286 +1,161 @@
 # CoinGecko Service API
 
-Token price data service providing real-time cryptocurrency prices, caching, and value calculations.
+Token price data service providing real-time cryptocurrency prices with intelligent caching.
 
 ## Overview
 
-The CoinGecko service integrates with the CoinGecko API to provide token price data for the FUM Library. It includes intelligent caching, automatic token symbol mapping, and both synchronous and asynchronous price calculation methods.
+The CoinGecko service integrates with the CoinGecko API to provide token price data for the FUM Library. It includes intelligent per-token caching with configurable durations and fail-fast error handling for financial operations.
+
+## Exports
+
+```javascript
+import {
+  fetchTokenPrices,
+  clearPriceCache,
+  buildApiUrl,
+  ENDPOINTS,
+  CACHE_DURATIONS,
+  priceCache
+} from 'fum_library/services/coingecko';
+```
 
 ## Configuration
 
-### configureCoingecko
+The service uses environment variables for configuration:
 
-Configures the CoinGecko service with custom settings.
+| Environment Variable | Required | Description |
+|---------------------|----------|-------------|
+| `COINGECKO_API_KEY` | No | API key for CoinGecko (uses free tier if not provided) |
 
-#### Signature
-```javascript
-configureCoingecko(config: Object): void
-```
+## Constants
 
-#### Parameters
+### CACHE_DURATIONS
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| config | `Object` | No | {} | Configuration options |
-| config.apiBaseUrl | `string` | No | 'https://api.coingecko.com/api/v3' | Base URL for CoinGecko API |
-| config.apiKey | `string` | No | null | Direct API key for CoinGecko |
-| config.useFreeTier | `boolean` | No | true | Whether to use free tier if no API key |
-
-#### Example
+Pre-defined cache duration values in milliseconds for common use cases.
 
 ```javascript
-import { configureCoingecko } from './services/coingecko.js';
-
-// Configure with API key
-configureCoingecko({
-  apiKey: 'your-api-key',
-  useFreeTier: false
-});
-
-// Configure for free tier
-configureCoingecko({
-  useFreeTier: true
-});
+export const CACHE_DURATIONS = {
+  '0-SECONDS': 0,           // No cache - always fresh (critical transactions)
+  '1-SECOND': 1000,         // 1 second (high-frequency trading)
+  '2-SECONDS': 2000,        // 2 seconds (ultra-fast execution)
+  '5-SECONDS': 5000,        // 5 seconds (active liquidity management)
+  '10-SECONDS': 10000,      // 10 seconds (rapid decision making)
+  '15-SECONDS': 15000,      // 15 seconds (quick updates)
+  '30-SECONDS': 30000,      // 30 seconds (trading decisions)
+  '1-MINUTE': 60000,        // 1 minute (background automation)
+  '2-MINUTES': 120000,      // 2 minutes (dashboard/portfolio view)
+  '5-MINUTES': 300000,      // 5 minutes (periodic monitoring)
+  '10-MINUTES': 600000      // 10 minutes (error fallback only)
+};
 ```
 
-### setApiKey
-
-Sets the API key directly without full reconfiguration.
-
-#### Signature
+**Usage:**
 ```javascript
-setApiKey(apiKey: string): void
+import { CACHE_DURATIONS, fetchTokenPrices } from 'fum_library/services/coingecko';
+
+// Use predefined durations
+const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['5-SECONDS']);
+
+// Or use custom milliseconds
+const prices = await fetchTokenPrices(['WETH', 'USDC'], 1500);
 ```
 
-#### Parameters
+### ENDPOINTS
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| apiKey | `string` | Yes | The CoinGecko API key |
-
-#### Example
-
-```javascript
-setApiKey('your-coingecko-api-key');
-```
-
-## Token Mapping
-
-### getCoingeckoId
-
-Maps a token symbol to its CoinGecko ID.
-
-#### Signature
-```javascript
-getCoingeckoId(symbol: string): string
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| symbol | `string` | Yes | Token symbol (e.g., "USDC") |
-
-#### Returns
-
-`string` - CoinGecko ID for the token
-
-#### Throws
-
-| Error | Condition |
-|-------|-----------|
-| `Error` | Token symbol is required and cannot be empty |
-| `Error` | Unknown token symbol (not in symbolToIdMap) |
-
-#### Built-in Mappings
-
-| Symbol | CoinGecko ID |
-|--------|--------------|
-| ETH/WETH | ethereum |
-| USDC | usd-coin |
-| USDT | tether |
-| DAI | dai |
-| WBTC | wrapped-bitcoin |
-| ... | ... |
-
-#### Example
+CoinGecko API endpoint constants.
 
 ```javascript
-getCoingeckoId('USDC'); // "usd-coin"
-getCoingeckoId('ETH'); // "ethereum"
-
-// Now throws instead of returning fallback
-try {
-  getCoingeckoId('UNKNOWN'); // Throws Error
-} catch (error) {
-  console.error(error.message); // "Unknown token symbol: UNKNOWN. Add mapping to symbolToIdMap..."
-}
-
-// Empty symbol also throws
-try {
-  getCoingeckoId(''); // Throws Error
-} catch (error) {
-  console.error(error.message); // "Token symbol is required and cannot be empty"
-}
+export const ENDPOINTS = {
+  SIMPLE_PRICE: '/simple/price',
+  COIN_DETAILS: '/coins/{id}',
+  COIN_HISTORY: '/coins/{id}/history',
+  EXCHANGES: '/exchanges',
+  EXCHANGE_RATES: '/exchange_rates',
+  GLOBAL_DATA: '/global'
+};
 ```
 
-### registerTokenMapping
-
-Registers a custom token symbol to CoinGecko ID mapping.
-
-#### Signature
-```javascript
-registerTokenMapping(symbol: string, coingeckoId: string): void
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| symbol | `string` | Yes | Token symbol |
-| coingeckoId | `string` | Yes | CoinGecko ID |
-
-#### Example
-
-```javascript
-// Register custom token
-registerTokenMapping('MYTOKEN', 'my-custom-token');
-
-// Now getCoingeckoId will use this mapping
-getCoingeckoId('MYTOKEN'); // "my-custom-token"
-```
-
-## Price Fetching
+## Functions
 
 ### fetchTokenPrices
 
-Fetches current token prices from CoinGecko with explicit cache strategy.
+Fetches current token prices from CoinGecko with explicit cache duration.
 
 #### Signature
 ```javascript
-async fetchTokenPrices(tokenSymbols: string[], cacheStrategy: string, currency?: string): Promise<Object>
+async fetchTokenPrices(tokenSymbols: string[], cacheDurationMs: number): Promise<Object>
 ```
 
 #### Parameters
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| tokenSymbols | `string[]` | Yes | - | Array of token symbols |
-| cacheStrategy | `string` | Yes | - | Required cache strategy: '0-SECONDS', '5-SECONDS', '30-SECONDS', '2-MINUTES', '1-MINUTE', '10-MINUTES' |
-| currency | `string` | No | 'usd' | Currency to get prices in |
-
-#### Cache Strategies
-
-| Strategy | Use Case | Cache Duration |
-|----------|----------|----------------|
-| '0-SECONDS' | Critical transactions | No cache - always fresh |
-| '5-SECONDS' | Active liquidity management | 5 seconds |
-| '30-SECONDS' | Trading decisions | 30 seconds |
-| '1-MINUTE' | Background automation | 1 minute |
-| '2-MINUTES' | Dashboard/portfolio view | 2 minutes |
-| '10-MINUTES' | Error fallback only | 10 minutes |
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| tokenSymbols | `string[]` | Yes | Array of token symbols (e.g., ['WETH', 'USDC']) |
+| cacheDurationMs | `number` | Yes | Cache duration in milliseconds (0 = no cache) |
 
 #### Returns
 
 `Promise<Object>` - Token prices keyed by uppercase symbol
 
+```javascript
+{
+  WETH: 2345.67,
+  USDC: 1.00
+}
+```
+
 #### Throws
 
 | Error | Condition |
 |-------|-----------|
-| `Error` | cacheStrategy not provided or invalid |
-| `Error` | API key not configured and free tier disabled |
-| `Error` | Unknown token symbol (via getCoingeckoId) |
+| `Error` | tokenSymbols is null, undefined, or not an array |
+| `Error` | Any token symbol is null, undefined, empty, or not a string |
+| `Error` | cacheDurationMs is null, undefined, not a number, or negative |
+| `Error` | Unknown token symbol (not in tokenHelpers mapping) |
 | `Error` | API request fails |
+| `Error` | No price data returned for a token |
 
-#### Example
+#### Examples
 
 ```javascript
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
+
 // For critical transactions - always fresh
-const prices = await fetchTokenPrices(['ETH', 'USDC'], '0-SECONDS');
-// { ETH: 2345.67, USDC: 1.00 }
+const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']);
+// { WETH: 2345.67, USDC: 1.00 }
 
 // For liquidity management - 5 second tolerance
-const lpPrices = await fetchTokenPrices(['ETH', 'DAI'], '5-SECONDS');
-// { ETH: 2345.67, DAI: 0.999 }
+const lpPrices = await fetchTokenPrices(['WETH', 'DAI'], CACHE_DURATIONS['5-SECONDS']);
 
 // For dashboard display - 2 minute tolerance
-const dashboardPrices = await fetchTokenPrices(['ETH', 'USDC', 'DAI'], '2-MINUTES');
+const dashboardPrices = await fetchTokenPrices(['WETH', 'USDC', 'DAI'], CACHE_DURATIONS['2-MINUTES']);
 
-// Fetch with different currency
-const eurPrices = await fetchTokenPrices(['ETH'], '30-SECONDS', 'eur');
-// { ETH: 2150.34 }
+// Custom cache duration (1.5 seconds)
+const prices = await fetchTokenPrices(['WETH', 'USDC'], 1500);
 
-// Missing cacheStrategy causes error
+// Missing parameters cause errors
 try {
-  const prices = await fetchTokenPrices(['ETH']); // Error!
+  await fetchTokenPrices(['WETH']); // Error - missing cacheDurationMs!
 } catch (error) {
-  console.error(error.message); // "cacheStrategy is required..."
+  console.error(error.message); // "cacheDurationMs parameter is required"
 }
 
 // Unknown tokens cause errors
 try {
-  const prices = await fetchTokenPrices(['ETH', 'UNKNOWN_TOKEN'], '1-MINUTE');
-  // Will throw: "Unknown token symbol: UNKNOWN_TOKEN"
+  await fetchTokenPrices(['WETH', 'UNKNOWN_TOKEN'], 5000);
 } catch (error) {
-  console.error('Failed to fetch prices:', error.message);
+  console.error('Failed:', error.message);
 }
 ```
 
-### prefetchTokenPrices
+#### Caching Behavior
 
-Prefetches and caches prices for a list of tokens without returning them.
+- Uses per-token caching with individual timestamps
+- Returns cached data only if ALL requested tokens are fresh
+- If any token is stale or missing, fetches all tokens fresh
+- Cache is updated atomically after successful fetch
 
-**⚠️ Note**: This function is currently broken in the codebase as it calls `fetchTokenPrices` without the required `cacheStrategy` parameter.
-
-#### Signature
-```javascript
-async prefetchTokenPrices(symbols: string[]): Promise<void>
-```
-
-#### Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| symbols | `string[]` | Yes | Array of token symbols to prefetch |
-
-#### Example
-
-```javascript
-// prefetchTokenPrices is broken - use fetchTokenPrices instead
-await fetchTokenPrices(['ETH', 'USDC', 'DAI', 'WBTC'], '2-MINUTES');
-
-// Prices are now cached for fast access
-const prices = await fetchTokenPrices(['USDC'], '30-SECONDS');
-const usdcValue = prices['USDC'] ? 100 * prices['USDC'] : 0;
-```
-
-## Cache Management
-
-### getPriceCache
-
-Returns the current price cache with metadata.
-
-#### Signature
-```javascript
-getPriceCache(): Object
-```
-
-#### Returns
-
-`Object` - Current cached prices with `_cacheAge` in seconds
-
-#### Example
-
-```javascript
-const cache = getPriceCache();
-// {
-//   ETH: 2345.67,
-//   USDC: 1.00,
-//   DAI: 0.999,
-//   _cacheAge: 120 // seconds since last update
-// }
-```
+---
 
 ### clearPriceCache
 
@@ -294,91 +169,137 @@ clearPriceCache(): void
 #### Example
 
 ```javascript
+import { clearPriceCache, fetchTokenPrices } from 'fum_library/services/coingecko';
+
 // Clear cache to force fresh data
 clearPriceCache();
 
-// Next fetch will retrieve new prices
-const prices = await fetchTokenPrices(['ETH']);
+// Next fetch will retrieve new prices from API
+const prices = await fetchTokenPrices(['WETH'], 5000);
 ```
 
-## Service Status
+---
 
-### isConfigured
+### buildApiUrl
 
-Checks if the service is properly configured and ready to use.
+Builds a CoinGecko API URL with authentication and query parameters.
 
 #### Signature
 ```javascript
-isConfigured(): boolean
+buildApiUrl(endpoint: string, params?: Object): string
 ```
+
+#### Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| endpoint | `string` | Yes | API endpoint (must be from ENDPOINTS) |
+| params | `Object` | No | Query parameters as key-value pairs |
 
 #### Returns
 
-`boolean` - Whether the service is ready (has API key or free tier enabled)
+`string` - Full API URL with authentication and parameters
+
+#### Throws
+
+| Error | Condition |
+|-------|-----------|
+| `Error` | Endpoint is not provided |
+| `Error` | Endpoint is not in approved ENDPOINTS list |
+| `Error` | Parameter value is null, undefined, or an object |
 
 #### Example
 
 ```javascript
-if (!isConfigured()) {
-  console.warn('CoinGecko service not configured');
-  configureCoingecko({ useFreeTier: true });
+import { buildApiUrl, ENDPOINTS } from 'fum_library/services/coingecko';
+
+const url = buildApiUrl(ENDPOINTS.SIMPLE_PRICE, {
+  ids: 'ethereum,usd-coin',
+  vs_currencies: 'usd'
+});
+// "https://api.coingecko.com/api/v3/simple/price?x_cg_demo_api_key=...&ids=ethereum,usd-coin&vs_currencies=usd"
+
+// Template endpoints with ID substitution
+const coinUrl = buildApiUrl('/coins/ethereum', {});
+// "https://api.coingecko.com/api/v3/coins/ethereum?x_cg_demo_api_key=..."
+```
+
+---
+
+### priceCache
+
+Direct access to the price cache object. Contains cached prices with timestamps.
+
+#### Structure
+```javascript
+{
+  'WETH': { price: 2345.67, timestamp: 1700000000000 },
+  'USDC': { price: 1.00, timestamp: 1700000000000 }
 }
 ```
 
+---
+
+## Token Symbol Mapping
+
+Token symbols are mapped to CoinGecko IDs using the `getCoingeckoId()` function from `tokenHelpers.js`. See [Token Helpers](../helpers/token-helpers.md) for supported tokens and how to add new mappings.
+
 ## Error Handling
 
+The service uses fail-fast error handling - it never returns stale cached data on API failures. This is intentional for financial applications where stale prices could lead to incorrect trading decisions.
+
 ```javascript
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
+
 try {
-  const prices = await fetchTokenPrices(['ETH', 'INVALID'], '1-MINUTE');
+  const prices = await fetchTokenPrices(['WETH', 'INVALID'], CACHE_DURATIONS['1-MINUTE']);
 } catch (error) {
-  if (error.message.includes('cacheStrategy is required')) {
-    console.error('Must provide cache strategy');
-  } else if (error.message.includes('Invalid cacheStrategy')) {
-    console.error('Invalid cache strategy provided');
-  } else if (error.message.includes('API key not configured')) {
-    // Configure for free tier
-    configureCoingecko({ useFreeTier: true });
-  } else if (error.message.includes('Unknown token symbol')) {
-    console.error('Token not mapped:', error);
+  if (error.message.includes('cacheDurationMs parameter is required')) {
+    console.error('Must provide cache duration');
+  } else if (error.message.includes('must be a valid number')) {
+    console.error('Invalid cache duration value');
+  } else if (error.message.includes('Unsupported token')) {
+    console.error('Token not mapped to CoinGecko ID');
   } else if (error.message.includes('CoinGecko API returned')) {
-    console.error('API request failed:', error);
-    // No cached data returned - must handle failure
+    console.error('API request failed');
+  } else if (error.message.includes('Failed to fetch current token prices')) {
+    console.error('Price fetch failed - cannot use stale data');
   } else {
-    console.error('Price fetch failed:', error);
+    console.error('Unexpected error:', error);
   }
 }
 ```
 
 ## Best Practices
 
-1. **Configuration**: Configure the service on app initialization
-2. **Prefetching**: Prefetch common token prices for better UX
-3. **Caching**: Use sync methods when prices are pre-cached
-4. **Error Handling**: Always handle price fetch failures gracefully
-5. **Rate Limiting**: Respect API rate limits, especially on free tier
+1. **Use Appropriate Cache Durations**:
+   - Critical transactions: `CACHE_DURATIONS['0-SECONDS']`
+   - Active trading: `CACHE_DURATIONS['5-SECONDS']`
+   - Background operations: `CACHE_DURATIONS['1-MINUTE']`
+   - Dashboard display: `CACHE_DURATIONS['2-MINUTES']`
+
+2. **Always Handle Errors**: Never assume price fetching will succeed
+
+3. **Respect Rate Limits**: Use longer cache durations when possible, especially on free tier
+
+4. **Batch Token Requests**: Fetch multiple tokens in one call rather than individual calls
 
 ## Usage Patterns
 
 ### Application Initialization
 ```javascript
-// On app start
-configureCoingecko({
-  apiKey: process.env.COINGECKO_API_KEY
-});
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
 
-// Note: prefetchTokenPrices is currently broken in the codebase
-// It calls fetchTokenPrices without the required cacheStrategy parameter
-// Use fetchTokenPrices directly instead:
-await fetchTokenPrices(['ETH', 'USDC', 'DAI', 'WBTC'], '2-MINUTES');
+// Pre-warm cache on app start
+await fetchTokenPrices(['WETH', 'USDC', 'DAI', 'WBTC', 'ARB'], CACHE_DURATIONS['2-MINUTES']);
 ```
 
 ### Portfolio Value Calculation
 ```javascript
 async function calculatePortfolioValue(holdings) {
   const symbols = Object.keys(holdings);
-  // Use appropriate cache strategy based on your needs
-  const prices = await fetchTokenPrices(symbols, '30-SECONDS');
-  
+  const prices = await fetchTokenPrices(symbols, CACHE_DURATIONS['30-SECONDS']);
+
   let totalValue = 0;
   for (const [symbol, amount] of Object.entries(holdings)) {
     const price = prices[symbol.toUpperCase()];
@@ -386,23 +307,24 @@ async function calculatePortfolioValue(holdings) {
       totalValue += amount * price;
     }
   }
-  
+
   return totalValue;
 }
 ```
 
-### Real-time Price Display
+### Automation Service Integration
 ```javascript
-// Update prices every 5 minutes
-setInterval(async () => {
-  // Use 0-SECONDS to always get fresh data for display
-  const prices = await fetchTokenPrices(['ETH', 'USDC'], '0-SECONDS');
-  updatePriceDisplay(prices);
-}, 5 * 60 * 1000);
+import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
+
+// For vault asset valuation (needs fresh data for decisions)
+const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['5-SECONDS']);
+
+// For tracking/logging (can use longer cache)
+const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['2-MINUTES']);
 ```
 
 ## See Also
 
-- [Token Helpers](../helpers/token-helpers.md) - Token utility functions
+- [Token Helpers](../helpers/token-helpers.md) - Token configuration and symbol mapping
 - [Format Helpers](../helpers/format-helpers.md) - Price formatting utilities
 - [CoinGecko API Documentation](https://www.coingecko.com/en/api/documentation)

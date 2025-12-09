@@ -390,17 +390,17 @@ describe('Strategy Helpers', () => {
         // Should have defaults for all parameters
         expect(Object.keys(result)).toHaveLength(10);
 
-        // Test specific values
+        // Test specific values (matching bob conservative template in strategies.js)
         expect(result.targetRangeUpper).toBe(10.0);
         expect(result.targetRangeLower).toBe(10.0);
-        expect(result.rebalanceThresholdUpper).toBe(3.0);
-        expect(result.rebalanceThresholdLower).toBe(3.0);
-        expect(result.maxUtilization).toBe(60);
-        expect(result.maxSlippage).toBe(0.3);
-        expect(result.emergencyExitTrigger).toBe(20);
-        expect(result.feeReinvestment).toBe(false);
+        expect(result.rebalanceThresholdUpper).toBe(6.0);
+        expect(result.rebalanceThresholdLower).toBe(6.0);
+        expect(result.maxUtilization).toBe(90);
+        expect(result.maxSlippage).toBe(0.5);
+        expect(result.emergencyExitTrigger).toBe(10);
+        expect(result.feeReinvestment).toBe(true);
         expect(result.reinvestmentTrigger).toBe(50);
-        expect(result.reinvestmentRatio).toBe(80);
+        expect(result.reinvestmentRatio).toBe(30);
       });
 
       it('should return custom template defaults', () => {
@@ -558,7 +558,7 @@ describe('Strategy Helpers', () => {
         // Should have defaults for all parameters in bob strategy
         expect(Object.keys(result)).toHaveLength(10);
 
-        // Test specific custom template values for bob strategy
+        // Test specific parameter defaultValues for bob strategy (from parameters section)
         expect(result.targetRangeUpper).toBe(5.0);
         expect(result.targetRangeLower).toBe(5.0);
         expect(result.rebalanceThresholdUpper).toBe(1.5);

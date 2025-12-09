@@ -10,7 +10,6 @@ The helpers module contains the core business logic of the FUM Library. It orche
 
 ```
 helpers/
-├── vaultHelpers.js     # Orchestration layer - coordinates between modules
 ├── tokenHelpers.js     # Token data management and validation
 ├── chainHelpers.js     # Chain configuration and utilities
 ├── strategyHelpers.js  # Strategy validation and parameter management
@@ -19,11 +18,6 @@ helpers/
 ```
 
 ### Responsibility Distribution
-
-#### **VaultHelpers** - The Orchestrator
-- **Role**: Coordinates between adapters, services, and other helpers
-- **Pattern**: Orchestration pattern with dependency injection
-- **Complexity**: High - manages multi-step workflows
 
 #### **TokenHelpers** - Data Access Layer
 - **Role**: Provides token configuration and validation
@@ -49,129 +43,6 @@ helpers/
 - **Role**: Data formatting for display
 - **Pattern**: Utility functions with no state
 - **Complexity**: Low - pure functions
-
-## VaultHelpers Deep Dive
-
-### Architecture Pattern: Orchestration
-
-VaultHelpers acts as the main orchestrator, coordinating between multiple subsystems:
-
-```javascript
-// Orchestration example
-export const getVaultData = async (vaultAddress, provider, chainId) => {
-  // 1. Get basic vault info (blockchain module)
-  const basicInfo = await getVaultBasicInfo(vaultAddress, provider);
-  
-  // 2. Get strategy info (strategy helpers)
-  const strategies = await getVaultStrategies(provider, chainId);
-  
-  // 3. Get positions (adapters)
-  const positions = await getVaultPositions(vaultAddress, provider, chainId);
-  
-  // 4. Get token balances (blockchain + token helpers)
-  const tokenBalances = await getVaultTokenBalances(vaultAddress, provider, chainId);
-  
-  // 5. Calculate TVL (price service + calculations)
-  const tvl = await calculatePositionsTVL(positions.positions, positions.poolData, positions.tokenData, provider, chainId);
-  
-  // 6. Aggregate results
-  return aggregateVaultData(basicInfo, strategies, positions, tokenBalances, tvl);
-};
-```
-
-### Data Flow Patterns
-
-#### 1. **Pipeline Pattern**
-Sequential data processing with error handling:
-```javascript
-const processVaultData = async (vaultAddress, provider, chainId) => {
-  let hasPartialData = false;
-  
-  // Step 1: Basic info (critical)
-  const basicInfo = await getVaultBasicInfo(vaultAddress, provider);
-  
-  // Step 2: Positions (important)
-  let positions = {};
-  try {
-    positions = await getVaultPositions(vaultAddress, provider, chainId);
-  } catch (error) {
-    console.error('Failed to fetch positions:', error);
-    hasPartialData = true;
-  }
-  
-  // Step 3: Prices (best effort)
-  let prices = {};
-  try {
-    prices = await fetchPositionPrices(positions);
-  } catch (error) {
-    console.error('Failed to fetch prices:', error);
-    hasPartialData = true;
-  }
-  
-  return { basicInfo, positions, prices, hasPartialData };
-};
-```
-
-#### 2. **Parallel Execution Pattern**
-Independent operations executed concurrently:
-```javascript
-const getAllUserVaultData = async (userAddress, provider, chainId) => {
-  // Get vault addresses first
-  const vaultAddresses = await getUserVaults(userAddress, provider);
-  
-  // Process all vaults in parallel
-  const vaultPromises = vaultAddresses.map(address => 
-    getVaultData(address, provider, chainId)
-  );
-  
-  const vaultResults = await Promise.allSettled(vaultPromises);
-  
-  // Handle partial failures gracefully
-  const vaults = vaultResults
-    .filter(result => result.status === 'fulfilled')
-    .map(result => result.value);
-    
-  const hasPartialData = vaultResults.some(result => result.status === 'rejected');
-  
-  return { vaults, hasPartialData };
-};
-```
-
-### Error Handling Strategy
-
-#### Graceful Degradation
-```javascript
-const calculatePositionsTVL = async (positions, poolData, tokenData, provider, chainId) => {
-  let positionTVL = 0;
-  let hasPartialData = false;
-  
-  for (const position of positions) {
-    try {
-      const value = await calculatePositionValue(position, poolData, tokenData);
-      positionTVL += value;
-    } catch (error) {
-      console.error(`Error calculating position ${position.id}:`, error);
-      hasPartialData = true;
-      // Continue with other positions
-    }
-  }
-  
-  return { positionTVL, hasPartialData };
-};
-```
-
-#### Error Context Preservation
-```javascript
-const processPosition = async (position, poolData, tokenData) => {
-  try {
-    return await calculatePositionMetrics(position, poolData, tokenData);
-  } catch (error) {
-    throw new Error(
-      `Failed to process position ${position.id} in pool ${position.poolAddress}: ${error.message}`
-    );
-  }
-};
-```
 
 ## Strategy Helpers Architecture
 

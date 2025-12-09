@@ -32,11 +32,11 @@ graph TD
     PlatformHelpers[platformHelpers.js]
     StrategyHelpers[strategyHelpers.js]
     TokenHelpers[tokenHelpers.js]
-    VaultHelpers[vaultHelpers.js]
     
     %% Services Module
     ServicesIndex[services/index.js]
     Coingecko[coingecko.js]
+    TheGraph[theGraph.js]
     
     %% Artifacts
     Artifacts[artifacts/contracts.js]
@@ -73,27 +73,19 @@ graph TD
     HelpersIndex --> PlatformHelpers
     HelpersIndex --> StrategyHelpers
     HelpersIndex --> TokenHelpers
-    HelpersIndex --> VaultHelpers
-    
+
     ChainHelpers --> Chains
-    
+
     PlatformHelpers --> Platforms
     PlatformHelpers --> ChainHelpers
-    
+
     StrategyHelpers --> Strategies
-    
+
     TokenHelpers --> Tokens
-    
-    VaultHelpers --> AdaptersIndex
-    VaultHelpers --> BlockchainIndex
-    VaultHelpers --> ServicesIndex
-    VaultHelpers --> StrategyHelpers
-    VaultHelpers --> TokenHelpers
-    VaultHelpers --> Artifacts
-    VaultHelpers -.->|external| EthersJS
-    
+
     ServicesIndex --> Coingecko
-    
+    ServicesIndex --> TheGraph
+
     Coingecko --> TokenHelpers
     
     %% Styling
@@ -106,9 +98,9 @@ graph TD
     
     class Index entryPoint
     class AdaptersIndex,AdapterFactory,PlatformAdapter,UniswapV3Adapter adapter
-    class HelpersIndex,ChainHelpers,FormatHelpers,PlatformHelpers,StrategyHelpers,TokenHelpers,VaultHelpers helper
+    class HelpersIndex,ChainHelpers,FormatHelpers,PlatformHelpers,StrategyHelpers,TokenHelpers helper
     class ConfigsIndex,Chains,Platforms,Strategies,Tokens,Artifacts config
-    class ServicesIndex,Coingecko service
+    class ServicesIndex,Coingecko,TheGraph service
     class EthersJS,UniswapSDK external
 ```
 

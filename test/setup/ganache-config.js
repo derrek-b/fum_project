@@ -1,8 +1,14 @@
 /**
  * Ganache Test Configuration
- * 
+ *
  * Consolidated configuration for Ganache test environment.
  * Combines all Ganache setup, contract deployment, and test utilities.
+ *
+ * ⚠️  WARNING: TEST CREDENTIALS - DO NOT USE ON MAINNET  ⚠️
+ *
+ * The mnemonic and private keys in this file are PUBLIC and used only for
+ * local testing with deterministic addresses. Any funds sent to these
+ * addresses on mainnet WILL BE STOLEN.
  */
 
 import ganache from 'ganache';
@@ -20,11 +26,11 @@ export const TEST_CONFIG = {
   port: 8545,
   
   // Fork settings - Arbitrum mainnet
-  forkUrl: (process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY)
-    ? `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`
+  forkUrl: process.env.ALCHEMY_API_KEY
+    ? `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
     : 'https://arb1.arbitrum.io/rpc', // Fallback to public RPC
   
-  // Test accounts
+  // Test accounts - ⚠️ PUBLIC TEST MNEMONIC - DO NOT USE ON MAINNET
   mnemonic: 'debris coral coral sleep shed prison nation mountain fatigue prosper dose portion',
   accountCount: 10,
   defaultBalance: 10000, // ETH per account
@@ -37,6 +43,7 @@ export const TEST_CONFIG = {
 };
 
 // Deterministic test accounts derived from custom mnemonic
+// ⚠️ PUBLIC TEST KEYS - DO NOT USE ON MAINNET - FUNDS WILL BE STOLEN
 export const TEST_ACCOUNTS = [
   {
     address: '0x18eE269ff740eA684da2Be21dE294e44253D0eb8',

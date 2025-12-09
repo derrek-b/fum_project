@@ -1,205 +1,295 @@
-# Architecture Overview
+# FUM Library Architecture
 
-## System Philosophy
+## Overview
 
-The FUM Library is built on the principle of **modular extensibility** with **protocol abstraction**. The architecture separates concerns into distinct layers, each with specific responsibilities and clear interfaces.
+The FUM (Fund Unified Management) Library is a modular DeFi integration framework designed to provide a unified interface for interacting with various decentralized finance protocols. This document describes the architecture, design patterns, and module interactions within the library.
 
-## Core Design Principles
+## Table of Contents
 
-### 1. **Adapter Pattern for Protocol Integration**
-- Each DeFi protocol has its own adapter implementing a common interface
-- New protocols can be added without changing existing code
-- Uniform data structures across different protocols
+1. [Architecture Overview](#architecture-overview)
+2. [Module Structure](#module-structure)
+3. [Core Components](#core-components)
+4. [Design Patterns](#design-patterns)
+5. [Data Flow](#data-flow)
+6. [Module Dependencies](#module-dependencies)
 
-### 2. **Layered Architecture**
-```
-┌─────────────────────────────────────────┐
-│             Public API Layer            │ ← Simple, consistent interface
-├─────────────────────────────────────────┤
-│          Business Logic Layer           │ ← Helpers, calculations, validation
-├─────────────────────────────────────────┤
-│         Protocol Adapter Layer          │ ← Platform-specific implementations
-├─────────────────────────────────────────┤
-│         Infrastructure Layer            │ ← Blockchain, services, configs
-└─────────────────────────────────────────┘
-```
+## Architecture Overview
 
-### 3. **Dependency Injection**
-- Configuration and providers passed down through layers
-- No hard-coded dependencies on specific chains or providers
-- Easy testing with mock implementations
-
-### 4. **Immutable Data Flow**
-- Functions return new data structures rather than modifying inputs
-- Predictable state management
-- Side-effect isolation
-
-## Key Architectural Decisions
-
-### Protocol Abstraction Strategy
-**Decision**: Use abstract base classes with concrete implementations
-**Reasoning**: 
-- Enforces consistent interface across protocols
-- Provides default implementations for common functionality
-- Type safety and IDE support
-- Clear extension points for new protocols
-
-### Configuration Management
-**Decision**: Static configuration files with runtime overrides
-**Reasoning**:
-- Version-controlled configuration
-- Environment-specific overrides (API keys, RPC URLs)
-- Validation at startup rather than runtime
-- Easy to audit and review changes
-
-### Error Handling Strategy
-**Decision**: Graceful degradation with partial data
-**Reasoning**:
-- DeFi data can be unreliable (network issues, node sync lag)
-- Better UX to show partial data than complete failure
-- Clear indication when data is incomplete (`hasPartialData` flags)
-
-### Caching Strategy
-**Decision**: Time-based caching with batch optimization
-**Reasoning**:
-- Price data changes frequently but not every second
-- Batch API calls to reduce rate limiting
-- Memory-based cache for development simplicity
-- 60-second TTL balances freshness vs. performance
-
-## Module Interaction Patterns
-
-### 1. **Orchestration Pattern** (VaultHelpers)
-VaultHelpers acts as an orchestrator, coordinating between multiple modules:
-```javascript
-// VaultHelpers orchestrates data gathering
-const positions = await adapter.getPositions(address, chainId);
-const prices = await priceService.fetchTokenPrices(tokenSymbols);
-const tvl = calculateTVL(positions, prices);
+```mermaid
+graph TB
+    subgraph "External Layer"
+        User[User Application]
+    end
+    
+    subgraph "FUM Library"
+        subgraph "API Layer"
+            Index[index.js<br/>Main Entry Point]
+        end
+        
+        subgraph "Service Layer"
+            Adapters[Adapters<br/>Protocol Integration]
+            Helpers[Helpers<br/>Utility Functions]
+            Services[Services<br/>External APIs]
+        end
+        
+        subgraph "Data Layer"
+            Blockchain[Blockchain<br/>Chain Interaction]
+            Configs[Configs<br/>Static Data]
+            Artifacts[Artifacts<br/>Contract ABIs]
+        end
+    end
+    
+    subgraph "External Services"
+        Chains[Blockchain Networks]
+        APIs[External APIs<br/>CoinGecko]
+    end
+    
+    User --> Index
+    Index --> Adapters
+    Index --> Helpers
+    Adapters --> Blockchain
+    Adapters --> Configs
+    Helpers --> Services
+    Helpers --> Configs
+    Blockchain --> Chains
+    Services --> APIs
 ```
 
-### 2. **Factory Pattern** (AdapterFactory)
-Centralized creation and management of protocol adapters:
-```javascript
-// Factory provides appropriate adapter instance
-const adapter = AdapterFactory.getAdapter(platformId, provider);
+## Module Structure
+
+### Directory Layout
+
+```
+src/
+├── index.js # FUM Library - Main Entry Point
+└── init.js # @module init
+├── adapters/
+│   ├── index.js # Adapter system for DeFi platforms
+│   ├── AdapterFactory.js # @module adapters/AdapterFactory
+│   ├── PlatformAdapter.js # Base class for DeFi platform adapters.
+│   └── UniswapV3Adapter.js # UniswapV3Adapter - Uniswap V3 Protocol Integration
+├── artifacts/
+│   └── contracts.js # Contract ABIs and addresses for the F.U.M. project
+├── blockchain/
+│   ├── index.js # Blockchain Module - Ethereum Interaction Utilities
+│   ├── contracts.js # @module blockchain/contracts
+│   └── wallet.js # @module blockchain/wallet
+├── configs/
+│   ├── index.js
+│   ├── chains.js # Chain configuration for F.U.M. project
+│   ├── platforms.js # Platform configuration for F.U.M. project
+│   ├── strategies.js # Strategy configuration with templates and parameters
+│   └── tokens.js # Token configuration with addresses on multiple chains
+├── helpers/
+│   ├── index.js
+│   ├── chainHelpers.js # @module helpers/chainHelpers
+│   ├── formatHelpers.js # @module helpers/formatHelpers
+│   ├── platformHelpers.js # @module helpers/platformHelpers
+│   ├── strategyHelpers.js # @module helpers/strategyHelpers
+│   └── tokenHelpers.js # @module helpers/tokenHelpers
+├── services/
+│   ├── index.js
+│   ├── coingecko.js # @module services/coingecko
+│   └── theGraph.js # @module services/theGraph
 ```
 
-### 3. **Strategy Pattern** (Price Fetching)
-Different strategies for fetching data based on context:
-- Cache hit: Immediate return
-- Cache miss: Batch with other requests
-- Fallback: Graceful degradation
+## Core Components
 
-## Data Flow Architecture
+### 1. Adapters Module
 
-### Request Flow
-1. **Entry Point**: Public API receives request
-2. **Validation**: Input validation and sanitization
-3. **Orchestration**: Helper functions coordinate data gathering
-4. **Adaptation**: Protocol adapters fetch blockchain data
-5. **Processing**: Raw data transformed into consistent format
-6. **Enrichment**: Additional data (prices, metadata) added
-7. **Response**: Structured response returned to caller
+The adapters module provides a unified interface for interacting with different DeFi protocols.
 
-### Error Propagation
-- Validation errors: Thrown immediately with descriptive messages
-- Network errors: Caught, logged, marked as partial data
-- Calculation errors: Isolated to specific positions/vaults
-- Critical errors: Bubble up with context preservation
+**Key Components:**
+- `PlatformAdapter`: Abstract base class defining the interface all adapters must implement
+- `UniswapV3Adapter`: Concrete implementation for Uniswap V3 protocol
+- `AdapterFactory`: Factory pattern implementation for creating platform-specific adapters
 
-## Extension Points
+**Design Pattern:** Factory Pattern with Abstract Base Class
 
-### Adding New Protocols
-1. Create new adapter extending `PlatformAdapter`
-2. Implement required methods with protocol-specific logic
-3. Register adapter with `AdapterFactory`
-4. Add protocol configuration to `platforms.js`
+### 2. Blockchain Module
 
-### Adding New Chains
-1. Add chain configuration to `chains.js`
-2. Add contract addresses for existing protocols
-3. Update token configurations with new chain addresses
-4. Test adapter functionality on new chain
+Handles all direct blockchain interactions including wallet management and contract calls.
 
-### Adding New Data Sources
-1. Create service module following existing patterns
-2. Implement caching if data is expensive to fetch
-3. Add error handling and fallback strategies
-4. Integrate with helper functions as needed
+**Key Components:**
+- `wallet.js`: Provider creation and wallet connection management
+- `contracts.js`: Smart contract interaction utilities
+
+**Features:**
+- Multi-chain support
+- Provider abstraction
+- Transaction management
+
+### 3. Configs Module
+
+Static configuration data for the library.
+
+**Components:**
+- `chains.js`: Blockchain network configurations
+- `platforms.js`: DeFi platform metadata
+- `strategies.js`: Trading strategy definitions
+- `tokens.js`: Token information and addresses
+
+### 4. Helpers Module
+
+Utility functions that provide common functionality across the library.
+
+**Components:**
+- `chainHelpers.js`: Chain-specific utilities
+- `formatHelpers.js`: Number and string formatting
+- `platformHelpers.js`: Platform data access
+- `strategyHelpers.js`: Strategy validation and management
+- `tokenHelpers.js`: Token data management
+
+### 5. Services Module
+
+External API integrations.
+
+**Components:**
+- `coingecko.js`: Price data fetching with caching
+
+### 6. Artifacts Module
+
+Contract ABIs and deployment addresses.
+
+## Design Patterns
+
+### 1. Factory Pattern
+Used in `AdapterFactory` to create platform-specific adapter instances.
+
+### 2. Adapter Pattern
+Each platform adapter implements a common interface, allowing uniform interaction with different protocols.
+
+### 3. Module Pattern
+Each module exports specific functionality while encapsulating implementation details.
+
+### 4. Singleton Pattern
+Configuration objects and caches are implemented as singletons.
+
+## Data Flow
+
+### Position Fetching Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Adapter
+    participant Contract
+    participant Service
+
+    User->>Adapter: getPositions(address)
+    Adapter->>Contract: Read position data
+    Contract-->>Adapter: Raw position info
+    Adapter->>Adapter: Format positions
+    Adapter-->>User: Formatted positions
+
+    User->>Service: fetchTokenPrices(symbols)
+    Service->>Service: Check cache
+    Service-->>User: Token prices
+```
+
+## Module Dependencies
+
+### Dependency Graph
+
+```mermaid
+graph LR
+    subgraph "Entry Points"
+        Index[index.js]
+    end
+    
+    subgraph "High-Level Modules"
+        Adapters[adapters]
+        Helpers[helpers]
+    end
+    
+    subgraph "Core Modules"
+        Blockchain[blockchain]
+        Services[services]
+        Configs[configs]
+    end
+    
+    subgraph "Data Modules"
+        Artifacts[artifacts]
+    end
+    
+    Index --> Adapters
+    Index --> Configs
+    
+    Adapters --> Blockchain
+    Adapters --> Configs
+    Adapters --> Helpers
+    
+    Helpers --> Adapters
+    Helpers --> Blockchain
+    Helpers --> Services
+    Helpers --> Configs
+    Helpers --> Artifacts
+    
+    Services --> Configs
+    
+    Blockchain --> Artifacts
+```
+
+### Circular Dependencies
+The library avoids circular dependencies through careful module design and the use of dependency injection where necessary.
+
+## Configuration Management
+
+The library uses a layered configuration approach:
+
+1. **Static Configs**: Hard-coded in `configs/` modules
+2. **Runtime Configs**: Passed through function parameters
+3. **Environment Configs**: Read from environment variables (API keys)
+
+## Error Handling
+
+The library implements consistent error handling:
+
+1. **Validation Errors**: Thrown immediately with descriptive messages
+2. **Network Errors**: Caught and logged, graceful degradation
+3. **Data Errors**: Return partial data with `hasPartialData` flags
 
 ## Performance Considerations
 
-### Concurrent Operations
-- Multiple blockchain calls executed in parallel
-- Batch operations where possible (price fetching)
-- Promise.all() for independent operations
+1. **Caching**: Price data cached for 60 seconds
+2. **Batch Operations**: Multiple positions fetched in parallel
+3. **Lazy Loading**: Contract instances created on demand
+4. **Data Prefetching**: Token prices prefetched before calculations
 
-### Memory Management
-- Limited cache size to prevent memory leaks
-- Automatic cache expiration
-- No persistent storage requirements
+## Security Considerations
 
-### Network Optimization
-- Batch API calls when possible
-- Retry logic with exponential backoff
-- Connection pooling for blockchain RPCs
+1. **Input Validation**: All user inputs validated
+2. **Address Checksums**: Ethereum addresses validated
+3. **Slippage Protection**: Built into swap operations
+4. **No Private Key Storage**: Library never stores private keys
 
-## Security Architecture
+## Extension Points
 
-### Input Validation
-- All user inputs validated at entry points
-- Address validation for Ethereum addresses
-- Numeric range validation for amounts
+The library is designed for extensibility:
 
-### Private Key Safety
-- Library never handles private keys
-- All transactions return unsigned data for external signing
-- No storage of sensitive information
-
-### API Key Management
-- API keys injected at runtime via configuration
-- No API keys stored in code or committed to version control
-- Fallback to free tiers when API keys unavailable
+1. **New Adapters**: Implement `PlatformAdapter` interface
+2. **New Strategies**: Add to `strategies.js` config
+3. **New Chains**: Add to `chains.js` config
+4. **New Tokens**: Add to `tokens.js` or use `registerToken()`
 
 ## Testing Strategy
 
-### Unit Testing
-- Pure functions with deterministic outputs
-- Mock external dependencies (blockchain, APIs)
-- Edge case validation (zero amounts, invalid addresses)
-
-### Integration Testing
-- Adapter implementations with real but predictable data
-- End-to-end workflows with test networks
-- Configuration validation
-
-### Performance Testing
-- Cache effectiveness measurement
-- Concurrent request handling
-- Memory usage under load
-
-## Monitoring and Observability
-
-### Error Tracking
-- Structured error objects with context
-- Error categorization (network, validation, calculation)
-- Partial data flags for degraded responses
-
-### Performance Metrics
-- Cache hit rates
-- API call frequencies
-- Response time distribution
-
-### Debug Information
-- Comprehensive logging at appropriate levels
-- Request/response correlation
-- Configuration validation results
+- **Unit Tests**: For pure functions and utilities
+- **Integration Tests**: For adapter implementations
+- **Mock Data**: Comprehensive mocks for external dependencies
 
 ---
 
-For module-specific architecture details, see:
-- [Adapters Architecture](./adapters.md)
-- [Helpers Architecture](./helpers.md)
-- [Services Architecture](./services.md)
-- [Blockchain Architecture](./blockchain.md)
+## Detailed Module Documentation
+
+For in-depth technical details on each module:
+
+- **[Adapters Architecture](./adapters.md)** - Protocol integration patterns, adding new adapters, error handling
+- **[Helpers Architecture](./helpers.md)** - Business logic organization, orchestration patterns, data processing
+- **[Services Architecture](./services.md)** - External API integration, caching strategies, rate limiting
+- **[Blockchain Architecture](./blockchain.md)** - Provider management, contract interactions, multi-chain support
+
+## Additional Documentation
+
+- **[API Reference](../api-reference/overview.md)** - Complete function and module documentation
+- **[Architecture Diagrams](../diagrams/)** - Visual system representations in multiple formats

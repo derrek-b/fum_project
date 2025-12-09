@@ -914,19 +914,19 @@ describe('The Graph Service - Real API Tests', () => {
         )).rejects.toThrow(`No creation timestamp available for pool ${validParams.poolAddress}`);
       });
 
-      it('should throw error when creation timestamp is missing (Messari schema)', async () => {
+      it('should throw error when creation timestamp is missing (Uniswap schema)', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           json: async () => ({
             data: {
-              liquidityPool: {
-                createdTimestamp: null
+              pool: {
+                createdAtTimestamp: null
               }
             }
           })
         });
 
-        // Test with Arbitrum to get Messari schema
+        // Test with Arbitrum (uses Uniswap schema)
         await expect(getPoolAge(
           validParams.poolAddress,
           42161,

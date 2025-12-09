@@ -9,11 +9,18 @@ import { vi } from 'vitest';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initFumLibrary } from '../src/init.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load test environment variables from test/.env.test
 dotenv.config({ path: path.join(__dirname, '.env.test') });
+
+// Initialize fum_library with test API keys
+initFumLibrary({
+  coingeckoApiKey: process.env.COINGECKO_API_KEY,
+  alchemyApiKey: process.env.ALCHEMY_API_KEY,
+});
 
 // Suppress console output during tests (optional)
 if (process.env.QUIET_TESTS === 'true') {

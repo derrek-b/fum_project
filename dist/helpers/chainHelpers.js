@@ -7,6 +7,25 @@
 
 import chains from '../configs/chains.js';
 
+// Module-level configuration (set via configureChainHelpers)
+let _chainConfig = {
+  alchemyApiKey: null,
+};
+
+/**
+ * Configure chain helpers
+ * @param {Object} options - Configuration options
+ * @param {string} [options.alchemyApiKey] - Alchemy API key for RPC URLs requiring authentication
+ * @example
+ * import { configureChainHelpers } from 'fum_library/helpers/chainHelpers';
+ * configureChainHelpers({ alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY });
+ */
+export function configureChainHelpers({ alchemyApiKey } = {}) {
+  if (alchemyApiKey !== undefined) {
+    _chainConfig.alchemyApiKey = alchemyApiKey;
+  }
+}
+
 /**
  * Validate chainId parameter using established validation pattern
  * @param {any} chainId - The value to validate as a chainId
@@ -138,9 +157,9 @@ export function getChainRpcUrls(chainId) {
 
   // Chains that require API key appended at runtime
   if (chainId === 42161) {
-    const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+    const apiKey = _chainConfig.alchemyApiKey;
     if (!apiKey) {
-      throw new Error('NEXT_PUBLIC_ALCHEMY_API_KEY environment variable is required for Arbitrum RPC');
+      throw new Error('Alchemy API key not configured. Call configureChainHelpers({ alchemyApiKey }) or initFumLibrary({ alchemyApiKey }) first.');
     }
     return config.rpcUrls.map(url => `${url}/${apiKey}`);
   }

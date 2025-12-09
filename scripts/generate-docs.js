@@ -2,12 +2,11 @@
 
 /**
  * Documentation Generation Script for FUM Library
- * 
+ *
  * This script automatically generates documentation by:
  * 1. Scanning all source files
  * 2. Extracting imports and exports
- * 3. Generating module documentation
- * 4. Updating ARCHITECTURE.md with current module structure
+ * 3. Generating docs/api-reference/modules.md with module reference
  */
 
 import fs from 'fs';
@@ -20,8 +19,7 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(ROOT_DIR, 'src');
 
-// File to update with generated documentation
-const ARCHITECTURE_FILE = path.join(ROOT_DIR, 'ARCHITECTURE.md');
+// Output file for generated documentation
 const MODULE_DOCS_FILE = path.join(ROOT_DIR, 'docs', 'api-reference', 'modules.md');
 
 /**
@@ -238,74 +236,6 @@ Generated on: ${new Date().toISOString()}
 }
 
 /**
- * Update the ARCHITECTURE.md file with current module structure
- */
-function updateArchitectureFile(modules) {
-  console.log('📝 Updating ARCHITECTURE.md...');
-  
-  let architectureContent = fs.readFileSync(ARCHITECTURE_FILE, 'utf-8');
-  
-  // Generate module structure
-  let moduleStructure = '```\nsrc/\n';
-  
-  const addFiles = (files, indent = '') => {
-    files.forEach((file, index) => {
-      const isLast = index === files.length - 1;
-      const prefix = isLast ? '└── ' : '├── ';
-      const description = file.description ? ` # ${file.description}` : '';
-      moduleStructure += `${indent}${prefix}${file.name}${description}\n`;
-    });
-  };
-  
-  // Add root files
-  if (modules.root) {
-    addFiles(modules.root.files);
-  }
-  
-  // Add subdirectories
-  Object.keys(modules).sort().forEach(moduleName => {
-    if (moduleName === 'root') return;
-    
-    moduleStructure += `├── ${moduleName}/\n`;
-    const subIndent = '│   ';
-    
-    // Add index.js first if exists
-    const indexFile = modules[moduleName].files.find(f => f.name === 'index.js');
-    if (indexFile) {
-      moduleStructure += `${subIndent}├── index.js${indexFile.description ? ` # ${indexFile.description}` : ''}\n`;
-    }
-    
-    // Add other files
-    const otherFiles = modules[moduleName].files.filter(f => f.name !== 'index.js');
-    otherFiles.forEach((file, index) => {
-      const isLast = index === otherFiles.length - 1;
-      const prefix = isLast ? '└── ' : '├── ';
-      const description = file.description ? ` # ${file.description}` : '';
-      moduleStructure += `${subIndent}${prefix}${file.name}${description}\n`;
-    });
-  });
-  
-  moduleStructure += '```';
-  
-  // Replace the module structure section
-  const structureStart = architectureContent.indexOf('### Directory Layout');
-  const structureEnd = architectureContent.indexOf('## Core Components');
-  
-  if (structureStart !== -1 && structureEnd !== -1) {
-    const beforeStructure = architectureContent.substring(0, structureStart);
-    const afterStructure = architectureContent.substring(structureEnd);
-    
-    architectureContent = beforeStructure + 
-      '### Directory Layout\n\n' + 
-      moduleStructure + '\n\n' +
-      afterStructure;
-    
-    fs.writeFileSync(ARCHITECTURE_FILE, architectureContent);
-    console.log('✅ ARCHITECTURE.md updated');
-  }
-}
-
-/**
  * Main function
  */
 async function main() {
@@ -325,10 +255,7 @@ async function main() {
     const moduleMarkdown = generateMarkdown(modules);
     fs.writeFileSync(MODULE_DOCS_FILE, moduleMarkdown);
     console.log(`✅ Module documentation generated: ${path.relative(ROOT_DIR, MODULE_DOCS_FILE)}`);
-    
-    // Update ARCHITECTURE.md
-    updateArchitectureFile(modules);
-    
+
     // Summary
     const totalFiles = Object.values(modules).reduce((sum, m) => sum + m.files.length, 0);
     console.log(`\n📊 Summary:`);

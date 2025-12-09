@@ -81,9 +81,7 @@ async function validateDeterministicAddresses(actualAddresses) {
 
   // Get expected addresses from the contracts file
   const expectedAddresses = {
-    BatchExecutor: contractsData.BatchExecutor?.addresses?.['1337'],
     VaultFactory: contractsData.VaultFactory?.addresses?.['1337'],
-    ParrisIslandStrategy: contractsData.parris?.addresses?.['1337'],
     BabyStepsStrategy: contractsData.bob?.addresses?.['1337'],
   };
 
@@ -147,9 +145,6 @@ export async function deployFUMContracts(deployer, config = {}) {
   const contracts = {};
 
   try {
-    // Deploy BatchExecutor
-    contracts.batchExecutor = await deployContract(deployer, 'BatchExecutor');
-
     // Get protocol addresses for the test chain (1337 is a fork of Arbitrum)
     const chainConfig = getChainConfig(1337);
     const universalRouterAddress = chainConfig.platformAddresses.uniswapV3.universalRouterAddress;
@@ -166,15 +161,11 @@ export async function deployFUMContracts(deployer, config = {}) {
     ]);
 
     // Deploy strategies (no constructor args)
-    contracts.parrisIsland = await deployContract(deployer, 'ParrisIslandStrategy');
-
     contracts.babySteps = await deployContract(deployer, 'BabyStepsStrategy');
 
     // Get addresses
     const addresses = {
-      BatchExecutor: contracts.batchExecutor.address,
       VaultFactory: contracts.vaultFactory.address,
-      ParrisIslandStrategy: contracts.parrisIsland.address,
       BabyStepsStrategy: contracts.babySteps.address,
     };
 
@@ -258,9 +249,7 @@ async function updateArtifactsContracts(addresses, filePath) {
  */
 function mapContractName(contractName) {
   const nameMap = {
-    'BatchExecutor': 'BatchExecutor',
     'VaultFactory': 'VaultFactory',
-    'ParrisIslandStrategy': 'parris',
     'BabyStepsStrategy': 'bob',
     'PositionVault': 'PositionVault'
   };

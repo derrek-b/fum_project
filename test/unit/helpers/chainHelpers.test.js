@@ -16,7 +16,8 @@ import {
   getPlatformAddresses,
   lookupChainPlatformIds,
   getMinDeploymentForGas,
-  getMinBufferSwapValue
+  getMinBufferSwapValue,
+  configureChainHelpers
 } from '../../../src/helpers/chainHelpers.js';
 
 describe('Chain Helpers', () => {
@@ -189,23 +190,13 @@ describe('Chain Helpers', () => {
       });
 
       it('should return correct RPC URLs for Arbitrum One (chainId 42161) with API key appended', () => {
-        // Set up API key for test
-        const originalApiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-        process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = 'test-api-key-123';
+        // Configure API key for test using the new configure pattern
+        configureChainHelpers({ alchemyApiKey: 'test-api-key-123' });
 
-        try {
-          const rpcUrls = getChainRpcUrls(42161);
+        const rpcUrls = getChainRpcUrls(42161);
 
-          expect(Array.isArray(rpcUrls)).toBe(true);
-          expect(rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2/test-api-key-123']);
-        } finally {
-          // Restore original API key
-          if (originalApiKey !== undefined) {
-            process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = originalApiKey;
-          } else {
-            delete process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-          }
-        }
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2/test-api-key-123']);
       });
 
       it('should return static RPC URLs for local fork (chainId 1337) without modification', () => {
@@ -221,19 +212,11 @@ describe('Chain Helpers', () => {
         expect(() => getChainRpcUrls(999999)).toThrow('Chain 999999 is not supported');
       });
 
-      it('should throw error for Arbitrum (chainId 42161) when API key is missing', () => {
-        // Remove API key for test
-        const originalApiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-        delete process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      it('should throw error for Arbitrum (chainId 42161) when API key is not configured', () => {
+        // Clear API key configuration for test
+        configureChainHelpers({ alchemyApiKey: null });
 
-        try {
-          expect(() => getChainRpcUrls(42161)).toThrow('NEXT_PUBLIC_ALCHEMY_API_KEY environment variable is required for Arbitrum RPC');
-        } finally {
-          // Restore original API key
-          if (originalApiKey !== undefined) {
-            process.env.NEXT_PUBLIC_ALCHEMY_API_KEY = originalApiKey;
-          }
-        }
+        expect(() => getChainRpcUrls(42161)).toThrow('Alchemy API key not configured');
       });
 
       it('should throw error when no RPC URL is configured', async () => {

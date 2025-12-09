@@ -8,10 +8,10 @@
 import { ethers } from 'ethers';
 import { startGanache, TEST_ACCOUNTS } from './setup/ganache-config.js';
 import { deployFUMContracts, deployTestVault } from './setup/test-contracts.js';
-import chains from '../dist/configs/chains.js';
-import tokens from '../dist/configs/tokens.js';
-import { UniswapV3Adapter } from '../dist/adapters/index.js';
-import contractData from '../dist/artifacts/contracts.js';
+import chains from '../src/configs/chains.js';
+import tokens from '../src/configs/tokens.js';
+import { UniswapV3Adapter } from '../src/adapters/index.js';
+import contractData from '../src/artifacts/contracts.js';
 import ERC20_ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import path from 'path';
 import { fileURLToPath } from 'url';

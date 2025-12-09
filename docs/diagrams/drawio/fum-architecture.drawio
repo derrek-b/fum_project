@@ -144,7 +144,7 @@
           <mxGeometry x="360" y="160" width="120" height="30" as="geometry" />
         </mxCell>
         
-        <mxCell id="vault-helpers" value="vaultHelpers" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+        <mxCell id="format-helpers" value="formatHelpers" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="400" y="200" width="160" height="40" as="geometry" />
         </mxCell>
         

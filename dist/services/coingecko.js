@@ -6,6 +6,25 @@
 // src/services/coingecko.js
 import { getCoingeckoId } from '../helpers/tokenHelpers.js';
 
+// Module-level configuration (set via configureCoingecko)
+let _config = {
+  apiKey: null,
+};
+
+/**
+ * Configure the CoinGecko service
+ * @param {Object} options - Configuration options
+ * @param {string} [options.apiKey] - CoinGecko API key for authenticated requests
+ * @example
+ * import { configureCoingecko } from 'fum_library/services/coingecko';
+ * configureCoingecko({ apiKey: process.env.COINGECKO_API_KEY });
+ */
+export function configureCoingecko({ apiKey } = {}) {
+  if (apiKey !== undefined) {
+    _config.apiKey = apiKey;
+  }
+}
+
 // API configuration constants
 const API_BASE_URL = 'https://api.coingecko.com/api/v3';
 
@@ -71,7 +90,7 @@ export function buildApiUrl(endpoint, params = {}) {
     throw new Error(`Invalid endpoint: ${endpoint}. Must match one of: ${validEndpoints.join(', ')}`);
   }
 
-  const apiKey = process.env.COINGECKO_API_KEY;
+  const apiKey = _config.apiKey;
   const url = new URL(`${API_BASE_URL}${endpoint}`);
 
   // Add API key if available

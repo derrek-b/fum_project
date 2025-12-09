@@ -5,6 +5,42 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2025-12-09
+
+### Production Release
+
+First production release of fum_library with stable APIs and comprehensive documentation.
+
+#### **Repository Cleanup & Documentation**
+- **ADDED**: LICENSE.md with proprietary license terms
+- **UPDATED**: README.md with proper GitHub repository links
+- **UPDATED**: TESTING.md documentation improvements
+- **UPDATED**: API documentation with new adapter and service references
+- **REMOVED**: .env.example (sensitive configuration)
+- **REMOVED**: ARCHITECTURE.md (consolidated into docs/)
+- **REMOVED**: LICENCE.md (replaced with LICENSE.md)
+- **REMOVED**: Deprecated bytecode files (BatchExecutor, MockERC20, MockPositionNFT, ParrisIslandStrategy)
+- **REMOVED**: Old tarball (fum_library-0.20.0.tgz)
+
+#### **Chain Configuration**
+- **UPDATED**: Arbitrum executor address for production (`0x42d9df99e78ba0573b2990d6177d6eef7145c8e6`)
+- **UPDATED**: Strategy configurations for production deployment
+- **ADDED**: init.js module for library initialization
+
+#### **Contract Artifacts**
+- **UPDATED**: BabyStepsStrategy bytecode and ABI (v1.0.0)
+- **UPDATED**: PositionVault bytecode and ABI (v1.0.0)
+- **UPDATED**: VaultFactory bytecode and ABI (v1.0.0)
+
+#### **Test Infrastructure**
+- **UPDATED**: Test setup and configuration for improved reliability
+- **UPDATED**: Ganache configuration for local testing
+- **UPDATED**: Unit tests for chainHelpers, strategyHelpers, wallet, theGraph
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None from v0.24.0
+**Impact**: Stable API for mainnet deployment
+
 ## [0.24.0] - 2025-12-01
 
 ### Added - Minimum Buffer Swap Value Threshold

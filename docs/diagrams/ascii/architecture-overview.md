@@ -10,9 +10,9 @@
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐           │
 │  │   Public API    │    │    Adapters     │    │    Helpers      │           │
 │  │                 │    │                 │    │                 │           │
-│  │ • index.js     │───▶│ • AdapterFactory│───▶│ • vaultHelpers  │           │
-│  │ • Re-exports   │    │ • PlatformAdapter│   │ • tokenHelpers  │           │
-│  │               │    │ • UniswapV3     │   │ • chainHelpers  │           │
+│  │ • index.js     │───▶│ • AdapterFactory│───▶│ • tokenHelpers  │           │
+│  │ • Re-exports   │    │ • PlatformAdapter│   │ • chainHelpers  │           │
+│  │               │    │ • UniswapV3     │   │ • formatHelpers │           │
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘           │
 │           │                      │                      │                      │
 │           ▼                      ▼                      ▼                      │
@@ -20,8 +20,8 @@
 │  │   Blockchain    │    │    Services     │    │    Configs      │           │
 │  │                 │    │                 │    │                 │           │
 │  │ • wallet.js    │    │ • coingecko.js │    │ • chains.js    │           │
-│  │ • contracts.js │    │ • Price cache  │    │ • tokens.js    │           │
-│  │               │    │                │    │ • platforms.js │           │
+│  │ • contracts.js │    │ • theGraph.js  │    │ • tokens.js    │           │
+│  │               │    │                │    │ • strategies.js│           │
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘           │
 │           │                      │                      │                      │
 │           ▼                      ▼                      ▼                      │
@@ -37,10 +37,10 @@
 │                              External Systems                                    │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐           │
-│  │   Ethereum      │    │   Arbitrum      │    │  CoinGecko API  │           │
-│  │   Mainnet       │    │   Network       │    │                 │           │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │  Ethereum   │  │  Arbitrum   │  │  CoinGecko  │  │  TheGraph   │         │
+│  │  Mainnet    │  │  Network    │  │     API     │  │     API     │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘         │
 │                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -66,16 +66,10 @@ index.js
     └── PlatformAdapter.js (abstract)
 
 helpers/
-├── vaultHelpers.js
-│   ├── adapters/ ←
-│   ├── blockchain/ ←
-│   ├── services/ ←
-│   ├── strategyHelpers.js
-│   ├── tokenHelpers.js
-│   └── artifacts/contracts.js
-│
 ├── chainHelpers.js
 │   └── chains.js ←
+│
+├── formatHelpers.js
 │
 ├── platformHelpers.js
 │   ├── platforms.js ←
@@ -98,8 +92,10 @@ blockchain/
     └── [external: ethers]
 
 services/
-└── coingecko.js
-    └── tokenHelpers.js
+├── coingecko.js
+│   └── tokenHelpers.js
+│
+└── theGraph.js
 
 ← = imported from configs/
 ```

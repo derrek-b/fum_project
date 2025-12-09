@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-01T15:08:39.134Z
+Generated on: 2025-12-09T14:00:27.172Z
 
 ## Table of Contents
 
@@ -216,8 +216,10 @@ Token configuration with addresses on multiple chains
 
 **Imports:**
 - from `../configs/chains.js`
+- from `fum_library/helpers/chainHelpers`
 
 **Exports:**
+- `configureChainHelpers` (function)
 - `validateChainId` (function)
 - `getChainConfig` (function)
 - `getChainName` (function)
@@ -356,16 +358,30 @@ FUM Library - Main Entry Point
 
 **Path:** `src/index.js`
 
-**Imports:**
-- from `dotenv`
-- from `path`
-- from `url`
-
 **Exports:**
 - re-exports from `./helpers/index.js`
 - re-exports from `./adapters/index.js`
 - re-exports from `./blockchain/index.js`
 - re-exports from `./services/index.js`
+- `initFumLibrary` (variable) (from `./init.js`)
+- `configureCoingecko` (variable) (from `./services/coingecko.js`)
+- `configureChainHelpers` (variable) (from `./helpers/chainHelpers.js`)
+
+---
+
+### init.js
+
+@module init
+
+**Path:** `src/init.js`
+
+**Imports:**
+- from `./helpers/chainHelpers.js`
+- from `./services/coingecko.js`
+- from `fum_library`
+
+**Exports:**
+- `initFumLibrary` (function)
 
 ---
 
@@ -379,8 +395,10 @@ FUM Library - Main Entry Point
 
 **Imports:**
 - from `../helpers/tokenHelpers.js`
+- from `fum_library/services/coingecko`
 
 **Exports:**
+- `configureCoingecko` (function)
 - `ENDPOINTS` (variable)
 - `CACHE_DURATIONS` (variable)
 - `priceCache` (variable)

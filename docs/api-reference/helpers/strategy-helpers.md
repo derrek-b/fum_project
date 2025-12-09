@@ -883,7 +883,6 @@ function renderStrategyForm(strategyId, currentValues) {
 
 ## See Also
 
-- [`vaultHelpers`](./vault-helpers.md) - Vault and strategy integration
 - [`tokenHelpers`](./token-helpers.md) - Token management utilities
 - [`formatHelpers`](./format-helpers.md) - Value formatting utilities
 - [Strategy Documentation](../../strategies/) - Detailed strategy descriptions
