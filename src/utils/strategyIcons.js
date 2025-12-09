@@ -3,11 +3,11 @@
  * Maps icon names from strategy configs to lucide-react components.
  * This avoids importing the entire lucide-react library.
  */
-import { Ban, Steps, Dumbbell, Banknote } from 'lucide-react';
+import { Ban, Footprints, Dumbbell, Banknote } from 'lucide-react';
 
 const strategyIcons = {
   Ban,
-  Steps,
+  Footprints,
   Dumbbell,
   Banknote
 };

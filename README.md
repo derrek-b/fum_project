@@ -102,7 +102,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+ (required for ES module JSON import syntax)
 - npm or yarn
 - MetaMask or compatible EVM wallet
 
@@ -119,21 +119,23 @@ code/
 
 ### fum_library Setup
 
-fum_library must be built before installing dependencies:
+For local development, set up symlinks to use local library changes:
 
 ```bash
 # Clone fum_library if not already present
 cd ..
 git clone https://github.com/derrek-b/fum_library.git
 
-# Build and pack the library
+# Install and set up symlinks
 cd fum_library
 npm install
-npm run build && npm pack
+npm run sync  # Creates symlinks to fum and fum_automation
 
 # Return to fum
 cd ../fum
 ```
+
+> **Note:** The GitHub dependency works out of the box for production. Use `npm run sync` only for local development when you need to test library changes. Use `npm run unsync` to restore the GitHub dependency.
 
 ### Installation
 

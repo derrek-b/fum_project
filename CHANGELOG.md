@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2025-12-09
+
+### Node.js 22+ & Deployment Preparation
+
+Updates for Vercel deployment compatibility and bug fixes.
+
+#### **Node.js Compatibility**
+- **UPDATED**: Minimum Node.js version to 22+ (required for ES module JSON import syntax)
+- **ADDED**: `.nvmrc` file for nvm auto-switching
+- **ADDED**: `engines.node: ">=22.0.0"` in package.json
+
+#### **Bug Fixes**
+- **FIXED**: Strategy icon "Steps" → "Footprints" (Steps doesn't exist in lucide-react)
+- **FIXED**: Added `skipLibCheck` and `types: []` to jsconfig.json for type definition compatibility
+
+#### **Documentation**
+- **UPDATED**: TESTING.md with sync/unsync workflow for fum_library
+- **UPDATED**: README.md with Node 22+ requirement and updated setup instructions
+
+#### **Arbitrum Mainnet Deployment**
+- **DEPLOYED**: VaultFactory to `0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B`
+- **DEPLOYED**: BabyStepsStrategy to `0x27eC094D03436d0401A18D57cC1Ae66f1108f70B`
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Dependency**: Requires fum_library v1.0.1
+
+---
+
 ## [1.0.0] - 2025-12-09
 ### Production Release
 

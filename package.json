@@ -1,26 +1,28 @@
 {
   "name": "fum",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "Front end for the full F.U.M. liquidity position management & automation app",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
-    "script": "tsx",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "contracts:sync": "tsx scripts/sync-contracts-to-ecosystem.js",
-    "contracts:test": "bash -c 'tsx scripts/sync-contracts-to-ecosystem.js --sync-only && cd ~/code/fum_testing && npx hardhat test'",
-    "contracts:test:coverage": "bash -c 'tsx scripts/sync-contracts-to-ecosystem.js --sync-only && cd ~/code/fum_testing && npx hardhat coverage'",
+    "contracts:sync": "node scripts/sync-contracts-to-ecosystem.js",
+    "contracts:test": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ~/code/fum_testing && npx hardhat test'",
+    "contracts:test:coverage": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ~/code/fum_testing && npx hardhat coverage'",
     "hardhat-node": "bash -c 'cd ~/code/fum_testing && npx hardhat node'",
     "deployment-setup": "npm run contracts:sync",
-    "seed-localhost": "bash -c 'npm run script test/scripts/create-test-vault.js && npm run script test/scripts/seed.js'",
-    "manipulate-price:up": "npm run script test/scripts/manipulate-price.js -- --direction=up",
-    "manipulate-price:down": "npm run script test/scripts/manipulate-price.js -- --direction=down",
-    "generate-fees": "npm run script test/scripts/generate-fees.js --",
+    "seed-localhost": "bash -c 'node test/scripts/create-test-vault.js && node test/scripts/seed.js'",
+    "manipulate-price:up": "node test/scripts/manipulate-price.js --direction=up",
+    "manipulate-price:down": "node test/scripts/manipulate-price.js --direction=down",
+    "generate-fees": "node test/scripts/generate-fees.js",
     "ganache": "node test/scripts/start-ganache.js"
   },
   "dependencies": {
@@ -29,7 +31,7 @@
     "@web3modal/ethereum": "^2.7.1",
     "bootstrap": "^5.3.3",
     "ethers": "^5.7.2",
-    "fum_library": "file:../fum_library/fum_library-1.0.0.tgz",
+    "fum_library": "github:derrek-b/fum_library",
     "next": "15.1.7",
     "react": "^19.0.0",
     "react-bootstrap": "^2.10.9",
@@ -59,7 +61,6 @@
     "lucide-react": "^0.487.0",
     "react-bootstrap-icons": "^1.11.5",
     "solidity-coverage": "^0.8.2",
-    "tsx": "^4.19.3",
     "typechain": "^8.2.0"
   }
 }

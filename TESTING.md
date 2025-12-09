@@ -46,7 +46,7 @@ code/
 ### Environment Setup
 
 1. **Alchemy API Key** - Required for forking Arbitrum mainnet
-2. **Node.js 18+** - All projects use ES modules
+2. **Node.js 22+** - Required for ES module JSON import syntax (`with { type: 'json' }`)
 3. **MetaMask or another Ethereum wallet** - For frontend wallet interaction
 
 ### Environment Files
@@ -113,18 +113,16 @@ This script:
 - Transfers tokens to the vault
 - Executes a couple trades to generate fees to collect for the WETH/USDC position
 
-### Step 3: Build fum_library
+### Step 3: Set Up fum_library Symlinks (First Time Only)
 
-The library must be built/rebuilt because contract addresses may change:
+Full ecosystem testing requires fum and fum_automation to share contract addresses. Symlinks ensure both projects read from the same fum_library:
 
 ```bash
 cd fum_library
-npm run pack  # Creates fum_library-x.x.x.tgz
+npm run sync  # Creates symlinks to fum and fum_automation
 ```
 
-This script:
-- Builds & packs the library
-- Reinstalls the library in fum & fum_automation with the new contract addresses
+After this initial setup, **no additional steps are needed when ganache restarts** - the start-ganache script automatically writes new contract addresses to both `src/` and `dist/`, and the symlinks ensure all projects see the changes immediately.
 
 ### Step 4: Start Automation Service
 
@@ -265,10 +263,13 @@ Ganache may have restarted. Re-run `npm run seed-localhost`
 **"Module not found: fum_library":**
 ```bash
 cd fum_library
-npm run build
-npm pack
-cd ../fum
-npm install
+npm run sync  # Sets up symlinks to fum and fum_automation
+```
+
+**To restore GitHub dependencies (undo symlinks):**
+```bash
+cd fum_library
+npm run unsync  # Restores fum and fum_automation to GitHub dependency
 ```
 
 ### Automation Connection Issues
