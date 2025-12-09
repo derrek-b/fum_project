@@ -41,6 +41,8 @@
     "docs": "node scripts/generate-docs.js",
     "prepublishOnly": "npm run build",
     "pack": "npm run build && npm pack && (cd ../fum_automation && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum_automation && npm install file:../fum_library/fum_library-1.0.0.tgz) && (cd ../fum && npm uninstall fum_library 2>/dev/null || true) && (cd ../fum && npm install file:../fum_library/fum_library-1.0.0.tgz --legacy-peer-deps --force)",
+    "sync": "npm run build && npm link && (cd ../fum && npm link fum_library) && (cd ../fum_automation && npm link fum_library) && echo '✅ fum_library synced to fum and fum_automation'",
+    "unsync": "(cd ../fum && npm install) && (cd ../fum_automation && npm install) && echo '✅ fum and fum_automation restored to GitHub dependency'",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
