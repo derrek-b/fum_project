@@ -520,8 +520,9 @@ const StrategyConfigPanel = ({
     }
 
     // Step 4: Template & parameters (executed as single batched transaction)
+    // Only show this step if template actually changed OR params actually changed
     const shouldShowParamStep = (activePreset && templateChanged) ||
-      ((activePreset === 'custom' || paramsChanged) && Object.keys(strategyParams).length > 0);
+      (paramsChanged && Object.keys(strategyParams).length > 0);
 
     if (shouldShowParamStep) {
       let description = `Configure the strategy parameters (preset: ${activePreset || 'none'})`;
@@ -796,7 +797,8 @@ const StrategyConfigPanel = ({
       }
 
       // Step 5: Set strategy parameters based on the strategy's parameter groups
-      if (selectedStrategy && (activePreset === 'custom' || paramsChanged)) {
+      // Only execute if params actually changed (not just because preset is 'custom')
+      if (selectedStrategy && paramsChanged) {
         // Get contract parameter groups from config
         const contractParamGroups = strategyConfig.contractParametersGroups || [];
 

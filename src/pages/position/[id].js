@@ -701,7 +701,7 @@ export default function PositionDetailPage() {
       <Navbar />
       <Container className="py-4">
         <Head>
-          <title>Position #{position?.id} - {position?.tokenPair || 'Detail'} | Liquidity Dashboard</title>
+          <title>{`Position #${position?.id} - ${position?.tokenPair || 'Detail'} | Liquidity Dashboard`}</title>
         </Head>
 
         <div className="d-flex justify-content-between align-items-center mb-4">

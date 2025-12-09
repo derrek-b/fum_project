@@ -28,8 +28,8 @@ import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
-import * as LucideIcons from 'lucide-react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { getStrategyIcon } from '../../utils/strategyIcons';
 import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
 const ERC20ABI = ERC20ARTIFACT.abi;
 
@@ -432,7 +432,7 @@ export default function VaultDetailPage() {
       <Navbar />
       <Container className="py-4">
         <Head>
-          <title>{vault?.name || 'Vault Detail'} | DeFi Dashboard</title>
+          <title>{`${vault?.name || 'Vault Detail'} | DeFi Dashboard`}</title>
         </Head>
 
         <div className="mb-4 animate-fade-in d-flex justify-content-between align-items-center">
@@ -459,7 +459,7 @@ export default function VaultDetailPage() {
               {vaultFromRedux.strategy?.strategyId ? (
                 (() => {
                   const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
-                  const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
+                  const IconComponent = strategyDetails?.icon ? getStrategyIcon(strategyDetails.icon) : null;
 
                   // Use strategy colors when strategy is configured
                   const hasActiveStrategy = vaultFromRedux?.hasActiveStrategy;
@@ -495,7 +495,7 @@ export default function VaultDetailPage() {
               ) : (
                 (() => {
                   const noneStrategy = getStrategyDetails("none");
-                  const NoneIcon = noneStrategy?.icon ? LucideIcons[noneStrategy.icon] : null;
+                  const NoneIcon = noneStrategy?.icon ? getStrategyIcon(noneStrategy.icon) : null;
 
                   return (
                     <Badge

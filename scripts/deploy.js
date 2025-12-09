@@ -42,24 +42,18 @@ function getChainId(networkName) {
 }
 
 // Get the appropriate private key based on network
-function getPrivateKey(chainId) {
-  // Use hardcoded key for localhost
+function getPrivateKey(chainId, networkName) {
+  // Use Hardhat default account #0 for localhost
   if (chainId === 1337) {
-    return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Default Hardhat account #0
+    return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Hardhat account #0
   }
 
-  // For other networks, look up the env var name in config
-  const networkConfig = getChainConfig(chainId);
-  if (!networkConfig) {
-    throw new Error(`Network with chainId ${chainId} not configured`);
-  }
-
-  // Get environment variable name from config
-  const envVarName = networkConfig.envPK || 'PRIVATE_KEY';
-  const privateKey = process.env[envVarName];
+  // Derive env var name from network name (e.g., 'arbitrum' -> 'ARBITRUM_DEPLOYER_PK')
+  const envVarName = `${networkName.toUpperCase()}_DEPLOYER_PK`;
+  const privateKey = process.env[envVarName] || process.env.PRIVATE_KEY;
 
   if (!privateKey) {
-    throw new Error(`No private key found for network ${networkName}. Set the ${envVarName} environment variable.`);
+    throw new Error(`No private key found for network ${networkName}. Set ${envVarName} or PRIVATE_KEY environment variable.`);
   }
 
   return privateKey;
@@ -103,10 +97,8 @@ function updateLibraryAddresses(deploymentResults, chainId) {
 
     // Map deployment result names to library contract names
     const contractNameMapping = {
-      'ParrisIslandStrategy': 'parris',
       'BabyStepsStrategy': 'bob',
       'VaultFactory': 'VaultFactory',
-      'BatchExecutor': 'BatchExecutor',
       'PositionVault': 'PositionVault'
     };
 
@@ -168,11 +160,21 @@ async function deploy() {
 
   console.log(`Deploying to ${networkConfig.name} (${chainId})...`);
 
+  // Build RPC URL - append API key for chains that need it
+  let rpcUrl = networkConfig.rpcUrls[0];
+  if (chainId === 42161) {
+    const apiKey = process.env.ALCHEMY_API_KEY;
+    if (!apiKey) {
+      throw new Error('ALCHEMY_API_KEY required for Arbitrum deployment');
+    }
+    rpcUrl = `${rpcUrl}/${apiKey}`;
+  }
+
   // Connect to provider
-  const provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
   // Get private key and create wallet
-  const privateKey = getPrivateKey(chainId);
+  const privateKey = getPrivateKey(chainId, networkName);
   const wallet = new ethers.Wallet(privateKey, provider);
   console.log(`Deploying with account: ${wallet.address}`);
 
@@ -201,9 +203,7 @@ async function deploy() {
 
     // Look for existing ABI
     let abi = [];
-    if (contractName === 'ParrisIslandStrategy') {
-      abi = contractsDataCopy['parris']?.abi || [];
-    } else if (contractName === 'BabyStepsStrategy') {
+    if (contractName === 'BabyStepsStrategy') {
       abi = contractsDataCopy['bob']?.abi || [];
     } else {
       abi = contractsDataCopy[contractName]?.abi || [];
@@ -266,7 +266,7 @@ async function deploy() {
   let contractsToDeploy = [];
   if (contractName === 'all') {
     // Deploy all contracts
-    contractsToDeploy = ['BatchExecutor', 'VaultFactory', 'ParrisIslandStrategy', 'BabyStepsStrategy'];
+    contractsToDeploy = ['VaultFactory', 'BabyStepsStrategy'];
   } else {
     // Deploy only the specified contract
     contractsToDeploy = [contractName];

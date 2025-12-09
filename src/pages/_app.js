@@ -6,9 +6,16 @@ import { ToastProvider } from '../context/ToastContext';
 import { ProviderProvider } from '../contexts/ProviderContext';
 import { triggerUpdate, markAutoRefresh } from '../redux/updateSlice';
 import { useAutomationEvents } from '../hooks/useAutomationEvents';
+import { initFumLibrary } from 'fum_library';
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "../styles/globals.css";
+
+// Initialize fum_library with API keys
+initFumLibrary({
+  coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
+  alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+});
 
 // Custom fallback component for React errors
 function ErrorFallback({ error, resetErrorBoundary }) {

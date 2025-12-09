@@ -28,9 +28,6 @@
 # misc
 .DS_Store
 *.pem
-/docs/LP_101.pdf
-/docs/SC_Dev_Plan.pdf
-ToDo
 src/automation/
 
 # debug
@@ -49,3 +46,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Unreleased contracts
+contracts/ParrisIslandStrategy.sol
+test/unit/ParrisIslandStrategy.test.js

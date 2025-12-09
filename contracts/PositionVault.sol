@@ -694,6 +694,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "0.4.3";
+        return "1.0.0";
     }
 }

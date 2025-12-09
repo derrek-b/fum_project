@@ -1,23 +1,15 @@
-// scripts/create-test-vault.js
+// test/scripts/create-test-vault.js
+// NOTE: This script is for local Ganache testing only
 import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import contractData from 'fum_library/artifacts/contracts';
-
-// Load environment variables
-dotenv.config();
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Parse command line arguments
-const args = process.argv.slice(2);
-const networkArg = args.find(arg => arg.startsWith('--network='));
-const networkName = networkArg ? networkArg.split('=')[1] : 'localhost';
 
 // Required Uniswap ABIs
 const FALLBACK_ABIS = {
@@ -76,33 +68,23 @@ const loadContractABI = (contractName) => {
 };
 
 async function main() {
-  // Get network configuration
-  const chainId = networkName === 'localhost' ? 1337 : 42161; // Default to Arbitrum unless localhost
+  // Hardcoded for local Ganache testing only
+  const chainId = 1337;
+  const rpcUrl = 'http://localhost:8545';
   const networkConfig = getChainConfig(chainId);
 
   if (!networkConfig) {
     throw new Error(`Network with chainId ${chainId} not configured`);
   }
 
-  console.log(`Creating test vault with sample position on ${networkConfig.name}...`);
+  console.log(`Creating test vault on local Ganache (${networkConfig.name})...`);
 
-  // Set up provider and signer
-  const provider = new ethers.providers.JsonRpcProvider(networkConfig.rpcUrl);
-
-  let signer;
-  if (networkName === 'localhost') {
-    // For local testing, use the first account
-    signer = new ethers.Wallet(
-      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // Default Hardhat account #0
-      provider
-    );
-  } else {
-    // For real networks, use private key from .env
-    if (!process.env.PRIVATE_KEY) {
-      throw new Error('PRIVATE_KEY environment variable not set');
-    }
-    signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-  }
+  // Set up provider and signer with hardcoded test account
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const signer = new ethers.Wallet(
+    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // Default Hardhat account #0
+    provider
+  );
 
   console.log(`Using account: ${signer.address}`);
 
@@ -110,7 +92,7 @@ async function main() {
   let vaultFactoryAddress;
 
   // First try to get from deployment file
-  const deploymentPath = path.join(__dirname, `../deployments/${chainId}-latest.json`);
+  const deploymentPath = path.join(__dirname, `../../deployments/${chainId}-latest.json`);
   if (fs.existsSync(deploymentPath)) {
     const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
     vaultFactoryAddress = deployment.contracts.VaultFactory;
@@ -162,55 +144,6 @@ async function main() {
   const vaultAddress = vaultCreatedEvents[0].args[1]; // Second arg is vault address
   console.log(`New vault created at: ${vaultAddress}`);
   console.log(`Vault name: ${vaultName}`);
-
-  // Connect to the vault
-  const vault = new ethers.Contract(
-    vaultAddress,
-    positionVaultABI,
-    signer
-  );
-
-  // Get strategy address from deployment file
-  const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
-  const babyStepsStrategyAddress = deployment.contracts.BabyStepsStrategy;
-  const executorAddress = '0xabA472B2EA519490EE10E643A422D578a507197A';
-
-  if (!babyStepsStrategyAddress) {
-    throw new Error('BabyStepsStrategy address not found in deployment file');
-  }
-
-  // Configure the vault for automation
-  console.log("\n=== CONFIGURING VAULT FOR AUTOMATION ===");
-
-  // Set target tokens
-  console.log("Setting target tokens: USDC, USD₮0...");
-  const setTokensTx = await vault.setTargetTokens(['USDC', 'USD₮0']);
-  await setTokensTx.wait();
-  console.log("Target tokens set");
-
-  // Set target platforms
-  console.log("Setting target platforms: uniswapV3...");
-  const setPlatformsTx = await vault.setTargetPlatforms(['uniswapV3']);
-  await setPlatformsTx.wait();
-  console.log("Target platforms set");
-
-  // Set strategy
-  console.log(`Setting strategy: BabySteps (${babyStepsStrategyAddress})...`);
-  const setStrategyTx = await vault.setStrategy(babyStepsStrategyAddress);
-  await setStrategyTx.wait();
-  console.log("Strategy set");
-
-  // Set executor (commented out - enable automation manually via UI)
-  // console.log(`Setting executor: ${executorAddress}...`);
-  // const setExecutorTx = await vault.setExecutor(executorAddress);
-  // await setExecutorTx.wait();
-  // console.log("Executor set");
-
-  console.log("\n✅ Vault configured for BabySteps automation!");
-  console.log(`   Target Tokens: USDC, USD₮0`);
-  console.log(`   Target Platform: uniswapV3`);
-  console.log(`   Strategy: BabySteps`);
-  console.log(`   Executor: Not set (enable via UI)`);
 
   // Define token addresses for Arbitrum that will be needed later
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum

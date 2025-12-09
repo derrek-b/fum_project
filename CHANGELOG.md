@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2025-12-09
+### Production Release
+
+First production release of F.U.M. with all core smart contracts and frontend ready for mainnet deployment.
+
+#### **Smart Contracts (v1.0.0)**
+- **PositionVault**: Production-ready vault contract for managing tokens and LP positions
+- **VaultFactory**: Factory contract for creating and tracking user vaults
+- **BabyStepsStrategy**: Template-based automation strategy with configurable parameters
+- **Note**: ParrisIslandStrategy remains in development (v0.1.0)
+
+#### **Repository Cleanup**
+- **ADDED**: LICENSE file with proprietary license terms
+- **ADDED**: TESTING.md with comprehensive local testing documentation
+- **REMOVED**: Mock contracts moved to fum_testing repository
+  - MockERC20, MockNonfungiblePositionManager, MockPositionNFT, MockUniversalRouter
+- **REMOVED**: BatchExecutor contract (functionality consolidated)
+- **REMOVED**: .solhint.json, remappings.txt (using fum_testing for linting)
+- **REMOVED**: docs/SC_Dev_Plan.pdf (outdated)
+- **REMOVED**: sync-contracts.sh (replaced by npm scripts)
+
+#### **Scripts Reorganization**
+- **MOVED**: Test scripts from scripts/ to test/scripts/
+  - create-test-vault.js, seed.js, start-ganache.js
+- **ADDED**: generate-fees.js for testing fee generation
+- **ADDED**: manipulate-price.js for testing price movements
+- **FIXED**: deploy.js RPC URL construction for Arbitrum mainnet
+  - Now properly uses `rpcUrls[0]` from chain config
+  - Appends Alchemy API key for Arbitrum deployments
+
+#### **Unit Tests Migration**
+- All contract unit tests moved to fum_testing repository
+- Tests run via `npm run contracts:test` which syncs and executes in fum_testing
+
+#### **Frontend Updates**
+- **ADDED**: Strategy icons utility (strategyIcons.js)
+- **UPDATED**: StrategyConfigPanel and StrategyDetailsSection improvements
+- **UPDATED**: VaultCard display enhancements
+- **UPDATED**: Demo page refinements
+- **UPDATED**: Position and vault detail page improvements
+- **UPDATED**: Error page styling
+
+#### **Documentation**
+- **UPDATED**: README.md with GitHub repository links
+- **UPDATED**: Related Repositories table with proper URLs
+- **ADDED**: Links to fum_testing repository
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: Contract tests now require fum_testing repository
+**Impact**: Ready for mainnet deployment on Arbitrum
+
 ## [0.8.0] - 2025-12-01
 ### PositionVault Contract Update
 

@@ -1,40 +1,267 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# F.U.M. - DeFi Liquidity Position Management & Automation
+
+A full-stack DeFi application for creating, managing, and automating Uniswap V3 liquidity positions. F.U.M. enables users to deploy personal vaults with configurable automation strategies for hands-off liquidity management.
+
+## Overview
+
+F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
+
+- **Personal Vaults** - Non-custodial smart contract vaults that hold your tokens and LP positions
+- **Uniswap V3 Integration** - Full support for Uniswap V3 concentrated liquidity positions
+- **Automated Strategies** - Configure rebalancing parameters and let the automation service manage your positions
+- **Real-Time Tracking** - Live updates via Server-Sent Events (SSE) connection to the automation service
+- **APY Analytics** - Track returns including fees earned and gas costs
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        F.U.M. Frontend                          │
+│                    (Next.js + React + Redux)                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────────────┐
+│   Read Provider (RPC)   │     │   Write Provider (Wallet)       │
+│   - Position queries    │     │   - Transaction signing         │
+│   - Balance checks      │     │   - Vault creation              │
+│   - Strategy params     │     │   - Strategy configuration      │
+└─────────────────────────┘     └─────────────────────────────────┘
+              │                               │
+              └───────────────┬───────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Smart Contracts                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
+│  │ VaultFactory │  │PositionVault │  │   Strategy Contracts  │  │
+│  │   (v1.0.0)   │  │   (v1.0.0)   │  │ BabySteps (v1.0.0)    │  │
+│  │              │  │              │  │ ParrisIsland (v0.1.0) │  │
+│  └──────────────┘  └──────────────┘  └───────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              Automation Service (fum_automation)                │
+│         - Position monitoring & rebalancing                     │
+│         - SSE event streaming to frontend                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Smart Contracts
+
+### Production Ready (v1.0.0)
+
+| Contract | Description |
+|----------|-------------|
+| **PositionVault** | User-controlled vault holding ERC20 tokens and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports EIP-1271 signature validation. |
+| **VaultFactory** | Factory contract for creating and tracking PositionVault instances. Maintains registry of user vaults. |
+| **BabyStepsStrategy** | Basic automation strategy with template-based parameters for range width, rebalance thresholds, fee reinvestment, and risk management. |
+
+### In Development (v0.1.0)
+
+| Contract | Description |
+|----------|-------------|
+| **ParrisIslandStrategy** | Advanced adaptive strategy with additional parameters for position sizing, pool liquidity requirements, oracle selection, and dynamic range adjustments. |
+
+## Features
+
+### Vault Management
+- Create multiple vaults with unique names
+- Configure target tokens per vault
+- Deposit/withdraw ERC20 tokens
+- Assign/unassign LP positions to vaults
+
+### Position Management
+- View all Uniswap V3 positions across connected wallet and vaults
+- Add/remove liquidity from positions
+- Collect accumulated fees
+- Close positions completely
+
+### Strategy Configuration
+- Select from preset templates (Conservative, Moderate, Aggressive, Stablecoin)
+- Customize individual parameters:
+  - **Range Parameters** - Target range width, rebalance thresholds
+  - **Fee Settings** - Reinvestment triggers and ratios
+  - **Risk Management** - Max slippage, emergency exit triggers, utilization limits
+
+### Real-Time Updates
+- SSE connection to automation service
+- Live notifications for:
+  - Position rebalances
+  - Fee collections
+  - New position mints
+  - Token swaps
+  - Vault status changes
+
+### Demo Mode
+- View live vault automation without connecting wallet
+- Showcase of system capabilities
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Node.js 18+
+- npm or yarn
+- MetaMask or compatible EVM wallet
+
+### Repository Structure
+
+The F.U.M. ecosystem requires repositories to be cloned as siblings:
+
+```
+code/
+├── fum/              # This repository (Frontend + Smart Contracts)
+├── fum_library/      # Shared utilities (required)
+└── fum_automation/   # Automation service (optional, for full testing)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### fum_library Setup
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
+fum_library must be built before installing dependencies:
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
+```bash
+# Clone fum_library if not already present
+cd ..
+git clone https://github.com/derrek-b/fum_library.git
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+# Build and pack the library
+cd fum_library
+npm install
+npm run build && npm pack
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Return to fum
+cd ../fum
+```
 
-## Learn More
+### Installation
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+# Install dependencies (requires fum_library to be built first)
+npm install
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+# Copy environment template
+cp .env.example .env.local
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Environment Configuration
 
-## Deploy on Vercel
+Copy `.env.example` to `.env.local` and configure:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+# Demo page showcase address (required for demo page)
+NEXT_PUBLIC_DEMO_ADDRESS=0x...
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+# Automation service SSE endpoint
+NEXT_PUBLIC_SSE_URL=http://your-automation-service:port/events
+
+# For local testing only - Alchemy API key for Arbitrum RPC
+# The UniswapV3Adapter needs real Arbitrum for AlphaRouter swap routing
+# Not needed for production (uses wallet provider directly)
+NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
+```
+
+### Development
+
+```bash
+# Start development server
+npm run dev
+
+# Open http://localhost:3000
+```
+
+### Local Blockchain Development
+
+For full application testing setup, see [TESTING.md](TESTING.md).
+
+## Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start Next.js development server |
+| `npm run build` | Build production bundle |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run contracts:sync` | Sync contracts to fum_library, fum_automation and fum_testing |
+| `npm run contracts:test` | Sync contracts to & run Hardhat contract tests in fum_testing |
+
+## Project Structure
+
+```
+fum/
+├── contracts/              # Solidity smart contracts
+│   ├── PositionVault.sol
+│   ├── VaultFactory.sol
+│   ├── BabyStepsStrategy.sol
+│   └── ParrisIslandStrategy.sol
+├── src/
+│   ├── pages/              # Next.js pages
+│   │   ├── index.js        # Landing page
+│   │   ├── vaults.js       # Vault management
+│   │   ├── positions.js    # Position management
+│   │   ├── demo.js         # Demo showcase
+│   │   ├── vault/[address].js
+│   │   └── position/[id].js
+│   ├── components/
+│   │   ├── common/         # Shared components (Navbar, Wallet, etc.)
+│   │   ├── vaults/         # Vault-related components
+│   │   ├── positions/      # Position-related components
+│   │   └── transactions/   # Transaction history components
+│   ├── redux/              # Redux store and slices
+│   ├── contexts/           # React context providers
+│   ├── hooks/              # Custom React hooks
+│   ├── utils/              # Utility functions
+│   └── styles/             # Global styles
+├── scripts/                # Deployment and utility scripts
+├── test/                   # Test scripts
+├── deployments/            # Deployment configurations
+└── public/                 # Static assets
+```
+
+## Tech Stack
+
+### Frontend
+- **Next.js 15** - React framework with Pages Router
+- **React 19** - UI library
+- **Redux Toolkit** - State management
+- **React Bootstrap** - UI components
+- **ethers.js v5** - Blockchain interaction
+
+### Smart Contracts
+- **Solidity ^0.8.0** - Contract language
+- **OpenZeppelin Contracts v5** - Security standards
+- **Hardhat** - Development framework and testing
+- **Ganache** - Local blockchain for development
+
+### External Dependencies
+- **fum_library** - Shared adapters, ABIs, and utilities
+- **Uniswap V3 SDK** - Position calculations
+- **CoinGecko API** - Token pricing (via fum_library)
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [fum_library](https://github.com/derrek-b/fum_library) | Shared library with Uniswap V3 adapter, ABIs, and blockchain utilities |
+| [fum_automation](https://github.com/derrek-b/fum_automation) | Automation service for position monitoring and rebalancing |
+| [fum_testing](https://github.com/derrek-b/fum_testing) | Isolated Hardhat environment for contract testing |
+
+## Version History
+
+- **v0.8.0** - PositionVault empty batch validation
+- **v0.7.0** - Dual provider architecture (dedicated RPC + wallet)
+- **v0.6.0** - Demo page, transaction history, APY calculations
+- **v0.5.0** - Security refactor
+
+## License
+
+Copyright (c) 2025 Derrek Brack and Rabid Husky Designs. All rights reserved.
+
+This software is proprietary and provided for portfolio demonstration purposes only. See [LICENSE.md](LICENSE.md) for details.
+
+## Author
+
+**Derrek Brack** & **Claude Code**
+
+For licensing inquiries, please contact the copyright holder.

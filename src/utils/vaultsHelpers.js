@@ -358,7 +358,7 @@ export const loadVaultStrategies = async (provider, chainId, dispatch, options =
     // Build a direct mapping from addresses to strategy IDs
     Object.keys(contractData).forEach(contractKey => {
       // Skip non-strategy contracts
-      if (['VaultFactory', 'PositionVault', 'BatchExecutor'].includes(contractKey)) {
+      if (['VaultFactory', 'PositionVault'].includes(contractKey)) {
         return;
       }
 

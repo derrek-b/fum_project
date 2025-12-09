@@ -1,4 +1,5 @@
-// seed.js - Script to create a test Uniswap V3 liquidity position
+// test/scripts/seed.js - Script to create a test Uniswap V3 liquidity position
+// NOTE: This script is for local Ganache testing only
 
 // Import required libraries
 import { ethers } from 'ethers';
@@ -21,7 +22,7 @@ const UniswapV3RouterABI = UniswapV3RouterArtifact.abi
 // Get deployment addresses from the deployment file
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const deploymentPath = path.join(__dirname, '..', 'deployments', '1337-latest.json');
+const deploymentPath = path.join(__dirname, '..', '..', 'deployments', '1337-latest.json');
 const deployment = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
 
 // Define config directly for local fork of Arbitrum
@@ -109,8 +110,8 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
       const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
       const amountIn = isWethToUsdc ?
-        ethers.utils.parseEther('0.1') : // 0.1 WETH
-        ethers.utils.parseUnits('200', 6); // 200 USDC
+        ethers.utils.parseEther('0.5') : // 0.5 WETH
+        ethers.utils.parseUnits('1700', 6); // 1700 USDC
 
       console.log(`Swap ${i+1}/${numSwaps}: ${isWethToUsdc ? 'WETH → USDC' : 'USDC → WETH'} (nonce: ${currentNonce})`);
 
@@ -995,8 +996,8 @@ async function main() {
     // NEW SECTION: Generate fees by performing multiple swaps
     console.log('\n=== GENERATING FEES FOR THE POSITION ===');
 
-    // Perform multiple swaps to generate fees (commented out for faster testing)
-    // await performSwapsToGenerateFees(wallet, 200);
+    // Perform multiple swaps to generate fees
+    await performSwapsToGenerateFees(wallet, 10);
 
     // Calculate fees directly without "poking" the position
     console.log('\n=== CALCULATING UNCOLLECTED FEES ===');

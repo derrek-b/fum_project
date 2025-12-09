@@ -14,11 +14,9 @@ const contractsDir = path.resolve(__dirname, '../contracts');
 
 // Define contract mapping to handle special naming cases
 const contractMapping = {
-  'ParrisIslandStrategy.sol': 'parris',
   'BabyStepsStrategy.sol': 'bob',
   'PositionVault.sol': 'PositionVault',
-  'VaultFactory.sol': 'VaultFactory',
-  'BatchExecutor.sol': 'BatchExecutor'
+  'VaultFactory.sol': 'VaultFactory'
 };
 
 // List of contracts to extract ABIs from

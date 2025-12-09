@@ -14,20 +14,12 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Core contracts that get distributed to production projects
+// Production contracts that get synced to fum_testing and distributed
+// Mocks and tests now live permanently in fum_testing
 const CORE_CONTRACTS = [
   'BabyStepsStrategy',
-  'ParrisIslandStrategy', 
   'VaultFactory',
-  'PositionVault',
-  'BatchExecutor'
-];
-
-// All contracts including mocks (for testing)
-const ALL_CONTRACTS = [
-  ...CORE_CONTRACTS,
-  'MockERC20',
-  'MockPositionNFT'
+  'PositionVault'
 ];
 
 // Project paths
@@ -47,7 +39,7 @@ async function syncContractsToEcosystem() {
   try {
     // Step 1: Sync source files to fum_testing
     console.log('📄 Step 1: Syncing source files to fum_testing...');
-    execSync('./sync-contracts.sh', { cwd: __dirname + '/..' });
+    await syncSourceFilesToTesting();
     console.log('✅ Source files synced to fum_testing\n');
     
     // Step 2: Compile contracts in fum_testing
@@ -74,15 +66,10 @@ async function syncContractsToEcosystem() {
     console.log('🚚 Step 6: Distributing bytecode to fum_automation...');
     await copyBytecodeToAutomation();
     console.log('✅ Bytecode distributed to fum_automation\n');
-    
-    // Step 7: Update fum_testing ABIs (all contracts including mocks)
-    console.log('📝 Step 7: Updating fum_testing ABIs...');
-    await updateTestingABIs();
-    console.log('✅ fum_testing ABIs updated\n');
-    
+
     console.log('✨ Contract sync completed successfully!');
     console.log('\n📊 Distribution Summary:');
-    console.log(`   • fum_testing: Source files + all ABIs (${ALL_CONTRACTS.length} contracts)`);
+    console.log(`   • fum_testing: Production contracts synced (${CORE_CONTRACTS.length} contracts)`);
     console.log(`   • fum_library: Core ABIs + core bytecode (${CORE_CONTRACTS.length} contracts)`);
     console.log(`   • fum_automation: Core bytecode only (${CORE_CONTRACTS.length} contracts)`);
 
@@ -150,47 +137,62 @@ async function copyBytecodeToAutomation() {
   console.log(`  📦 Copied ${successCount}/${CORE_CONTRACTS.length} bytecode files to fum_automation`);
 }
 
+
 /**
- * Update fum_testing ABIs by extracting from compiled artifacts
- * Creates/updates src/abis/contracts.json with all contracts including mocks
+ * Recursively find all files matching a pattern in a directory
  */
-async function updateTestingABIs() {
-  const artifactsDir = path.join(PROJECTS.fum_testing, 'artifacts/contracts');
-  const abisOutputFile = path.join(PROJECTS.fum_testing, 'src/abis/contracts.json');
-  
-  // Ensure output directory exists
-  const abisDir = path.dirname(abisOutputFile);
-  if (!fs.existsSync(abisDir)) {
-    fs.mkdirSync(abisDir, { recursive: true });
+function findFiles(dir, extension) {
+  const files = [];
+
+  if (!fs.existsSync(dir)) {
+    return files;
   }
-  
-  const contractsAbi = {};
-  let successCount = 0;
-  
-  for (const contractName of ALL_CONTRACTS) {
-    const artifactPath = path.join(artifactsDir, `${contractName}.sol`, `${contractName}.json`);
-    
-    if (fs.existsSync(artifactPath)) {
-      try {
-        const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-        contractsAbi[contractName] = {
-          abi: artifact.abi
-        };
-        console.log(`  ✅ Extracted ABI for ${contractName}`);
-        successCount++;
-      } catch (error) {
-        console.warn(`  ⚠️ Warning: Failed to parse artifact for ${contractName}: ${error.message}`);
-      }
-    } else {
-      console.warn(`  ⚠️ Warning: Artifact not found for ${contractName} at ${artifactPath}`);
+
+  const items = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const item of items) {
+    const fullPath = path.join(dir, item.name);
+    if (item.isDirectory()) {
+      files.push(...findFiles(fullPath, extension));
+    } else if (item.name.endsWith(extension)) {
+      files.push(fullPath);
     }
   }
-  
-  // Write the contracts.json file
-  const contractsJson = JSON.stringify(contractsAbi, null, 2);
-  fs.writeFileSync(abisOutputFile, contractsJson);
-  
-  console.log(`  📝 Updated ${abisOutputFile} with ${successCount}/${ALL_CONTRACTS.length} contract ABIs`);
+
+  return files;
+}
+
+/**
+ * Sync production contracts from fum to fum_testing
+ * Only syncs CORE_CONTRACTS - mocks and tests live permanently in fum_testing
+ */
+async function syncSourceFilesToTesting() {
+  const sourceDir = path.resolve(__dirname, '..');
+  const targetDir = PROJECTS.fum_testing;
+
+  // Ensure target directory exists
+  const contractsTargetDir = path.join(targetDir, 'contracts');
+  if (!fs.existsSync(contractsTargetDir)) {
+    fs.mkdirSync(contractsTargetDir, { recursive: true });
+  }
+
+  // Copy only production contracts (CORE_CONTRACTS)
+  console.log('  Copying production contracts...');
+  let contractCount = 0;
+
+  for (const contractName of CORE_CONTRACTS) {
+    const sourceFile = path.join(sourceDir, 'contracts', `${contractName}.sol`);
+    const targetFile = path.join(contractsTargetDir, `${contractName}.sol`);
+
+    if (fs.existsSync(sourceFile)) {
+      fs.copyFileSync(sourceFile, targetFile);
+      console.log(`  ✅ ${contractName}.sol`);
+      contractCount++;
+    } else {
+      console.warn(`  ⚠️ Warning: ${sourceFile} not found`);
+    }
+  }
+  console.log(`  📦 Synced ${contractCount}/${CORE_CONTRACTS.length} production contracts`);
 }
 
 /**
@@ -198,13 +200,13 @@ async function updateTestingABIs() {
  */
 function validateProjectStructure() {
   const missingProjects = [];
-  
+
   for (const [projectName, projectPath] of Object.entries(PROJECTS)) {
     if (!fs.existsSync(projectPath)) {
       missingProjects.push(`${projectName} (${projectPath})`);
     }
   }
-  
+
   if (missingProjects.length > 0) {
     console.error('❌ Missing required projects:');
     missingProjects.forEach(project => console.error(`   • ${project}`));
@@ -215,10 +217,24 @@ function validateProjectStructure() {
 // Run the sync if called directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   validateProjectStructure();
-  syncContractsToEcosystem().catch(error => {
-    console.error('💥 Unexpected error:', error);
-    process.exit(1);
-  });
+
+  // Check for --sync-only flag (just sync source files, skip compile/distribute)
+  const syncOnly = process.argv.includes('--sync-only');
+
+  if (syncOnly) {
+    console.log('🚀 Running source sync only (--sync-only flag detected)...\n');
+    syncSourceFilesToTesting()
+      .then(() => console.log('\n✨ Source sync completed!'))
+      .catch(error => {
+        console.error('💥 Unexpected error:', error);
+        process.exit(1);
+      });
+  } else {
+    syncContractsToEcosystem().catch(error => {
+      console.error('💥 Unexpected error:', error);
+      process.exit(1);
+    });
+  }
 }
 
 export default syncContractsToEcosystem;

@@ -12,7 +12,6 @@ import { formatTimestamp } from "fum_library/helpers";
 import { getStrategyDetails } from "fum_library/helpers";
 import { getChainConfig, getChainRpcUrls } from "fum_library/helpers/chainHelpers";
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain/contracts';
-import * as LucideIcons from 'lucide-react';
 import { Wifi, WifiOff } from 'lucide-react';
 
 // Demo address from environment variable

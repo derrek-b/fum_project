@@ -160,6 +160,6 @@ contract VaultFactory is Ownable {
     }
 
     function getVersion() external pure returns (string memory) {
-        return "0.4.0";
+        return "1.0.0";
     }
 }

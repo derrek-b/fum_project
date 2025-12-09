@@ -1,3 +1,5 @@
+// test/scripts/start-ganache.js
+// NOTE: This script is for local Ganache testing only
 import { fileURLToPath } from 'url';
 import path from 'path';
 import ganache from "ganache";
@@ -5,14 +7,15 @@ import fs from "fs";
 import { ethers } from "ethers";
 import dotenv from 'dotenv';
 import contractData from 'fum_library/artifacts/contracts';
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: '.env.local' });
 
-// Fixed path to the library (sibling directory)
-const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
+// Path to the library (3 levels up from test/scripts/, then into fum_library)
+const LIBRARY_PATH = path.resolve(__dirname, '../../../fum_library');
 
 // Function to update library contracts.js files
 function updateLibraryContracts(contractsData) {
@@ -85,7 +88,7 @@ async function main() {
         mnemonic: "test test test test test test test test test test test junk"  // ETH balance for each account
       },
       miner: {
-        blockTime: .5 // Mine a block every half second
+        blockTime: 0 // Instant mining (auto-mine)
       },
       fork: {
         url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`
@@ -124,33 +127,23 @@ async function main() {
       const deploymentResults = {};
 
       try {
-        // Deploy BatchExecutor
-        console.log("\nDeploying BatchExecutor...");
-        const BatchExecutorBytecodePath = path.join(__dirname, `../bytecode/BatchExecutor.bin`);
-        const BatchExecutorBytecode = "0x" + fs.readFileSync(BatchExecutorBytecodePath, "utf8").trim();
-        const BatchExecutor = new ethers.ContractFactory(
-          contractsDataCopy.BatchExecutor.abi,
-          BatchExecutorBytecode,
-          wallet
-        );
+        // Get Arbitrum network config for protocol addresses (we're forking Arbitrum)
+        const arbitrumConfig = getChainConfig(42161);
+        const universalRouterAddress = arbitrumConfig.platformAddresses?.uniswapV3?.universalRouterAddress;
+        const positionManagerAddress = arbitrumConfig.platformAddresses?.uniswapV3?.positionManagerAddress;
+        const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3'; // Canonical Permit2 address
 
-        const batchExecutor = await BatchExecutor.deploy({
-          gasLimit: 5000000,
-          gasPrice: ethers.utils.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
-        });
-        console.log(`Transaction hash: ${batchExecutor.deploymentTransaction().hash}`);
-        console.log("Waiting for deployment to be confirmed...");
-        await batchExecutor.waitForDeployment();
-        const batchExecutorAddress = await batchExecutor.getAddress();
-        console.log(`BatchExecutor deployed to: ${batchExecutorAddress}`);
-
-        // Update contracts data copy
-        contractsDataCopy.BatchExecutor.addresses[chainId] = batchExecutorAddress;
-        deploymentResults.BatchExecutor = batchExecutorAddress;
+        if (!universalRouterAddress || !positionManagerAddress) {
+          throw new Error('Missing Uniswap V3 addresses in Arbitrum config');
+        }
 
         // Deploy VaultFactory
         console.log("\nDeploying VaultFactory...");
-        const VaultFactoryBytecodePath = path.join(__dirname, `../bytecode/VaultFactory.bin`);
+        console.log(`Using Universal Router: ${universalRouterAddress}`);
+        console.log(`Using Permit2: ${permit2Address}`);
+        console.log(`Using Position Manager: ${positionManagerAddress}`);
+
+        const VaultFactoryBytecodePath = path.join(__dirname, `../../bytecode/VaultFactory.bin`);
         const VaultFactoryBytecode = "0x" + fs.readFileSync(VaultFactoryBytecodePath, "utf8").trim();
         const VaultFactory = new ethers.ContractFactory(
           contractsDataCopy.VaultFactory.abi,
@@ -158,47 +151,28 @@ async function main() {
           wallet
         );
 
-        const vaultFactory = await VaultFactory.deploy(wallet.address, {
-          gasLimit: 5000000,
-          gasPrice: ethers.utils.parseUnits("0.1", "gwei"), // Arbitrum-compatible gas price
-        });
-        console.log(`Transaction hash: ${vaultFactory.deploymentTransaction().hash}`);
+        const vaultFactory = await VaultFactory.deploy(
+          wallet.address,
+          universalRouterAddress,
+          permit2Address,
+          positionManagerAddress,
+          {
+            gasLimit: 5000000
+          }
+        );
+        console.log(`Transaction hash: ${vaultFactory.deployTransaction.hash}`);
         console.log("Waiting for deployment to be confirmed...");
-        await vaultFactory.waitForDeployment();
-        const vaultFactoryAddress = await vaultFactory.getAddress();
+        await vaultFactory.deployed();
+        const vaultFactoryAddress = vaultFactory.address;
         console.log(`VaultFactory deployed to: ${vaultFactoryAddress}`);
 
         // Update contracts data copy
         contractsDataCopy.VaultFactory.addresses[chainId] = vaultFactoryAddress;
         deploymentResults.VaultFactory = vaultFactoryAddress;
 
-        // Deploy ParrisIslandStrategy
-        console.log("\nDeploying ParrisIslandStrategy...");
-        const ParrisIslandStrategyBytecodePath = path.join(__dirname, `../bytecode/ParrisIslandStrategy.bin`);
-        const ParrisIslandStrategyBytecode = "0x" + fs.readFileSync(ParrisIslandStrategyBytecodePath, "utf8").trim();
-        const ParrisIslandStrategy = new ethers.ContractFactory(
-          contractsDataCopy.parris.abi,
-          ParrisIslandStrategyBytecode,
-          wallet
-        );
-
-        const strategy = await ParrisIslandStrategy.deploy({
-          gasLimit: 5000000,
-          gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
-        });
-        console.log(`Transaction hash: ${strategy.deploymentTransaction().hash}`);
-        console.log("Waiting for deployment to be confirmed...");
-        await strategy.waitForDeployment();
-        const strategyAddress = await strategy.getAddress();
-        console.log(`ParrisIslandStrategy deployed to: ${strategyAddress}`);
-
-        // Update contracts data copy (map to 'parris')
-        contractsDataCopy.parris.addresses[chainId] = strategyAddress;
-        deploymentResults.ParrisIslandStrategy = strategyAddress;
-
         // Deploy BabyStepsStrategy
         console.log("\nDeploying BabyStepsStrategy...");
-        const BabyStepsStrategyBytecodePath = path.join(__dirname, `../bytecode/BabyStepsStrategy.bin`);
+        const BabyStepsStrategyBytecodePath = path.join(__dirname, `../../bytecode/BabyStepsStrategy.bin`);
 
         // Check if bytecode file exists
         if (fs.existsSync(BabyStepsStrategyBytecodePath)) {
@@ -213,13 +187,12 @@ async function main() {
             );
 
             const babyStepsStrategy = await BabyStepsStrategy.deploy({
-              gasLimit: 5000000,
-              gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
+              gasLimit: 5000000
             });
-            console.log(`Transaction hash: ${babyStepsStrategy.deploymentTransaction().hash}`);
+            console.log(`Transaction hash: ${babyStepsStrategy.deployTransaction.hash}`);
             console.log("Waiting for deployment to be confirmed...");
-            await babyStepsStrategy.waitForDeployment();
-            const babyStepsStrategyAddress = await babyStepsStrategy.getAddress();
+            await babyStepsStrategy.deployed();
+            const babyStepsStrategyAddress = babyStepsStrategy.address;
             console.log(`BabyStepsStrategy deployed to: ${babyStepsStrategyAddress}`);
 
             // Update contracts data copy (map to 'bob')
@@ -249,7 +222,7 @@ async function main() {
         };
 
         console.log("Saving deployment info...");
-        const deploymentsDir = path.join(__dirname, "../deployments");
+        const deploymentsDir = path.join(__dirname, "../../deployments");
         if (!fs.existsSync(deploymentsDir)) {
           fs.mkdirSync(deploymentsDir, { recursive: true });
         }

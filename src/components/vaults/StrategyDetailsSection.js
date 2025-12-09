@@ -132,6 +132,9 @@ const StrategyDetailsSection = ({
     return getAvailablePlatforms(chainId);
   }, [chainId]);
 
+  // Internal contract fields that shouldn't be treated as user-configurable parameters
+  const INTERNAL_PARAM_FIELDS = ['customizationBitmap', 'templateEnum'];
+
   // Initialize from current strategy config or defaults
   useEffect(() => {
     if (!strategyId || strategyId === 'none') {
@@ -144,7 +147,13 @@ const StrategyDetailsSection = ({
 
     // Check if we have saved parameters in the vault strategy object
     if (currentStrategy?.parameters && currentStrategy.strategyId === strategyId) {
-      setParams(currentStrategy.parameters);
+      // Filter out internal contract fields that aren't user-configurable
+      const userParams = Object.fromEntries(
+        Object.entries(currentStrategy.parameters).filter(
+          ([key]) => !INTERNAL_PARAM_FIELDS.includes(key)
+        )
+      );
+      setParams(userParams);
 
       setActivePreset(currentStrategy.activeTemplate);
 

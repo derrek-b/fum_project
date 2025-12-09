@@ -3,9 +3,9 @@ import React from "react";
 import { Card, Badge, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
-import * as LucideIcons from 'lucide-react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
+import { getStrategyIcon } from '../../utils/strategyIcons';
 import { calculateVaultAPY } from '../../utils/vaultsHelpers';
 
 export default function VaultCard({ vault }) {
@@ -87,7 +87,7 @@ export default function VaultCard({ vault }) {
               if (vault.strategy?.isActive && hasConfiguredStrategy) {
                 // Active strategy case
                 const strategyDetails = getStrategyDetails(vault.strategy?.strategyId);
-                const IconComponent = strategyDetails?.icon ? LucideIcons[strategyDetails.icon] : null;
+                const IconComponent = strategyDetails?.icon ? getStrategyIcon(strategyDetails.icon) : null;
 
                 return (
                   <>
@@ -135,7 +135,7 @@ export default function VaultCard({ vault }) {
               } else {
                 // "Not Configured" case - use the "none" strategy settings
                 const noneStrategy = getStrategyDetails("none");
-                const NoneIcon = noneStrategy?.icon ? LucideIcons[noneStrategy.icon] : null;
+                const NoneIcon = noneStrategy?.icon ? getStrategyIcon(noneStrategy.icon) : null;
 
                 return (
                   <Badge

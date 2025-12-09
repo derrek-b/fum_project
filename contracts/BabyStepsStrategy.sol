@@ -48,44 +48,46 @@ contract BabyStepsStrategy is Ownable {
     // Conservative template values - WIDER ranges, fewer rebalances
     uint16 private constant CONS_TARGET_RANGE_UPPER = 1000;          // 10.00%
     uint16 private constant CONS_TARGET_RANGE_LOWER = 1000;          // 10.00%
-    uint16 private constant CONS_REBALANCE_THRESHOLD_UPPER = 300;    // 3.00%
-    uint16 private constant CONS_REBALANCE_THRESHOLD_LOWER = 300;    // 3.00%
-    uint16 private constant CONS_MAX_SLIPPAGE = 30;                  // 0.30%
-    uint16 private constant CONS_EMERGENCY_EXIT_TRIGGER = 2000;      // 20.00%
-    uint16 private constant CONS_MAX_UTILIZATION = 6000;             // 60.00%
-    bool private constant CONS_FEE_REINVESTMENT = false;             // No fee reinvestment
+    uint16 private constant CONS_REBALANCE_THRESHOLD_UPPER = 600;    // 6.00%
+    uint16 private constant CONS_REBALANCE_THRESHOLD_LOWER = 600;    // 6.00%
+    uint256 private constant CONS_REINVESTMENT_TRIGGER = 5000;       // $50.00 (in cents)
+    uint16 private constant CONS_REINVESTMENT_RATIO = 3000;          // 30.00%
+    uint16 private constant CONS_MAX_SLIPPAGE = 50;                  // 0.50%
+    uint16 private constant CONS_EMERGENCY_EXIT_TRIGGER = 1000;      // 10.00%
+    uint16 private constant CONS_MAX_UTILIZATION = 9000;             // 90.00%
+    bool private constant CONS_FEE_REINVESTMENT = true;              // Fee reinvestment enabled
 
     // Moderate template values - MEDIUM ranges, moderate rebalances
     uint16 private constant MOD_TARGET_RANGE_UPPER = 500;            // 5.00%
     uint16 private constant MOD_TARGET_RANGE_LOWER = 500;            // 5.00%
-    uint16 private constant MOD_REBALANCE_THRESHOLD_UPPER = 150;     // 1.50%
-    uint16 private constant MOD_REBALANCE_THRESHOLD_LOWER = 150;     // 1.50%
-    uint256 private constant MOD_REINVESTMENT_TRIGGER = 50 ether;    // $50
-    uint16 private constant MOD_REINVESTMENT_RATIO = 8000;           // 80.00%
+    uint16 private constant MOD_REBALANCE_THRESHOLD_UPPER = 400;     // 4.00%
+    uint16 private constant MOD_REBALANCE_THRESHOLD_LOWER = 400;     // 4.00%
+    uint256 private constant MOD_REINVESTMENT_TRIGGER = 5000;        // $50.00 (in cents)
+    uint16 private constant MOD_REINVESTMENT_RATIO = 5000;           // 50.00%
     uint16 private constant MOD_MAX_SLIPPAGE = 50;                   // 0.50%
-    uint16 private constant MOD_EMERGENCY_EXIT_TRIGGER = 1500;       // 15.00%
-    uint16 private constant MOD_MAX_UTILIZATION = 8000;              // 80.00%
+    uint16 private constant MOD_EMERGENCY_EXIT_TRIGGER = 1000;       // 10.00%
+    uint16 private constant MOD_MAX_UTILIZATION = 9000;              // 90.00%
 
     // Aggressive template values - TIGHTER ranges, frequent rebalances
     uint16 private constant AGG_TARGET_RANGE_UPPER = 300;            // 3.00%
     uint16 private constant AGG_TARGET_RANGE_LOWER = 300;            // 3.00%
     uint16 private constant AGG_REBALANCE_THRESHOLD_UPPER = 80;      // 0.80%
     uint16 private constant AGG_REBALANCE_THRESHOLD_LOWER = 80;      // 0.80%
-    uint256 private constant AGG_REINVESTMENT_TRIGGER = 25 ether;    // $25
-    uint16 private constant AGG_REINVESTMENT_RATIO = 10000;          // 100.00%
-    uint16 private constant AGG_MAX_SLIPPAGE = 100;                  // 1.00%
+    uint256 private constant AGG_REINVESTMENT_TRIGGER = 5000;        // $50.00 (in cents)
+    uint16 private constant AGG_REINVESTMENT_RATIO = 9000;           // 90.00%
+    uint16 private constant AGG_MAX_SLIPPAGE = 50;                   // 0.50%
     uint16 private constant AGG_EMERGENCY_EXIT_TRIGGER = 1000;       // 10.00%
-    uint16 private constant AGG_MAX_UTILIZATION = 9500;              // 95.00%
+    uint16 private constant AGG_MAX_UTILIZATION = 9000;              // 90.00%
 
     // Stablecoin template values - VERY TIGHT ranges for stablecoins
-    uint16 private constant STBL_TARGET_RANGE_UPPER = 50;            // 0.50%
-    uint16 private constant STBL_TARGET_RANGE_LOWER = 50;            // 0.50%
-    uint16 private constant STBL_REBALANCE_THRESHOLD_UPPER = 20;     // 0.20%
-    uint16 private constant STBL_REBALANCE_THRESHOLD_LOWER = 20;     // 0.20%
-    uint256 private constant STBL_REINVESTMENT_TRIGGER = 10 ether;   // $10
+    uint16 private constant STBL_TARGET_RANGE_UPPER = 20;            // 0.20%
+    uint16 private constant STBL_TARGET_RANGE_LOWER = 20;            // 0.20%
+    uint16 private constant STBL_REBALANCE_THRESHOLD_UPPER = 1250;   // 12.50%
+    uint16 private constant STBL_REBALANCE_THRESHOLD_LOWER = 1250;   // 12.50%
+    uint256 private constant STBL_REINVESTMENT_TRIGGER = 1000;       // $10.00 (in cents)
     uint16 private constant STBL_REINVESTMENT_RATIO = 10000;         // 100.00%
-    uint16 private constant STBL_MAX_SLIPPAGE = 10;                  // 0.10%
-    uint16 private constant STBL_EMERGENCY_EXIT_TRIGGER = 200;       // 2.00%
+    uint16 private constant STBL_MAX_SLIPPAGE = 20;                  // 0.20%
+    uint16 private constant STBL_EMERGENCY_EXIT_TRIGGER = 100;       // 1.00%
     uint16 private constant STBL_MAX_UTILIZATION = 9000;             // 90.00%
 
     // ==================== Customization Bitmap ====================
@@ -259,7 +261,7 @@ contract BabyStepsStrategy is Ownable {
 
         // Return template value
         Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since reinvestment is off
+        if (template == Template.Conservative) return CONS_REINVESTMENT_TRIGGER;
         if (template == Template.Moderate) return MOD_REINVESTMENT_TRIGGER;
         if (template == Template.Aggressive) return AGG_REINVESTMENT_TRIGGER;
         if (template == Template.Stablecoin) return STBL_REINVESTMENT_TRIGGER;
@@ -281,7 +283,7 @@ contract BabyStepsStrategy is Ownable {
 
         // Return template value
         Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since reinvestment is off
+        if (template == Template.Conservative) return CONS_REINVESTMENT_RATIO;
         if (template == Template.Moderate) return MOD_REINVESTMENT_RATIO;
         if (template == Template.Aggressive) return AGG_REINVESTMENT_RATIO;
         if (template == Template.Stablecoin) return STBL_REINVESTMENT_RATIO;
