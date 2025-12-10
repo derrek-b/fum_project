@@ -820,7 +820,7 @@
     ],
     "addresses": {
       "1337": "0x5b1869D9A4C187F2EAa108f3062412ecf0526b24",
-      "42161": "0x27eC094D03436d0401A18D57cC1Ae66f1108f70B"
+      "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
   "PositionVault": {
