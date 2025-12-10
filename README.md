@@ -93,7 +93,7 @@ Copy `.env.example` to `.env.local` and configure:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG` | `false` | Enable verbose logging |
-| `BLACKLIST_PATH` | `./data/blacklist.json` | Path to vault blacklist file |
+| `BLACKLIST_PATH` | `./data/.vault-blacklist.json` | Path to vault blacklist file |
 | `TRACKING_DATA_DIR` | `./data/vaults` | Directory for vault tracking data |
 | `COINGECKO_API_KEY` | - | CoinGecko API key for token prices (see note below) |
 | `TELEGRAM_BOT_API_KEY` | - | Telegram bot API key for notifications |

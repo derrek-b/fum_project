@@ -58,8 +58,8 @@ class AutomationService {
     this._validateWebSocketUrl(config.wsUrl);
     this._validateBoolean(config.debug);
 
-    // Validate blacklistFilePath (optional, defaults to './data/blacklist.json')
-    const blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
+    // Validate blacklistFilePath (optional, defaults to './data/.vault-blacklist.json')
+    const blacklistFilePath = config.blacklistFilePath || './data/.vault-blacklist.json';
     if (typeof blacklistFilePath !== 'string') {
       throw new Error('blacklistFilePath must be a string path');
     }

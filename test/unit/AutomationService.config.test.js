@@ -334,12 +334,12 @@ describe('AutomationService Configuration Validation', () => {
   describe('blacklistFilePath validation', () => {
     it('should use default when blacklistFilePath is missing', () => {
       const service = new AutomationService(configWithout('blacklistFilePath'));
-      expect(service.blacklistFilePath).toBe('./data/blacklist.json');
+      expect(service.blacklistFilePath).toBe('./data/.vault-blacklist.json');
     });
 
     it('should use default when blacklistFilePath is null', () => {
       const service = new AutomationService(configWith('blacklistFilePath', null));
-      expect(service.blacklistFilePath).toBe('./data/blacklist.json');
+      expect(service.blacklistFilePath).toBe('./data/.vault-blacklist.json');
     });
 
     it('should throw for non-string blacklistFilePath', () => {

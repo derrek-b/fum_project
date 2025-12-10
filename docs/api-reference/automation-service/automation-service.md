@@ -103,7 +103,7 @@ const automationService = new AutomationService({
   envPath: './.env',
 
   // Operational
-  blacklistFilePath: './data/blacklist.json',
+  blacklistFilePath: './data/.vault-blacklist.json',
   retryIntervalMs: 60000,             // Retry failed vaults every 1 minute
   maxFailureDurationMs: 3600000,      // Blacklist after 1 hour of failures
   ssePort: 3001,                      // SSE server on port 3001
@@ -974,7 +974,7 @@ const config = {
   envPath: './.env',
 
   // Operational
-  blacklistFilePath: './data/blacklist.json',
+  blacklistFilePath: './data/.vault-blacklist.json',
   retryIntervalMs: 60000,
   maxFailureDurationMs: 3600000,
   ssePort: 3001

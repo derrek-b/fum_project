@@ -1,5 +1,22 @@
 # F.U.M. Project Changelog
 
+## [1.0.2] - 2025-12-09
+
+### Railway Deployment Fixes
+
+#### **Configuration**
+- **FIXED**: Default `blacklistFilePath` changed from `./data/blacklist.json` to `./data/.vault-blacklist.json` to match actual file location
+
+#### **Deployment**
+- **ADDED**: `nixpacks.toml` for Railway/Nixpacks build configuration
+- **ADDED**: `.npmrc` with `omit=optional` and `omit=dev` for production builds
+- **FIXED**: Railway deployment failing due to macOS-only `fsevents` dependency
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+
+---
+
 ## [1.0.1] - 2025-12-09
 
 ### Node.js 22+ & Deployment Preparation
