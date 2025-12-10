@@ -1,5 +1,23 @@
 # F.U.M. Project Changelog
 
+## [1.0.3] - 2025-12-10
+
+### Railway Volume Support
+
+#### **Data Persistence**
+- **IMPROVED**: `loadBlacklist()` now creates an empty blacklist file if one doesn't exist (supports fresh Railway deployments)
+- **IMPROVED**: `saveBlacklist()` now ensures the data directory exists before writing (supports Railway volume mounts)
+
+#### **Railway Deployment**
+- Service now handles fresh starts gracefully - no pre-existing data files required
+- All data directories (`/data/`, `/data/vaults/`, `/data/vaults/{address}/`) are created automatically on startup
+- Compatible with Railway persistent volumes mounted at `/app/data`
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+
+---
+
 ## [1.0.2] - 2025-12-09
 
 ### Railway Deployment Fixes

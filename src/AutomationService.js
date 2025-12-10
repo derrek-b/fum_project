@@ -1938,8 +1938,9 @@ class AutomationService {
    * @since 1.0.0
    */
   async loadBlacklist() {
+    const blacklistPath = path.resolve(this.blacklistFilePath);
+
     try {
-      const blacklistPath = path.resolve(this.blacklistFilePath);
       const data = await fs.readFile(blacklistPath, 'utf8');
       const parsed = JSON.parse(data);
 
@@ -1958,6 +1959,13 @@ class AutomationService {
 
       console.log(`Loaded ${this.blacklistedVaults.size} blacklisted vaults from ${blacklistPath}`);
     } catch (error) {
+      // If file doesn't exist, create an empty blacklist
+      if (error.code === 'ENOENT') {
+        console.log(`Blacklist file not found at ${blacklistPath}, creating empty blacklist`);
+        this.blacklistedVaults.clear();
+        await this.saveBlacklist();
+        return;
+      }
       console.error('Failed to load blacklist file:', error.message);
       throw new Error(`Blacklist loading failed: ${error.message}`);
     }
@@ -1974,6 +1982,9 @@ class AutomationService {
     try {
       const blacklistPath = path.resolve(this.blacklistFilePath);
       const tempPath = `${blacklistPath}.tmp`;
+
+      // Ensure directory exists
+      await fs.mkdir(path.dirname(blacklistPath), { recursive: true });
 
       const data = {
         version: '1.0',
