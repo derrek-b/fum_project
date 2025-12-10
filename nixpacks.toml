@@ -1,5 +1,5 @@
 [phases.install]
-cmds = ["npm ci --omit=optional --omit=dev"]
+cmds = ["npm install --omit=optional --omit=dev"]
 
 [start]
 cmd = "npm run start"
