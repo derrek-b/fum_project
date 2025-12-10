@@ -20,7 +20,43 @@ const args = process.argv.slice(2);
 const networkArg = args.find(arg => arg.startsWith('--network='));
 const networkName = networkArg ? networkArg.split('=')[1] : 'localhost';
 const contractArg = args.find(arg => arg.startsWith('--contract='));
-const contractName = contractArg ? contractArg.split('=')[1] : 'all'; // Default to deploying all contracts
+const contractList = contractArg ? contractArg.split('=')[1] : 'all'; // Supports: 'all', single contract, or comma-separated list
+
+// Available contracts for deployment
+const AVAILABLE_CONTRACTS = ['VaultFactory', 'BabyStepsStrategy'];
+
+// Help flag
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`
+Usage: node scripts/deploy.js [options]
+
+Options:
+  --network=<name>     Network to deploy to (default: localhost)
+                       Supported: localhost, arbitrum, mainnet, polygon, optimism, base
+  --contract=<names>   Contract(s) to deploy (default: all)
+                       Examples:
+                         --contract=all                           Deploy all contracts
+                         --contract=BabyStepsStrategy             Deploy single contract
+                         --contract=VaultFactory,BabyStepsStrategy Deploy multiple contracts
+  --list               List available contracts
+  --help, -h           Show this help message
+
+Available contracts: ${AVAILABLE_CONTRACTS.join(', ')}
+
+Examples:
+  node scripts/deploy.js --network=localhost
+  node scripts/deploy.js --network=arbitrum --contract=BabyStepsStrategy
+  node scripts/deploy.js --network=arbitrum --contract=VaultFactory,BabyStepsStrategy
+`);
+  process.exit(0);
+}
+
+// List flag
+if (args.includes('--list')) {
+  console.log('Available contracts for deployment:');
+  AVAILABLE_CONTRACTS.forEach(c => console.log(`  - ${c}`));
+  process.exit(0);
+}
 
 // Library path for updating deployment addresses
 const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
@@ -264,13 +300,21 @@ async function deploy() {
 
   // Determine which contracts to deploy
   let contractsToDeploy = [];
-  if (contractName === 'all') {
+  if (contractList === 'all') {
     // Deploy all contracts
-    contractsToDeploy = ['VaultFactory', 'BabyStepsStrategy'];
+    contractsToDeploy = [...AVAILABLE_CONTRACTS];
   } else {
-    // Deploy only the specified contract
-    contractsToDeploy = [contractName];
+    // Parse comma-separated list
+    contractsToDeploy = contractList.split(',').map(c => c.trim());
+
+    // Validate all requested contracts exist
+    const invalidContracts = contractsToDeploy.filter(c => !AVAILABLE_CONTRACTS.includes(c));
+    if (invalidContracts.length > 0) {
+      throw new Error(`Unknown contract(s): ${invalidContracts.join(', ')}. Available: ${AVAILABLE_CONTRACTS.join(', ')}`);
+    }
   }
+
+  console.log(`\nContracts to deploy: ${contractsToDeploy.join(', ')}\n`);
 
   // Deploy each contract
   for (const contract of contractsToDeploy) {

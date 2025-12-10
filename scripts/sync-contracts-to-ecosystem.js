@@ -22,6 +22,11 @@ const CORE_CONTRACTS = [
   'PositionVault'
 ];
 
+// Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)
+const TESTING_ONLY_CONTRACTS = [
+  'ParrisIslandStrategy'
+];
+
 // Project paths
 const PROJECTS = {
   fum_testing: path.resolve(__dirname, '../../fum_testing'),
@@ -49,12 +54,12 @@ async function syncContractsToEcosystem() {
     
     // Step 3: Extract bytecode to fum/bytecode
     console.log('📦 Step 3: Extracting bytecode from compiled artifacts...');
-    execSync('npm run script scripts/extract-bytecode.js', { cwd: __dirname + '/..' });
+    execSync('node scripts/extract-bytecode.js', { cwd: __dirname + '/..' });
     console.log('✅ Bytecode extracted to fum/bytecode\n');
-    
+
     // Step 4: Extract ABIs to fum_library (core contracts only)
     console.log('📋 Step 4: Extracting ABIs to fum_library...');
-    execSync('npm run script scripts/extract-abis.js', { cwd: __dirname + '/..' });
+    execSync('node scripts/extract-abis.js', { cwd: __dirname + '/..' });
     console.log('✅ Core contract ABIs extracted to fum_library\n');
     
     // Step 5: Distribute bytecode to fum_library
@@ -176,11 +181,12 @@ async function syncSourceFilesToTesting() {
     fs.mkdirSync(contractsTargetDir, { recursive: true });
   }
 
-  // Copy only production contracts (CORE_CONTRACTS)
-  console.log('  Copying production contracts...');
+  // Copy production contracts (CORE_CONTRACTS) and testing-only contracts (TESTING_ONLY_CONTRACTS)
+  const allContractsToSync = [...CORE_CONTRACTS, ...TESTING_ONLY_CONTRACTS];
+  console.log('  Copying contracts...');
   let contractCount = 0;
 
-  for (const contractName of CORE_CONTRACTS) {
+  for (const contractName of allContractsToSync) {
     const sourceFile = path.join(sourceDir, 'contracts', `${contractName}.sol`);
     const targetFile = path.join(contractsTargetDir, `${contractName}.sol`);
 
@@ -192,7 +198,7 @@ async function syncSourceFilesToTesting() {
       console.warn(`  ⚠️ Warning: ${sourceFile} not found`);
     }
   }
-  console.log(`  📦 Synced ${contractCount}/${CORE_CONTRACTS.length} production contracts`);
+  console.log(`  📦 Synced ${contractCount}/${allContractsToSync.length} contracts (${CORE_CONTRACTS.length} production + ${TESTING_ONLY_CONTRACTS.length} testing-only)`);
 }
 
 /**

@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  */
 contract ParrisIslandStrategy is Ownable {
     // Version information
-    string public constant VERSION = "1.0.0";
+    string public constant VERSION = "0.2.0";
 
     // ==================== Events ====================
     event ParameterUpdated(address indexed vault, string paramName);
@@ -28,14 +28,27 @@ contract ParrisIslandStrategy is Ownable {
         _;
     }
 
-    // Functions to manage vault authorization
-    function authorizeVault(address vault) external onlyOwner {
+    // Functions to manage vault authorization - only vault owners can authorize their own vaults
+    function authorizeVault(address vault) external {
         require(vault != address(0), "ParrisIslandStrategy: zero vault address");
+
+        // Verify caller is the vault owner
+        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
+        require(success && data.length == 32, "ParrisIslandStrategy: failed to get vault owner");
+        address vaultOwner = abi.decode(data, (address));
+        require(msg.sender == vaultOwner, "ParrisIslandStrategy: caller is not vault owner");
+
         authorizedVaults[vault] = true;
         emit VaultAuthorized(vault, true);
     }
 
-    function deauthorizeVault(address vault) external onlyOwner {
+    function deauthorizeVault(address vault) external {
+        // Verify caller is the vault owner
+        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
+        require(success && data.length == 32, "ParrisIslandStrategy: failed to get vault owner");
+        address vaultOwner = abi.decode(data, (address));
+        require(msg.sender == vaultOwner, "ParrisIslandStrategy: caller is not vault owner");
+
         authorizedVaults[vault] = false;
         emit VaultAuthorized(vault, false);
     }

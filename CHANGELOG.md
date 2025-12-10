@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2025-12-10
+
+### Strategy Authorization Fix
+
+Fixed authorization model for strategy contracts - vault owners can now authorize their own vaults.
+
+#### **Smart Contract Changes**
+- **FIXED**: `BabyStepsStrategy` v1.0.0 → v1.1.0
+  - `authorizeVault()` and `deauthorizeVault()` now check vault owner via staticcall
+  - Removed `onlyOwner` restriction - only vault owners can authorize/deauthorize their own vaults
+  - This fixes the `OwnableUnauthorizedAccount` error when configuring strategies
+- **FIXED**: `ParrisIslandStrategy` v0.1.0 → v0.2.0
+  - Same authorization fix applied
+
+#### **Build System**
+- **FIXED**: `sync-contracts-to-ecosystem.js` - Changed `npm run script` to `node` (script command was removed with tsx dependency)
+- **ADDED**: `ParrisIslandStrategy` to sync script's testing-only contracts list
+
+#### **Tests**
+- **REFACTORED**: `BabyStepsStrategy.test.js` - Now uses real vault contracts via `vault.execute()` instead of signers
+- **REFACTORED**: `ParrisIslandStrategy.test.js` - Same refactor applied
+- **UPDATED**: Version tests to expect new contract versions
+
+**Status**: ⚠️ Requires contract redeployment
+**Breaking Changes**: Strategy contracts must be redeployed (authorization model changed)
+**Impact**: Fixes strategy configuration in production
+
+---
+
 ## [1.0.1] - 2025-12-09
 
 ### Node.js 22+ & Deployment Preparation
