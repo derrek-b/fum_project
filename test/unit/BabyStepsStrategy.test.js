@@ -3,11 +3,15 @@ const { ethers } = require('hardhat');
 
 describe("BabyStepsStrategy", function () {
   let strategy;
+  let strategyAddress;
+  let factory;
   let owner;
   let user1;
   let user2;
-  let vault1;
-  let vault2;
+  let vault1Contract;
+  let vault2Contract;
+  let vault1Address;
+  let vault2Address;
 
   // ==================== Template Constants ====================
   // Conservative template values - WIDER ranges, fewer rebalances
@@ -67,74 +71,159 @@ describe("BabyStepsStrategy", function () {
     Stablecoin: 4
   };
 
-  beforeEach(async function () {
-    [owner, user1, user2, vault1, vault2] = await ethers.getSigners();
+  // Strategy function interface for encoding calls
+  const strategyInterface = new ethers.Interface([
+    "function selectTemplate(uint8 template)",
+    "function setRangeParameters(uint16 upperRange, uint16 lowerRange, uint16 upperThreshold, uint16 lowerThreshold)",
+    "function setFeeParameters(bool reinvest, uint256 trigger, uint16 ratio)",
+    "function setRiskParameters(uint16 slippage, uint16 exitTrigger, uint16 utilization)",
+    "function resetToTemplate()",
+    "function resetAll()"
+  ]);
 
+  // Helper to execute strategy calls through vault
+  async function executeOnStrategy(vault, vaultOwner, functionName, args) {
+    const data = strategyInterface.encodeFunctionData(functionName, args);
+    return vault.connect(vaultOwner).execute([strategyAddress], [data]);
+  }
+
+  beforeEach(async function () {
+    [owner, user1, user2] = await ethers.getSigners();
+
+    // Deploy MockUniversalRouter
+    const MockUniversalRouter = await ethers.getContractFactory("MockUniversalRouter");
+    const router = await MockUniversalRouter.deploy();
+    await router.waitForDeployment();
+
+    // Deploy VaultFactory
+    const VaultFactory = await ethers.getContractFactory("VaultFactory");
+    factory = await VaultFactory.deploy(
+      owner.address,
+      await router.getAddress(),
+      "0x000000000022D473030F116dDEE9F6B43aC78BA3", // permit2
+      "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"  // nonfungiblePositionManager
+    );
+    await factory.waitForDeployment();
+
+    // Deploy BabyStepsStrategy
     const StrategyFactory = await ethers.getContractFactory("BabyStepsStrategy");
     strategy = await StrategyFactory.deploy();
     await strategy.waitForDeployment();
+    strategyAddress = await strategy.getAddress();
 
-    // Authorize vault1 and vault2 as valid vaults
-    await strategy.authorizeVault(vault1.address);
-    await strategy.authorizeVault(vault2.address);
+    // Create vault1 owned by user1
+    let tx = await factory.connect(user1).createVault("Test Vault 1");
+    let receipt = await tx.wait();
+    vault1Address = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+    vault1Contract = await ethers.getContractAt("PositionVault", vault1Address);
+
+    // Create vault2 owned by user2
+    tx = await factory.connect(user2).createVault("Test Vault 2");
+    receipt = await tx.wait();
+    vault2Address = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+    vault2Contract = await ethers.getContractAt("PositionVault", vault2Address);
+
+    // Authorize vaults (called by vault owners)
+    await strategy.connect(user1).authorizeVault(vault1Address);
+    await strategy.connect(user2).authorizeVault(vault2Address);
   });
 
   describe("Authorization", function() {
-    it("Should allow owner to authorize vaults", async function() {
-      const newVault = user1.address;
-      await strategy.authorizeVault(newVault);
-      expect(await strategy.authorizedVaults(newVault)).to.equal(true);
+    it("Should allow vault owner to authorize their vault", async function() {
+      // Create a new vault owned by user1
+      const tx = await factory.connect(user1).createVault("New Vault");
+      const receipt = await tx.wait();
+      const newVaultAddress = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+
+      // user1 (vault owner) authorizes the new vault
+      await strategy.connect(user1).authorizeVault(newVaultAddress);
+      expect(await strategy.authorizedVaults(newVaultAddress)).to.equal(true);
     });
 
-    it("Should allow owner to deauthorize vaults", async function() {
-      await strategy.deauthorizeVault(vault1.address);
-      expect(await strategy.authorizedVaults(vault1.address)).to.equal(false);
+    it("Should allow vault owner to deauthorize their vault", async function() {
+      await strategy.connect(user1).deauthorizeVault(vault1Address);
+      expect(await strategy.authorizedVaults(vault1Address)).to.equal(false);
+    });
+
+    it("Should fail when non-owner tries to authorize someone else's vault", async function() {
+      // Create a new vault owned by user1
+      const tx = await factory.connect(user1).createVault("New Vault");
+      const receipt = await tx.wait();
+      const newVaultAddress = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+
+      // user2 (NOT the vault owner) tries to authorize user1's vault
+      await expect(
+        strategy.connect(user2).authorizeVault(newVaultAddress)
+      ).to.be.revertedWith("BabyStepsStrategy: caller is not vault owner");
+    });
+
+    it("Should fail when non-owner tries to deauthorize someone else's vault", async function() {
+      // user2 tries to deauthorize vault1 (owned by user1)
+      await expect(
+        strategy.connect(user2).deauthorizeVault(vault1Address)
+      ).to.be.revertedWith("BabyStepsStrategy: caller is not vault owner");
     });
 
     it("Should fail when unauthorized vault tries to set parameters", async function() {
+      // Create a new vault but don't authorize it
+      const tx = await factory.connect(user1).createVault("Unauthorized Vault");
+      const receipt = await tx.wait();
+      const unauthorizedVaultAddress = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+      const unauthorizedVault = await ethers.getContractAt("PositionVault", unauthorizedVaultAddress);
+
+      // Try to set parameters through the unauthorized vault
+      const data = strategyInterface.encodeFunctionData("setRangeParameters", [600, 400, 120, 80]);
       await expect(
-        strategy.connect(user1).setRangeParameters(600, 400, 120, 80)
-      ).to.be.revertedWith("BabyStepsStrategy: caller is not an authorized vault");
+        unauthorizedVault.connect(user1).execute([strategyAddress], [data])
+      ).to.be.revertedWith("PositionVault: transaction failed");
     });
 
     it("Should fail when unauthorized vault tries to select template", async function() {
+      // Create a new vault but don't authorize it
+      const tx = await factory.connect(user1).createVault("Unauthorized Vault");
+      const receipt = await tx.wait();
+      const unauthorizedVaultAddress = receipt.logs.find(log => log.fragment?.name === 'VaultCreated').args[1];
+      const unauthorizedVault = await ethers.getContractAt("PositionVault", unauthorizedVaultAddress);
+
+      // Try to select template through the unauthorized vault
+      const data = strategyInterface.encodeFunctionData("selectTemplate", [Template.Conservative]);
       await expect(
-        strategy.connect(user1).selectTemplate(Template.Conservative)
-      ).to.be.revertedWith("BabyStepsStrategy: caller is not an authorized vault");
+        unauthorizedVault.connect(user1).execute([strategyAddress], [data])
+      ).to.be.revertedWith("PositionVault: transaction failed");
     });
   });
 
   describe("Template Selection", function () {
     it("Should set default template to None", async function () {
-      const template = await strategy.selectedTemplate(vault1.address);
+      const template = await strategy.selectedTemplate(vault1Address);
       expect(template).to.equal(Template.None);
     });
 
     it("Should select Conservative template", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Conservative);
-      const template = await strategy.selectedTemplate(vault1.address);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Conservative]);
+      const template = await strategy.selectedTemplate(vault1Address);
       expect(template).to.equal(Template.Conservative);
     });
 
     it("Should select Stablecoin template", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Stablecoin);
-      const template = await strategy.selectedTemplate(vault1.address);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Stablecoin]);
+      const template = await strategy.selectedTemplate(vault1Address);
       expect(template).to.equal(Template.Stablecoin);
     });
 
     it("Should clear customization bitmap when selecting template", async function () {
       // First set a custom parameter
-      await strategy.connect(vault1).setRangeParameters(1000, 1000, 100, 100);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 100, 100]);
 
       // Verify bitmap is non-zero
-      const bitmapBefore = await strategy.customizationBitmap(vault1.address);
+      const bitmapBefore = await strategy.customizationBitmap(vault1Address);
       expect(bitmapBefore).to.not.equal(0n);
 
       // Select a template
-      await strategy.connect(vault1).selectTemplate(Template.Moderate);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Moderate]);
 
       // Verify bitmap is cleared
-      const bitmapAfter = await strategy.customizationBitmap(vault1.address);
+      const bitmapAfter = await strategy.customizationBitmap(vault1Address);
       expect(bitmapAfter).to.equal(0n);
     });
   });
@@ -142,80 +231,80 @@ describe("BabyStepsStrategy", function () {
   describe("Parameter Getters", function () {
     it("Should return moderate template values by default", async function () {
       // Range parameters
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(MOD_TARGET_RANGE_UPPER);
-      expect(await strategy.getTargetRangeLower(vault1.address)).to.equal(MOD_TARGET_RANGE_LOWER);
-      expect(await strategy.getRebalanceThresholdUpper(vault1.address)).to.equal(MOD_REBALANCE_THRESHOLD_UPPER);
-      expect(await strategy.getRebalanceThresholdLower(vault1.address)).to.equal(MOD_REBALANCE_THRESHOLD_LOWER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(MOD_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(MOD_TARGET_RANGE_LOWER);
+      expect(await strategy.getRebalanceThresholdUpper(vault1Address)).to.equal(MOD_REBALANCE_THRESHOLD_UPPER);
+      expect(await strategy.getRebalanceThresholdLower(vault1Address)).to.equal(MOD_REBALANCE_THRESHOLD_LOWER);
 
       // Fee parameters
-      expect(await strategy.getFeeReinvestment(vault1.address)).to.equal(MOD_FEE_REINVESTMENT);
-      expect(await strategy.getReinvestmentTrigger(vault1.address)).to.equal(MOD_REINVESTMENT_TRIGGER);
-      expect(await strategy.getReinvestmentRatio(vault1.address)).to.equal(MOD_REINVESTMENT_RATIO);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(MOD_FEE_REINVESTMENT);
+      expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(MOD_REINVESTMENT_TRIGGER);
+      expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(MOD_REINVESTMENT_RATIO);
 
       // Risk parameters
-      expect(await strategy.getMaxSlippage(vault1.address)).to.equal(MOD_MAX_SLIPPAGE);
-      expect(await strategy.getEmergencyExitTrigger(vault1.address)).to.equal(MOD_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1.address)).to.equal(MOD_MAX_UTILIZATION);
+      expect(await strategy.getMaxSlippage(vault1Address)).to.equal(MOD_MAX_SLIPPAGE);
+      expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(MOD_EMERGENCY_EXIT_TRIGGER);
+      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(MOD_MAX_UTILIZATION);
     });
 
     it("Should return conservative template values when selected", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Conservative);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Conservative]);
 
       // Range parameters
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(CONS_TARGET_RANGE_UPPER);
-      expect(await strategy.getTargetRangeLower(vault1.address)).to.equal(CONS_TARGET_RANGE_LOWER);
-      expect(await strategy.getRebalanceThresholdUpper(vault1.address)).to.equal(CONS_REBALANCE_THRESHOLD_UPPER);
-      expect(await strategy.getRebalanceThresholdLower(vault1.address)).to.equal(CONS_REBALANCE_THRESHOLD_LOWER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(CONS_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(CONS_TARGET_RANGE_LOWER);
+      expect(await strategy.getRebalanceThresholdUpper(vault1Address)).to.equal(CONS_REBALANCE_THRESHOLD_UPPER);
+      expect(await strategy.getRebalanceThresholdLower(vault1Address)).to.equal(CONS_REBALANCE_THRESHOLD_LOWER);
 
       // Fee parameters
-      expect(await strategy.getFeeReinvestment(vault1.address)).to.equal(CONS_FEE_REINVESTMENT);
-      expect(await strategy.getReinvestmentTrigger(vault1.address)).to.equal(CONS_REINVESTMENT_TRIGGER);
-      expect(await strategy.getReinvestmentRatio(vault1.address)).to.equal(CONS_REINVESTMENT_RATIO);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(CONS_FEE_REINVESTMENT);
+      expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(CONS_REINVESTMENT_TRIGGER);
+      expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(CONS_REINVESTMENT_RATIO);
 
       // Risk parameters
-      expect(await strategy.getMaxSlippage(vault1.address)).to.equal(CONS_MAX_SLIPPAGE);
-      expect(await strategy.getEmergencyExitTrigger(vault1.address)).to.equal(CONS_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1.address)).to.equal(CONS_MAX_UTILIZATION);
+      expect(await strategy.getMaxSlippage(vault1Address)).to.equal(CONS_MAX_SLIPPAGE);
+      expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(CONS_EMERGENCY_EXIT_TRIGGER);
+      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(CONS_MAX_UTILIZATION);
     });
 
     it("Should return aggressive template values when selected", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Aggressive);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Aggressive]);
 
       // Range parameters
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(AGG_TARGET_RANGE_UPPER);
-      expect(await strategy.getTargetRangeLower(vault1.address)).to.equal(AGG_TARGET_RANGE_LOWER);
-      expect(await strategy.getRebalanceThresholdUpper(vault1.address)).to.equal(AGG_REBALANCE_THRESHOLD_UPPER);
-      expect(await strategy.getRebalanceThresholdLower(vault1.address)).to.equal(AGG_REBALANCE_THRESHOLD_LOWER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(AGG_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(AGG_TARGET_RANGE_LOWER);
+      expect(await strategy.getRebalanceThresholdUpper(vault1Address)).to.equal(AGG_REBALANCE_THRESHOLD_UPPER);
+      expect(await strategy.getRebalanceThresholdLower(vault1Address)).to.equal(AGG_REBALANCE_THRESHOLD_LOWER);
 
       // Fee parameters
-      expect(await strategy.getFeeReinvestment(vault1.address)).to.equal(AGG_FEE_REINVESTMENT);
-      expect(await strategy.getReinvestmentTrigger(vault1.address)).to.equal(AGG_REINVESTMENT_TRIGGER);
-      expect(await strategy.getReinvestmentRatio(vault1.address)).to.equal(AGG_REINVESTMENT_RATIO);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(AGG_FEE_REINVESTMENT);
+      expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(AGG_REINVESTMENT_TRIGGER);
+      expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(AGG_REINVESTMENT_RATIO);
 
       // Risk parameters
-      expect(await strategy.getMaxSlippage(vault1.address)).to.equal(AGG_MAX_SLIPPAGE);
-      expect(await strategy.getEmergencyExitTrigger(vault1.address)).to.equal(AGG_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1.address)).to.equal(AGG_MAX_UTILIZATION);
+      expect(await strategy.getMaxSlippage(vault1Address)).to.equal(AGG_MAX_SLIPPAGE);
+      expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(AGG_EMERGENCY_EXIT_TRIGGER);
+      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(AGG_MAX_UTILIZATION);
     });
 
     it("Should return stablecoin template values when selected", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Stablecoin);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Stablecoin]);
 
       // Range parameters
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(STBL_TARGET_RANGE_UPPER);
-      expect(await strategy.getTargetRangeLower(vault1.address)).to.equal(STBL_TARGET_RANGE_LOWER);
-      expect(await strategy.getRebalanceThresholdUpper(vault1.address)).to.equal(STBL_REBALANCE_THRESHOLD_UPPER);
-      expect(await strategy.getRebalanceThresholdLower(vault1.address)).to.equal(STBL_REBALANCE_THRESHOLD_LOWER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(STBL_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(STBL_TARGET_RANGE_LOWER);
+      expect(await strategy.getRebalanceThresholdUpper(vault1Address)).to.equal(STBL_REBALANCE_THRESHOLD_UPPER);
+      expect(await strategy.getRebalanceThresholdLower(vault1Address)).to.equal(STBL_REBALANCE_THRESHOLD_LOWER);
 
       // Fee parameters
-      expect(await strategy.getFeeReinvestment(vault1.address)).to.equal(STBL_FEE_REINVESTMENT);
-      expect(await strategy.getReinvestmentTrigger(vault1.address)).to.equal(STBL_REINVESTMENT_TRIGGER);
-      expect(await strategy.getReinvestmentRatio(vault1.address)).to.equal(STBL_REINVESTMENT_RATIO);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(STBL_FEE_REINVESTMENT);
+      expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(STBL_REINVESTMENT_TRIGGER);
+      expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(STBL_REINVESTMENT_RATIO);
 
       // Risk parameters
-      expect(await strategy.getMaxSlippage(vault1.address)).to.equal(STBL_MAX_SLIPPAGE);
-      expect(await strategy.getEmergencyExitTrigger(vault1.address)).to.equal(STBL_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1.address)).to.equal(STBL_MAX_UTILIZATION);
+      expect(await strategy.getMaxSlippage(vault1Address)).to.equal(STBL_MAX_SLIPPAGE);
+      expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(STBL_EMERGENCY_EXIT_TRIGGER);
+      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(STBL_MAX_UTILIZATION);
     });
 
     it("Should return customized values when parameters are customized", async function () {
@@ -224,32 +313,28 @@ describe("BabyStepsStrategy", function () {
       const customRangeLower = 2345;
 
       // First select template
-      await strategy.connect(vault1).selectTemplate(Template.Conservative);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Conservative]);
 
       // Then customize parameters
-      await strategy.connect(vault1).setRangeParameters(
-        customRangeUpper, customRangeLower, 100, 100
-      );
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [customRangeUpper, customRangeLower, 100, 100]);
 
       // Should return custom values
-      const rangeUpper = await strategy.getTargetRangeUpper(vault1.address);
-      const rangeLower = await strategy.getTargetRangeLower(vault1.address);
+      const rangeUpper = await strategy.getTargetRangeUpper(vault1Address);
+      const rangeLower = await strategy.getTargetRangeLower(vault1Address);
 
       expect(rangeUpper).to.equal(customRangeUpper);
       expect(rangeLower).to.equal(customRangeLower);
     });
 
     it("Should return all parameters with template fallbacks", async function () {
-      await strategy.connect(vault1).selectTemplate(Template.Moderate);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Moderate]);
 
       // Set just one custom parameter
       const customSlippage = 75;
-      await strategy.connect(vault1).setRiskParameters(
-        customSlippage, 1500, 8000
-      );
+      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [customSlippage, 1500, 8000]);
 
       // Get all parameters
-      const params = await strategy.getAllParameters(vault1.address);
+      const params = await strategy.getAllParameters(vault1Address);
 
       // Check template values and custom values are all returned
       expect(params[0]).to.equal(MOD_TARGET_RANGE_UPPER); // Template value
@@ -264,18 +349,16 @@ describe("BabyStepsStrategy", function () {
       const upperThreshold = 120;
       const lowerThreshold = 80;
 
-      await strategy.connect(vault1).setRangeParameters(
-        upperRange, lowerRange, upperThreshold, lowerThreshold
-      );
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [upperRange, lowerRange, upperThreshold, lowerThreshold]);
 
       // Check values were set
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(upperRange);
-      expect(await strategy.getTargetRangeLower(vault1.address)).to.equal(lowerRange);
-      expect(await strategy.getRebalanceThresholdUpper(vault1.address)).to.equal(upperThreshold);
-      expect(await strategy.getRebalanceThresholdLower(vault1.address)).to.equal(lowerThreshold);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(upperRange);
+      expect(await strategy.getTargetRangeLower(vault1Address)).to.equal(lowerRange);
+      expect(await strategy.getRebalanceThresholdUpper(vault1Address)).to.equal(upperThreshold);
+      expect(await strategy.getRebalanceThresholdLower(vault1Address)).to.equal(lowerThreshold);
 
       // Check bitmap was updated
-      const bitmap = await strategy.customizationBitmap(vault1.address);
+      const bitmap = await strategy.customizationBitmap(vault1Address);
       // Check if bits 0-3 are set (15 = 0b1111)
       expect(bitmap & 15n).to.equal(15n);
     });
@@ -285,17 +368,15 @@ describe("BabyStepsStrategy", function () {
       const trigger = ethers.parseEther("100");
       const ratio = 7500;
 
-      await strategy.connect(vault1).setFeeParameters(
-        reinvest, trigger, ratio
-      );
+      await executeOnStrategy(vault1Contract, user1, "setFeeParameters", [reinvest, trigger, ratio]);
 
       // Check values were set
-      expect(await strategy.getFeeReinvestment(vault1.address)).to.equal(reinvest);
-      expect(await strategy.getReinvestmentTrigger(vault1.address)).to.equal(trigger);
-      expect(await strategy.getReinvestmentRatio(vault1.address)).to.equal(ratio);
+      expect(await strategy.getFeeReinvestment(vault1Address)).to.equal(reinvest);
+      expect(await strategy.getReinvestmentTrigger(vault1Address)).to.equal(trigger);
+      expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(ratio);
 
       // Check bitmap was updated
-      const bitmap = await strategy.customizationBitmap(vault1.address);
+      const bitmap = await strategy.customizationBitmap(vault1Address);
       // Check if bits 4-6 are set (112 = 0b1110000)
       expect(bitmap & 112n).to.equal(112n);
     });
@@ -305,69 +386,67 @@ describe("BabyStepsStrategy", function () {
       const exitTrigger = 1200;
       const utilization = 7000;
 
-      await strategy.connect(vault1).setRiskParameters(
-        slippage, exitTrigger, utilization
-      );
+      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [slippage, exitTrigger, utilization]);
 
       // Check values were set
-      expect(await strategy.getMaxSlippage(vault1.address)).to.equal(slippage);
-      expect(await strategy.getEmergencyExitTrigger(vault1.address)).to.equal(exitTrigger);
-      expect(await strategy.getMaxUtilization(vault1.address)).to.equal(utilization);
+      expect(await strategy.getMaxSlippage(vault1Address)).to.equal(slippage);
+      expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(exitTrigger);
+      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(utilization);
 
       // Check bitmap was updated
-      const bitmap = await strategy.customizationBitmap(vault1.address);
+      const bitmap = await strategy.customizationBitmap(vault1Address);
       // Check if bits 7-9 are set (896 = 0b1110000000)
       expect(bitmap & 896n).to.equal(896n);
     });
 
     it("Should allow multiple vaults to have independent parameters", async function () {
       // Vault 1 sets parameters
-      await strategy.connect(vault1).setRangeParameters(600, 400, 120, 80);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400, 120, 80]);
 
       // Vault 2 sets different parameters
-      await strategy.connect(vault2).setRangeParameters(300, 300, 100, 100);
+      await executeOnStrategy(vault2Contract, user2, "setRangeParameters", [300, 300, 100, 100]);
 
       // Check values are independent
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(600);
-      expect(await strategy.getTargetRangeUpper(vault2.address)).to.equal(300);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(600);
+      expect(await strategy.getTargetRangeUpper(vault2Address)).to.equal(300);
     });
   });
 
   describe("Reset Functions", function () {
     it("Should reset to template defaults", async function () {
       // Select template
-      await strategy.connect(vault1).selectTemplate(Template.Conservative);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Conservative]);
 
       // Set custom parameters
-      await strategy.connect(vault1).setRangeParameters(1000, 1000, 200, 200);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 200, 200]);
 
       // Reset to template
-      await strategy.connect(vault1).resetToTemplate();
+      await executeOnStrategy(vault1Contract, user1, "resetToTemplate", []);
 
       // Check values returned to template defaults
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(CONS_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(CONS_TARGET_RANGE_UPPER);
 
       // Check bitmap was cleared
-      const bitmap = await strategy.customizationBitmap(vault1.address);
+      const bitmap = await strategy.customizationBitmap(vault1Address);
       expect(bitmap).to.equal(0n);
     });
 
     it("Should reset all parameters to moderate defaults", async function () {
       // Select template and set custom values
-      await strategy.connect(vault1).selectTemplate(Template.Conservative);
-      await strategy.connect(vault1).setRangeParameters(1000, 1000, 200, 200);
+      await executeOnStrategy(vault1Contract, user1, "selectTemplate", [Template.Conservative]);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 200, 200]);
 
       // Reset all
-      await strategy.connect(vault1).resetAll();
+      await executeOnStrategy(vault1Contract, user1, "resetAll", []);
 
       // Check template was reset to None
-      expect(await strategy.selectedTemplate(vault1.address)).to.equal(Template.None);
+      expect(await strategy.selectedTemplate(vault1Address)).to.equal(Template.None);
 
       // Check values returned to moderate defaults
-      expect(await strategy.getTargetRangeUpper(vault1.address)).to.equal(MOD_TARGET_RANGE_UPPER);
+      expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(MOD_TARGET_RANGE_UPPER);
 
       // Check bitmap was cleared
-      const bitmap = await strategy.customizationBitmap(vault1.address);
+      const bitmap = await strategy.customizationBitmap(vault1Address);
       expect(bitmap).to.equal(0n);
     });
   });
@@ -375,7 +454,7 @@ describe("BabyStepsStrategy", function () {
   describe("Admin Functions", function () {
     it("Should return correct version", async function () {
       const version = await strategy.getVersion();
-      expect(version).to.equal("1.0.0");
+      expect(version).to.equal("1.1.0");
     });
   });
 });
