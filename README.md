@@ -155,6 +155,9 @@ Copy `.env.example` to `.env.local` and configure:
 # Demo page showcase address (required for demo page)
 NEXT_PUBLIC_DEMO_ADDRESS=0x...
 
+# Demo page chain ID (1337 for local, 42161 for Arbitrum)
+NEXT_PUBLIC_DEMO_CHAIN_ID=1337
+
 # Automation service SSE endpoint
 NEXT_PUBLIC_SSE_URL=http://your-automation-service:port/events
 

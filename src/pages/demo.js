@@ -14,8 +14,9 @@ import { getChainConfig, getChainRpcUrls } from "fum_library/helpers/chainHelper
 import { getUserVaults, getVaultInfo } from 'fum_library/blockchain/contracts';
 import { Wifi, WifiOff } from 'lucide-react';
 
-// Demo address from environment variable
+// Demo configuration from environment variables
 const DEMO_ADDRESS = process.env.NEXT_PUBLIC_DEMO_ADDRESS;
+const DEMO_CHAIN_ID = parseInt(process.env.NEXT_PUBLIC_DEMO_CHAIN_ID, 10);
 
 /**
  * Format currency value
@@ -60,12 +61,17 @@ export default function DemoPage() {
         return;
       }
 
+      if (!DEMO_CHAIN_ID || isNaN(DEMO_CHAIN_ID)) {
+        setError("Demo chain ID not configured. Please set NEXT_PUBLIC_DEMO_CHAIN_ID in environment.");
+        setIsLoading(false);
+        return;
+      }
+
       try {
         setIsLoading(true);
 
-        // Create a read-only provider using chain config (local dev chain 1337)
-        const demoChainId = 1337;
-        const rpcUrls = getChainRpcUrls(demoChainId);
+        // Create a read-only provider using chain config
+        const rpcUrls = getChainRpcUrls(DEMO_CHAIN_ID);
         const readProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
         setProvider(readProvider);
 

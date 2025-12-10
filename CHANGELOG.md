@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2025-12-10
+
+### Demo Page Chain Configuration
+
+Added configurable chain ID for demo page to support both local testing and production.
+
+#### **Demo Page**
+- **ADDED**: `NEXT_PUBLIC_DEMO_CHAIN_ID` environment variable
+- **FIXED**: Demo page no longer hardcoded to localhost (chain 1337)
+- **UPDATED**: All env files with new variable (`.env.local`, `.env.example`, `.env.vercel.arbitrum`)
+
+#### **Documentation**
+- **UPDATED**: README.md with new environment variable
+- **UPDATED**: TESTING.md with new environment variable
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None (new env var required for demo page)
+
+---
+
 ## [1.0.2] - 2025-12-10
 
 ### Strategy Authorization Fix
@@ -30,9 +50,11 @@ Fixed authorization model for strategy contracts - vault owners can now authoriz
 - **REFACTORED**: `ParrisIslandStrategy.test.js` - Same refactor applied
 - **UPDATED**: Version tests to expect new contract versions
 
-**Status**: ⚠️ Requires contract redeployment
-**Breaking Changes**: Strategy contracts must be redeployed (authorization model changed)
-**Impact**: Fixes strategy configuration in production
+#### **Deployment**
+- **DEPLOYED**: BabyStepsStrategy v1.1.0 to Arbitrum: `0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27`
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: Strategy contracts redeployed (authorization model changed)
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "fum",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "Derrek Brack & Claude Code",
   "license": "SEE LICENSE IN LICENSE.md",
   "description": "Front end for the full F.U.M. liquidity position management & automation app",
