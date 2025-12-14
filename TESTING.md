@@ -5,7 +5,7 @@ This document describes the full integration testing setup for the F.U.M. ecosys
 ## Overview
 
 Full integration testing simulates the complete F.U.M. workflow:
-1. A forked Arbitrum blockchain running locally via Ganache
+1. A forked Arbitrum blockchain running locally via Hardhat
 2. Deployed smart contracts (VaultFactory, PositionVault, Strategies)
 3. The automation service monitoring and managing positions
 4. The frontend for user interaction
@@ -17,7 +17,7 @@ Full integration testing simulates the complete F.U.M. workflow:
 
    Terminal 1                Terminal 2              Terminal 3              Terminal 4
 ┌──────────────┐         ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
-│   Ganache    │         │ fum_library  │        │fum_automation│        │     fum      │
+│   Hardhat    │         │ fum_library  │        │fum_automation│        │     fum      │
 │  (Blockchain)│◄───────►│   (Shared)   │◄──────►│  (Backend)   │◄──────►│  (Frontend)  │
 │              │         │              │        │              │        │              │
 │ Arbitrum Fork│         │ ABIs, Helpers│        │ SSE Events   │        │ React UI     │
@@ -65,7 +65,7 @@ NEXT_PUBLIC_ALCHEMY_API_KEY=your_alchemy_api_key
 CHAIN_ID=1337
 WS_URL=ws://localhost:8545
 
-# Executor wallet (Ganache account #4) - funded by seed.js
+# Executor wallet (Hardhat account #4) - funded by seed.js
 # Address: 0xabA472B2EA519490EE10E643A422D578a507197A
 AUTOMATION_PRIVATE_KEY=0x153b8bcb033769a3f3d51b6c2c99be54e76ea190a20752a308a7ec0873383470
 
@@ -82,16 +82,16 @@ THEGRAPH_API_KEY=your_thegraph_api_key
 
 ## Quick Start
 
-### Step 1: Start Ganache (Arbitrum Fork)
+### Step 1: Start Hardhat (Arbitrum Fork)
 
 This starts a local blockchain forked from Arbitrum mainnet:
 
 ```bash
 cd fum
-npm run ganache
+npm run hardhat
 ```
 
-Ganache will:
+Hardhat will:
 - Fork Arbitrum at a recent block
 - Deploy VaultFactory, PositionVault, and Strategy contracts
 - Update contract addresses in `fum_library` src directory
@@ -114,16 +114,14 @@ This script:
 - Transfers tokens to the vault
 - Executes a couple trades to generate fees to collect for the WETH/USDC position
 
-### Step 3: Set Up fum_library Symlinks (First Time Only)
+### Step 3: Update fum_library (After Contract Deployment)
 
-Full ecosystem testing requires fum and fum_automation to share contract addresses. Symlinks ensure both projects read from the same fum_library:
+After Hardhat deploys contracts, update fum_library so other projects use the new addresses:
 
 ```bash
 cd fum_library
-npm run sync  # Creates symlinks to fum and fum_automation
+npm run pack  # Rebuilds and reinstalls library to fum and fum_automation with new addresses
 ```
-
-After this initial setup, **no additional steps are needed when ganache restarts** - the start-ganache script automatically writes new contract addresses to both `src/` and `dist/`, and the symlinks ensure all projects see the changes immediately.
 
 ### Step 4: Start Automation Service
 
@@ -133,7 +131,7 @@ npm run start
 ```
 
 The automation service will:
-- Connect to the local Ganache node
+- Connect to the local Hardhat node
 - Load existing connected vault configurations
 - Start monitoring for vault blockchain events
 - Expose SSE endpoint at `http://localhost:3001/events`
@@ -150,7 +148,7 @@ npm run dev
 Open `http://localhost:3000` and connect MetaMask:
 
 1. Add a custom network:
-   - Network name: `Ganache Local`
+   - Network name: `Hardhat Local`
    - RPC URL: `http://localhost:8545`
    - Chain ID: `1337`
    - Currency symbol: `ETH`
@@ -192,13 +190,13 @@ npm run generate-fees -- --swaps=300
 >    - **Fee Reinvest Trigger:** $5 (minimum) - allows fee collection to trigger with smaller amounts
 > 4. Enable automation
 >
-> With default or wider range settings, the price manipulation swaps can't move the price enough to trigger rebalances before exhausting liquidity in the Ganache sandbox environment.
+> With default or wider range settings, the price manipulation swaps can't move the price enough to trigger rebalances before exhausting liquidity in the Hardhat sandbox environment.
 
 ### What to Observe
 
 1. **Frontend** - Position status updates via SSE
 2. **Automation logs** - Rebalance triggers and execution
-3. **Ganache console** - Transaction confirmations
+3. **Hardhat console** - Transaction confirmations
 
 ### Testing Checklist
 
@@ -251,26 +249,20 @@ This syncs contracts to `fum_testing/` and runs Hardhat tests. See `fum_testing/
 
 ## Troubleshooting
 
-### Ganache Issues
+### Hardhat Issues
 
 **"Nonce too high" errors:**
 Reset MetaMask account (Settings > Advanced > Clear activity tab data)
 
 **"Contract not deployed" errors:**
-Ganache may have restarted. Re-run `npm run seed-localhost`
+Hardhat may have restarted. Re-run `npm run seed-localhost`
 
-### Library Sync Issues
+### Library Issues
 
 **"Module not found: fum_library":**
 ```bash
 cd fum_library
-npm run sync  # Sets up symlinks to fum and fum_automation
-```
-
-**To restore GitHub dependencies (undo symlinks):**
-```bash
-cd fum_library
-npm run unsync  # Restores fum and fum_automation to GitHub dependency
+npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```
 
 ### Automation Connection Issues
@@ -282,7 +274,7 @@ npm run unsync  # Restores fum and fum_automation to GitHub dependency
 
 ### Frontend State Issues
 
-**Stale data after Ganache restart:**
+**Stale data after Hardhat restart:**
 1. Clear browser localStorage
 2. Disconnect and reconnect wallet
 3. Reset MetaMask account
@@ -291,7 +283,7 @@ npm run unsync  # Restores fum and fum_automation to GitHub dependency
 
 | Path | Purpose |
 |------|---------|
-| `fum/test/scripts/start-ganache.js` | Ganache startup + contract deployment |
+| `fum/test/scripts/start-hardhat.js` | Hardhat startup + contract deployment |
 | `fum/test/scripts/create-test-vault.js` | Creates test vault via VaultFactory |
 | `fum/test/scripts/seed.js` | Test data seeding (position, tokens, fees) |
 | `fum/test/scripts/manipulate-price.js` | Price manipulation for testing |
@@ -304,7 +296,7 @@ npm run unsync  # Restores fum and fum_automation to GitHub dependency
 
 | Script | Location | Description |
 |--------|----------|-------------|
-| `npm run ganache` | fum | Start Ganache with Arbitrum fork |
+| `npm run hardhat` | fum | Start Hardhat with Arbitrum fork |
 | `npm run seed-localhost` | fum | Create test vault and position |
 | `npm run manipulate-price:up` | fum | Simulate price increase |
 | `npm run manipulate-price:down` | fum | Simulate price decrease |

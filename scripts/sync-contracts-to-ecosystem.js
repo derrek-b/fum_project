@@ -1,6 +1,6 @@
 /**
  * @module sync-contracts-to-ecosystem
- * @description Unified contract distribution system that handles all ABI and bytecode 
+ * @description Unified contract distribution system that handles all ABI and bytecode
  * extraction and distribution to fum_testing, fum_automation, and fum_library projects.
  * This is the single source of truth for contract synchronization across the ecosystem.
  * @since 1.0.0
@@ -46,12 +46,12 @@ async function syncContractsToEcosystem() {
     console.log('📄 Step 1: Syncing source files to fum_testing...');
     await syncSourceFilesToTesting();
     console.log('✅ Source files synced to fum_testing\n');
-    
+
     // Step 2: Compile contracts in fum_testing
     console.log('🔨 Step 2: Compiling contracts in fum_testing...');
     execSync('npx hardhat compile', { cwd: PROJECTS.fum_testing });
     console.log('✅ Contracts compiled successfully\n');
-    
+
     // Step 3: Extract bytecode to fum/bytecode
     console.log('📦 Step 3: Extracting bytecode from compiled artifacts...');
     execSync('node scripts/extract-bytecode.js', { cwd: __dirname + '/..' });
@@ -61,12 +61,12 @@ async function syncContractsToEcosystem() {
     console.log('📋 Step 4: Extracting ABIs to fum_library...');
     execSync('node scripts/extract-abis.js', { cwd: __dirname + '/..' });
     console.log('✅ Core contract ABIs extracted to fum_library\n');
-    
+
     // Step 5: Distribute bytecode to fum_library
     console.log('🚚 Step 5: Distributing bytecode to fum_library...');
     await copyBytecodeToLibrary();
     console.log('✅ Bytecode distributed to fum_library\n');
-    
+
     // Step 6: Distribute bytecode to fum_automation
     console.log('🚚 Step 6: Distributing bytecode to fum_automation...');
     await copyBytecodeToAutomation();
@@ -90,17 +90,17 @@ async function syncContractsToEcosystem() {
 async function copyBytecodeToLibrary() {
   const sourceBytecodeDir = path.join(__dirname, '../bytecode');
   const destBytecodeDir = path.join(PROJECTS.fum_library, 'bytecode');
-  
+
   // Create destination directory if it doesn't exist
   if (!fs.existsSync(destBytecodeDir)) {
     fs.mkdirSync(destBytecodeDir, { recursive: true });
   }
-  
+
   let successCount = 0;
   for (const contract of CORE_CONTRACTS) {
     const sourceFile = path.join(sourceBytecodeDir, `${contract}.bin`);
     const destFile = path.join(destBytecodeDir, `${contract}.bin`);
-    
+
     if (fs.existsSync(sourceFile)) {
       fs.copyFileSync(sourceFile, destFile);
       console.log(`  ✅ ${contract}.bin → fum_library`);
@@ -109,7 +109,7 @@ async function copyBytecodeToLibrary() {
       console.warn(`  ⚠️ Warning: ${sourceFile} not found`);
     }
   }
-  
+
   console.log(`  📦 Copied ${successCount}/${CORE_CONTRACTS.length} bytecode files to fum_library`);
 }
 
@@ -119,17 +119,17 @@ async function copyBytecodeToLibrary() {
 async function copyBytecodeToAutomation() {
   const sourceBytecodeDir = path.join(__dirname, '../bytecode');
   const destBytecodeDir = path.join(PROJECTS.fum_automation, 'bytecode');
-  
+
   // Create destination directory if it doesn't exist
   if (!fs.existsSync(destBytecodeDir)) {
     fs.mkdirSync(destBytecodeDir, { recursive: true });
   }
-  
+
   let successCount = 0;
   for (const contract of CORE_CONTRACTS) {
     const sourceFile = path.join(sourceBytecodeDir, `${contract}.bin`);
     const destFile = path.join(destBytecodeDir, `${contract}.bin`);
-    
+
     if (fs.existsSync(sourceFile)) {
       fs.copyFileSync(sourceFile, destFile);
       console.log(`  ✅ ${contract}.bin → fum_automation`);
@@ -138,7 +138,7 @@ async function copyBytecodeToAutomation() {
       console.warn(`  ⚠️ Warning: ${sourceFile} not found`);
     }
   }
-  
+
   console.log(`  📦 Copied ${successCount}/${CORE_CONTRACTS.length} bytecode files to fum_automation`);
 }
 

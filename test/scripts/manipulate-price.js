@@ -1,9 +1,9 @@
 /**
  * test/scripts/manipulate-price.js
  *
- * NOTE: This script is for local Ganache testing only
+ * NOTE: This script is for local Hardhat testing only
  *
- * Manipulates the USDC/USDT pool price in the Ganache sandbox for testing
+ * Manipulates the USDC/USDT pool price in the Hardhat sandbox for testing
  * position rebalancing.
  *
  * Usage: npm run manipulate-price -- --direction=<up|down>
@@ -215,7 +215,7 @@ async function logPoolState(provider, label) {
 async function fundWallet(provider, wallet) {
   console.log('\n--- Funding Wallet ---');
 
-  // Use Ganache's evm_setAccountBalance to fund the wallet
+  // Use Hardhat's hardhat_setBalance to fund the wallet
   const balanceHex = ethers.utils.hexValue(
     ethers.utils.parseEther(CONFIG.INITIAL_ETH_FUNDING)
   );

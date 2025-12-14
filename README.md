@@ -119,23 +119,24 @@ code/
 
 ### fum_library Setup
 
-For local development, set up symlinks to use local library changes:
+For local development, build and pack the library:
 
 ```bash
 # Clone fum_library if not already present
 cd ..
 git clone https://github.com/derrek-b/fum_library.git
 
-# Install and set up symlinks
+# Build and pack the library
 cd fum_library
 npm install
-npm run sync  # Creates symlinks to fum and fum_automation
+npm run build && npm pack
 
-# Return to fum
+# Return to fum and install
 cd ../fum
+npm install
 ```
 
-> **Note:** The GitHub dependency works out of the box for production. Use `npm run sync` only for local development when you need to test library changes. Use `npm run unsync` to restore the GitHub dependency.
+> **Note:** Run `npm run pack` in fum_library whenever you make library changes to reinstall the updated tarball in fum and fum_automation.
 
 ### Installation
 
@@ -236,8 +237,7 @@ fum/
 ### Smart Contracts
 - **Solidity ^0.8.0** - Contract language
 - **OpenZeppelin Contracts v5** - Security standards
-- **Hardhat** - Development framework and testing
-- **Ganache** - Local blockchain for development
+- **Hardhat** - Development framework, testing, and local blockchain
 
 ### External Dependencies
 - **fum_library** - Shared adapters, ABIs, and utilities

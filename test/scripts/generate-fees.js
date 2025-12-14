@@ -1,6 +1,6 @@
 // test/scripts/generate-fees.js
 // Simple script to generate fees by performing multiple swaps on a Uniswap V3 pool
-// NOTE: This script is for local Ganache testing only
+// NOTE: This script is for local Hardhat testing only
 //
 // Uses the USDC/USDT 0.01% pool to generate fees for stablecoin positions
 
@@ -54,10 +54,10 @@ async function performSwaps(numSwaps = 5) {
   console.log(`\n=== Starting generate-fees script ===`);
   console.log(`Will perform ${numSwaps} round-trip swaps on USDC/USDT 0.01% pool`);
 
-  // Setup provider - hardcoded for local Ganache testing
+  // Setup provider - hardcoded for local Hardhat testing
   const rpcUrl = "http://localhost:8545";
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
-  console.log(`Connected to local Ganache: ${rpcUrl}`);
+  console.log(`Connected to local Hardhat: ${rpcUrl}`);
 
   // Setup signer (wallet)
   // WARNING: This is using the first Hardhat test account private key
@@ -99,7 +99,7 @@ async function performSwaps(numSwaps = 5) {
     if (wethBalance.lt(wethNeeded)) {
       const ethToWrap = wethNeeded.sub(wethBalance);
       if (ethBalance.lt(ethToWrap)) {
-        // Fund the wallet with more ETH using Ganache's evm_setAccountBalance
+        // Fund the wallet with more ETH using Hardhat's hardhat_setBalance
         console.log("Funding wallet with ETH...");
         await provider.send('evm_setAccountBalance', [
           wallet.address,

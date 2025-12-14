@@ -1,15 +1,15 @@
 // test/scripts/seed.js - Script to create a test Uniswap V3 liquidity position
-// NOTE: This script is for local Ganache testing only
+// NOTE: This script is for local Hardhat testing only
 
 // Import required libraries
 import { ethers } from 'ethers';
 import { Token, CurrencyAmount } from '@uniswap/sdk-core';
 import { Pool, Position, NonfungiblePositionManager, TickMath } from '@uniswap/v3-sdk';
 import JSBI from 'jsbi';
-import IUniswapV3PoolArtifact from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json';
-import NonfungiblePositionManagerArtifact from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
-import ERC20Artifact from '@openzeppelin/contracts/build/contracts/ERC20.json';
-import UniswapV3RouterArtifact from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json';
+import IUniswapV3PoolArtifact from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json' with { type: 'json' };
+import NonfungiblePositionManagerArtifact from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json' with { type: 'json' };
+import ERC20Artifact from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
+import UniswapV3RouterArtifact from '@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json' with { type: 'json' };
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -139,7 +139,7 @@ async function performSwapsToGenerateFees(wallet, numSwaps = 10) {
       await tx.wait();
       console.log(`  Swap confirmed`);
 
-      // Wait 2 seconds to align with Ganache's block time
+      // Wait for block confirmation
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Increment nonce only on success
@@ -510,31 +510,31 @@ async function main() {
   console.log(`Automation executor funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
 
   // =====================================================
-  // Get existing vault (created and configured by create-test-vault.js)
+  // COMMENTED OUT: Vault lookup - not needed for basic token funding
   // =====================================================
-  console.log('\n=== GETTING EXISTING VAULT ===');
-
-  const VAULT_FACTORY_ADDRESS = deployment.contracts.VaultFactory;
-
-  // VaultFactory ABI (minimal)
-  const VAULT_FACTORY_ABI = [
-    'function getVaultCount(address user) external view returns (uint256)',
-    'function getVaults(address user) external view returns (address[])'
-  ];
-
-  const vaultFactory = new ethers.Contract(VAULT_FACTORY_ADDRESS, VAULT_FACTORY_ABI, wallet);
-
-  // Get existing vaults for this wallet (created by create-test-vault.js)
-  const userVaults = await vaultFactory.getVaults(wallet.address);
-  console.log(`Found ${userVaults.length} existing vault(s) for wallet`);
-
-  if (userVaults.length === 0) {
-    throw new Error('No existing vault found. Run create-test-vault.js first.');
-  }
-
-  // Use the first vault (created and configured by create-test-vault.js)
-  const vaultAddress = userVaults[0];
-  console.log(`Using existing vault at: ${vaultAddress}`);
+  // console.log('\n=== GETTING EXISTING VAULT ===');
+  //
+  // const VAULT_FACTORY_ADDRESS = deployment.contracts.VaultFactory;
+  //
+  // // VaultFactory ABI (minimal)
+  // const VAULT_FACTORY_ABI = [
+  //   'function getVaultCount(address user) external view returns (uint256)',
+  //   'function getVaults(address user) external view returns (address[])'
+  // ];
+  //
+  // const vaultFactory = new ethers.Contract(VAULT_FACTORY_ADDRESS, VAULT_FACTORY_ABI, wallet);
+  //
+  // // Get existing vaults for this wallet (created by create-test-vault.js)
+  // const userVaults = await vaultFactory.getVaults(wallet.address);
+  // console.log(`Found ${userVaults.length} existing vault(s) for wallet`);
+  //
+  // if (userVaults.length === 0) {
+  //   throw new Error('No existing vault found. Run create-test-vault.js first.');
+  // }
+  //
+  // // Use the first vault (created and configured by create-test-vault.js)
+  // const vaultAddress = userVaults[0];
+  // console.log(`Using existing vault at: ${vaultAddress}`);
 
   // Define token addresses for Arbitrum
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
@@ -661,6 +661,15 @@ async function main() {
 
   console.log('ETH to USDC swap completed successfully.');
 
+  console.log('\n=== WALLET FUNDING COMPLETE ===');
+  console.log('You can now use the web UI to create positions manually.');
+  console.log('\nSeed script completed.');
+}
+
+// =====================================================
+// COMMENTED OUT: Position creation - use web UI instead
+// =====================================================
+/*
   // Step 4: Gather Pool Information (AFTER the swap to get updated pool state)
   console.log('\n--- Creating Pool Instance and Gathering Information ---');
 
@@ -1051,7 +1060,7 @@ async function main() {
 
     return price * decimalAdjustment;
   }
-}
+*/
 
 // Execute the script
 main()

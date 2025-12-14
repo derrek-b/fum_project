@@ -1,5 +1,5 @@
 // test/scripts/create-test-vault.js
-// NOTE: This script is for local Ganache testing only
+// NOTE: This script is for local Hardhat testing only
 import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
@@ -68,7 +68,7 @@ const loadContractABI = (contractName) => {
 };
 
 async function main() {
-  // Hardcoded for local Ganache testing only
+  // Hardcoded for local Hardhat testing only
   const chainId = 1337;
   const rpcUrl = 'http://localhost:8545';
   const networkConfig = getChainConfig(chainId);
@@ -77,7 +77,7 @@ async function main() {
     throw new Error(`Network with chainId ${chainId} not configured`);
   }
 
-  console.log(`Creating test vault on local Ganache (${networkConfig.name})...`);
+  console.log(`Creating test vault on local Hardhat (${networkConfig.name})...`);
 
   // Set up provider and signer with hardcoded test account
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
