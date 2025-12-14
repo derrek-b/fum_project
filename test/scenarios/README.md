@@ -48,7 +48,7 @@ SCENARIO=test/scenarios/1111.json npm test test/workflow/service-init/BS-configu
 |-------|------|-------------|
 | `name` | string | Display name for the test scenario |
 | `description` | string | Brief explanation of what this scenario tests |
-| `port` | number | Ganache server port (use unique port per scenario to avoid conflicts) |
+| `port` | number | Hardhat server port (use unique port per scenario to avoid conflicts) |
 | `vaultSetup` | object | Vault configuration (see below) |
 
 ### Vault Setup Configuration

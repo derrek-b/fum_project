@@ -17,3 +17,5 @@ node_modules
 
 # Test data files
 /test/data/.vault-blacklist.json
+
+cache/

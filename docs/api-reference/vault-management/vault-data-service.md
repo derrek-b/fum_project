@@ -56,7 +56,6 @@ class VaultDataService {
   // Events and utilities
   getAvailableEvents(): Array<string>
   subscribe(eventType, handler): Function
-  async computePoolAddress(token0, token1, fee, platform, chainId, adapter): Promise<string>
   async getDynamicVaultState(vaultAddress, position, currentTick, sqrtPriceX96, adapter): Promise<Object>
 }
 ```
@@ -656,26 +655,6 @@ const unsubscribe = vaultDataService.subscribe('vaultLoaded', (data) => {
 
 // Later: unsubscribe();
 ```
-
----
-
-### computePoolAddress(token0, token1, fee, platform, chainId, adapter)
-
-Calculate pool address deterministically.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| token0 | `string` | Yes | - | Token0 address |
-| token1 | `string` | Yes | - | Token1 address |
-| fee | `number` | Yes | - | Fee tier (e.g., 500, 3000, 10000) |
-| platform | `string` | Yes | - | Platform identifier (e.g., 'uniswapv3') |
-| chainId | `number` | No | current | Chain ID |
-| adapter | `Object` | No | null | Platform adapter instance |
-
-**Returns:**
-`Promise<string>` - Computed pool address
 
 ---
 

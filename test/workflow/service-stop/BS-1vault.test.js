@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 
 // Mock the getPoolTVLAverage function for test environment
@@ -31,7 +31,7 @@ describe('Service Stop Workflow - 1111 Configuration', () => {
 
     // 2. Create test vault with simple fast setup
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {

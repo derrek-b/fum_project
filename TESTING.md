@@ -12,7 +12,7 @@ The test suite is organized into two categories: unit & workflow tests...
 test/
 ├── setup.js                 # Global test setup (loads env, initializes fum_library)
 ├── helpers/
-│   ├── ganache-setup.js     # Blockchain environment setup
+│   ├── hardhat-setup.js     # Blockchain environment setup (Hardhat fork)
 │   └── test-vault-setup.js  # Test vault creation utilities
 ├── unit/                    # Fast, isolated unit tests
 │   ├── AutomationService.config.test.js
@@ -30,6 +30,16 @@ test/
 ```
 
 ## Prerequisites
+
+### Local Development Setup
+
+The `.npmrc` file omits devDependencies for production deployment. For local testing, run:
+
+```bash
+npm run setup:dev
+```
+
+This installs all dev and optional dependencies needed for testing.
 
 ### Environment Variables
 
@@ -49,11 +59,11 @@ COINGECKO_API_KEY=your_coingecko_api_key
 
 The GitHub dependency works out of the box for running tests. Workflow tests deploy their own contracts and save addresses to the installed fum_library in `node_modules/`.
 
-**Only use symlinks if you need to Test local fum_library changes**
+**To test local fum_library changes:**
 
 ```bash
 cd ../fum_library
-npm run sync  # Creates symlinks to fum and fum_automation
+npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```
 
 ## Running Tests
@@ -80,7 +90,7 @@ Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. Th
 npm test test/workflow
 ```
 
-Workflow tests spin up a Ganache fork, deploy contracts, and test real scenarios. They take longer (~15-180 seconds or longer each).
+Workflow tests spin up a Hardhat fork of Arbitrum, deploy contracts, and test real scenarios. They take longer (~15-180 seconds or longer each).
 
 ### Specific Test File
 
@@ -216,10 +226,10 @@ See [test/scenarios/README.md](test/scenarios/README.md) for complete documentat
 
 ## Test Helper Files
 
-### ganache-setup.js
+### hardhat-setup.js
 
 Provides `setupTestBlockchain()` which:
-- Starts a Ganache fork of Arbitrum
+- Starts a Hardhat fork of Arbitrum
 - Deploys FUM contracts (VaultFactory, strategies)
 - Validates deterministic addresses
 - Returns test environment with signers, contracts, and config
@@ -261,7 +271,7 @@ describe('MyModule', () => {
 ```javascript
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 
 describe('My Workflow Test', () => {
@@ -275,7 +285,7 @@ describe('My Workflow Test', () => {
 
     // Create test vault with specific configuration
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {
@@ -317,11 +327,11 @@ This is expected behavior on first run or after changes:
 2. Before exiting, it auto-saves the new addresses to fum_library (both src/ and dist/)
 3. **Re-run the test** - it will now use the updated addresses and pass
 
-If using the GitHub dependency instead of symlinks, you'll need to run `npm run sync` in fum_library first so the saved addresses are available.
+After tests update addresses, run `npm run pack` in fum_library to reinstall the library with new addresses.
 
 ### Port conflicts
 
-Each workflow test uses a unique Ganache port. If running tests in parallel fails, check for port conflicts in the 8545-8560 range.
+Each workflow test uses a unique Hardhat port. If running tests in parallel fails, check for port conflicts in the 8545-8560 range.
 
 ### Timeout errors
 
@@ -335,11 +345,5 @@ Workflow tests have extended timeouts (30-180 seconds). If tests still timeout:
 If tests fail with contract-related errors after code changes:
 ```bash
 cd ../fum_library
-npm run build  # Copies src/ to dist/
-```
-
-If using the GitHub dependency instead of symlinks:
-```bash
-cd ../fum_library
-npm run sync  # Sets up symlinks for local development
+npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```

@@ -7,7 +7,7 @@
 import { ethers } from 'ethers'
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 
 // Mock the getPoolTVLAverage function for test environment
@@ -88,7 +88,7 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
 
     // 3. THEN create the vault with exact same 1111 configuration
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {

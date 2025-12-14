@@ -214,7 +214,7 @@ The Fee Event Workflow manages the detection, evaluation, and collection of accu
 
 **Workflow Testing Strategy**: Single comprehensive test that follows the complete function call chain from fee accumulation to collection and reinvestment. Tests fee calculation, threshold evaluation, and transaction execution using real blockchain environment with accumulated fees.
 
-**Environment**: Ganache sandbox with deployed vault positions that can accumulate real fees through swap activity, and token price feeds that can be controlled for testing different threshold scenarios.
+**Environment**: Hardhat sandbox with deployed vault positions that can accumulate real fees through swap activity, and token price feeds that can be controlled for testing different threshold scenarios.
 
 **Minimal Mocking**: Use real fee accumulation, real price feeds, and real collection transactions. Mock only external price services for specific test scenarios.
 

@@ -173,8 +173,6 @@ export default class VaultDataService {
   // Post-transaction updates
   updateVaultAfterTransaction(vaultAddress: string, chainId: number, transactionHash: string): Promise<void>
   
-  // Utilities
-  computePoolAddress(token0: string, token1: string, fee: number, chainId: number): string
 }
 ```
 

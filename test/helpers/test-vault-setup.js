@@ -16,13 +16,13 @@ const ERC20_ABI = [
 
 /**
  * Set up a test vault with configurable positions, tokens, and balances
- * @param {Object} ganache - Ganache instance with provider and signers
+ * @param {Object} hardhat - Hardhat instance with provider and signers
  * @param {Object} contracts - Deployed FUM contract instances
  * @param {Object} deployedContracts - Deployed FUM contract addresses
  * @param {Object} config - Configuration for vault setup
  * @returns {Promise<Object>} Test vault with positions and tokens
  */
-export async function setupTestVault(ganache, contracts, deployedContracts, config = {}) {
+export async function setupTestVault(hardhat, contracts, deployedContracts, config = {}) {
   const defaults = {
     // Token configuration
     wrapEthAmount: '10',        // How much ETH to wrap
@@ -89,7 +89,7 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
   console.log(`  - Created vault at: ${vaultAddress}`);
 
   // Get vault contract instance using library helper
-  const testVault = getVaultContract(vaultAddress, ganache.provider).connect(ganache.signers[0]);
+  const testVault = getVaultContract(vaultAddress, hardhat.provider).connect(hardhat.signers[0]);
 
   // Get chain config for our forked network
   const chainConfig = getChainConfig(1337);
@@ -100,7 +100,7 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
 
   // Create adapter for interacting with Uniswap
   const adapter = new UniswapV3Adapter(1337);
-  const owner = ganache.signers[0];
+  const owner = hardhat.signers[0];
 
   // Step 1: Wrap ETH to WETH
   console.log(`  - Wrapping ${settings.wrapEthAmount} ETH to WETH...`);
@@ -156,7 +156,7 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
       amountIn: ethers.utils.parseUnits(swap.amount, tokenInData.decimals).toString(),
       slippageTolerance: settings.slippageTolerance,
       sqrtPriceLimitX96: "0",
-      provider: ganache.provider,
+      provider: hardhat.provider,
       deadlineMinutes: 2
     };
 
@@ -202,7 +202,7 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
         : [token1Address, token0Address, positionConfig.token1, positionConfig.token0];
 
     // Get pool data for tick calculations
-    const poolData = await adapter.fetchPoolData(token0Address, token1Address, positionConfig.fee, ganache.provider);
+    const poolData = await adapter.fetchPoolData(token0Address, token1Address, positionConfig.fee, hardhat.provider);
     const currentTick = poolData.tick;
     const tickSpacing = positionConfig.fee === 500 ? 10 : positionConfig.fee === 3000 ? 60 : 200;
 
@@ -326,12 +326,12 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
       console.log(`    Generating fees on pool ${pool.token0}/${pool.token1} (fee: ${pool.fee})...`);
 
       // Find the adapter and pool address
-      const adapter = new UniswapV3Adapter(1337, ganache.provider);
+      const adapter = new UniswapV3Adapter(1337, hardhat.provider);
       const poolAddress = await adapter.getPoolAddress(
         getTokenAddress(pool.token0, 1337),
         getTokenAddress(pool.token1, 1337),
         pool.fee,
-        ganache.provider
+        hardhat.provider
       );
 
       // Execute each swap in the sequence
@@ -345,12 +345,12 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
           tokenIn: getTokenAddress(swap.from, 1337),
           tokenOut: getTokenAddress(swap.to, 1337),
           fee: pool.fee,
-          recipient: ganache.signers[0].address,
+          recipient: hardhat.signers[0].address,
           amountIn: swapAmount.toString(),
           slippageTolerance: 1,
           sqrtPriceLimitX96: "0",
           deadlineMinutes: 2,
-          provider: ganache.provider
+          provider: hardhat.provider
         };
 
         const swapData = await adapter.generateSwapData(swapParams);
@@ -359,13 +359,13 @@ export async function setupTestVault(ganache, contracts, deployedContracts, conf
         const tokenInContract = new ethers.Contract(
           getTokenAddress(swap.from, 1337),
           ERC20_ABI,
-          ganache.signers[0]
+          hardhat.signers[0]
         );
         const approveTx = await tokenInContract.approve(swapData.to, swapAmount);
         await approveTx.wait();
 
         // Execute swap
-        const swapTx = await ganache.signers[0].sendTransaction({
+        const swapTx = await hardhat.signers[0].sendTransaction({
           to: swapData.to,
           data: swapData.data,
           gasLimit: 500000

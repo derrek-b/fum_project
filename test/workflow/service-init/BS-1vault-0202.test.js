@@ -7,7 +7,7 @@
 import { ethers } from 'ethers'
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -46,7 +46,7 @@ describe('AutomationService Initialization - 1 Vault (0AP/2NP/0AT/2NT)', () => {
 
     // Create test vault with 2 non-aligned positions and 2 non-aligned tokens using new setup
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {

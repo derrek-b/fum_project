@@ -7,8 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run automation service: `npm run start`
 - Run tests: `npm test`
 - Run tests in watch mode: `npm run test:watch`
-- Sync fum_library for local development: `cd ../fum_library && npm run sync`
-- Restore GitHub dependency: `cd ../fum_library && npm run unsync`
+- Update fum_library for local development: `cd ../fum_library && npm run pack`
 
 ## Code Style Guidelines
 

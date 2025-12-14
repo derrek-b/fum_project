@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
@@ -52,12 +52,12 @@ describe('Swap Event Detection', () => {
   let testVault;
 
   beforeAll(async () => {
-    // Setup Ganache fork
+    // Setup Hardhat fork
     testEnv = await setupTestBlockchain({ port: 8551 });
-    console.log('Ganache fork started');
+    console.log('Hardhat fork started');
 
     // Fund signer[1] for market manipulation (swaps)
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
     console.log('Setting up swap wallet (signer[1]) for market manipulation...');
 
     // Transfer 800 ETH to signer[1] from deployer (need lots for all the swaps)
@@ -108,7 +108,7 @@ describe('Swap Event Detection', () => {
       amountIn: swapAmount.toString(),
       slippageTolerance: 1,
       sqrtPriceLimitX96: "0",
-      provider: testEnv.ganacheServer.provider,
+      provider: testEnv.hardhatServer.provider,
       deadlineMinutes: 2
     };
 
@@ -128,7 +128,7 @@ describe('Swap Event Detection', () => {
 
     // Create test vault with one aligned position
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {
@@ -164,7 +164,7 @@ describe('Swap Event Detection', () => {
     const strategyContract = new ethers.Contract(
       babyStepsStrategyAddress,
       ['function authorizeVault(address vault) external'],
-      testEnv.ganacheServer.signers[0]  // Owner/deployer
+      testEnv.hardhatServer.signers[0]  // Owner/deployer
     );
 
     const authTx = await strategyContract.authorizeVault(testVault.vaultAddress);
@@ -272,7 +272,7 @@ describe('Swap Event Detection', () => {
 
   it('should detect swap events and prevent concurrent processing', async () => {
     // Use signer[1] as swap wallet
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
 
     // Get token data from service's cache
     const wethData = service.tokens['WETH'];
@@ -320,7 +320,7 @@ describe('Swap Event Detection', () => {
       amountIn: swapAmount1.toString(),
       slippageTolerance: 5,
       sqrtPriceLimitX96: "0",
-      provider: testEnv.ganacheServer.provider,
+      provider: testEnv.hardhatServer.provider,
       deadlineMinutes: 2
     };
 
@@ -332,7 +332,7 @@ describe('Swap Event Detection', () => {
       amountIn: swapAmount2.toString(),
       slippageTolerance: 5,
       sqrtPriceLimitX96: "0",
-      provider: testEnv.ganacheServer.provider,
+      provider: testEnv.hardhatServer.provider,
       deadlineMinutes: 2
     };
 
@@ -400,7 +400,7 @@ describe('Swap Event Detection', () => {
 
   it('should trigger fee collection when accumulated fees exceed threshold', async () => {
     // Setup
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
     const vaultData = await service.vaultDataService.getVault(testVault.vaultAddress);
     const position = Object.values(vaultData.positions)[0];
 
@@ -450,7 +450,7 @@ describe('Swap Event Detection', () => {
         amountIn: swapSizeETH.toString(),
         slippageTolerance: 5,
         sqrtPriceLimitX96: "0",
-        provider: testEnv.ganacheServer.provider,
+        provider: testEnv.hardhatServer.provider,
         deadlineMinutes: 2
       };
 
@@ -529,7 +529,7 @@ describe('Swap Event Detection', () => {
 
   it('should trigger rebalance when tick crosses lower threshold', async () => {
     // Use signer[1] as swap wallet
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
 
     // Get vault's current position
     const vaultData = await service.vaultDataService.getVault(testVault.vaultAddress);
@@ -549,7 +549,7 @@ describe('Swap Event Detection', () => {
       usdcData.address,
       wethData.address,
       100,
-      testEnv.ganacheServer.provider
+      testEnv.hardhatServer.provider
     );
 
     // Calculate rebalance threshold tick (1.5% from boundary)
@@ -654,7 +654,7 @@ describe('Swap Event Detection', () => {
           amountIn: swapSize.toString(),
           slippageTolerance: 100, // Accept any price (100% means no slippage protection)
           sqrtPriceLimitX96: "0",
-          provider: testEnv.ganacheServer.provider,
+          provider: testEnv.hardhatServer.provider,
           deadlineMinutes: 2
         };
 
@@ -675,7 +675,7 @@ describe('Swap Event Detection', () => {
           usdcData.address,
           wethData.address,
           500,
-          testEnv.ganacheServer.provider
+          testEnv.hardhatServer.provider
         );
         currentTick = updatedPool.tick;
         swapCount++;
@@ -806,7 +806,7 @@ describe('Swap Event Detection', () => {
     console.log('\n🔄 Starting reverse rebalance test (USDC → WETH)...');
 
     // Use signer[1] as swap wallet
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
 
     // Get the updated vault state after the previous rebalance
     const vaultData = await service.vaultDataService.getVault(testVault.vaultAddress);
@@ -830,7 +830,7 @@ describe('Swap Event Detection', () => {
       usdcData.address,
       wethData.address,
       500,
-      testEnv.ganacheServer.provider
+      testEnv.hardhatServer.provider
     );
 
     // Calculate upper threshold tick (1.5% from upper boundary)
@@ -908,7 +908,7 @@ describe('Swap Event Detection', () => {
           amountIn: swapSize.toString(),
           slippageTolerance: 100, // Accept any price
           sqrtPriceLimitX96: "0",
-          provider: testEnv.ganacheServer.provider,
+          provider: testEnv.hardhatServer.provider,
           deadlineMinutes: 2
         };
 
@@ -929,7 +929,7 @@ describe('Swap Event Detection', () => {
           usdcData.address,
           wethData.address,
           500,
-          testEnv.ganacheServer.provider
+          testEnv.hardhatServer.provider
         );
         currentTick = updatedPool.tick;
         swapCount++;
@@ -1058,7 +1058,7 @@ describe('Swap Event Detection', () => {
     console.log(`  Range: ${activePosition.tickLower} to ${activePosition.tickUpper}`);
 
     // Use signer[1] as swap wallet
-    const swapWallet = testEnv.ganacheServer.signers[1];
+    const swapWallet = testEnv.hardhatServer.signers[1];
 
     // Get token data
     const wethData = service.tokens['WETH'];
@@ -1114,7 +1114,7 @@ describe('Swap Event Detection', () => {
       usdcData.address,
       wethData.address,
       500,
-      testEnv.ganacheServer.provider
+      testEnv.hardhatServer.provider
     );
     console.log(`\n📊 Pool state before emergency exit swap:`);
     console.log(`  Current tick: ${poolDataBefore.tick}`);
@@ -1134,7 +1134,7 @@ describe('Swap Event Detection', () => {
       amountIn: actualSwapSize.toString(),
       slippageTolerance: 100, // Accept any price for emergency exit test
       sqrtPriceLimitX96: "0",
-      provider: testEnv.ganacheServer.provider,
+      provider: testEnv.hardhatServer.provider,
       deadlineMinutes: 2
     };
 
@@ -1161,7 +1161,7 @@ describe('Swap Event Detection', () => {
       usdcData.address,
       wethData.address,
       500,
-      testEnv.ganacheServer.provider
+      testEnv.hardhatServer.provider
     );
 
     const tickMovement = Math.abs(poolDataAfter.tick - poolDataBefore.tick);

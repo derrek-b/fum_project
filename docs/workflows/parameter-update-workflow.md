@@ -135,7 +135,7 @@ The Parameter Update Workflow handles real-time synchronization of strategy para
 
 **Workflow Testing Strategy**: Single comprehensive test that follows the complete function call chain from event trigger to final side effects. Tests integration, return values, and state changes all together using real blockchain environment.
 
-**Environment**: Ganache sandbox with actual deployed contracts, real vaults, and real parameter state that can be modified on-chain.
+**Environment**: Hardhat sandbox with actual deployed contracts, real vaults, and real parameter state that can be modified on-chain.
 
 **Minimal Mocking**: Use real contracts and real blockchain events. Mock only external services that cannot be reliably sandboxed.
 
@@ -143,7 +143,7 @@ The Parameter Update Workflow handles real-time synchronization of strategy para
 
 #### Happy Path Workflow Test
 **Complete End-to-End Flow**:
-1. **Setup**: Deploy real strategy contract to Ganache
+1. **Setup**: Deploy real strategy contract to Hardhat
 2. **Vault Creation**: Create vault and authorize automation service as executor
 3. **Parameter Change**: Call actual parameter update function on strategy contract  
 4. **Event Emission**: Verify `ParameterUpdated` event is emitted by contract
@@ -190,7 +190,7 @@ The Parameter Update Workflow handles real-time synchronization of strategy para
 ### Mock Strategy
 
 **Real Components Used**:
-- **Strategy Contracts**: Actual deployed contracts in Ganache
+- **Strategy Contracts**: Actual deployed contracts in Hardhat
 - **Vault Contracts**: Real vaults with authorization state
 - **Blockchain Events**: Natural event emission from contract calls
 - **Telegram Bot**: Use configured test bot for notifications

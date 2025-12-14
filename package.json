@@ -10,10 +10,8 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev:link": "npm link fum_library",
-    "dev:unlink": "npm unlink fum_library && npm install file:../fum_library",
     "start": "node scripts/start-automation.js",
-    "ganache": "node ../fum/scripts/start-ganache.js",
+    "setup:dev": "npm install --include=dev --include=optional",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -27,7 +25,7 @@
     "@uniswap/v3-sdk": "^3.25.2",
     "axios": "^1.9.0",
     "ethers": "^5.7.2",
-    "fum_library": "github:derrek-b/fum_library",
+    "fum_library": "file:../fum_library/fum_library-1.0.1.tgz",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
   },
@@ -35,7 +33,7 @@
     "@openzeppelin/contracts": "^5.3.0",
     "@vitest/coverage-v8": "^1.2.2",
     "dotenv": "^16.5.0",
-    "ganache": "^7.9.1",
+    "hardhat": "^2.22.19",
     "vitest": "^1.2.2"
   }
 }

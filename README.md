@@ -77,7 +77,7 @@ Copy `.env.example` to `.env.local` and configure:
 
 | Variable | Description |
 |----------|-------------|
-| `CHAIN_ID` | Network ID (1337=Ganache, 42161=Arbitrum One) |
+| `CHAIN_ID` | Network ID (1337=Hardhat local, 42161=Arbitrum One) |
 | `WS_URL` | WebSocket RPC endpoint for real-time events |
 | `AUTOMATION_PRIVATE_KEY` | Private key for executor wallet (signs transactions) |
 | `SSE_PORT` | Port for Server-Sent Events HTTP server |

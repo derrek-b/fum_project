@@ -218,7 +218,7 @@ The Vault Configuration Updates Workflow handles real-time synchronization of va
 
 **Workflow Testing Strategy**: Single comprehensive test that follows the complete function call chain from event emission to monitoring reconfiguration. Tests cache updates, monitoring transitions, and configuration changes using real blockchain environment.
 
-**Environment**: Ganache sandbox with deployed vault contracts that can emit real configuration change events and support target token/platform modifications.
+**Environment**: Hardhat sandbox with deployed vault contracts that can emit real configuration change events and support target token/platform modifications.
 
 **Minimal Mocking**: Use real contracts and real blockchain events. Mock only external services that cannot be reliably sandboxed.
 

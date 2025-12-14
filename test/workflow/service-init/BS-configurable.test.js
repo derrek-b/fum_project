@@ -15,7 +15,7 @@
 import { ethers } from 'ethers'
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import AutomationService from '../../../src/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/ganache-setup.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import fs from 'fs';
 import path from 'path';
@@ -53,7 +53,7 @@ describe(`Configurable Service Init - ${scenario.name}`, () => {
 
     // Create test vault using scenario configuration
     testVault = await setupTestVault(
-      testEnv.ganacheServer,
+      testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {
