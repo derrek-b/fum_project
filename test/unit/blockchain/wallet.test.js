@@ -1,7 +1,7 @@
 /**
  * Wallet Unit Tests
  *
- * Tests using Ganache fork of Arbitrum - no mocks, real blockchain interactions.
+ * Tests using Hardhat fork of Arbitrum - no mocks, real blockchain interactions.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -126,7 +126,7 @@ describe('Wallet - Unit Tests', () => {
         expect(provider).toBeInstanceOf(ethers.providers.Provider);
       });
 
-      it('should work with ganache test environment', async () => {
+      it('should work with hardhat test environment', async () => {
         const provider = await createJsonRpcProvider('http://localhost:8545');
 
         // Test that we can get network info (connectivity test already passed)
@@ -169,15 +169,15 @@ describe('Wallet - Unit Tests', () => {
   describe('getConnectedAccounts', () => {
     describe('Success Cases', () => {
       it('should return array of connected accounts', async () => {
-        // Create a real provider using our ganache instance
+        // Create a real provider using our hardhat instance
         const provider = await createJsonRpcProvider('http://localhost:8545');
 
         const accounts = await getConnectedAccounts(provider);
 
         expect(Array.isArray(accounts)).toBe(true);
-        expect(accounts.length).toBe(10); // Ganache provides 10 test accounts
+        expect(accounts.length).toBe(10); // Hardhat provides 10 test accounts
         
-        // Verify we get the exact first Ganache test account
+        // Verify we get the exact first Hardhat test account
         expect(accounts[0]).toBe(env.accounts[0].address);
         
         // All accounts should be valid addresses
@@ -278,7 +278,7 @@ describe('Wallet - Unit Tests', () => {
         const provider = await createJsonRpcProvider('http://localhost:8545');
         const chainId = await getChainId(provider);
         
-        expect(chainId).toBe(1337); // Ganache fork chain ID
+        expect(chainId).toBe(1337); // Hardhat fork chain ID
         expect(typeof chainId).toBe('number');
       });
     });

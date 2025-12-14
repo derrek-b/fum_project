@@ -6,7 +6,6 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  validateChainId,
   validatePlatformId,
   getPlatformMetadata,
   getPlatformName,
@@ -22,71 +21,7 @@ import {
 } from '../../../src/helpers/platformHelpers.js';
 
 describe('Platform Helpers', () => {
-  describe('validateChainId', () => {
-    describe('Success Cases', () => {
-      it('should accept valid positive integers', () => {
-        expect(() => validateChainId(1)).not.toThrow();
-        expect(() => validateChainId(42161)).not.toThrow();
-        expect(() => validateChainId(1337)).not.toThrow();
-      });
-
-      it('should accept integers represented as floats (1.0, 42161.0)', () => {
-        expect(() => validateChainId(1.0)).not.toThrow();
-        expect(() => validateChainId(42161.0)).not.toThrow();
-      });
-    });
-
-    describe('Error Cases', () => {
-      it('should throw error for null chainId', () => {
-        expect(() => validateChainId(null)).toThrow('chainId parameter is required');
-      });
-
-      it('should throw error for undefined chainId', () => {
-        expect(() => validateChainId(undefined)).toThrow('chainId parameter is required');
-      });
-
-      it('should throw error for string chainId', () => {
-        expect(() => validateChainId('1')).toThrow('chainId must be a number');
-        expect(() => validateChainId('ethereum')).toThrow('chainId must be a number');
-      });
-
-      it('should throw error for array chainId', () => {
-        expect(() => validateChainId([1])).toThrow('chainId must be a number');
-      });
-
-      it('should throw error for object chainId', () => {
-        expect(() => validateChainId({ chainId: 1 })).toThrow('chainId must be a number');
-      });
-
-      it('should throw error for boolean chainId', () => {
-        expect(() => validateChainId(true)).toThrow('chainId must be a number');
-        expect(() => validateChainId(false)).toThrow('chainId must be a number');
-      });
-
-      it('should throw error for NaN chainId', () => {
-        expect(() => validateChainId(NaN)).toThrow('chainId must be a finite number');
-      });
-
-      it('should throw error for Infinity chainId', () => {
-        expect(() => validateChainId(Infinity)).toThrow('chainId must be a finite number');
-        expect(() => validateChainId(-Infinity)).toThrow('chainId must be a finite number');
-      });
-
-      it('should throw error for zero chainId', () => {
-        expect(() => validateChainId(0)).toThrow('chainId must be greater than 0');
-      });
-
-      it('should throw error for negative chainId', () => {
-        expect(() => validateChainId(-1)).toThrow('chainId must be greater than 0');
-        expect(() => validateChainId(-42161)).toThrow('chainId must be greater than 0');
-      });
-
-      it('should throw error for decimal chainId', () => {
-        expect(() => validateChainId(1.5)).toThrow('chainId must be an integer');
-        expect(() => validateChainId(42161.123)).toThrow('chainId must be an integer');
-      });
-    });
-  });
+  // Note: validateChainId tests are in chainHelpers.test.js
 
   describe('validatePlatformId', () => {
     describe('Success Cases', () => {

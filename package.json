@@ -26,7 +26,7 @@
     "./artifacts": "./dist/artifacts/index.js",
     "./artifacts/contracts": "./dist/artifacts/contracts.js",
     "./artifacts/contracts.js": "./dist/artifacts/contracts.js",
-    "./test/setup/ganache-config": "./test/setup/ganache-config.js",
+    "./test/setup/hardhat-config": "./test/setup/hardhat-config.js",
     "./test/setup/test-contracts": "./test/setup/test-contracts.js",
     "./test/test-env": "./test/test-env.js"
   },
@@ -66,7 +66,7 @@
     "chai": "^5.2.0",
     "dotenv": "^16.5.0",
     "ethers": "^5.7.2",
-    "ganache": "^7.9.2",
+    "hardhat": "^2.22.19",
     "sinon": "^20.0.0",
     "vitest": "^3.1.3"
   }

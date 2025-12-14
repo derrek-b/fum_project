@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getContract } from './ganache-config.js';
+import { getContract } from './hardhat-config.js';
 import contractsData from '../../dist/artifacts/contracts.js';
 import { getChainConfig } from '../../dist/helpers/chainHelpers.js';
 

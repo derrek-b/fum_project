@@ -107,7 +107,7 @@ describe('Chain Helpers', () => {
         expect(typeof config).toBe('object');
         expect(config.name).toBe('Arbitrum One');
         expect(config.rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2']);  // Base URL - API key appended by getChainRpcUrls()
-        expect(config.executorAddress).toBe('0x0');
+        expect(config.executorAddress).toBe('0x42d9df99e78ba0573b2990d6177d6eef7145c8e6');
         expect(config.platformAddresses).toHaveProperty('uniswapV3');
       });
     });
@@ -295,8 +295,9 @@ describe('Chain Helpers', () => {
       });
 
       it('should throw error for chains with 0x0 executor address', () => {
+        // Ethereum mainnet still has 0x0 (no executor deployed yet)
         expect(() => getExecutorAddress(1)).toThrow('No executor address configured for chain 1');
-        expect(() => getExecutorAddress(42161)).toThrow('No executor address configured for chain 42161');
+        // Note: Arbitrum (42161) now has a real executor address, so it doesn't throw
       });
 
       it('should throw error for chains with empty string executor address', async () => {

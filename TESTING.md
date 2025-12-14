@@ -1,13 +1,13 @@
 # FUM Library Test Suite
 
-This directory contains the test suite for fum_library, using Ganache to fork Arbitrum mainnet for realistic integration testing.
+This directory contains the test suite for fum_library, using Hardhat to fork Arbitrum mainnet for realistic integration testing.
 
 ## Structure
 
 ```
 test/
 ├── setup/                    # Test configuration and utilities
-│   ├── ganache-config.js    # Ganache setup and blockchain utilities
+│   ├── hardhat-config.js    # Hardhat setup and blockchain utilities
 │   └── test-contracts.js    # Contract deployment logic
 ├── unit/                    # Unit tests (pure functions)
 │   ├── adapters/           # Adapter unit tests
@@ -49,21 +49,22 @@ describe('My Test Suite', () => {
 
 ```javascript
 const env = await setupTestEnvironment({
-  port: 8545,               // Ganache port
+  port: 8545,               // Hardhat port (use unique port per test file)
   deployContracts: true,    // Deploy FUM contracts
   updateContractsFile: false, // Update contracts.js with addresses
-  quiet: true,              // Suppress Ganache logs
+  quiet: true,              // Suppress Hardhat logs
   syncBytecode: false,      // Sync bytecode from fum project
 });
 ```
 
 ## Key Features
 
-### 1. Ganache Fork
+### 1. Hardhat Fork
 - Forks Arbitrum mainnet for realistic testing
 - Provides 10 test accounts with 10,000 ETH each
 - Deterministic accounts from mnemonic
 - WebSocket support enabled
+- Supports Cancun hardfork (required for Uniswap V4)
 
 ### 2. No Mocks
 - Tests use real Uniswap SDK and ethers.js
@@ -110,8 +111,6 @@ THEGRAPH_API_KEY=your_api_key_here     # For subgraph queries
 # Optional: Test configuration
 QUIET_TESTS=false
 NODE_ENV=test
-GANACHE_PORT=8545
-GANACHE_BLOCK_TIME=0.5
 TEST_TIMEOUT=30000
 ```
 
@@ -164,7 +163,27 @@ Common test patterns used across the test suite:
 
 ## Troubleshooting
 
+### First Run Address Mismatch
+
+On first run (or after certain changes), you may see an error like:
+```
+💥 DETERMINISTIC ADDRESS VALIDATION FAILED!
+Deployed addresses do not match stored addresses in contracts file.
+```
+
+This is **expected behavior**. Contract addresses are deterministic based on deployer address and nonce. The test suite validates that deployed addresses match the stored addresses in `src/artifacts/contracts.js`.
+
+**What happens:**
+1. Tests deploy contracts and compare addresses to stored values
+2. If they don't match, the test **saves the new addresses** and exits
+3. **Re-run the test** - it will now pass with the updated addresses
+
+This fail-fast behavior prevents wasting time running a full test suite with incorrect addresses.
+
+### Other Issues
+
 - **Timeout Errors**: Increase test timeout in vitest.config.js
 - **Fork Errors**: Check your RPC URL and network connectivity
 - **Contract Not Found**: Ensure bytecode is synced from fum project
 - **WebSocket Errors**: Normal during cleanup, can be ignored
+- **Port Conflicts**: Each test file should use a unique port (8545, 8546, etc.) to avoid conflicts when running multiple test files

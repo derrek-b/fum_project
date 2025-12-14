@@ -2,11 +2,11 @@
  * Test Environment
  *
  * Main entry point for setting up the complete test environment.
- * Combines Ganache, contract deployment, and test utilities.
+ * Combines Hardhat node, contract deployment, and test utilities.
  */
 
 import { ethers } from 'ethers';
-import { startGanache, TEST_ACCOUNTS } from './setup/ganache-config.js';
+import { startHardhat, TEST_ACCOUNTS } from './setup/hardhat-config.js';
 import { deployFUMContracts, deployTestVault } from './setup/test-contracts.js';
 import chains from '../src/configs/chains.js';
 import tokens from '../src/configs/tokens.js';
@@ -35,9 +35,9 @@ export async function setupTestEnvironment(options = {}) {
 
   console.log('🚀 Starting test environment...');
 
-  // Start Ganache
-  console.log('🔧 Starting Ganache with Arbitrum fork...');
-  const ganache = await startGanache({ port, quiet });
+  // Start Hardhat node
+  console.log('🔧 Starting Hardhat node with Arbitrum fork...');
+  const hardhat = await startHardhat({ port, quiet });
 
   let contracts = {};
   let contractAddresses = {};
@@ -46,7 +46,7 @@ export async function setupTestEnvironment(options = {}) {
   if (deployContracts) {
     console.log('📄 Deploying FUM contracts...');
     const deployment = await deployFUMContracts(
-      ganache.signers[0],
+      hardhat.signers[0],
       { updateContractsFile }
     );
     contracts = deployment.contracts;
@@ -89,7 +89,7 @@ export async function setupTestEnvironment(options = {}) {
 
     // Get vault contract instance
     const vaultAbi = contractData.PositionVault.abi;
-    testVault = new ethers.Contract(vaultAddress, vaultAbi, ganache.signers[0]);
+    testVault = new ethers.Contract(vaultAddress, vaultAbi, hardhat.signers[0]);
 
     // Get chain config for our forked network
     const chainConfig = chains[1337];
@@ -99,7 +99,7 @@ export async function setupTestEnvironment(options = {}) {
     const adapter = new UniswapV3Adapter(1337);
 
     // Setup tokens - we'll need WETH and USDC
-    const owner = ganache.signers[0];
+    const owner = hardhat.signers[0];
 
     // 1. Wrap 10 ETH to WETH
     console.log('  - Wrapping 10 ETH to WETH...');
@@ -136,7 +136,7 @@ export async function setupTestEnvironment(options = {}) {
       amountIn: ethers.utils.parseEther('2').toString(),
       slippageTolerance: 1, // 1% slippage
       sqrtPriceLimitX96: "0",
-      provider: ganache.provider,
+      provider: hardhat.provider,
       deadlineMinutes: 2  // 2 minutes for L2
     };
 
@@ -172,7 +172,7 @@ export async function setupTestEnvironment(options = {}) {
     await (await usdc.approve(uniswapV3.positionManagerAddress, usdcAmount)).wait();
 
     // Get current pool data to center position around current tick
-    poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, ganache.provider);
+    poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, hardhat.provider);
 
     // Create position centered around current tick
     const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
@@ -259,22 +259,22 @@ export async function setupTestEnvironment(options = {}) {
 
   // Fund additional test accounts for use in tests
   console.log('💰 Funding test accounts...');
-  for (let i = 1; i < Math.min(5, ganache.signers.length); i++) {
-    const tx = await ganache.signers[0].sendTransaction({
-      to: ganache.signers[i].address,
+  for (let i = 1; i < Math.min(5, hardhat.signers.length); i++) {
+    const tx = await hardhat.signers[0].sendTransaction({
+      to: hardhat.signers[i].address,
       value: ethers.utils.parseEther('10')
     });
     await tx.wait();
-    console.log(`  - Funded account ${i} (${ganache.signers[i].address}) with 10 ETH`);
+    console.log(`  - Funded account ${i} (${hardhat.signers[i].address}) with 10 ETH`);
   }
   console.log('  ✅ Test accounts funded!');
 
   // Create test environment object
   const env = {
-    // Ganache utilities
-    provider: ganache.provider,
-    wsProvider: ganache.wsProvider,
-    signers: ganache.signers,
+    // Hardhat utilities
+    provider: hardhat.provider,
+    wsProvider: hardhat.wsProvider,
+    signers: hardhat.signers,
     accounts: TEST_ACCOUNTS,
 
     // Contract instances
@@ -309,10 +309,10 @@ export async function setupTestEnvironment(options = {}) {
       const vaultConfig = {
         name: 'Test Vault',
         symbol: 'TEST-V',
-        depositor: ganache.signers[0].address,
-        executor: ganache.signers[1].address,
-        strategist: ganache.signers[2].address,
-        feeRecipient: ganache.signers[3].address,
+        depositor: hardhat.signers[0].address,
+        executor: hardhat.signers[1].address,
+        strategist: hardhat.signers[2].address,
+        feeRecipient: hardhat.signers[3].address,
         performanceFee: 1000, // 10%
         managementFee: 200,   // 2%
         ...params,
@@ -322,7 +322,7 @@ export async function setupTestEnvironment(options = {}) {
     },
 
     async fundAccount(address, amountETH = '10') {
-      const funder = ganache.signers[0];
+      const funder = hardhat.signers[0];
       const tx = await funder.sendTransaction({
         to: address,
         value: ethers.utils.parseEther(amountETH),
@@ -335,35 +335,35 @@ export async function setupTestEnvironment(options = {}) {
       const ERC20_ABI = [
         'function balanceOf(address account) view returns (uint256)',
       ];
-      const token = new ethers.Contract(tokenAddress, ERC20_ABI, ganache.provider);
+      const token = new ethers.Contract(tokenAddress, ERC20_ABI, hardhat.provider);
       return await token.balanceOf(accountAddress);
     },
 
     // Snapshot management
     async snapshot() {
-      return await ganache.provider.send('evm_snapshot', []);
+      return await hardhat.provider.send('evm_snapshot', []);
     },
 
     async revert(snapshotId) {
-      await ganache.provider.send('evm_revert', [snapshotId]);
+      await hardhat.provider.send('evm_revert', [snapshotId]);
     },
 
     // Time manipulation
     async increaseTime(seconds) {
-      await ganache.provider.send('evm_increaseTime', [seconds]);
-      await ganache.provider.send('evm_mine', []);
+      await hardhat.provider.send('evm_increaseTime', [seconds]);
+      await hardhat.provider.send('evm_mine', []);
     },
 
     async mineBlocks(count = 1) {
       for (let i = 0; i < count; i++) {
-        await ganache.provider.send('evm_mine', []);
+        await hardhat.provider.send('evm_mine', []);
       }
     },
 
     // Cleanup function
     async teardown() {
       console.log('🧹 Cleaning up test environment...');
-      await ganache.stop();
+      await hardhat.stop();
     },
   };
 
@@ -374,7 +374,7 @@ export async function setupTestEnvironment(options = {}) {
     console.log('\n📊 Test Environment Summary:');
     console.log(`- RPC URL: http://localhost:${port}`);
     console.log(`- WebSocket URL: ws://localhost:${port}`);
-    console.log(`- Test accounts: ${ganache.signers.length}`);
+    console.log(`- Test accounts: ${hardhat.signers.length}`);
     console.log(`- Contracts deployed: ${Object.keys(contracts).length}`);
     console.log('\n');
   }
@@ -396,5 +396,5 @@ export async function quickTestSetup(options = {}) {
 }
 
 // Export all test utilities
-export * from './setup/ganache-config.js';
+export * from './setup/hardhat-config.js';
 export * from './setup/test-contracts.js';

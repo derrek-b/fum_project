@@ -1,7 +1,7 @@
 /**
  * contracts.js Unit Tests
  *
- * Tests using Ganache fork of Arbitrum - no mocks, real blockchain interactions.
+ * Tests using Hardhat fork of Arbitrum - no mocks, real blockchain interactions.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -27,12 +27,14 @@ describe('contracts.js - Unit Tests', () => {
 
   beforeAll(async () => {
     try {
-      // Setup test environment with Ganache fork and full deployment for contract testing
+      // Setup test environment with Hardhat fork and full deployment for contract testing
+      // Use port 8545 to avoid conflicts with other test files
       env = await setupTestEnvironment({
         deployContracts: true, // Need deployed contracts for testing
+        port: 8545,
       });
 
-      console.log('Ganache test environment started successfully');
+      console.log('Hardhat test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
       console.log('Chain ID:', await env.provider.getNetwork().then(n => n.chainId));
 
@@ -71,8 +73,8 @@ describe('contracts.js - Unit Tests', () => {
     }
   });
 
-  // Test to verify Ganache is working
-  it('should connect to Ganache fork successfully', async () => {
+  // Test to verify Hardhat is working
+  it('should connect to Hardhat fork successfully', async () => {
     const network = await env.provider.getNetwork();
     expect(network.chainId).toBe(1337);
 
