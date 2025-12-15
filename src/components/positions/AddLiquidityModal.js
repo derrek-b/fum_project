@@ -264,11 +264,14 @@ export default function AddLiquidityModal({
         const chainTokens = getTokensByChain(chainId);
 
         // Format tokens to match the expected structure
+        // For native tokens (ETH), address is null but we need wethAddress for V3
         const formattedTokens = chainTokens.map(token => ({
-          address: token.addresses[chainId],
           symbol: token.symbol,
           name: token.name,
-          decimals: token.decimals
+          decimals: token.decimals,
+          isNative: token.isNative || false,
+          address: token.addresses[chainId],  // null for ETH
+          wethAddress: token.isNative ? token.wethAddresses?.[chainId] : null
         }));
 
         setCommonTokens(formattedTokens);
@@ -340,24 +343,31 @@ export default function AddLiquidityModal({
     }
   }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, readProvider, adapter, showError]);
 
-  // Fetch token balances when token addresses change
+  // Fetch token balances when token symbols change
   useEffect(() => {
     if (!isExistingPosition && token0Address && token1Address && readProvider && address) {
-      fetchTokenBalances(token0Address, token1Address);
+      // Get token info from commonTokens using symbol (token0Address/token1Address now store symbols)
+      const token0Info = commonTokens.find(t => t.symbol === token0Address);
+      const token1Info = commonTokens.find(t => t.symbol === token1Address);
+      if (token0Info && token1Info) {
+        fetchTokenBalances(token0Info, token1Info);
+      }
     }
-  }, [token0Address, token1Address, readProvider, address, isExistingPosition]);
+  }, [token0Address, token1Address, readProvider, address, isExistingPosition, commonTokens]);
 
   // Load pool price when both tokens and fee tier are selected
   useEffect(() => {
     // Only attempt to fetch pool price when we have all necessary data
     // This prevents errors when user is mid-selection
+    // Also skip if we already have an error (prevents infinite loop)
     if (!isExistingPosition &&
         token0Address && token0Address !== "" &&
         token1Address && token1Address !== "" &&
-        selectedFeeTier && readProvider && adapter) {
+        selectedFeeTier && readProvider && adapter &&
+        !priceLoadError) {
       fetchPoolPrice();
     }
-  }, [token0Address, token1Address, selectedFeeTier, readProvider, adapter, isExistingPosition]);
+  }, [token0Address, token1Address, selectedFeeTier, readProvider, adapter, isExistingPosition, priceLoadError]);
 
   // Fetch token prices for new positions when tokens are selected
   useEffect(() => {
@@ -366,22 +376,18 @@ export default function AddLiquidityModal({
         return;
       }
 
-      // Get token symbols from commonTokens
-      const token0Info = commonTokens.find(t => t.address === token0Address);
-      const token1Info = commonTokens.find(t => t.address === token1Address);
-
-      if (!token0Info?.symbol || !token1Info?.symbol) {
-        return;
-      }
+      // token0Address/token1Address now hold symbols directly
+      const token0Symbol = token0Address;
+      const token1Symbol = token1Address;
 
       try {
-        const symbols = [token0Info.symbol, token1Info.symbol];
+        const symbols = [token0Symbol, token1Symbol];
         const prices = await fetchTokenPrices(symbols, CACHE_DURATIONS['2-MINUTES']);
 
         if (prices) {
           setLocalTokenPrices({
-            token0: prices[token0Info.symbol] || 0,
-            token1: prices[token1Info.symbol] || 0
+            token0: prices[token0Symbol] || 0,
+            token1: prices[token1Symbol] || 0
           });
         }
       } catch (error) {
@@ -392,32 +398,6 @@ export default function AddLiquidityModal({
 
     fetchPrices();
   }, [token0Address, token1Address, commonTokens, isExistingPosition]);
-
-  // Calculate paired token amount when token0 amount changes
-  useEffect(() => {
-    if (!token0Amount || token0Amount === '0' || !currentPoolPrice) {
-      return;
-    }
-
-    try {
-      const amount0 = parseFloat(token0Amount);
-      const price = parseFloat(currentPoolPrice);
-
-      if (isNaN(amount0) || isNaN(price) || price === 0) {
-        return;
-      }
-
-      // If tokens were swapped in sorting, we need to adjust the calculation
-      const calculatedAmount1 = tokensSwapped
-        ? amount0 / price
-        : amount0 * price;
-
-      setToken1Amount(calculatedAmount1.toFixed(6));
-    } catch (error) {
-      console.error("Error calculating paired amount:", error);
-      setToken1Error("Failed to calculate paired amount");
-    }
-  }, [token0Amount, currentPoolPrice, tokensSwapped]);
 
   // Handle token0 amount change with token1 calculation
   const handleToken0AmountChange = (value) => {
@@ -447,7 +427,9 @@ export default function AddLiquidityModal({
         ? amount0 / price
         : amount0 * price;
 
-      setToken1Amount(calculatedAmount1.toFixed(6));
+      // Use token1's decimals for proper precision
+      const token1Info = commonTokens.find(t => t.symbol === token1Address);
+      setToken1Amount(calculatedAmount1.toFixed(token1Info.decimals));
     } catch (error) {
       console.error("Error calculating paired amount:", error);
       setToken1Error("Failed to calculate paired amount");
@@ -482,15 +464,17 @@ export default function AddLiquidityModal({
         ? amount1 * price
         : amount1 / price;
 
-      setToken0Amount(calculatedAmount0.toFixed(6));
+      // Use token0's decimals for proper precision
+      const token0Info = commonTokens.find(t => t.symbol === token0Address);
+      setToken0Amount(calculatedAmount0.toFixed(token0Info.decimals));
     } catch (error) {
       console.error("Error calculating paired amount:", error);
       setToken0Error("Failed to calculate paired amount");
     }
   };
 
-  // Fetch token balances for user
-  const fetchTokenBalances = async (address0, address1) => {
+  // Fetch token balances for user (handles native ETH + WETH combined balance)
+  const fetchTokenBalances = async (token0Info, token1Info) => {
     if (!readProvider || !address) {
       console.error("Provider or address missing");
       return;
@@ -503,41 +487,41 @@ export default function AddLiquidityModal({
         'function decimals() view returns (uint8)'
       ];
 
-      // Create contract instances
-      const token0Contract = new ethers.Contract(address0, erc20ABI, readProvider);
-      const token1Contract = new ethers.Contract(address1, erc20ABI, readProvider);
+      // Helper to fetch balance for a single token
+      const fetchBalance = async (tokenInfo) => {
+        if (tokenInfo.isNative) {
+          // For native tokens (ETH), fetch both native ETH and WETH balances
+          const ethBalance = await readProvider.getBalance(address);
 
-      // Get balances and decimals
-      const [balance0, balance1] = await Promise.all([
-        token0Contract.balanceOf(address),
-        token1Contract.balanceOf(address)
-      ]);
+          // Fetch WETH balance
+          const wethContract = new ethers.Contract(tokenInfo.wethAddress, erc20ABI, readProvider);
+          const wethBalance = await wethContract.balanceOf(address);
 
-      // Get token details
-      const getTokenDetail = (address) => {
-        if (isExistingPosition) {
-          if (address === token0Data.address) return token0Data;
-          if (address === token1Data.address) return token1Data;
+          return {
+            native: ethers.utils.formatEther(ethBalance),
+            wrapped: ethers.utils.formatEther(wethBalance),
+            total: ethers.utils.formatEther(ethBalance.add(wethBalance)),
+            isNative: true
+          };
         } else {
-          return commonTokens.find(t => t.address === address);
+          // Standard ERC20 balance
+          const contract = new ethers.Contract(tokenInfo.address, erc20ABI, readProvider);
+          const balance = await contract.balanceOf(address);
+          return {
+            total: ethers.utils.formatUnits(balance, tokenInfo.decimals),
+            isNative: false
+          };
         }
-        return null;
       };
 
-      const token0Detail = getTokenDetail(address0);
-      const token1Detail = getTokenDetail(address1);
+      const [balance0, balance1] = await Promise.all([
+        fetchBalance(token0Info),
+        fetchBalance(token1Info)
+      ]);
 
-      if (!token0Detail || !token1Detail) {
-        throw new Error("Token details not found");
-      }
-
-      // Format balances with proper decimals
-      const formattedBalance0 = ethers.utils.formatUnits(balance0, token0Detail.decimals);
-      const formattedBalance1 = ethers.utils.formatUnits(balance1, token1Detail.decimals);
-
-      // Update state
-      setToken0Balance(formattedBalance0);
-      setToken1Balance(formattedBalance1);
+      // Update state with balance objects
+      setToken0Balance(balance0);
+      setToken1Balance(balance1);
     } catch (error) {
       console.error("Error fetching token balances:", error);
       // Clear balances on error
@@ -562,23 +546,34 @@ export default function AddLiquidityModal({
     setPriceLoadError(null);
 
     try {
-      // Get the current token data
-      const token0Info = commonTokens.find(t => t.address === token0Address);
-      const token1Info = commonTokens.find(t => t.address === token1Address);
+      // Get the current token data (use symbol since token0Address/token1Address hold symbols)
+      const token0Info = commonTokens.find(t => t.symbol === token0Address);
+      const token1Info = commonTokens.find(t => t.symbol === token1Address);
 
       if (!token0Info || !token1Info) {
         throw new Error("Token information not found");
       }
+
+      // Helper to get the address to use for pool calculations (WETH for native tokens)
+      const getPoolTokenAddress = (tokenInfo) => {
+        if (tokenInfo.isNative) {
+          return tokenInfo.wethAddress;  // Use WETH address for V3 pools
+        }
+        return tokenInfo.address;
+      };
 
       // Create a helper function to get pool address with properly sorted tokens
       // This would be in the adapter in a production app
       const getPoolAddressWithSorting = async () => {
         try {
           // Use the Uniswap SDK to calculate pool address with properly sorted tokens
+          // Get addresses for pool lookup (WETH for native tokens)
+          const token0PoolAddress = getPoolTokenAddress(token0Info);
+          const token1PoolAddress = getPoolTokenAddress(token1Info);
 
           // Sort tokens according to Uniswap V3 rules (lexicographically by address)
           let sortedToken0, sortedToken1;
-          const shouldSwap = token0Address.toLowerCase() > token1Address.toLowerCase();
+          const shouldSwap = token0PoolAddress.toLowerCase() > token1PoolAddress.toLowerCase();
 
           if (shouldSwap) {
             sortedToken0 = token1Info;
@@ -596,9 +591,10 @@ export default function AddLiquidityModal({
             throw new Error("Could not determine chainId from provider");
           }
 
+          // For SDK Token creation, use WETH address for native tokens
           const sdkToken0 = new Token(
             chainId,
-            sortedToken0.address,
+            getPoolTokenAddress(sortedToken0),
             sortedToken0.decimals,
             sortedToken0.symbol || "",
             sortedToken0.name || ""
@@ -606,7 +602,7 @@ export default function AddLiquidityModal({
 
           const sdkToken1 = new Token(
             chainId,
-            sortedToken1.address,
+            getPoolTokenAddress(sortedToken1),
             sortedToken1.decimals,
             sortedToken1.symbol || "",
             sortedToken1.name || ""
@@ -655,9 +651,9 @@ export default function AddLiquidityModal({
         // Extract tick value
         const tickValue = typeof slot0.tick === 'bigint' ? Number(slot0.tick) : Number(slot0.tick);
 
-        // Use adapter to calculate price
-        const baseToken = { address: sortedToken0.address, decimals: sortedToken0.decimals };
-        const quoteToken = { address: sortedToken1.address, decimals: sortedToken1.decimals };
+        // Use adapter to calculate price (use WETH address for native tokens)
+        const baseToken = { address: getPoolTokenAddress(sortedToken0), decimals: sortedToken0.decimals };
+        const quoteToken = { address: getPoolTokenAddress(sortedToken1), decimals: sortedToken1.decimals };
         const priceObj = adapter.calculatePriceFromSqrtPrice(
           slot0.sqrtPriceX96.toString(),
           baseToken,
@@ -680,14 +676,14 @@ export default function AddLiquidityModal({
           tick: tickValue
         });
 
-        // Store sorted token data for position creation
+        // Store sorted token data for position creation (use WETH address for native tokens)
         setSortedToken0Data({
-          address: sortedToken0.address,
+          address: getPoolTokenAddress(sortedToken0),
           decimals: sortedToken0.decimals,
           symbol: sortedToken0.symbol
         });
         setSortedToken1Data({
-          address: sortedToken1.address,
+          address: getPoolTokenAddress(sortedToken1),
           decimals: sortedToken1.decimals,
           symbol: sortedToken1.symbol
         });
@@ -809,16 +805,20 @@ export default function AddLiquidityModal({
 
       // Verify calculations by converting ticks back to prices
       if (adapter && token0Address && token1Address) {
-        const token0Info = commonTokens.find(t => t.address === token0Address);
-        const token1Info = commonTokens.find(t => t.address === token1Address);
+        // Use symbol to find token since token0Address/token1Address hold symbols
+        const token0Info = commonTokens.find(t => t.symbol === token0Address);
+        const token1Info = commonTokens.find(t => t.symbol === token1Address);
 
         if (token0Info && token1Info) {
+          // Helper to get pool address (WETH for native tokens)
+          const getPoolAddr = (info) => info.isNative ? info.wethAddress : info.address;
+
           const baseToken = tokensSwapped ?
-            { address: token1Info.address, decimals: token1Info.decimals } :
-            { address: token0Info.address, decimals: token0Info.decimals };
+            { address: getPoolAddr(token1Info), decimals: token1Info.decimals } :
+            { address: getPoolAddr(token0Info), decimals: token0Info.decimals };
           const quoteToken = tokensSwapped ?
-            { address: token0Info.address, decimals: token0Info.decimals } :
-            { address: token1Info.address, decimals: token1Info.decimals };
+            { address: getPoolAddr(token0Info), decimals: token0Info.decimals } :
+            { address: getPoolAddr(token1Info), decimals: token1Info.decimals };
 
           try {
             const lowerPriceObj = adapter.tickToPrice(minTick, baseToken, quoteToken);
@@ -886,8 +886,8 @@ export default function AddLiquidityModal({
       }
 
       // User enters price in the display format (what they see on screen)
-      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "WETH per USDC")
-      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per WETH")
+      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "ETH per USDC")
+      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per ETH")
 
       // Determine which tokens to use as base and quote based on display format
       // The adapter's priceToTick expects (price, baseToken, quoteToken) where price = quote/base
@@ -950,8 +950,8 @@ export default function AddLiquidityModal({
       }
 
       // User enters price in the display format (what they see on screen)
-      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "WETH per USDC")
-      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per WETH")
+      // When invertPriceDisplay=false: User sees "token0 per token1" (e.g., "ETH per USDC")
+      // When invertPriceDisplay=true: User sees "token1 per token0" (e.g., "USDC per ETH")
 
       // Determine which tokens to use as base and quote based on display format
       // The adapter's priceToTick expects (price, baseToken, quoteToken) where price = quote/base
@@ -1112,6 +1112,26 @@ export default function AddLiquidityModal({
     }
   };
 
+  /**
+   * Calculate how much ETH needs to be wrapped for a native token
+   * @param {string} requiredAmount - Amount needed for the position (human readable)
+   * @param {object} balance - Balance object { native, wrapped, total, isNative }
+   * @returns {string} Amount to wrap (human readable), or "0" if no wrap needed
+   */
+  const calculateWrapAmount = (requiredAmount, balance) => {
+    if (!balance?.isNative) return "0";
+
+    const required = parseFloat(requiredAmount);
+    const availableWeth = parseFloat(balance.wrapped);
+
+    if (required <= availableWeth) {
+      return "0"; // Already have enough WETH
+    }
+
+    const wrapNeeded = required - availableWeth;
+    return wrapNeeded.toString();
+  };
+
   // Function to create a new position with approval flow
   const createPosition = async (params) => {
     if (!adapter) {
@@ -1128,12 +1148,30 @@ export default function AddLiquidityModal({
       throw new Error("Position Manager address not found");
     }
 
-    // Setup transaction steps
-    const steps = [
-      { title: `Approve ${sortedToken0Data.symbol}`, description: 'Grant permission to spend token' },
-      { title: `Approve ${sortedToken1Data.symbol}`, description: 'Grant permission to spend token' },
-      { title: 'Create Position', description: 'Mint new liquidity position' }
-    ];
+    // Determine which token is ETH (if any) and calculate wrap amount
+    const token0Info = commonTokens.find(t => t.symbol === token0Address);
+    const token1Info = commonTokens.find(t => t.symbol === token1Address);
+
+    // Get the ETH amount in user's input order (before pool sorting)
+    const ethTokenInfo = token0Info?.isNative ? token0Info : (token1Info?.isNative ? token1Info : null);
+    const ethBalance = token0Info?.isNative ? token0Balance : (token1Info?.isNative ? token1Balance : null);
+    const ethAmount = token0Info?.isNative ? params.token0Amount : (token1Info?.isNative ? params.token1Amount : null);
+
+    let wrapAmount = "0";
+    if (ethTokenInfo && ethBalance && ethAmount) {
+      wrapAmount = calculateWrapAmount(ethAmount, ethBalance);
+    }
+    const needsWrap = parseFloat(wrapAmount) > 0;
+
+    // Build transaction steps dynamically
+    const steps = [];
+    if (needsWrap) {
+      steps.push({ title: 'Prepare ETH', description: `Preparing ${parseFloat(wrapAmount).toFixed(6)} ETH for the position` });
+    }
+    steps.push({ title: `Approve ${sortedToken0Data.symbol}`, description: 'Grant permission to spend token' });
+    steps.push({ title: `Approve ${sortedToken1Data.symbol}`, description: 'Grant permission to spend token' });
+    steps.push({ title: 'Create Position', description: 'Mint new liquidity position' });
+
     setTransactionSteps(steps);
     setCurrentTxStep(0);
     setTransactionError('');
@@ -1145,19 +1183,41 @@ export default function AddLiquidityModal({
     setOperationError(null);
 
     try {
+      // If tokens were swapped during sorting, swap the amounts to match pool order
+      const amount0ForPool = tokensSwapped ? params.token1Amount : params.token0Amount;
+      const amount1ForPool = tokensSwapped ? params.token0Amount : params.token1Amount;
+
       // Convert token amounts from human-readable format to wei
       const token0AmountWei = ethers.utils.parseUnits(
-        params.token0Amount || "0",
+        amount0ForPool || "0",
         sortedToken0Data.decimals
       ).toString();
 
       const token1AmountWei = ethers.utils.parseUnits(
-        params.token1Amount || "0",
+        amount1ForPool || "0",
         sortedToken1Data.decimals
       ).toString();
 
       // Get signer
       const signer = getSigner();
+
+      // Track current step index (dynamic based on whether wrap is needed)
+      let stepIndex = 0;
+
+      // Step 0 (conditional): Wrap ETH to WETH if needed
+      if (needsWrap) {
+        const wrapAmountWei = ethers.utils.parseEther(wrapAmount);
+        const wethAddress = ethTokenInfo.wethAddress;
+
+        const WETH_ABI = ['function deposit() payable'];
+        const wethContract = new ethers.Contract(wethAddress, WETH_ABI, signer);
+
+        const wrapTx = await wethContract.deposit({ value: wrapAmountWei });
+        await wrapTx.wait();
+
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
+      }
 
       // ERC20 ABI for approve and allowance
       const erc20ABI = [
@@ -1165,7 +1225,7 @@ export default function AddLiquidityModal({
         'function allowance(address owner, address spender) view returns (uint256)'
       ];
 
-      // Step 1: Check and approve token0 if needed
+      // Step: Check and approve token0 if needed
       if (token0AmountWei !== "0") {
         const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, readProvider);
         const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
@@ -1180,10 +1240,11 @@ export default function AddLiquidityModal({
         }
       }
 
-      // Move to step 2
-      setCurrentTxStep(1);
+      // Move to next step
+      stepIndex++;
+      setCurrentTxStep(stepIndex);
 
-      // Step 2: Check and approve token1 if needed
+      // Step: Check and approve token1 if needed
       if (token1AmountWei !== "0") {
         const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, readProvider);
         const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
@@ -1198,8 +1259,9 @@ export default function AddLiquidityModal({
         }
       }
 
-      // Move to step 3
-      setCurrentTxStep(2);
+      // Move to final step (Create Position)
+      stepIndex++;
+      setCurrentTxStep(stepIndex);
 
       // Step 3: Generate transaction data using the library
       // Ensure tickLower < tickUpper for the SDK
@@ -1318,9 +1380,9 @@ export default function AddLiquidityModal({
           const decimalError = validateDecimalPrecision(token0Amount, token0Data?.decimals, token0Data?.symbol || 'Token 0');
           if (decimalError) errors.push(decimalError);
 
-          // Validate balance
+          // Validate balance (use .total for both native and ERC20 tokens)
           if (token0Balance !== null) {
-            const balance0 = parseFloat(token0Balance);
+            const balance0 = parseFloat(token0Balance.total);
             if (amount0 > balance0) {
               errors.push(`${token0Data?.symbol || 'Token 0'} amount exceeds your balance`);
             }
@@ -1339,9 +1401,9 @@ export default function AddLiquidityModal({
           const decimalError = validateDecimalPrecision(token1Amount, token1Data?.decimals, token1Data?.symbol || 'Token 1');
           if (decimalError) errors.push(decimalError);
 
-          // Validate balance
+          // Validate balance (use .total for both native and ERC20 tokens)
           if (token1Balance !== null) {
-            const balance1 = parseFloat(token1Balance);
+            const balance1 = parseFloat(token1Balance.total);
             if (amount1 > balance1) {
               errors.push(`${token1Data?.symbol || 'Token 1'} amount exceeds your balance`);
             }
@@ -1374,8 +1436,8 @@ export default function AddLiquidityModal({
         errors.push("Please select both tokens");
       }
 
-      // Validate tokens are not the same
-      if (token0Address && token1Address && token0Address.toLowerCase() === token1Address.toLowerCase()) {
+      // Validate tokens are not the same (token0Address/token1Address now hold symbols)
+      if (token0Address && token1Address && token0Address === token1Address) {
         errors.push("Cannot create position with the same token for both sides");
       }
 
@@ -1432,16 +1494,16 @@ export default function AddLiquidityModal({
         if (isNaN(amount0) || amount0 <= 0) {
           errors.push("Token 0 amount must be greater than zero");
         } else {
-          // Validate decimal precision
-          const token0Info = commonTokens.find(t => t.address.toLowerCase() === token0Address.toLowerCase());
+          // Validate decimal precision (use symbol to find token since ETH has null address)
+          const token0Info = commonTokens.find(t => t.symbol === token0Address);
           if (token0Info) {
             const decimalError = validateDecimalPrecision(token0Amount, token0Info.decimals, token0Info.symbol);
             if (decimalError) errors.push(decimalError);
           }
 
-          // Validate balance
+          // Validate balance (use .total for both native and ERC20 tokens)
           if (token0Balance !== null) {
-            const balance0 = parseFloat(token0Balance);
+            const balance0 = parseFloat(token0Balance.total);
             if (amount0 > balance0) {
               errors.push("Token 0 amount exceeds your balance");
             }
@@ -1455,16 +1517,16 @@ export default function AddLiquidityModal({
         if (isNaN(amount1) || amount1 <= 0) {
           errors.push("Token 1 amount must be greater than zero");
         } else {
-          // Validate decimal precision
-          const token1Info = commonTokens.find(t => t.address.toLowerCase() === token1Address.toLowerCase());
+          // Validate decimal precision (use symbol to find token since ETH has null address)
+          const token1Info = commonTokens.find(t => t.symbol === token1Address);
           if (token1Info) {
             const decimalError = validateDecimalPrecision(token1Amount, token1Info.decimals, token1Info.symbol);
             if (decimalError) errors.push(decimalError);
           }
 
-          // Validate balance
+          // Validate balance (use .total for both native and ERC20 tokens)
           if (token1Balance !== null) {
-            const balance1 = parseFloat(token1Balance);
+            const balance1 = parseFloat(token1Balance.total);
             if (amount1 > balance1) {
               errors.push("Token 1 amount exceeds your balance");
             }
@@ -1516,6 +1578,9 @@ export default function AddLiquidityModal({
     try {
       // Get token data
       const getTokens = () => {
+        // Helper to get pool address (WETH for native tokens)
+        const getPoolAddr = (tokenInfo) => tokenInfo.isNative ? tokenInfo.wethAddress : tokenInfo.address;
+
         if (isExistingPosition) {
           if (!token0Data?.decimals || !token1Data?.decimals || !token0Data?.address || !token1Data?.address) {
             return { token0: null, token1: null };
@@ -1525,16 +1590,25 @@ export default function AddLiquidityModal({
             token1: { address: token1Data.address, decimals: token1Data.decimals }
           };
         } else {
-          const token0 = commonTokens.find(t => t.address === token0Address);
-          const token1 = commonTokens.find(t => t.address === token1Address);
+          // Use symbol to find token since token0Address/token1Address hold symbols
+          const token0 = commonTokens.find(t => t.symbol === token0Address);
+          const token1 = commonTokens.find(t => t.symbol === token1Address);
 
-          if (!token0?.decimals || !token1?.decimals || !token0?.address || !token1?.address) {
+          if (!token0?.decimals || !token1?.decimals) {
+            return { token0: null, token1: null };
+          }
+
+          // Get pool address (WETH for native tokens)
+          const t0Addr = getPoolAddr(token0);
+          const t1Addr = getPoolAddr(token1);
+
+          if (!t0Addr || !t1Addr) {
             return { token0: null, token1: null };
           }
 
           return {
-            token0: { address: token0.address, decimals: token0.decimals },
-            token1: { address: token1.address, decimals: token1.decimals }
+            token0: { address: t0Addr, decimals: token0.decimals },
+            token1: { address: t1Addr, decimals: token1.decimals }
           };
         }
       };
@@ -1554,9 +1628,9 @@ export default function AddLiquidityModal({
       // The adapter now handles sorting internally and returns price in the order we request
       // tickToPrice(base, quote) returns "quote per base"
       //
-      // When invertPriceDisplay=false: We want to display "token0 per token1" (WETH per USDC)
+      // When invertPriceDisplay=false: We want to display "token0 per token1" (ETH per USDC)
       //   So ask for tickToPrice(base=token1, quote=token0) → returns "token0 per token1" ✓
-      // When invertPriceDisplay=true: We want to display "token1 per token0" (USDC per WETH)
+      // When invertPriceDisplay=true: We want to display "token1 per token0" (USDC per ETH)
       //   So ask for tickToPrice(base=token0, quote=token1) → returns "token1 per token0" ✓
 
       const baseToken = invertPriceDisplay ? token0 : token1;
@@ -1618,12 +1692,12 @@ export default function AddLiquidityModal({
     }
   }, [currentPoolPrice, isExistingPosition, poolData, formatTickToPrice, invertPriceDisplay]);
 
-  // Get token symbols safely
+  // Get token data safely (use symbol since token0Address/token1Address hold symbols)
   const getToken0Data = () => {
     if (isExistingPosition) {
       return token0Data;
     } else {
-      return commonTokens.find(t => t.address === token0Address);
+      return commonTokens.find(t => t.symbol === token0Address);
     }
   };
 
@@ -1631,7 +1705,7 @@ export default function AddLiquidityModal({
     if (isExistingPosition) {
       return token1Data;
     } else {
-      return commonTokens.find(t => t.address === token1Address);
+      return commonTokens.find(t => t.symbol === token1Address);
     }
   };
 
@@ -1639,8 +1713,8 @@ export default function AddLiquidityModal({
     if (isExistingPosition) {
       return token0Data?.symbol || "Token0";
     } else {
-      const token = commonTokens.find(t => t.address === token0Address);
-      return token?.symbol || "Token0";
+      // token0Address holds the symbol directly
+      return token0Address || "Token0";
     }
   };
 
@@ -1648,8 +1722,8 @@ export default function AddLiquidityModal({
     if (isExistingPosition) {
       return token1Data?.symbol || "Token1";
     } else {
-      const token = commonTokens.find(t => t.address === token1Address);
-      return token?.symbol || "Token1";
+      // token1Address holds the symbol directly
+      return token1Address || "Token1";
     }
   };
 
@@ -1658,19 +1732,24 @@ export default function AddLiquidityModal({
 
   // Get correct display price direction
   const getPriceDisplay = () => {
-    // Base display determined by token order and whether they were swapped for Uniswap
-    // Default convention across the app: token0 per token1 (when invertPriceDisplay is false)
+    // The price from calculatePriceFromSqrtPrice is "quoteToken per baseToken"
+    // where baseToken=sortedToken0, quoteToken=sortedToken1
+    // So price = sortedToken1/sortedToken0
     let baseDisplay;
 
     // For existing positions, respect the token order from the position
     if (isExistingPosition) {
       baseDisplay = `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
     } else {
-      // For new positions, if tokens were swapped for Uniswap order, we need to adjust the display
+      // For new positions:
+      // - When tokensSwapped=true: sortedToken0=userToken1, sortedToken1=userToken0
+      //   So price = userToken0/userToken1 → display as "token0 per token1"
+      // - When tokensSwapped=false: sortedToken0=userToken0, sortedToken1=userToken1
+      //   So price = userToken1/userToken0 → display as "token1 per token0"
       if (tokensSwapped) {
-        baseDisplay = `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}`;
-      } else {
         baseDisplay = `${displayCurrentPrice} ${token0Symbol} per ${token1Symbol}`;
+      } else {
+        baseDisplay = `${displayCurrentPrice} ${token1Symbol} per ${token0Symbol}`;
       }
     }
 
@@ -1791,12 +1870,12 @@ export default function AddLiquidityModal({
                     style={{ fontSize: '0.9em' }}
                   >
                     {isExistingPosition ? (
-                      <option value={token0Data?.address}>{token0Data?.symbol}</option>
+                      <option value={token0Data?.symbol}>{token0Data?.symbol}</option>
                     ) : (
                       <>
                         <option value="">Select Token 0</option>
                         {commonTokens.map(token => (
-                          <option key={token.address} value={token.address}>
+                          <option key={token.symbol} value={token.symbol}>
                             {token.symbol} - {token.name}
                           </option>
                         ))}
@@ -1817,14 +1896,14 @@ export default function AddLiquidityModal({
                     style={{ fontSize: '0.9em' }}
                   >
                     {isExistingPosition ? (
-                      <option value={token1Data?.address}>{token1Data?.symbol}</option>
+                      <option value={token1Data?.symbol}>{token1Data?.symbol}</option>
                     ) : (
                       <>
                         <option value="">Select Token 1</option>
                         {commonTokens
-                          .filter(token => token.address !== token0Address)
+                          .filter(token => token.symbol !== token0Address)
                           .map(token => (
-                            <option key={token.address} value={token.address}>
+                            <option key={token.symbol} value={token.symbol}>
                               {token.symbol} - {token.name}
                             </option>
                           ))}
@@ -1996,13 +2075,17 @@ export default function AddLiquidityModal({
                         <strong>
                           {formatTickToPrice(priceRange.min)} - {formatTickToPrice(priceRange.max)}
                         </strong>
+                        {/* Price direction matches getPriceDisplay() logic:
+                            - tokensSwapped=true: base price is "token0 per token1"
+                            - tokensSwapped=false: base price is "token1 per token0"
+                            - invertPriceDisplay flips whichever one is shown */}
                         {invertPriceDisplay ?
                           (tokensSwapped ?
-                            <> {token0Symbol} per {token1Symbol}</> :
-                            <> {token1Symbol} per {token0Symbol}</>) :
-                          (tokensSwapped ?
                             <> {token1Symbol} per {token0Symbol}</> :
-                            <> {token0Symbol} per {token1Symbol}</>)
+                            <> {token0Symbol} per {token1Symbol}</>) :
+                          (tokensSwapped ?
+                            <> {token0Symbol} per {token1Symbol}</> :
+                            <> {token1Symbol} per {token0Symbol}</>)
                         }
                       </div>
                     </Form.Group>
@@ -2022,20 +2105,24 @@ export default function AddLiquidityModal({
             <h6 className="border-bottom pb-2 mt-5 mb-3" style={{ fontSize: '0.9em' }}>Add Liquidity</h6>
 
             <Row className="mb-4">
-              <Col md={6}>
+              <Col md={12}>
                 <Form.Group className="mb-3">
-                  <Form.Label style={{ fontSize: '0.9em' }}>{token0Symbol} Amount</Form.Label>
+                  <Form.Label className="mb-0" style={{ fontSize: '0.9em' }}>{token0Symbol} Amount</Form.Label>
                   {token0Balance && (
                     <div className="d-flex justify-content-between align-items-center mb-1">
                       <small style={{ color: 'var(--neutral-600)', fontSize: '0.75em' }}>
-                        Balance: {parseFloat(token0Balance).toFixed(6)}
+                        {token0Balance.isNative ? (
+                          <>Balance: {parseFloat(token0Balance.native).toFixed(4)}{parseFloat(token0Balance.wrapped) > 0 && <> ({parseFloat(token0Balance.wrapped).toFixed(4)} WETH)</>}</>
+                        ) : (
+                          <>Balance: {parseFloat(token0Balance.total).toFixed(6)}</>
+                        )}
                       </small>
                       <Button
                         variant="link"
                         size="sm"
                         className="p-0"
                         style={{ color: 'var(--crimson-700)', fontSize: '0.75em' }}
-                        onClick={() => handleToken0AmountChange(token0Balance)}
+                        onClick={() => handleToken0AmountChange(token0Balance.total)}
                         disabled={isProcessingOperation}
                       >
                         Max
@@ -2070,20 +2157,24 @@ export default function AddLiquidityModal({
                 </Form.Group>
               </Col>
 
-              <Col md={6}>
+              <Col md={12}>
                 <Form.Group className="mb-3">
-                  <Form.Label style={{ fontSize: '0.9em' }}>{token1Symbol} Amount</Form.Label>
+                  <Form.Label className="mb-0" style={{ fontSize: '0.9em' }}>{token1Symbol} Amount</Form.Label>
                   {token1Balance && (
                     <div className="d-flex justify-content-between align-items-center mb-1">
                       <small style={{ color: 'var(--neutral-600)', fontSize: '0.75em' }}>
-                        Balance: {parseFloat(token1Balance).toFixed(6)}
+                        {token1Balance.isNative ? (
+                          <>Balance: {parseFloat(token1Balance.native).toFixed(4)}{parseFloat(token1Balance.wrapped) > 0 && <> ({parseFloat(token1Balance.wrapped).toFixed(4)} WETH)</>}</>
+                        ) : (
+                          <>Balance: {parseFloat(token1Balance.total).toFixed(6)}</>
+                        )}
                       </small>
                       <Button
                         variant="link"
                         size="sm"
                         className="p-0"
                         style={{ color: 'var(--crimson-700)', fontSize: '0.75em' }}
-                        onClick={() => handleToken1AmountChange(token1Balance)}
+                        onClick={() => handleToken1AmountChange(token1Balance.total)}
                         disabled={isProcessingOperation}
                       >
                         Max
