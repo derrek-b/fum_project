@@ -196,6 +196,12 @@ export function getTokensByChain(chainId) {
     if (!token.addresses) {
       throw new Error(`Token ${token.symbol || 'unknown'} is missing addresses property`);
     }
+
+    // For native tokens, check wethAddresses instead
+    if (token.isNative) {
+      return token.wethAddresses && token.wethAddresses[chainId];
+    }
+
     return token.addresses[chainId];
   });
 }
@@ -375,6 +381,11 @@ export function getTokensBySymbol(symbols) {
  * // Returns: { symbol: "USDC", name: "USD Coin", ... }
  *
  * @example
+ * // Look up ETH token by WETH address
+ * const token = getTokenByAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', 1);
+ * // Returns: { symbol: "ETH", name: "Ether", isNative: true, ... }
+ *
+ * @example
  * // Identify token from transaction
  * try {
  *   const token = getTokenByAddress(event.args.token, chainId);
@@ -392,8 +403,16 @@ export function getTokenByAddress(address, chainId) {
   const normalizedAddress = address.toLowerCase();
 
   for (const token of Object.values(tokens)) {
+    // Check standard addresses
     if (token.addresses[chainId] &&
         token.addresses[chainId].toLowerCase() === normalizedAddress) {
+      return token;
+    }
+
+    // Also check wethAddresses for native tokens (e.g., WETH address -> ETH token)
+    if (token.wethAddresses &&
+        token.wethAddresses[chainId] &&
+        token.wethAddresses[chainId].toLowerCase() === normalizedAddress) {
       return token;
     }
   }
@@ -436,7 +455,7 @@ export function getTokensByType(isStablecoin) {
  * @memberof module:helpers/tokenHelpers
  * @param {string} symbol - Token symbol (case-sensitive)
  * @param {number} chainId - Chain ID where the token address is needed
- * @returns {string} Token contract address (0x-prefixed)
+ * @returns {string|null} Token contract address (0x-prefixed), or null for native tokens like ETH
  * @throws {Error} If parameters are invalid, token not found, or token not available on chain
  * @example
  * // Get USDC address on Ethereum mainnet
@@ -444,12 +463,17 @@ export function getTokensByType(isStablecoin) {
  * // Returns: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
  *
  * @example
- * // Handle token not available on chain
- * try {
- *   const tokenAddress = getTokenAddress('USDC', chainId);
- *   const contract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
- * } catch (error) {
- *   console.error('Token not available:', error.message);
+ * // Get ETH address (returns null for native token)
+ * const ethAddress = getTokenAddress('ETH', 1);
+ * // Returns: null (use getWethAddress() for WETH contract address)
+ *
+ * @example
+ * // Handle native vs ERC20 tokens
+ * const address = getTokenAddress(symbol, chainId);
+ * if (address === null) {
+ *   // Native token - use provider.getBalance() or getWethAddress()
+ * } else {
+ *   const contract = new ethers.Contract(address, ERC20ABI, provider);
  * }
  * @since 1.0.0
  */
@@ -460,6 +484,15 @@ export function getTokenAddress(symbol, chainId) {
   const token = tokens[symbol];
   if (!token) {
     throw new Error(`Token ${symbol} not found`);
+  }
+
+  // For native tokens, addresses[chainId] is null - return null instead of throwing
+  if (token.isNative) {
+    // Verify the chain is supported by checking wethAddresses
+    if (!token.wethAddresses || !token.wethAddresses[chainId]) {
+      throw new Error(`Token ${symbol} not available on chain ${chainId}`);
+    }
+    return null;
   }
 
   const address = token.addresses[chainId];
@@ -475,12 +508,12 @@ export function getTokenAddress(symbol, chainId) {
  * @memberof module:helpers/tokenHelpers
  * @param {string[]} symbols - Array of token symbols
  * @param {number} chainId - Chain ID where addresses are needed
- * @returns {Object} Object mapping symbol to address
+ * @returns {Object} Object mapping symbol to address (null for native tokens like ETH)
  * @throws {Error} If parameters are invalid, any token not found, or any token not available on chain
  * @example
  * // Get multiple token addresses at once
- * const addresses = getTokenAddresses(['USDC', 'WETH'], 42161);
- * // Returns: { USDC: "0xaf88...", WETH: "0x82af..." }
+ * const addresses = getTokenAddresses(['USDC', 'ETH'], 1);
+ * // Returns: { USDC: "0xA0b8...", ETH: null }
  *
  * @example
  * // Fails fast if any token is not available
@@ -497,10 +530,8 @@ export function getTokenAddresses(symbols, chainId) {
 
   const addresses = {};
   symbols.forEach(symbol => {
-    const address = getTokenAddress(symbol, chainId);
-    if (address) {
-      addresses[symbol] = address;
-    }
+    // getTokenAddress returns null for native tokens, which is valid
+    addresses[symbol] = getTokenAddress(symbol, chainId);
   });
 
   return addresses;
@@ -515,14 +546,14 @@ export function getTokenAddresses(symbols, chainId) {
  * @throws {Error} If parameters are invalid
  * @example
  * // Check if token pair is available on Arbitrum
- * const tokensAvailable = areTokensSupportedOnChain(['USDC', 'WETH'], 42161);
+ * const tokensAvailable = areTokensSupportedOnChain(['USDC', 'ETH'], 42161);
  * if (!tokensAvailable) {
  *   console.error('Not all tokens available on this chain');
  * }
  *
  * @example
  * // Validate token selection for a specific chain
- * const selectedTokens = ['USDC', 'WETH', 'WBTC'];
+ * const selectedTokens = ['USDC', 'ETH', 'WBTC'];
  * if (areTokensSupportedOnChain(selectedTokens, chainId)) {
  *   proceedWithStrategy(selectedTokens);
  * }
@@ -534,7 +565,14 @@ export function areTokensSupportedOnChain(symbols, chainId) {
 
   return symbols.every(symbol => {
     const token = tokens[symbol];
-    return token && token.addresses[chainId];
+    if (!token) return false;
+
+    // For native tokens, check wethAddresses
+    if (token.isNative) {
+      return token.wethAddresses && token.wethAddresses[chainId];
+    }
+
+    return token.addresses[chainId];
   });
 }
 
@@ -572,7 +610,7 @@ export function validateTokensExist(symbols) {
  * @example
  * // Use in price fetching
  * try {
- *   const geckoId = getCoingeckoId('WETH');
+ *   const geckoId = getCoingeckoId('ETH');
  *   const price = await fetchPriceFromCoingecko(geckoId);
  * } catch (error) {
  *   console.error('Token not supported for price fetching');
@@ -592,4 +630,136 @@ export function getCoingeckoId(symbol) {
   }
 
   return token.coingeckoId;
+}
+
+/**
+ * Check if a token is a native token (like ETH)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} symbol - Token symbol (case-sensitive)
+ * @returns {boolean} True if the token is native, false otherwise
+ * @throws {Error} If symbol parameter is invalid or token is not found
+ * @example
+ * // Check if ETH is native
+ * const native = isNativeToken('ETH');
+ * // Returns: true
+ *
+ * @example
+ * // Check if USDC is native
+ * const native = isNativeToken('USDC');
+ * // Returns: false
+ *
+ * @example
+ * // Use in balance fetching logic
+ * if (isNativeToken(symbol)) {
+ *   balance = await provider.getBalance(address);
+ * } else {
+ *   balance = await tokenContract.balanceOf(address);
+ * }
+ * @since 1.0.0
+ */
+export function isNativeToken(symbol) {
+  validateTokenSymbol(symbol);
+
+  const token = tokens[symbol];
+  if (!token) {
+    throw new Error(`Token ${symbol} not found`);
+  }
+
+  return token.isNative === true;
+}
+
+/**
+ * Get WETH contract address for a specific chain
+ * @memberof module:helpers/tokenHelpers
+ * @param {number} chainId - Chain ID where the WETH address is needed
+ * @returns {string} WETH contract address (0x-prefixed)
+ * @throws {Error} If chainId is invalid or WETH not available on chain
+ * @example
+ * // Get WETH address on Ethereum mainnet
+ * const wethAddress = getWethAddress(1);
+ * // Returns: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+ *
+ * @example
+ * // Use for wrapping ETH in V3 operations
+ * const wethContract = new ethers.Contract(getWethAddress(chainId), WETH_ABI, signer);
+ * await wethContract.deposit({ value: amount });
+ * @since 1.0.0
+ */
+export function getWethAddress(chainId) {
+  validateChainId(chainId);
+
+  const ethToken = tokens['ETH'];
+  if (!ethToken) {
+    throw new Error('ETH token not found in configuration');
+  }
+
+  if (!ethToken.wethAddresses) {
+    throw new Error('ETH token does not have wethAddresses configured');
+  }
+
+  const address = ethToken.wethAddresses[chainId];
+  if (!address) {
+    throw new Error(`WETH not available on chain ${chainId}`);
+  }
+
+  return address;
+}
+
+/**
+ * Get the appropriate token address for a specific protocol version
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} symbol - Token symbol (case-sensitive)
+ * @param {number} chainId - Chain ID where the address is needed
+ * @param {string} protocol - Protocol identifier ('v3' or 'v4')
+ * @returns {string|null} Token address - returns WETH address for V3 native tokens, null for V4 native tokens, or the ERC20 address for non-native tokens
+ * @throws {Error} If parameters are invalid, token not found, or token not available on chain
+ * @example
+ * // Get ETH address for V3 (returns WETH)
+ * const address = getTokenAddressForProtocol('ETH', 1, 'v3');
+ * // Returns: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+ *
+ * @example
+ * // Get ETH address for V4 (returns null for native)
+ * const address = getTokenAddressForProtocol('ETH', 1, 'v4');
+ * // Returns: null
+ *
+ * @example
+ * // Get USDC address (same for both protocols)
+ * const address = getTokenAddressForProtocol('USDC', 1, 'v3');
+ * // Returns: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+ * @since 1.0.0
+ */
+export function getTokenAddressForProtocol(symbol, chainId, protocol) {
+  validateTokenSymbol(symbol);
+  validateChainId(chainId);
+
+  if (!protocol || (protocol !== 'v3' && protocol !== 'v4')) {
+    throw new Error('Protocol must be "v3" or "v4"');
+  }
+
+  const token = tokens[symbol];
+  if (!token) {
+    throw new Error(`Token ${symbol} not found`);
+  }
+
+  // For native tokens (like ETH), return WETH for V3, null for V4
+  if (token.isNative) {
+    if (protocol === 'v3') {
+      if (!token.wethAddresses || !token.wethAddresses[chainId]) {
+        throw new Error(`WETH address not available for ${symbol} on chain ${chainId}`);
+      }
+      return token.wethAddresses[chainId];
+    } else {
+      // V4 uses native ETH
+      return null;
+    }
+  }
+
+  // For non-native tokens, return the ERC20 address
+  const address = token.addresses[chainId];
+  if (!address) {
+    throw new Error(`Token ${symbol} not available on chain ${chainId}`);
+  }
+
+  return address;
 }

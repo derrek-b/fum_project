@@ -22,7 +22,7 @@ describe('CoinGecko Service - Real API Tests', () => {
 
   describe('buildApiUrl', () => {
     describe('Success Cases', () => {
-      it('should build SIMPLE_PRICE endpoint URL with WETH', () => {
+      it('should build SIMPLE_PRICE endpoint URL with ETH', () => {
         const url = buildApiUrl(ENDPOINTS.SIMPLE_PRICE, { ids: 'ethereum', vs_currencies: 'usd' });
 
         expect(url).toContain('https://api.coingecko.com/api/v3/simple/price');
@@ -30,14 +30,14 @@ describe('CoinGecko Service - Real API Tests', () => {
         expect(url).toContain('vs_currencies=usd');
       });
 
-      it('should build COIN_DETAILS endpoint URL with WETH', () => {
+      it('should build COIN_DETAILS endpoint URL with ETH', () => {
         const url = buildApiUrl(ENDPOINTS.COIN_DETAILS.replace('{id}', 'ethereum'), { localization: 'false' });
 
         expect(url).toContain('https://api.coingecko.com/api/v3/coins/ethereum');
         expect(url).toContain('localization=false');
       });
 
-      it('should build COIN_HISTORY endpoint URL with WETH', () => {
+      it('should build COIN_HISTORY endpoint URL with ETH', () => {
         const url = buildApiUrl(ENDPOINTS.COIN_HISTORY.replace('{id}', 'ethereum'), { date: '30-12-2023' });
 
         expect(url).toContain('https://api.coingecko.com/api/v3/coins/ethereum/history');
@@ -160,44 +160,44 @@ describe('CoinGecko Service - Real API Tests', () => {
   describe('fetchTokenPrices', () => {
     describe('Success Cases', () => {
       it('should fetch WETH price successfully', async () => {
-        const prices = await fetchTokenPrices(['WETH'], CACHE_DURATIONS['0-SECONDS']);
+        const prices = await fetchTokenPrices(['ETH'], CACHE_DURATIONS['0-SECONDS']);
 
-        expect(prices).toHaveProperty('WETH');
-        expect(typeof prices.WETH).toBe('number');
-        expect(prices.WETH).toBeGreaterThan(0);
+        expect(prices).toHaveProperty('ETH');
+        expect(typeof prices.ETH).toBe('number');
+        expect(prices.ETH).toBeGreaterThan(0);
       });
 
       it('should populate cache with timestamp', async () => {
-        await fetchTokenPrices(['WETH'], CACHE_DURATIONS['5-SECONDS']);
+        await fetchTokenPrices(['ETH'], CACHE_DURATIONS['5-SECONDS']);
 
-        expect(priceCache).toHaveProperty('WETH');
-        expect(priceCache.WETH).toHaveProperty('price');
-        expect(priceCache.WETH).toHaveProperty('timestamp');
-        expect(typeof priceCache.WETH.price).toBe('number');
-        expect(typeof priceCache.WETH.timestamp).toBe('number');
-        expect(priceCache.WETH.price).toBeGreaterThan(0);
+        expect(priceCache).toHaveProperty('ETH');
+        expect(priceCache.ETH).toHaveProperty('price');
+        expect(priceCache.ETH).toHaveProperty('timestamp');
+        expect(typeof priceCache.ETH.price).toBe('number');
+        expect(typeof priceCache.ETH.timestamp).toBe('number');
+        expect(priceCache.ETH.price).toBeGreaterThan(0);
       });
 
       it('should fetch multiple tokens', async () => {
-        const prices = await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']);
+        const prices = await fetchTokenPrices(['ETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']);
 
-        expect(prices).toHaveProperty('WETH');
+        expect(prices).toHaveProperty('ETH');
         expect(prices).toHaveProperty('USDC');
-        expect(prices.WETH).toBeGreaterThan(100); // ETH should be > $100
+        expect(prices.ETH).toBeGreaterThan(100); // ETH should be > $100
         expect(prices.USDC).toBeCloseTo(1, 1); // USDC should be ~$1
       });
 
       it('should use cache when within duration', async () => {
         // First call - populate cache
-        const firstCall = await fetchTokenPrices(['WETH'], CACHE_DURATIONS['5-MINUTES']);
-        const firstTimestamp = priceCache.WETH.timestamp;
+        const firstCall = await fetchTokenPrices(['ETH'], CACHE_DURATIONS['5-MINUTES']);
+        const firstTimestamp = priceCache.ETH.timestamp;
 
         // Small delay to ensure different timestamp if fetched
         await new Promise(resolve => setTimeout(resolve, 10)); // Rate limit delay
 
         // Second call - should use cache
-        const secondCall = await fetchTokenPrices(['WETH'], CACHE_DURATIONS['5-MINUTES']);
-        const secondTimestamp = priceCache.WETH.timestamp;
+        const secondCall = await fetchTokenPrices(['ETH'], CACHE_DURATIONS['5-MINUTES']);
+        const secondTimestamp = priceCache.ETH.timestamp;
 
         expect(firstCall.WETH).toBe(secondCall.WETH);
         expect(firstTimestamp).toBe(secondTimestamp); // Should be same timestamp (from cache)
@@ -205,24 +205,24 @@ describe('CoinGecko Service - Real API Tests', () => {
 
       it('should bypass cache with 0-SECONDS strategy', async () => {
         // First call
-        await fetchTokenPrices(['WETH'], CACHE_DURATIONS['5-MINUTES']);
-        const cachedTimestamp = priceCache.WETH.timestamp;
+        await fetchTokenPrices(['ETH'], CACHE_DURATIONS['5-MINUTES']);
+        const cachedTimestamp = priceCache.ETH.timestamp;
 
         // Second call with 0-SECONDS should fetch fresh
-        await fetchTokenPrices(['WETH'], CACHE_DURATIONS['0-SECONDS']);
+        await fetchTokenPrices(['ETH'], CACHE_DURATIONS['0-SECONDS']);
 
         // Price might be same, but timestamp should be different
-        const newTimestamp = priceCache.WETH.timestamp;
+        const newTimestamp = priceCache.ETH.timestamp;
         expect(newTimestamp).toBeGreaterThan(cachedTimestamp);
       });
 
       it('should accept custom cache duration in milliseconds', async () => {
         // Custom 1.5 second cache duration
         const customDuration = 1500;
-        const prices = await fetchTokenPrices(['WETH'], customDuration);
+        const prices = await fetchTokenPrices(['ETH'], customDuration);
 
-        expect(prices.WETH).toBeGreaterThan(0);
-        expect(typeof prices.WETH).toBe('number');
+        expect(prices.ETH).toBeGreaterThan(0);
+        expect(typeof prices.ETH).toBe('number');
       });
 
       it('should return empty object for empty token array', async () => {
@@ -244,7 +244,7 @@ describe('CoinGecko Service - Real API Tests', () => {
       });
 
       it('should throw error for non-array tokenSymbols', async () => {
-        await expect(fetchTokenPrices('WETH', CACHE_DURATIONS['0-SECONDS']))
+        await expect(fetchTokenPrices('ETH', CACHE_DURATIONS['0-SECONDS']))
           .rejects.toThrow('tokenSymbols must be an array');
       });
 
@@ -269,43 +269,43 @@ describe('CoinGecko Service - Real API Tests', () => {
       });
 
       it('should throw error for non-string token symbols', async () => {
-        await expect(fetchTokenPrices([123, 'WETH'], CACHE_DURATIONS['0-SECONDS']))
+        await expect(fetchTokenPrices([123, 'ETH'], CACHE_DURATIONS['0-SECONDS']))
           .rejects.toThrow('All token symbols must be strings. Found: number');
       });
 
       // cacheDurationMs parameter validation
       it('should throw error for missing cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH']))
+        await expect(fetchTokenPrices(['ETH']))
           .rejects.toThrow('cacheDurationMs parameter is required');
       });
 
       it('should throw error for null cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], null))
+        await expect(fetchTokenPrices(['ETH'], null))
           .rejects.toThrow('cacheDurationMs parameter is required');
       });
 
       it('should throw error for undefined cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], undefined))
+        await expect(fetchTokenPrices(['ETH'], undefined))
           .rejects.toThrow('cacheDurationMs parameter is required');
       });
 
       it('should throw error for non-number cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], '1000'))
+        await expect(fetchTokenPrices(['ETH'], '1000'))
           .rejects.toThrow('cacheDurationMs must be a valid number');
       });
 
       it('should throw error for non-finite cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], Infinity))
+        await expect(fetchTokenPrices(['ETH'], Infinity))
           .rejects.toThrow('cacheDurationMs must be a valid number');
       });
 
       it('should throw error for NaN cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], NaN))
+        await expect(fetchTokenPrices(['ETH'], NaN))
           .rejects.toThrow('cacheDurationMs must be a valid number');
       });
 
       it('should throw error for negative cache duration', async () => {
-        await expect(fetchTokenPrices(['WETH'], -1))
+        await expect(fetchTokenPrices(['ETH'], -1))
           .rejects.toThrow('cacheDurationMs must be >= 0. Got: -1');
       });
 
@@ -320,7 +320,7 @@ describe('CoinGecko Service - Real API Tests', () => {
           })
         });
 
-        await expect(fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']))
+        await expect(fetchTokenPrices(['ETH', 'USDC'], CACHE_DURATIONS['0-SECONDS']))
           .rejects.toThrow('No price data returned for token USDC');
 
         // Restore original fetch
@@ -337,8 +337,8 @@ describe('CoinGecko Service - Real API Tests', () => {
           })
         });
 
-        await expect(fetchTokenPrices(['WETH'], CACHE_DURATIONS['0-SECONDS']))
-          .rejects.toThrow('Invalid price data for token WETH: -100');
+        await expect(fetchTokenPrices(['ETH'], CACHE_DURATIONS['0-SECONDS']))
+          .rejects.toThrow('Invalid price data for token ETH: -100');
 
         // Restore original fetch
         global.fetch = originalFetch;
@@ -353,16 +353,16 @@ describe('CoinGecko Service - Real API Tests', () => {
 
 
       // After fetch, cache should have data
-      await fetchTokenPrices(['WETH'], CACHE_DURATIONS['5-SECONDS']);
+      await fetchTokenPrices(['ETH'], CACHE_DURATIONS['5-SECONDS']);
       expect(Object.keys(priceCache)).toHaveLength(1);
-      expect(priceCache.WETH).toBeDefined();
-      expect(priceCache.WETH.price).toBeGreaterThan(0);
-      expect(priceCache.WETH.timestamp).toBeGreaterThan(0);
+      expect(priceCache.ETH).toBeDefined();
+      expect(priceCache.ETH.price).toBeGreaterThan(0);
+      expect(priceCache.ETH.timestamp).toBeGreaterThan(0);
     });
 
     it('should clear cache completely', async () => {
       // Populate cache
-      await fetchTokenPrices(['WETH', 'USDC'], CACHE_DURATIONS['5-SECONDS']);
+      await fetchTokenPrices(['ETH', 'USDC'], CACHE_DURATIONS['5-SECONDS']);
       expect(Object.keys(priceCache)).toHaveLength(2);
 
       // Clear cache

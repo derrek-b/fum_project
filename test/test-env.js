@@ -109,8 +109,8 @@ export async function setupTestEnvironment(options = {}) {
       ...ERC20_ABI // Include all standard ERC20 functions
     ];
 
-    // Get WETH address from tokens config
-    wethAddress = tokens.WETH.addresses[1337];
+    // Get WETH address from ETH token config (wethAddresses for wrapped version)
+    wethAddress = tokens.ETH.wethAddresses[1337];
     const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
 
     const wrapTx = await weth.deposit({ value: ethers.utils.parseEther('10') });

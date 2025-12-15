@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-14T19:28:04.827Z
+Generated on: 2025-12-15T21:38:20.835Z
 
 ## Table of Contents
 
@@ -346,6 +346,9 @@ Token configuration with addresses on multiple chains
 - `areTokensSupportedOnChain` (function)
 - `validateTokensExist` (function)
 - `getCoingeckoId` (function)
+- `isNativeToken` (function)
+- `getWethAddress` (function)
+- `getTokenAddressForProtocol` (function)
 
 ---
 

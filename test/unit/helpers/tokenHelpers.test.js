@@ -20,7 +20,10 @@ import {
   validateTokensExist,
   getTokensBySymbol,
   isStablecoin,
-  detectStablePair
+  detectStablePair,
+  isNativeToken,
+  getWethAddress,
+  getTokenAddressForProtocol
 } from '../../../src/helpers/tokenHelpers.js';
 import tokens from '../../../src/configs/tokens.js';
 
@@ -42,7 +45,7 @@ describe('Token Helpers', () => {
 
         // Test with known tokens
         expect(result.USDC).toBeDefined();
-        expect(result.WETH).toBeDefined();
+        expect(result.ETH).toBeDefined();
 
         // Verify token structure
         const usdc = result.USDC;
@@ -51,6 +54,12 @@ describe('Token Helpers', () => {
         expect(usdc).toHaveProperty('decimals');
         expect(usdc).toHaveProperty('addresses');
         expect(usdc).toHaveProperty('isStablecoin');
+
+        // Verify ETH has native token properties
+        const eth = result.ETH;
+        expect(eth).toHaveProperty('isNative');
+        expect(eth.isNative).toBe(true);
+        expect(eth).toHaveProperty('wethAddresses');
       });
 
       it('should include all expected token properties', () => {
@@ -83,14 +92,16 @@ describe('Token Helpers', () => {
         expect(result.isStablecoin).toBe(true);
       });
 
-      it('should return WETH token correctly', () => {
-        const result = getTokenBySymbol('WETH');
+      it('should return ETH token correctly', () => {
+        const result = getTokenBySymbol('ETH');
 
         expect(result).toBeDefined();
-        expect(result.symbol).toBe('WETH');
-        expect(result.name).toBe('Wrapped Ether');
+        expect(result.symbol).toBe('ETH');
+        expect(result.name).toBe('Ether');
         expect(result.decimals).toBe(18);
         expect(result.isStablecoin).toBe(false);
+        expect(result.isNative).toBe(true);
+        expect(result.wethAddresses).toBeDefined();
       });
 
       it('should handle unicode keys correctly', () => {
@@ -142,9 +153,17 @@ describe('Token Helpers', () => {
         expect(result).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
       });
 
-      it('should return address for local chain', () => {
-        const result = getTokenAddress('WETH', 1337);
-        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      it('should return null for native ETH token', () => {
+        const result = getTokenAddress('ETH', 1);
+        expect(result).toBeNull();
+      });
+
+      it('should return null for ETH on all supported chains', () => {
+        const chainIds = [1, 42161, 1337];
+        chainIds.forEach(chainId => {
+          const result = getTokenAddress('ETH', chainId);
+          expect(result).toBeNull();
+        });
       });
 
 
@@ -209,9 +228,9 @@ describe('Token Helpers', () => {
         expect(result['USD₮0'].isStablecoin).toBe(true);
       });
 
-      it('should not include WETH in stablecoins', () => {
+      it('should not include ETH in stablecoins', () => {
         const result = getStablecoins();
-        expect(result.WETH).toBeUndefined();
+        expect(result.ETH).toBeUndefined();
       });
 
       it('should have consistent structure with getAllTokens', () => {
@@ -316,8 +335,8 @@ describe('Token Helpers', () => {
         expect(result).toBe(true);
       });
 
-      it('should return false for WETH-USDC mixed pair', () => {
-        const wethAddress = getTokenAddress('WETH', 1337);
+      it('should return false for ETH-USDC mixed pair (using WETH address)', () => {
+        const wethAddress = getWethAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result = detectStablePair(wethAddress, usdcAddress, 1337);
@@ -326,8 +345,8 @@ describe('Token Helpers', () => {
         expect(typeof result).toBe('boolean');
       });
 
-      it('should return false for USDC-WETH mixed pair (reversed)', () => {
-        const wethAddress = getTokenAddress('WETH', 1337);
+      it('should return false for USDC-ETH mixed pair (reversed, using WETH address)', () => {
+        const wethAddress = getWethAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result = detectStablePair(usdcAddress, wethAddress, 1337);
@@ -335,8 +354,8 @@ describe('Token Helpers', () => {
         expect(result).toBe(false);
       });
 
-      it('should return false for WETH-WBTC non-stable pair', () => {
-        const wethAddress = getTokenAddress('WETH', 1337);
+      it('should return false for ETH-WBTC non-stable pair (using WETH address)', () => {
+        const wethAddress = getWethAddress(1337);
         const wbtcAddress = getTokenAddress('WBTC', 1337);
 
         const result = detectStablePair(wethAddress, wbtcAddress, 1337);
@@ -345,7 +364,7 @@ describe('Token Helpers', () => {
       });
 
       it('should work with all combinations of known tokens', () => {
-        const wethAddress = getTokenAddress('WETH', 1337);
+        const wethAddress = getWethAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
         const usdtAddress = getTokenAddress('USD₮0', 1337);
         const wbtcAddress = getTokenAddress('WBTC', 1337);
@@ -354,7 +373,7 @@ describe('Token Helpers', () => {
         const pairs = [
           { tokenA: usdcAddress, tokenB: usdtAddress, expected: true },  // stable-stable
           { tokenA: usdtAddress, tokenB: usdcAddress, expected: true },  // stable-stable reversed
-          { tokenA: usdcAddress, tokenB: wethAddress, expected: false }, // stable-volatile
+          { tokenA: usdcAddress, tokenB: wethAddress, expected: false }, // stable-volatile (ETH via WETH address)
           { tokenA: wethAddress, tokenB: usdcAddress, expected: false }, // volatile-stable
           { tokenA: usdcAddress, tokenB: wbtcAddress, expected: false }, // stable-volatile
           { tokenA: wbtcAddress, tokenB: usdcAddress, expected: false }, // volatile-stable
@@ -476,7 +495,7 @@ describe('Token Helpers', () => {
       });
 
       it('should be deterministic for non-stable pairs', () => {
-        const wethAddress = getTokenAddress('WETH', 1337);
+        const wethAddress = getWethAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result1 = detectStablePair(wethAddress, usdcAddress, 1337);
@@ -491,12 +510,17 @@ describe('Token Helpers', () => {
   describe('areTokensSupportedOnChain', () => {
     describe('Success Cases', () => {
       it('should return true when all tokens are supported', () => {
-        const result = areTokensSupportedOnChain(['USDC', 'WETH'], 1);
+        const result = areTokensSupportedOnChain(['USDC', 'ETH'], 1);
         expect(result).toBe(true);
       });
 
       it('should return true for single token', () => {
         const result = areTokensSupportedOnChain(['USDC'], 42161);
+        expect(result).toBe(true);
+      });
+
+      it('should return true for native ETH token', () => {
+        const result = areTokensSupportedOnChain(['ETH'], 1);
         expect(result).toBe(true);
       });
 
@@ -511,12 +535,12 @@ describe('Token Helpers', () => {
       });
 
       it('should work with all valid tokens on Arbitrum', () => {
-        const result = areTokensSupportedOnChain(['USDC', 'WETH', 'WBTC'], 42161);
+        const result = areTokensSupportedOnChain(['USDC', 'ETH', 'WBTC'], 42161);
         expect(result).toBe(true);
       });
 
       it('should work with mixed token support', () => {
-        const supportedResult = areTokensSupportedOnChain(['USDC', 'WETH'], 1);
+        const supportedResult = areTokensSupportedOnChain(['USDC', 'ETH'], 1);
         expect(supportedResult).toBe(true);
 
         const unsupportedResult = areTokensSupportedOnChain(['USDC', 'NONEXISTENT'], 1);
@@ -562,12 +586,22 @@ describe('Token Helpers', () => {
         expect(result.symbol).toBe('USDC');
       });
 
-      it('should work with WETH address', () => {
+      it('should resolve WETH address to ETH token', () => {
         const address = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
         const result = getTokenByAddress(address, 42161);
 
         expect(result).toBeDefined();
-        expect(result.symbol).toBe('WETH');
+        expect(result.symbol).toBe('ETH');
+        expect(result.isNative).toBe(true);
+      });
+
+      it('should resolve WETH address on Ethereum mainnet to ETH token', () => {
+        const address = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+        const result = getTokenByAddress(address, 1);
+
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('ETH');
+        expect(result.isNative).toBe(true);
       });
 
     });
@@ -619,8 +653,13 @@ describe('Token Helpers', () => {
         expect(result.length).toBeGreaterThan(0);
 
         result.forEach(token => {
-          expect(token.addresses[1]).toBeDefined();
-          expect(typeof token.addresses[1]).toBe('string');
+          // Native tokens have null addresses but wethAddresses
+          if (token.isNative) {
+            expect(token.wethAddresses[1]).toBeDefined();
+          } else {
+            expect(token.addresses[1]).toBeDefined();
+            expect(typeof token.addresses[1]).toBe('string');
+          }
         });
       });
 
@@ -631,7 +670,11 @@ describe('Token Helpers', () => {
         expect(result.length).toBeGreaterThan(0);
 
         result.forEach(token => {
-          expect(token.addresses[42161]).toBeDefined();
+          if (token.isNative) {
+            expect(token.wethAddresses[42161]).toBeDefined();
+          } else {
+            expect(token.addresses[42161]).toBeDefined();
+          }
         });
       });
 
@@ -647,7 +690,7 @@ describe('Token Helpers', () => {
         expect(result).toEqual([]);
       });
 
-      it('should include USDC and WETH on all supported chains', () => {
+      it('should include USDC and ETH on all supported chains', () => {
         const supportedChains = [1, 42161, 1337];
 
         supportedChains.forEach(chainId => {
@@ -655,8 +698,18 @@ describe('Token Helpers', () => {
           const symbols = tokens.map(token => token.symbol);
 
           expect(symbols).toContain('USDC');
-          expect(symbols).toContain('WETH');
+          expect(symbols).toContain('ETH');
         });
+      });
+
+      it('should include native ETH token with correct properties', () => {
+        const result = getTokensByChain(1);
+        const ethToken = result.find(t => t.symbol === 'ETH');
+
+        expect(ethToken).toBeDefined();
+        expect(ethToken.isNative).toBe(true);
+        expect(ethToken.addresses[1]).toBeNull();
+        expect(ethToken.wethAddresses[1]).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
       });
     });
 
@@ -679,7 +732,7 @@ describe('Token Helpers', () => {
         expect(result.length).toBeGreaterThan(0);
 
         expect(result).toContain('USDC');
-        expect(result).toContain('WETH');
+        expect(result).toContain('ETH');
         expect(result).toContain('WBTC');
       });
 
@@ -734,7 +787,7 @@ describe('Token Helpers', () => {
         });
 
         const symbols = result.map(token => token.symbol);
-        expect(symbols).toContain('WETH');
+        expect(symbols).toContain('ETH');
         expect(symbols).toContain('WBTC');
       });
 
@@ -778,8 +831,8 @@ describe('Token Helpers', () => {
         expect(result).toBe('usd-coin');
       });
 
-      it('should return CoinGecko ID for WETH', () => {
-        const result = getCoingeckoId('WETH');
+      it('should return CoinGecko ID for ETH', () => {
+        const result = getCoingeckoId('ETH');
         expect(result).toBe('ethereum');
       });
 
@@ -819,21 +872,27 @@ describe('Token Helpers', () => {
 
   describe('getTokenAddresses', () => {
     describe('Success Cases', () => {
-      it('should return addresses for multiple tokens', () => {
-        const result = getTokenAddresses(['USDC', 'WETH'], 1);
+      it('should return addresses for multiple ERC20 tokens', () => {
+        const result = getTokenAddresses(['USDC', 'WBTC'], 1);
 
         expect(typeof result).toBe('object');
         expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(result.WETH).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+        expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
+      });
+
+      it('should return null for native ETH token', () => {
+        const result = getTokenAddresses(['USDC', 'ETH'], 1);
+
+        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(result.ETH).toBeNull();
       });
 
       it('should return addresses for Arbitrum chain', () => {
-        const result = getTokenAddresses(['USDC', 'WETH'], 42161);
+        const result = getTokenAddresses(['USDC', 'WBTC'], 42161);
 
         expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
-        expect(result.WETH).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(result.WBTC).toBe('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f');
       });
-
 
       it('should return all addresses when all tokens are available', () => {
         const result = getTokenAddresses(['USDC', 'WBTC'], 1);
@@ -866,7 +925,7 @@ describe('Token Helpers', () => {
       });
 
       it('should throw error when token not available on chain', () => {
-        expect(() => getTokenAddresses(['USDC', 'WETH'], 999999))
+        expect(() => getTokenAddresses(['USDC', 'ETH'], 999999))
           .toThrow('Token USDC not available on chain 999999');
       });
     });
@@ -875,7 +934,7 @@ describe('Token Helpers', () => {
   describe('validateTokensExist', () => {
     describe('Success Cases', () => {
       it('should return true for existing tokens', () => {
-        const result = validateTokensExist(['USDC', 'WETH']);
+        const result = validateTokensExist(['USDC', 'ETH']);
         expect(result).toBe(true);
       });
 
@@ -913,14 +972,15 @@ describe('Token Helpers', () => {
   describe('getTokensBySymbol', () => {
     describe('Success Cases', () => {
       it('should return tokens for multiple symbols', () => {
-        const result = getTokensBySymbol(['USDC', 'WETH']);
+        const result = getTokensBySymbol(['USDC', 'ETH']);
 
         expect(typeof result).toBe('object');
         expect(result.USDC).toBeDefined();
-        expect(result.WETH).toBeDefined();
+        expect(result.ETH).toBeDefined();
 
         expect(result.USDC.name).toBe('USD Coin');
-        expect(result.WETH.name).toBe('Wrapped Ether');
+        expect(result.ETH.name).toBe('Ether');
+        expect(result.ETH.isNative).toBe(true);
       });
 
       it('should return token for single symbol', () => {
@@ -960,6 +1020,165 @@ describe('Token Helpers', () => {
         expect(() => getTokensBySymbol(null)).toThrow('Token symbols parameter is required');
         expect(() => getTokensBySymbol([])).toThrow('Token symbols array cannot be empty');
         expect(() => getTokensBySymbol('USDC')).toThrow('Token symbols must be an array');
+      });
+    });
+  });
+
+  describe('isNativeToken', () => {
+    describe('Success Cases', () => {
+      it('should return true for ETH', () => {
+        const result = isNativeToken('ETH');
+        expect(result).toBe(true);
+      });
+
+      it('should return false for USDC', () => {
+        const result = isNativeToken('USDC');
+        expect(result).toBe(false);
+      });
+
+      it('should return false for WBTC', () => {
+        const result = isNativeToken('WBTC');
+        expect(result).toBe(false);
+      });
+
+      it('should return false for all non-native tokens', () => {
+        const allTokens = getAllTokens();
+        Object.values(allTokens).forEach(token => {
+          const result = isNativeToken(token.symbol);
+          expect(result).toBe(token.isNative === true);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null symbol', () => {
+        expect(() => isNativeToken(null)).toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for undefined symbol', () => {
+        expect(() => isNativeToken(undefined)).toThrow('Token symbol parameter is required');
+      });
+
+      it('should throw error for empty string symbol', () => {
+        expect(() => isNativeToken('')).toThrow('Token symbol cannot be empty');
+      });
+
+      it('should throw error for non-string symbol', () => {
+        expect(() => isNativeToken(123)).toThrow('Token symbol must be a string');
+        expect(() => isNativeToken({})).toThrow('Token symbol must be a string');
+      });
+
+      it('should throw error for unknown token', () => {
+        expect(() => isNativeToken('UNKNOWN')).toThrow('Token UNKNOWN not found');
+      });
+    });
+  });
+
+  describe('getWethAddress', () => {
+    describe('Success Cases', () => {
+      it('should return WETH address for Ethereum mainnet', () => {
+        const result = getWethAddress(1);
+        expect(result).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+      });
+
+      it('should return WETH address for Arbitrum', () => {
+        const result = getWethAddress(42161);
+        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should return WETH address for local chain', () => {
+        const result = getWethAddress(1337);
+        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should return valid Ethereum addresses', () => {
+        const chainIds = [1, 42161, 1337];
+        chainIds.forEach(chainId => {
+          const result = getWethAddress(chainId);
+          expect(result).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null chainId', () => {
+        expect(() => getWethAddress(null)).toThrow('Chain ID parameter is required');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        expect(() => getWethAddress('invalid')).toThrow('Chain ID must be a positive integer');
+        expect(() => getWethAddress(-1)).toThrow('Chain ID must be a positive integer');
+        expect(() => getWethAddress(0)).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for unsupported chain', () => {
+        expect(() => getWethAddress(999999)).toThrow('WETH not available on chain 999999');
+      });
+    });
+  });
+
+  describe('getTokenAddressForProtocol', () => {
+    describe('Success Cases', () => {
+      it('should return WETH address for ETH on V3', () => {
+        const result = getTokenAddressForProtocol('ETH', 1, 'v3');
+        expect(result).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+      });
+
+      it('should return null for ETH on V4', () => {
+        const result = getTokenAddressForProtocol('ETH', 1, 'v4');
+        expect(result).toBeNull();
+      });
+
+      it('should return same address for USDC on both V3 and V4', () => {
+        const v3Result = getTokenAddressForProtocol('USDC', 1, 'v3');
+        const v4Result = getTokenAddressForProtocol('USDC', 1, 'v4');
+
+        expect(v3Result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(v4Result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(v3Result).toBe(v4Result);
+      });
+
+      it('should work on Arbitrum for ETH', () => {
+        const v3Result = getTokenAddressForProtocol('ETH', 42161, 'v3');
+        const v4Result = getTokenAddressForProtocol('ETH', 42161, 'v4');
+
+        expect(v3Result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(v4Result).toBeNull();
+      });
+
+      it('should return ERC20 address for non-native tokens', () => {
+        const result = getTokenAddressForProtocol('WBTC', 1, 'v3');
+        expect(result).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbol', () => {
+        expect(() => getTokenAddressForProtocol(null, 1, 'v3')).toThrow('Token symbol parameter is required');
+        expect(() => getTokenAddressForProtocol('', 1, 'v3')).toThrow('Token symbol cannot be empty');
+      });
+
+      it('should throw error for invalid chainId', () => {
+        expect(() => getTokenAddressForProtocol('ETH', null, 'v3')).toThrow('Chain ID parameter is required');
+        expect(() => getTokenAddressForProtocol('ETH', 'invalid', 'v3')).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for invalid protocol', () => {
+        expect(() => getTokenAddressForProtocol('ETH', 1, null)).toThrow('Protocol must be "v3" or "v4"');
+        expect(() => getTokenAddressForProtocol('ETH', 1, 'v2')).toThrow('Protocol must be "v3" or "v4"');
+        expect(() => getTokenAddressForProtocol('ETH', 1, 'V3')).toThrow('Protocol must be "v3" or "v4"');
+      });
+
+      it('should throw error for unknown token', () => {
+        expect(() => getTokenAddressForProtocol('UNKNOWN', 1, 'v3')).toThrow('Token UNKNOWN not found');
+      });
+
+      it('should throw error for token not available on chain', () => {
+        expect(() => getTokenAddressForProtocol('USDC', 999999, 'v3')).toThrow('Token USDC not available on chain 999999');
+      });
+
+      it('should throw error for ETH not available on unsupported chain', () => {
+        expect(() => getTokenAddressForProtocol('ETH', 999999, 'v3')).toThrow('WETH address not available for ETH on chain 999999');
       });
     });
   });

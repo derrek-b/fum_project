@@ -5,6 +5,36 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-12-15
+
+### Native ETH Support
+
+Adds first-class support for native ETH alongside WETH for Uniswap V3 position management.
+
+#### **Token Configuration**
+- **CHANGED**: Renamed `WETH` token to `ETH` with `isNative: true` flag
+- **ADDED**: `wethAddresses` property for native tokens (maps chainId to WETH contract address)
+- **UPDATED**: Native token `addresses` now return `null` (use `wethAddresses` for contract interactions)
+
+#### **Token Helpers**
+- **ADDED**: `getWethAddress(chainId)` - Get WETH contract address for a chain
+- **ADDED**: `isNativeToken(symbol)` - Check if token is native (ETH)
+- **ADDED**: `getTokenAddressForPool(symbol, chainId)` - Get address for V3 pool operations (returns WETH for ETH)
+- **UPDATED**: `getTokenByAddress()` - Now matches WETH addresses to ETH token
+- **UPDATED**: `getTokensByChain()` - Checks `wethAddresses` for native tokens
+- **UPDATED**: `getTokenAddress()` - Returns `null` for native tokens (documented behavior)
+
+#### **Test Updates**
+- **UPDATED**: Token validation tests for new `isNative` and `wethAddresses` properties
+- **UPDATED**: CoinGecko tests to use `ETH` symbol instead of `WETH`
+- **UPDATED**: Token helper tests for native token handling
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: `WETH` symbol renamed to `ETH` - update any hardcoded references
+**Impact**: Frontend can now display combined ETH + WETH balances and handle wrapping transparently
+
+---
+
 ## [1.0.1] - 2025-12-09
 
 ### Node.js 22+ & Deployment Preparation

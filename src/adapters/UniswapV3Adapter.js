@@ -1423,7 +1423,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Human price = rawRatio * 10^(baseDecimals - quoteDecimals)
       // So: rawRatio = humanPrice * 10^(quoteDecimals - baseDecimals)
       //
-      // Example: 1 WETH per USDC (base=USDC 6dec, quote=WETH 18dec)
+      // Example: 1 ETH per USDC (base=USDC 6dec, quote=ETH 18dec)
       // rawRatio = 1 * 10^(18-6) = 10^12
       // We express this as numerator/denominator where:
       //   denominator = 10^baseDecimals

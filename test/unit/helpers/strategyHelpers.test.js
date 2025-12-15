@@ -1859,7 +1859,7 @@ describe('Strategy Helpers', () => {
         expect(Object.keys(tokens).length).toBeGreaterThan(0);
 
         // Should include common tokens
-        expect(tokens).toHaveProperty('WETH');
+        expect(tokens).toHaveProperty('ETH');
         expect(tokens).toHaveProperty('USDC');
       });
 
@@ -1874,9 +1874,9 @@ describe('Strategy Helpers', () => {
         // Should include stablecoins
         expect(tokens).toHaveProperty('USDC');
 
-        // Should not include non-stablecoins like WETH (if it exists in all tokens)
+        // Should not include non-stablecoins like ETH (if it exists in all tokens)
         const allTokens = getAllTokens();
-        if (allTokens.WETH && !tokens.WETH) {
+        if (allTokens.ETH && !tokens.ETH) {
           // This confirms stablecoins are a subset
           expect(Object.keys(tokens).length).toBeLessThan(Object.keys(allTokens).length);
         }
@@ -1966,7 +1966,7 @@ describe('Strategy Helpers', () => {
     describe('Custom Strategy Support', () => {
       it('should return custom supportedTokens for custom tokenSupport', () => {
         const originalBob = strategies.bob;
-        const customTokens = { WETH: { name: 'Wrapped Ether' }, USDC: { name: 'USD Coin' } };
+        const customTokens = { ETH: { name: 'Wrapped Ether' }, USDC: { name: 'USD Coin' } };
         strategies.bob = { ...originalBob, tokenSupport: 'custom', supportedTokens: customTokens };
 
         const result = getStrategyTokens('bob');
@@ -1979,7 +1979,7 @@ describe('Strategy Helpers', () => {
     describe('Backward Compatibility', () => {
       it('should handle strategies with supportedTokens but no tokenSupport', () => {
         const originalBob = strategies.bob;
-        const legacyTokens = { WETH: { name: 'Wrapped Ether' } };
+        const legacyTokens = { ETH: { name: 'Wrapped Ether' } };
         strategies.bob = { ...originalBob, tokenSupport: undefined, supportedTokens: legacyTokens };
 
         const result = getStrategyTokens('bob');
@@ -1994,12 +1994,12 @@ describe('Strategy Helpers', () => {
     describe('Success Cases', () => {
       it('should return true when all tokens are supported', () => {
         // Bob strategy supports all tokens
-        const result = strategySupportsTokens('bob', ['WETH', 'USDC']);
+        const result = strategySupportsTokens('bob', ['ETH', 'USDC']);
         expect(result).toBe(true);
       });
 
       it('should return true for single supported token', () => {
-        const result = strategySupportsTokens('bob', ['WETH']);
+        const result = strategySupportsTokens('bob', ['ETH']);
         expect(result).toBe(true);
       });
 
@@ -2010,12 +2010,12 @@ describe('Strategy Helpers', () => {
       });
 
       it('should work with multiple supported tokens', () => {
-        const result = strategySupportsTokens('bob', ['WETH', 'USDC', 'USDC', 'WBTC']);
+        const result = strategySupportsTokens('bob', ['ETH', 'USDC', 'USDC', 'WBTC']);
         expect(result).toBe(true);
       });
 
       it('should work with parris strategy that supports all tokens', () => {
-        const result = strategySupportsTokens('parris', ['WETH', 'USDC', 'LINK']);
+        const result = strategySupportsTokens('parris', ['ETH', 'USDC', 'LINK']);
         expect(result).toBe(true);
       });
 
@@ -2025,18 +2025,18 @@ describe('Strategy Helpers', () => {
         expect(stablecoinResult).toBe(true);
 
         // Should return false for non-stablecoins
-        const nonStablecoinResult = strategySupportsTokens('fed', ['WETH', 'WBTC']);
+        const nonStablecoinResult = strategySupportsTokens('fed', ['ETH', 'WBTC']);
         expect(nonStablecoinResult).toBe(false);
       });
 
       it('should work with none strategy', () => {
-        const result = strategySupportsTokens('none', ['WETH', 'USDC']);
+        const result = strategySupportsTokens('none', ['ETH', 'USDC']);
         expect(result).toBe(true);
       });
 
       it('should handle case-sensitive token symbols', () => {
         // Should work with correct case
-        expect(strategySupportsTokens('bob', ['WETH'])).toBe(true);
+        expect(strategySupportsTokens('bob', ['ETH'])).toBe(true);
 
         // Should not work with incorrect case
         expect(strategySupportsTokens('bob', ['eth'])).toBe(false);
@@ -2045,14 +2045,14 @@ describe('Strategy Helpers', () => {
 
       it('should check that ALL tokens are supported', () => {
         // Mix of supported and unsupported tokens should return false
-        const result = strategySupportsTokens('fed', ['USDC', 'WETH']); // USDC supported, ETH not supported by fed
+        const result = strategySupportsTokens('fed', ['USDC', 'ETH']); // USDC supported, ETH not supported by fed
         expect(result).toBe(false);
       });
     });
 
     describe('Failure Cases', () => {
       it('should return false for non-existent strategy', () => {
-        const result = strategySupportsTokens('nonExistentStrategy', ['WETH']);
+        const result = strategySupportsTokens('nonExistentStrategy', ['ETH']);
         expect(result).toBe(false);
       });
 
@@ -2060,7 +2060,7 @@ describe('Strategy Helpers', () => {
         const originalBob = strategies.bob;
         strategies.bob = { ...originalBob, tokenSupport: 'invalid' };
 
-        const result = strategySupportsTokens('bob', ['WETH']);
+        const result = strategySupportsTokens('bob', ['ETH']);
         expect(result).toBe(false);
 
         strategies.bob = originalBob;
@@ -2070,7 +2070,7 @@ describe('Strategy Helpers', () => {
         const originalBob = strategies.bob;
         strategies.bob = { ...originalBob, tokenSupport: undefined };
 
-        const result = strategySupportsTokens('bob', ['WETH']);
+        const result = strategySupportsTokens('bob', ['ETH']);
         expect(result).toBe(false);
 
         strategies.bob = originalBob;
@@ -2078,13 +2078,13 @@ describe('Strategy Helpers', () => {
 
       it('should return false when some tokens are not supported', () => {
         // Fed strategy doesn't support ETH
-        const result = strategySupportsTokens('fed', ['WETH']);
+        const result = strategySupportsTokens('fed', ['ETH']);
         expect(result).toBe(false);
       });
 
       it('should return false when any token in array is not supported', () => {
         // Fed strategy supports USDC but not ETH
-        const result = strategySupportsTokens('fed', ['USDC', 'WETH']);
+        const result = strategySupportsTokens('fed', ['USDC', 'ETH']);
         expect(result).toBe(false);
       });
 
@@ -2096,20 +2096,20 @@ describe('Strategy Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for null strategyId', () => {
-        expect(() => strategySupportsTokens(null, ['WETH'])).toThrow('ID parameter is required');
+        expect(() => strategySupportsTokens(null, ['ETH'])).toThrow('ID parameter is required');
       });
 
       it('should throw error for undefined strategyId', () => {
-        expect(() => strategySupportsTokens(undefined, ['WETH'])).toThrow('ID parameter is required');
+        expect(() => strategySupportsTokens(undefined, ['ETH'])).toThrow('ID parameter is required');
       });
 
       it('should throw error for non-string strategyId', () => {
-        expect(() => strategySupportsTokens(123, ['WETH'])).toThrow('ID must be a string');
-        expect(() => strategySupportsTokens({}, ['WETH'])).toThrow('ID must be a string');
+        expect(() => strategySupportsTokens(123, ['ETH'])).toThrow('ID must be a string');
+        expect(() => strategySupportsTokens({}, ['ETH'])).toThrow('ID must be a string');
       });
 
       it('should throw error for empty strategyId', () => {
-        expect(() => strategySupportsTokens('', ['WETH'])).toThrow('ID cannot be empty');
+        expect(() => strategySupportsTokens('', ['ETH'])).toThrow('ID cannot be empty');
       });
 
       it('should handle null tokenSymbols gracefully', () => {
@@ -2124,7 +2124,7 @@ describe('Strategy Helpers', () => {
 
       it('should handle non-array tokenSymbols gracefully', () => {
         // Should throw when trying to call every() on non-array
-        expect(() => strategySupportsTokens('bob', 'WETH')).toThrow();
+        expect(() => strategySupportsTokens('bob', 'ETH')).toThrow();
         expect(() => strategySupportsTokens('bob', {})).toThrow();
         expect(() => strategySupportsTokens('bob', 123)).toThrow();
       });
@@ -2139,9 +2139,9 @@ describe('Strategy Helpers', () => {
     describe('Real-world Usage Scenarios', () => {
       it('should work for common DeFi token pairs', () => {
         // ETH/USDC pair
-        expect(strategySupportsTokens('bob', ['WETH', 'USDC'])).toBe(true);
-        expect(strategySupportsTokens('parris', ['WETH', 'USDC'])).toBe(true);
-        expect(strategySupportsTokens('fed', ['WETH', 'USDC'])).toBe(false); // Fed doesn't support ETH
+        expect(strategySupportsTokens('bob', ['ETH', 'USDC'])).toBe(true);
+        expect(strategySupportsTokens('parris', ['ETH', 'USDC'])).toBe(true);
+        expect(strategySupportsTokens('fed', ['ETH', 'USDC'])).toBe(false); // Fed doesn't support ETH
 
         // Stablecoin pairs
         expect(strategySupportsTokens('fed', ['USDC', 'USDC'])).toBe(true);
@@ -2149,7 +2149,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle large token lists', () => {
-        const manyTokens = ['WETH', 'USDC', 'USDC', 'WBTC', 'LINK'];
+        const manyTokens = ['ETH', 'USDC', 'USDC', 'WBTC', 'LINK'];
 
         expect(strategySupportsTokens('bob', manyTokens)).toBe(true);
         expect(strategySupportsTokens('parris', manyTokens)).toBe(true);
@@ -2157,7 +2157,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should be useful for filtering compatible strategies', () => {
-        const selectedTokens = ['WETH', 'USDC'];
+        const selectedTokens = ['ETH', 'USDC'];
 
         // Filter strategies that support the selected tokens
         const compatibleStrategies = ['bob', 'parris', 'fed', 'none'].filter(strategyId =>
@@ -2440,8 +2440,8 @@ describe('Strategy Helpers', () => {
   describe('validateTokensForStrategy', () => {
     describe('Success Cases (No Messages)', () => {
       it('should return valid result when all vault tokens are in strategy', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 1000 };
-        const strategyTokens = ['WETH', 'USDC', 'USDC'];
+        const vaultTokens = { ETH: 1.5, USDC: 1000 };
+        const strategyTokens = ['ETH', 'USDC', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2451,7 +2451,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when vault tokens are empty', () => {
         const vaultTokens = {};
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2460,7 +2460,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when vault tokens is null', () => {
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(null, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2469,7 +2469,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when vault tokens is undefined', () => {
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(undefined, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2478,7 +2478,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when strategy tokens is null', () => {
-        const vaultTokens = { WETH: 1.5 };
+        const vaultTokens = { ETH: 1.5 };
 
         const result = validateTokensForStrategy(vaultTokens, null);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2487,7 +2487,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when strategy tokens is undefined', () => {
-        const vaultTokens = { WETH: 1.5 };
+        const vaultTokens = { ETH: 1.5 };
 
         const result = validateTokensForStrategy(vaultTokens, undefined);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2496,7 +2496,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when strategy tokens is empty array', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 1000 };
+        const vaultTokens = { ETH: 1.5, USDC: 1000 };
         const strategyTokens = [];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
@@ -2506,8 +2506,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when exact token match', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 1000 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1.5, USDC: 1000 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2516,8 +2516,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return valid result when vault has subset of strategy tokens', () => {
-        const vaultTokens = { WETH: 1.5 };
-        const strategyTokens = ['WETH', 'USDC', 'USDC'];
+        const vaultTokens = { ETH: 1.5 };
+        const strategyTokens = ['ETH', 'USDC', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2528,8 +2528,8 @@ describe('Strategy Helpers', () => {
 
     describe('Warning Cases (Returns Warnings)', () => {
       it('should return warning when some vault tokens are not in strategy', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 1000, LINK: 500 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1.5, USDC: 1000, LINK: 500 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2541,7 +2541,7 @@ describe('Strategy Helpers', () => {
 
       it('should return warning when all vault tokens are not in strategy', () => {
         const vaultTokens = { WBTC: 0.5, LINK: 100 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2553,8 +2553,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should return warning with multiple unmatched tokens', () => {
-        const vaultTokens = { WETH: 1.5, WBTC: 0.5, LINK: 100, UNI: 50 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1.5, WBTC: 0.5, LINK: 100, UNI: 50 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2567,8 +2567,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle single unmatched token', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 1000, WBTC: 0.5 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1.5, USDC: 1000, WBTC: 0.5 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2580,7 +2580,7 @@ describe('Strategy Helpers', () => {
 
       it('should be case-sensitive', () => {
         const vaultTokens = { eth: 1.5, USDC: 1000 }; // lowercase eth
-        const strategyTokens = ['WETH', 'USDC']; // uppercase ETH
+        const strategyTokens = ['ETH', 'USDC']; // uppercase ETH
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2593,8 +2593,8 @@ describe('Strategy Helpers', () => {
 
     describe('Edge Cases and Input Types', () => {
       it('should handle vault tokens with zero balances', () => {
-        const vaultTokens = { WETH: 0, USDC: 1000, LINK: 0 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 0, USDC: 1000, LINK: 0 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2603,18 +2603,18 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle vault tokens with negative balances', () => {
-        const vaultTokens = { WETH: -1, USDC: 1000 };
+        const vaultTokens = { ETH: -1, USDC: 1000 };
         const strategyTokens = ['USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
         expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0].items).toEqual(['WETH']);
+        expect(result.warnings[0].items).toEqual(['ETH']);
       });
 
       it('should handle vault tokens with string balances', () => {
-        const vaultTokens = { WETH: '1.5', USDC: '1000' };
-        const strategyTokens = ['WETH'];
+        const vaultTokens = { ETH: '1.5', USDC: '1000' };
+        const strategyTokens = ['ETH'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2623,7 +2623,7 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle non-array strategy tokens gracefully', () => {
-        const vaultTokens = { WETH: 1.5 };
+        const vaultTokens = { ETH: 1.5 };
         const strategyTokens = 'not-an-array';
 
         // Should handle non-array gracefully without throwing
@@ -2631,12 +2631,12 @@ describe('Strategy Helpers', () => {
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
         expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0].items).toContain('WETH');
+        expect(result.warnings[0].items).toContain('ETH');
       });
 
       it('should handle empty vault tokens object', () => {
         const vaultTokens = {};
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2653,8 +2653,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle vault tokens with very large numbers', () => {
-        const vaultTokens = { WETH: Number.MAX_SAFE_INTEGER, LINK: 1000 };
-        const strategyTokens = ['WETH'];
+        const vaultTokens = { ETH: Number.MAX_SAFE_INTEGER, LINK: 1000 };
+        const strategyTokens = ['ETH'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2666,12 +2666,12 @@ describe('Strategy Helpers', () => {
     describe('Real-world Usage Scenarios', () => {
       it('should handle typical DeFi vault scenario', () => {
         const vaultTokens = {
-          WETH: 2.5,
+          ETH: 2.5,
           USDC: 5000,
           LINK: 1000,
           WBTC: 0.1
         };
-        const strategyTokens = ['WETH', 'USDC']; // Strategy only supports ETH/USDC pair
+        const strategyTokens = ['ETH', 'USDC']; // Strategy only supports ETH/USDC pair
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2682,19 +2682,19 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle stablecoin-only strategy', () => {
-        const vaultTokens = { USDC: 1000, WBTC: 0.5, WETH: 1.5 };
+        const vaultTokens = { USDC: 1000, WBTC: 0.5, ETH: 1.5 };
         const strategyTokens = ['USDC', 'USDC']; // Stablecoin strategy
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
         expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0].items).toContain('WETH');
+        expect(result.warnings[0].items).toContain('ETH');
         expect(result.warnings[0].items).toContain('WBTC');
       });
 
       it('should handle vault with tokens strategy does not support', () => {
         const vaultTokens = { SHIB: 1000000, DOGE: 500 };
-        const strategyTokens = ['WETH', 'USDC', 'WBTC'];
+        const strategyTokens = ['ETH', 'USDC', 'WBTC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2705,8 +2705,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should handle perfect vault-strategy alignment', () => {
-        const vaultTokens = { WETH: 1.5, USDC: 3000 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1.5, USDC: 3000 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2715,8 +2715,8 @@ describe('Strategy Helpers', () => {
       });
 
       it('should be useful for warning users about token swaps', () => {
-        const vaultTokens = { WETH: 1, USDC: 1000, LINK: 500, WBTC: 0.1 };
-        const strategyTokens = ['WETH', 'USDC'];
+        const vaultTokens = { ETH: 1, USDC: 1000, LINK: 500, WBTC: 0.1 };
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validateTokensForStrategy(vaultTokens, strategyTokens);
 
@@ -2731,7 +2731,7 @@ describe('Strategy Helpers', () => {
         expect(result.warnings[0].count).toBe(2);
 
         // Should not include tokens that are already supported
-        expect(result.warnings[0].items).not.toContain('WETH');
+        expect(result.warnings[0].items).not.toContain('ETH');
         expect(result.warnings[0].items).not.toContain('USDC');
       });
     });
@@ -2745,10 +2745,10 @@ describe('Strategy Helpers', () => {
           { id: '67890', pool: '0xdef' }
         ];
         const pools = {
-          '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } },
-          '0xdef': { token0: { symbol: 'USDC' }, token1: { symbol: 'WETH' } }
+          '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } },
+          '0xdef': { token0: { symbol: 'USDC' }, token1: { symbol: 'ETH' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2759,7 +2759,7 @@ describe('Strategy Helpers', () => {
       it('should return valid result when no positions in vault', () => {
         const vaultPositions = [];
         const pools = {};
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2769,7 +2769,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when vaultPositions is null', () => {
         const pools = {};
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(null, pools, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2779,7 +2779,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when vaultPositions is undefined', () => {
         const pools = {};
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(undefined, pools, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2789,7 +2789,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when strategyTokens is null', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
-        const pools = { '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } } };
+        const pools = { '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } } };
 
         const result = validatePositionsForStrategy(vaultPositions, pools, null);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2799,7 +2799,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when strategyTokens is undefined', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
-        const pools = { '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } } };
+        const pools = { '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } } };
 
         const result = validatePositionsForStrategy(vaultPositions, pools, undefined);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2809,7 +2809,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when strategyTokens is empty array', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
-        const pools = { '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } } };
+        const pools = { '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } } };
         const strategyTokens = [];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
@@ -2820,7 +2820,7 @@ describe('Strategy Helpers', () => {
 
       it('should return valid result when pools is null', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, null, strategyTokens);
         expect(result).toEqual({ isValid: true, warnings: [] });
@@ -2833,9 +2833,9 @@ describe('Strategy Helpers', () => {
       it('should return warning when position has one mismatched token', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
         const pools = {
-          '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'LINK' } }
+          '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'LINK' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2844,7 +2844,7 @@ describe('Strategy Helpers', () => {
         expect(result.warnings[0].count).toBe(1);
         expect(result.warnings[0].items).toHaveLength(1);
         expect(result.warnings[0].items[0].id).toBe('12345');
-        expect(result.warnings[0].items[0].tokenPair).toBe('WETH/LINK');
+        expect(result.warnings[0].items[0].tokenPair).toBe('ETH/LINK');
         expect(result.warnings[0].items[0].nonMatchingTokens).toEqual(['LINK']);
       });
 
@@ -2853,7 +2853,7 @@ describe('Strategy Helpers', () => {
         const pools = {
           '0xabc': { token0: { symbol: 'WBTC' }, token1: { symbol: 'LINK' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2871,10 +2871,10 @@ describe('Strategy Helpers', () => {
           { id: '222', pool: '0xbbb' }
         ];
         const pools = {
-          '0xaaa': { token0: { symbol: 'WETH' }, token1: { symbol: 'LINK' } },
+          '0xaaa': { token0: { symbol: 'ETH' }, token1: { symbol: 'LINK' } },
           '0xbbb': { token0: { symbol: 'WBTC' }, token1: { symbol: 'USDC' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2894,11 +2894,11 @@ describe('Strategy Helpers', () => {
           { id: '333', pool: '0xccc' }  // matches
         ];
         const pools = {
-          '0xaaa': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } },
+          '0xaaa': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } },
           '0xbbb': { token0: { symbol: 'LINK' }, token1: { symbol: 'WBTC' } },
-          '0xccc': { token0: { symbol: 'USDC' }, token1: { symbol: 'WETH' } }
+          '0xccc': { token0: { symbol: 'USDC' }, token1: { symbol: 'ETH' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2913,7 +2913,7 @@ describe('Strategy Helpers', () => {
         const pools = {
           '0xabc': { token0: { symbol: 'weth' }, token1: { symbol: 'USDC' } } // lowercase weth
         };
-        const strategyTokens = ['WETH', 'USDC']; // uppercase WETH
+        const strategyTokens = ['ETH', 'USDC']; // uppercase ETH
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2929,10 +2929,10 @@ describe('Strategy Helpers', () => {
           { id: '222', pool: '0xbbb' } // pool data missing
         ];
         const pools = {
-          '0xaaa': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } }
+          '0xaaa': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
           // 0xbbb is missing
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2947,7 +2947,7 @@ describe('Strategy Helpers', () => {
         const pools = {
           '0xabc': { token0: null, token1: { symbol: 'USDC' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2962,7 +2962,7 @@ describe('Strategy Helpers', () => {
         const pools = {
           '0xabc': { token0: { symbol: undefined }, token1: { symbol: 'USDC' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2980,10 +2980,10 @@ describe('Strategy Helpers', () => {
           { id: '222', pool: '0xbbb' }
         ];
         const pools = {
-          '0xaaa': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } },
-          '0xbbb': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } }
+          '0xaaa': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } },
+          '0xbbb': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -2998,7 +2998,7 @@ describe('Strategy Helpers', () => {
         const pools = {
           '0xabc': { invalidStructure: true } // missing token0/token1
         };
-        const strategyTokens = ['WETH', 'USDC'];
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -3022,14 +3022,14 @@ describe('Strategy Helpers', () => {
     });
 
     describe('Real-world Usage Scenarios', () => {
-      it('should handle vault migrating from WETH/USDC to USDC/DAI strategy', () => {
+      it('should handle vault migrating from ETH/USDC to USDC/DAI strategy', () => {
         const vaultPositions = [
           { id: '111', pool: '0xaaa' },
           { id: '222', pool: '0xbbb' }
         ];
         const pools = {
-          '0xaaa': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } },
-          '0xbbb': { token0: { symbol: 'WETH' }, token1: { symbol: 'LINK' } }
+          '0xaaa': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } },
+          '0xbbb': { token0: { symbol: 'ETH' }, token1: { symbol: 'LINK' } }
         };
         const strategyTokens = ['USDC', 'DAI']; // New strategy
 
@@ -3037,9 +3037,9 @@ describe('Strategy Helpers', () => {
         expect(result.isValid).toBe(false);
         expect(result.warnings).toHaveLength(1);
         expect(result.warnings[0].count).toBe(2);
-        // Both positions have WETH which is not in new strategy
-        expect(result.warnings[0].items[0].nonMatchingTokens).toContain('WETH');
-        expect(result.warnings[0].items[1].nonMatchingTokens).toContain('WETH');
+        // Both positions have ETH which is not in new strategy
+        expect(result.warnings[0].items[0].nonMatchingTokens).toContain('ETH');
+        expect(result.warnings[0].items[1].nonMatchingTokens).toContain('ETH');
       });
 
       it('should handle vault with all positions needing to be closed', () => {
@@ -3053,7 +3053,7 @@ describe('Strategy Helpers', () => {
           '0xbbb': { token0: { symbol: 'AAVE' }, token1: { symbol: 'UNI' } },
           '0xccc': { token0: { symbol: 'SUSHI' }, token1: { symbol: 'COMP' } }
         };
-        const strategyTokens = ['WETH', 'USDC']; // None of the positions match
+        const strategyTokens = ['ETH', 'USDC']; // None of the positions match
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -3071,13 +3071,13 @@ describe('Strategy Helpers', () => {
           { id: '5', pool: '0xe' }
         ];
         const pools = {
-          '0xa': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } }, // match
-          '0xb': { token0: { symbol: 'WETH' }, token1: { symbol: 'DAI' } },  // match
-          '0xc': { token0: { symbol: 'WETH' }, token1: { symbol: 'LINK' } }, // LINK mismatch
+          '0xa': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }, // match
+          '0xb': { token0: { symbol: 'ETH' }, token1: { symbol: 'DAI' } },  // match
+          '0xc': { token0: { symbol: 'ETH' }, token1: { symbol: 'LINK' } }, // LINK mismatch
           '0xd': { token0: { symbol: 'USDC' }, token1: { symbol: 'DAI' } },  // match
           '0xe': { token0: { symbol: 'WBTC' }, token1: { symbol: 'LINK' } }  // both mismatch
         };
-        const strategyTokens = ['WETH', 'USDC', 'DAI'];
+        const strategyTokens = ['ETH', 'USDC', 'DAI'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(false);
@@ -3086,17 +3086,16 @@ describe('Strategy Helpers', () => {
         expect(result.warnings[0].items).toHaveLength(2);
       });
 
-      it('should handle positions using wrapped vs unwrapped tokens', () => {
+      it('should handle positions with matching ETH tokens', () => {
         const vaultPositions = [{ id: '12345', pool: '0xabc' }];
         const pools = {
-          '0xabc': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } }
+          '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
         };
-        const strategyTokens = ['ETH', 'USDC']; // ETH not WETH
+        const strategyTokens = ['ETH', 'USDC'];
 
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
-        expect(result.isValid).toBe(false);
-        expect(result.warnings).toHaveLength(1);
-        expect(result.warnings[0].items[0].nonMatchingTokens).toEqual(['WETH']);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
       });
     });
   });

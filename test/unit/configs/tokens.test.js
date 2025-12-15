@@ -41,17 +41,20 @@ function validatePath(path) {
 /**
  * Validate token addresses object
  * @param {string} tokenKey - Token key for error reporting
- * @param {Object} addresses - Addresses object to validate
+ * @param {Object} token - Full token object to validate
  * @param {Array<string>} expectedChainIds - Expected chain IDs for consistency
  * @throws {Error} If addresses are invalid
  */
-function validateTokenAddresses(tokenKey, addresses, expectedChainIds) {
+function validateTokenAddresses(tokenKey, token, expectedChainIds) {
+  const addresses = token.addresses;
+  const isNativeToken = token.isNative === true;
+
   if (!addresses || typeof addresses !== 'object' || Array.isArray(addresses)) {
     throw new Error(`Token ${tokenKey} addresses must be an object`);
   }
 
   const addressChainIds = Object.keys(addresses);
-  
+
   // Check that all expected chain IDs are present
   expectedChainIds.forEach(chainId => {
     if (!addressChainIds.includes(chainId)) {
@@ -68,10 +71,31 @@ function validateTokenAddresses(tokenKey, addresses, expectedChainIds) {
 
   // Validate each address format
   Object.entries(addresses).forEach(([chainId, address]) => {
-    if (!validateEthereumAddress(address)) {
-      throw new Error(`Token ${tokenKey} address for chain ${chainId} must be a valid Ethereum address, got: ${address}`);
+    // Native tokens (like ETH) have null addresses - that's valid
+    if (isNativeToken) {
+      if (address !== null) {
+        throw new Error(`Native token ${tokenKey} address for chain ${chainId} must be null, got: ${address}`);
+      }
+    } else {
+      if (!validateEthereumAddress(address)) {
+        throw new Error(`Token ${tokenKey} address for chain ${chainId} must be a valid Ethereum address, got: ${address}`);
+      }
     }
   });
+
+  // Native tokens must have wethAddresses
+  if (isNativeToken) {
+    if (!token.wethAddresses || typeof token.wethAddresses !== 'object') {
+      throw new Error(`Native token ${tokenKey} must have wethAddresses object`);
+    }
+
+    // Validate wethAddresses for native tokens
+    Object.entries(token.wethAddresses).forEach(([chainId, address]) => {
+      if (!validateEthereumAddress(address)) {
+        throw new Error(`Native token ${tokenKey} wethAddress for chain ${chainId} must be a valid Ethereum address, got: ${address}`);
+      }
+    });
+  }
 }
 
 describe('Token Configuration Validation', () => {
@@ -132,7 +156,7 @@ describe('Token Configuration Validation', () => {
 
       // Validate token addresses structure and consistency
       try {
-        validateTokenAddresses(tokenKey, token.addresses, expectedChainIds);
+        validateTokenAddresses(tokenKey, token, expectedChainIds);
       } catch (error) {
         tokenErrors.push(`addresses validation failed: ${error.message}`);
       }

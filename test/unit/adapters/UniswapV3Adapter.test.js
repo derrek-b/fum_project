@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
-import { getTokenBySymbol, getTokenAddress } from '../../../src/helpers/tokenHelpers.js';
+import { getTokenBySymbol, getTokenAddress, getWethAddress } from '../../../src/helpers/tokenHelpers.js';
 
 describe('UniswapV3Adapter - Unit Tests', () => {
   let env;
@@ -360,48 +360,37 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let positionManagerContract;
 
     beforeAll(async () => {
-      try {
-        // Check if environment is still available
-        if (!env || !env.provider) {
-          console.warn('Test environment not available, skipping contract setup');
-          return;
-        }
+      // Test provider connectivity before using it
+      await env.provider.getNetwork();
 
-        // Test provider connectivity before using it
-        await env.provider.getNetwork();
+      // Get token data using helpers
+      const usdcToken = getTokenBySymbol('USDC');
+      const wethAddress = getWethAddress(1337);
 
-        // Get token data using helpers
-        const usdcToken = getTokenBySymbol('USDC');
-        const wethToken = getTokenBySymbol('WETH');
+      // Create real contract instances using addresses from adapter config
+      const poolAddress = await adapter.getPoolAddress(
+        usdcToken.addresses[1337],
+        wethAddress,
+        500,
+        env.provider
+      );
+      poolContract = new ethers.Contract(
+        poolAddress,
+        adapter.uniswapV3PoolABI,
+        env.provider
+      );
 
-        // Create real contract instances using addresses from adapter config
-        const poolAddress = await adapter.getPoolAddress(
-          usdcToken.addresses[1337],
-          wethToken.addresses[1337],
-          500,
-          env.provider
-        );
-        poolContract = new ethers.Contract(
-          poolAddress,
-          adapter.uniswapV3PoolABI,
-          env.provider
-        );
+      wethContract = new ethers.Contract(
+        wethAddress,
+        adapter.erc20ABI,
+        env.provider
+      );
 
-        wethContract = new ethers.Contract(
-          wethToken.addresses[1337],
-          adapter.erc20ABI,
-          env.provider
-        );
-
-        positionManagerContract = new ethers.Contract(
-          adapter.addresses.positionManagerAddress,
-          adapter.nonfungiblePositionManagerABI,
-          env.provider
-        );
-      } catch (error) {
-        console.warn('Failed to setup contracts for _estimateGas tests:', error.message);
-        // Gracefully skip setup if provider is unavailable
-      }
+      positionManagerContract = new ethers.Contract(
+        adapter.addresses.positionManagerAddress,
+        adapter.nonfungiblePositionManagerABI,
+        env.provider
+      );
     });
 
     describe('Success Cases', () => {
@@ -533,32 +522,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let usdcContract;
 
     beforeAll(async () => {
-      try {
-        // Check if environment is still available
-        if (!env || !env.provider) {
-          console.warn('Test environment not available, skipping contract setup');
-          return;
-        }
+      // Get signer from test environment
+      signer = env.signers[0];
 
-        // Get signer from test environment
-        signer = env.signers[0];
+      // Use the actual WETH and USDC addresses from the test environment
+      // These are the addresses deployed in the test environment
+      wethContract = new ethers.Contract(
+        env.wethAddress,
+        adapter.erc20ABI,
+        env.provider
+      );
 
-        // Use the actual WETH and USDC addresses from the test environment
-        // These are the addresses deployed in the test environment
-        wethContract = new ethers.Contract(
-          env.wethAddress,
-          adapter.erc20ABI,
-          env.provider
-        );
-
-        usdcContract = new ethers.Contract(
-          env.usdcAddress,
-          adapter.erc20ABI,
-          env.provider
-        );
-      } catch (error) {
-        console.warn('Failed to setup contracts for _estimateGasFromTxData tests:', error.message);
-      }
+      usdcContract = new ethers.Contract(
+        env.usdcAddress,
+        adapter.erc20ABI,
+        env.provider
+      );
     });
 
     describe('Success Cases', () => {
@@ -1024,7 +1003,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should handle real token addresses (WETH vs USDC)', () => {
         const weth = {
           address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-          symbol: 'WETH',
+          symbol: 'ETH',
           decimals: 18
         };
         const usdc = {
@@ -2371,23 +2350,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let validTickUpper;
 
     beforeAll(async () => {
-      try {
-        // Get valid pool data to use for testing
-        const wethToken = getTokenBySymbol('WETH');
-        const usdcToken = getTokenBySymbol('USDC');
-        const wethAddress = wethToken.addresses[1337];
-        const usdcAddress = usdcToken.addresses[1337];
+      // Get valid pool data to use for testing
+      const wethAddress = getWethAddress(1337);
+      const usdcToken = getTokenBySymbol('USDC');
+      const usdcAddress = usdcToken.addresses[1337];
 
-        const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
-        validPoolAddress = poolData.poolAddress;
+      const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
+      validPoolAddress = poolData.poolAddress;
 
-        // Use valid tick values around current tick
-        const currentTick = poolData.tick;
-        validTickLower = currentTick - 1000;
-        validTickUpper = currentTick + 1000;
-      } catch (error) {
-        console.warn('Failed to setup fetchTickData test data:', error.message);
-      }
+      // Use valid tick values around current tick
+      const currentTick = poolData.tick;
+      validTickLower = currentTick - 1000;
+      validTickUpper = currentTick + 1000;
     });
 
     describe('Success Cases', () => {
@@ -2726,47 +2700,33 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let expectedLiquidity;
 
     beforeAll(async () => {
-      try {
-        // Skip if no test position available
-        if (!env.positionTokenId) {
-          console.warn('No test position available, skipping _assemblePositionData tests');
-          return;
-        }
+      testTokenId = env.positionTokenId;
 
-        testTokenId = env.positionTokenId;
+      // Get position manager and fetch real position data
+      positionManager = adapter._getPositionManager(env.provider);
+      positionData = await positionManager.positions(testTokenId);
 
-        // Get position manager and fetch real position data
-        positionManager = adapter._getPositionManager(env.provider);
-        positionData = await positionManager.positions(testTokenId);
+      // Get pool data for the position's tokens
+      const wethAddress = getWethAddress(1337);
+      const usdcToken = getTokenBySymbol('USDC');
+      const usdcAddress = usdcToken.addresses[1337];
 
-        // Get pool data for the position's tokens
-        const wethToken = getTokenBySymbol('WETH');
-        const usdcToken = getTokenBySymbol('USDC');
-        const wethAddress = wethToken.addresses[1337];
-        const usdcAddress = usdcToken.addresses[1337];
+      poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
 
-        poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
-
-        // Capture expected values for assertions
-        expectedNonce = Number(positionData.nonce);
-        expectedOperator = positionData.operator;
-        expectedFee = Number(positionData.fee);
-        expectedTickLower = Number(positionData.tickLower);
-        expectedTickUpper = Number(positionData.tickUpper);
-        expectedLiquidity = positionData.liquidity.toString();
-
-      } catch (error) {
-        console.warn('Failed to setup _assemblePositionData test data:', error.message);
-      }
+      // Capture expected values for assertions
+      expectedNonce = Number(positionData.nonce);
+      expectedOperator = positionData.operator;
+      expectedFee = Number(positionData.fee);
+      expectedTickLower = Number(positionData.tickLower);
+      expectedTickUpper = Number(positionData.tickUpper);
+      expectedLiquidity = positionData.liquidity.toString();
     });
 
     describe('Success Cases', () => {
       it('should assemble position data correctly with real position', async () => {
-        // Skip if test data not available
-        if (!positionData || !poolData) {
-          console.warn('Test data not available, skipping test');
-          return;
-        }
+        // Verify test data is available
+        expect(positionData).toBeDefined();
+        expect(poolData).toBeDefined();
 
         const result = adapter._assemblePositionData(testTokenId, positionData, poolData);
 
@@ -2803,11 +2763,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle tokenId as different input types correctly', () => {
-        // Skip if test data not available
-        if (!positionData || !poolData) {
-          console.warn('Test data not available, skipping test');
-          return;
-        }
+        // Verify test data is available
+        expect(positionData).toBeDefined();
+        expect(poolData).toBeDefined();
 
         // Test with tokenId as number
         const resultNumber = adapter._assemblePositionData(testTokenId, positionData, poolData);
@@ -2825,11 +2783,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should create correct tokenPair string from real token data', () => {
-        // Skip if test data not available
-        if (!positionData || !poolData) {
-          console.warn('Test data not available, skipping test');
-          return;
-        }
+        // Verify test data is available
+        expect(positionData).toBeDefined();
+        expect(poolData).toBeDefined();
 
         const result = adapter._assemblePositionData(testTokenId, positionData, poolData);
 
@@ -2844,11 +2800,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should preserve all platform metadata correctly', () => {
-        // Skip if test data not available
-        if (!positionData || !poolData) {
-          console.warn('Test data not available, skipping test');
-          return;
-        }
+        // Verify test data is available
+        expect(positionData).toBeDefined();
+        expect(poolData).toBeDefined();
 
         const result = adapter._assemblePositionData(testTokenId, positionData, poolData);
 
@@ -2860,11 +2814,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle BigInt to string conversions correctly', () => {
-        // Skip if test data not available
-        if (!positionData || !poolData) {
-          console.warn('Test data not available, skipping test');
-          return;
-        }
+        // Verify test data is available
+        expect(positionData).toBeDefined();
+        expect(poolData).toBeDefined();
 
         const result = adapter._assemblePositionData(testTokenId, positionData, poolData);
 
@@ -3375,9 +3327,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should calculate price for ETH/USDC pair', () => {
         const ethToken = {
-          address: getTokenAddress('WETH', 1337), // Hardhat fork WETH
+          address: getWethAddress(1337), // Hardhat fork WETH
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const usdcToken = {
           address: getTokenAddress('USDC', 1337), // Hardhat fork USDC
@@ -3424,9 +3376,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -3451,7 +3403,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -3473,9 +3425,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getTokenAddress('WETH', 1337),
+        address: getWethAddress(1337),
         decimals: 18,
-        symbol: 'WETH'
+        symbol: 'ETH'
       };
       const validTokenB = {
         address: getTokenAddress('USDC', 1337),
@@ -3546,12 +3498,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validSqrtPrice = '79228162514264337593543950336';
 
         const invalidTokens = [
-          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -3589,9 +3541,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           symbol: 'USDC'
         };
         const ethToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
 
         // Tick 0 = 1:1 price ratio - use USDC/WETH to get a readable price around 1e12
@@ -3610,9 +3562,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should calculate price for positive tick', () => {
         const ethToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const usdcToken = {
           address: getTokenAddress('USDC', 1337),
@@ -3635,9 +3587,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should calculate price for negative tick', () => {
         const ethToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const usdcToken = {
           address: getTokenAddress('USDC', 1337),
@@ -3660,9 +3612,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -3686,7 +3638,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -3708,9 +3660,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getTokenAddress('WETH', 1337),
+        address: getWethAddress(1337),
         decimals: 18,
-        symbol: 'WETH'
+        symbol: 'ETH'
       };
       const validTokenB = {
         address: getTokenAddress('USDC', 1337),
@@ -3769,9 +3721,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error when base and quote tokens have the same address', () => {
         const validTick = 0;
         const sameToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
 
         expect(() => adapter.tickToPrice(validTick, sameToken, sameToken))
@@ -3782,12 +3734,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validTick = 0;
 
         const invalidTokens = [
-          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -3818,9 +3770,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should handle extreme tick values near limits', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -3846,9 +3798,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle zero tick consistently', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -3869,9 +3821,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should convert price to tick and back consistently', () => {
         const ethToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const usdcToken = {
           address: getTokenAddress('USDC', 1337),
@@ -3892,9 +3844,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle small prices correctly', () => {
         const ethToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const usdcToken = {
           address: getTokenAddress('USDC', 1337),
@@ -3915,9 +3867,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -3948,7 +3900,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -3967,9 +3919,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getTokenAddress('WETH', 1337),
+        address: getWethAddress(1337),
         decimals: 18,
-        symbol: 'WETH'
+        symbol: 'ETH'
       };
       const validTokenB = {
         address: getTokenAddress('USDC', 1337),
@@ -4032,9 +3984,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error when base and quote tokens have the same address', () => {
         const validPrice = 1000;
         const sameToken = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
 
         expect(() => adapter.priceToTick(validPrice, sameToken, sameToken))
@@ -4045,12 +3997,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validPrice = 1000;
 
         const invalidTokens = [
-          { address: getTokenAddress('WETH', 1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: NaN, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: -1, symbol: 'TEST' },
-          { address: getTokenAddress('WETH', 1337), decimals: 256, symbol: 'TEST' }
+          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -4081,9 +4033,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should handle very small prices', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -4101,9 +4053,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle very large prices', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -4120,9 +4072,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should be deterministic', () => {
         const tokenA = {
-          address: getTokenAddress('WETH', 1337),
+          address: getWethAddress(1337),
           decimals: 18,
-          symbol: 'WETH'
+          symbol: 'ETH'
         };
         const tokenB = {
           address: getTokenAddress('USDC', 1337),
@@ -4457,7 +4409,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const swapperWallet = new ethers.Wallet(env.accounts[2].privateKey, env.provider);
 
         // Get WETH and USDC addresses from our environment
-        const wethAddress = getTokenAddress('WETH', 1337);
+        const wethAddress = getWethAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         // Simple WETH ABI with deposit function
@@ -5094,14 +5046,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(poolData.platform).toBe('uniswapV3');
 
         // Verify token symbols match the test position's tokens
-        // Test environment uses WETH and USDC, order depends on addresses
+        // Test environment uses ETH and USDC, order depends on addresses
         const tokenSymbols = [poolData.token0Symbol, poolData.token1Symbol].sort();
-        expect(tokenSymbols).toEqual(['USDC', 'WETH']);
+        expect(tokenSymbols).toEqual(['ETH', 'USDC']);
 
         // Verify the token order matches the test position setup
         // env.testPosition.token0 and token1 are the actual addresses in pool order
-        const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
-        const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
+        const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'ETH' : 'USDC';
+        const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'ETH' : 'USDC';
         expect(poolData.token0Symbol).toBe(expectedToken0Symbol);
         expect(poolData.token1Symbol).toBe(expectedToken1Symbol);
 
@@ -10709,10 +10661,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with actual WETH/USDC pool data from fork', async () => {
         // This test uses the exact pool data from our test environment
-        if (!env || !env.poolData) {
-          console.log('Skipping - pool data not available');
-          return;
-        }
+        expect(env).toBeDefined();
+        expect(env.poolData).toBeDefined();
 
         const poolTick = env.poolData.tick;
         const poolFee = env.poolData.fee || 500; // WETH/USDC 0.05% pool

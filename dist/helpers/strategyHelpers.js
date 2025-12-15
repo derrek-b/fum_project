@@ -743,7 +743,7 @@ export function shouldShowParameter(conditionalParam, testValueSet) {
  * @example
  * // Get tokens for strategy that supports all tokens
  * const tokens = getStrategyTokens('bob');
- * // Returns: { WETH: { name: "Wrapped Ether", ... }, USDC: { ... }, ... }
+ * // Returns: { ETH: { name: "Ether", ... }, USDC: { ... }, ... }
  *
  * @example
  * // Get tokens for stablecoin-only strategy
@@ -955,10 +955,10 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
  * @returns {Array<string>} Array of warning messages (empty if all positions match)
  * @example
  * const positions = [{ id: '12345', pool: '0xabc...' }];
- * const pools = { '0xabc...': { token0: { symbol: 'WETH' }, token1: { symbol: 'USDC' } } };
+ * const pools = { '0xabc...': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } } };
  * const strategyTokens = ['USDC', 'DAI'];
  * const messages = validatePositionsForStrategy(positions, pools, strategyTokens);
- * // Returns: ["The following positions will be closed immediately: Position #12345 (WETH/USDC uses non-strategy token WETH). These positions will be closed and tokens swapped into your strategy tokens."]
+ * // Returns: ["The following positions will be closed immediately: Position #12345 (ETH/USDC uses non-strategy token ETH). These positions will be closed and tokens swapped into your strategy tokens."]
  * @since 1.0.0
  */
 export function validatePositionsForStrategy (vaultPositions, pools, strategyTokens) {

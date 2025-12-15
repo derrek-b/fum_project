@@ -35,17 +35,23 @@ const tokens = {
     isStablecoin: true
   },
 
-  // WETH
-  "WETH": {
-    name: "Wrapped Ether",
-    symbol: "WETH",
-    displaySymbol: "WETH",
+  // ETH (Native Ether with WETH wrapper addresses for V3 compatibility)
+  "ETH": {
+    name: "Ether",
+    symbol: "ETH",
+    displaySymbol: "ETH",
     decimals: 18,
     coingeckoId: "ethereum",
+    isNative: true,
     addresses: {
-      1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // Ethereum
-      42161: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // Arbitrum
-      1337: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"  // Local (same as Arbitrum)
+      1: null,      // Native ETH represented as null
+      42161: null,
+      1337: null
+    },
+    wethAddresses: {
+      1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",      // Ethereum
+      42161: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",  // Arbitrum
+      1337: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"    // Local (same as Arbitrum)
     },
     logoURI: "/Token_Logos/ETH.svg",
     isStablecoin: false
