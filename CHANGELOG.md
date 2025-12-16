@@ -5,6 +5,32 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-12-16
+
+### Native ETH Unwrapping Fix
+
+Fixes critical bug preventing native ETH unwrapping during liquidity removal and fee collection.
+
+#### **Bug Fix**
+- **FIXED**: `generateRemoveLiquidityData()` and `generateClaimFeesData()` now correctly handle native ETH unwrapping
+  - **Root Cause**: Using `MaxUint128` for `expectedCurrencyOwed` caused overflow when SDK added burn amounts
+  - **Symptom**: "Insufficient WETH9" error when removing liquidity or collecting fees from ETH positions
+  - **Solution**: Changed `expectedCurrencyOwed` from `MaxUint128` to `0` for both functions
+  - The SDK adds burn amounts to `expectedCurrencyOwed`, so `MaxUint128 + burnAmount` overflowed past 128 bits
+  - Using `0` lets the SDK calculate correct minimums from burn amounts alone
+  - No slippage risk since unwrap/sweep are atomic 1:1 operations within the multicall
+
+#### **Technical Details**
+- `expectedCurrencyOwed` is only used for: (1) detecting native currency type, (2) calculating `amountMinimum` for unwrapWETH9/sweepToken
+- The actual `collect` call internally uses `MaxUint128` for `amount0Max`/`amount1Max` regardless
+- Non-native token pairs are unaffected (SDK ignores these values when `involvesETH` is false)
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Impact**: Native ETH unwrapping now works correctly for remove liquidity, close position, and collect fees operations
+
+---
+
 ## [1.1.0] - 2025-12-15
 
 ### Native ETH Support

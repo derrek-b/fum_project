@@ -16,7 +16,7 @@ import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } fr
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress } from "../helpers/tokenHelpers.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
-import { Percent, Token, CurrencyAmount, Price, TradeType } from '@uniswap/sdk-core';
+import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import JSBI from "jsbi";
@@ -2107,11 +2107,19 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {string} params.token1Address - Token1 address
    * @param {number} params.token0Decimals - Token0 decimals
    * @param {number} params.token1Decimals - Token1 decimals
+   * @param {boolean} [params.token0IsNative=false] - Whether token0 is native ETH (triggers unwrapWETH9)
+   * @param {boolean} [params.token1IsNative=false] - Whether token1 is native ETH (triggers unwrapWETH9)
    * @returns {Object} Transaction data object with `to`, `data`, `value` properties
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateClaimFeesData(params) {
-    const { positionId, provider, walletAddress, token0Address, token1Address, token0Decimals, token1Decimals } = params;
+    const {
+      positionId, provider, walletAddress,
+      token0Address, token1Address,
+      token0Decimals, token1Decimals,
+      token0IsNative = false,
+      token1IsNative = false
+    } = params;
 
     // Input validation
     if (positionId === null || positionId === undefined) {
@@ -2182,30 +2190,26 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const positionManagerAddress = this.addresses.positionManagerAddress;
 
 
-      // Create Token instances for the SDK
-      const token0 = new Token(
-        this.chainId,
-        token0Address,
-        token0Decimals
-      );
+      // Create currency instances for the SDK
+      // Use Ether.onChain() for native tokens to trigger unwrapWETH9 in the multicall
+      const currency0 = token0IsNative
+        ? Ether.onChain(this.chainId)
+        : new Token(this.chainId, token0Address, token0Decimals);
 
-      const token1 = new Token(
-        this.chainId,
-        token1Address,
-        token1Decimals
-      );
+      const currency1 = token1IsNative
+        ? Ether.onChain(this.chainId)
+        : new Token(this.chainId, token1Address, token1Decimals);
 
-      // Create collectOptions object to collect ALL available fees
+      // For collectCallParameters, use 0 for expectedCurrencyOwed because:
+      // 1. The SDK uses these values as amountMinimum for unwrapWETH9/sweepToken
+      // 2. Using MaxUint128 would fail (contract doesn't have that much WETH)
+      // 3. The actual collect call internally uses MaxUint128 to collect all fees
+      // 4. The currency TYPE still triggers native ETH detection for unwrapping
+      // 5. unwrap/sweep have no slippage risk (1:1 conversion, direct transfer)
       const collectOptions = {
         tokenId: positionId,
-        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(
-          token0,
-          MaxUint128
-        ),
-        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(
-          token1,
-          MaxUint128
-        ),
+        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(currency0, 0),
+        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(currency1, 0),
         recipient: walletAddress
       };
 
@@ -2246,6 +2250,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.token1Data.decimals - Token decimal places
    * @param {number} params.slippageTolerance - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
    * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
+   * @param {boolean} [params.token0IsNative=false] - Whether token0 is native ETH (triggers unwrapWETH9)
+   * @param {boolean} [params.token1IsNative=false] - Whether token1 is native ETH (triggers unwrapWETH9)
    * @returns {Object} Transaction data object with `to`, `data`, `value` properties
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
@@ -2259,7 +2265,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       token0Data,
       token1Data,
       slippageTolerance,
-      deadlineMinutes
+      deadlineMinutes,
+      token0IsNative = false,
+      token1IsNative = false
     } = params;
 
     // Input validation
@@ -2490,14 +2498,24 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         tickUpper: position.tickUpper
       });
 
-      // Always collect all available fees when removing liquidity
-      const expectedCurrencyOwed0 = CurrencyAmount.fromRawAmount(token0, MaxUint128);
-      const expectedCurrencyOwed1 = CurrencyAmount.fromRawAmount(token1, MaxUint128);
+      // For collectOptions, use Ether if native (triggers unwrapWETH9 in multicall)
+      // Pool/Position still use Token instances since pools always use WETH
+      const collectCurrency0 = token0IsNative
+        ? Ether.onChain(this.chainId)
+        : token0;
 
-      // Create CollectOptions to collect fees in the same transaction
+      const collectCurrency1 = token1IsNative
+        ? Ether.onChain(this.chainId)
+        : token1;
+
+      // For removeCallParameters, use 0 for expectedCurrencyOwed because:
+      // 1. The SDK ADDS burn amounts to these values - using MaxUint128 causes overflow
+      // 2. The actual collect call internally uses MaxUint128 to collect all tokens
+      // 3. These values only affect amountMinimum for unwrapWETH9/sweepToken (no slippage risk)
+      // 4. The currency TYPE still triggers native ETH detection for unwrapping
       const collectOptions = {
-        expectedCurrencyOwed0,
-        expectedCurrencyOwed1,
+        expectedCurrencyOwed0: CurrencyAmount.fromRawAmount(collectCurrency0, 0),
+        expectedCurrencyOwed1: CurrencyAmount.fromRawAmount(collectCurrency1, 0),
         recipient: walletAddress
       };
 
