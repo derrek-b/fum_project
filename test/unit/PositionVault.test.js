@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 1.0.0", function() {
+describe("PositionVault - 1.1.0", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
@@ -342,7 +342,7 @@ describe("PositionVault - 1.0.0", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("1.0.0");
+      expect(await vault.getVersion()).to.equal("1.1.0");
     });
   });
 
@@ -410,6 +410,166 @@ describe("PositionVault - 1.0.0", function() {
       await expect(
         vault.withdrawTokens(ethers.ZeroAddress, ethers.parseEther("10"))
       ).to.be.revertedWith("PositionVault: zero token address");
+    });
+  });
+
+  // Test for native ETH withdrawal
+  describe("Native ETH Withdrawal", function() {
+    it("should withdraw native ETH to owner", async function() {
+      const vaultAddress = await vault.getAddress();
+      const depositAmount = ethers.parseEther("1");
+
+      // Send ETH to vault
+      await owner.sendTransaction({ to: vaultAddress, value: depositAmount });
+
+      // Check vault received ETH
+      expect(await ethers.provider.getBalance(vaultAddress)).to.equal(depositAmount);
+
+      const initialOwnerBalance = await ethers.provider.getBalance(owner.address);
+
+      // Withdraw ETH
+      const tx = await vault.withdrawETH(depositAmount);
+      const receipt = await tx.wait();
+      const gasCost = receipt.gasUsed * receipt.gasPrice;
+
+      // Verify owner received ETH (minus gas)
+      const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
+      expect(finalOwnerBalance).to.equal(initialOwnerBalance + depositAmount - gasCost);
+
+      // Verify vault is empty
+      expect(await ethers.provider.getBalance(vaultAddress)).to.equal(0);
+    });
+
+    it("should emit TokensWithdrawn with address(0) for native ETH", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+      await owner.sendTransaction({ to: vaultAddress, value: amount });
+
+      await expect(vault.withdrawETH(amount))
+        .to.emit(vault, "TokensWithdrawn")
+        .withArgs(ethers.ZeroAddress, owner.address, amount);
+    });
+
+    it("should revert if insufficient ETH balance", async function() {
+      await expect(vault.withdrawETH(ethers.parseEther("100")))
+        .to.be.revertedWith("PositionVault: insufficient ETH balance");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1") });
+
+      await expect(vault.connect(user1).withdrawETH(ethers.parseEther("1")))
+        .to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to withdraw ETH to owner", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+      await owner.sendTransaction({ to: vaultAddress, value: amount });
+
+      await vault.setExecutor(executorWallet.address);
+      const initialOwnerBalance = await ethers.provider.getBalance(owner.address);
+
+      await vault.connect(executorWallet).withdrawETH(amount);
+
+      const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
+      expect(finalOwnerBalance).to.equal(initialOwnerBalance + amount);
+    });
+
+    it("should emit TokensWithdrawn with owner as recipient when executor calls", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+      await owner.sendTransaction({ to: vaultAddress, value: amount });
+
+      await vault.setExecutor(executorWallet.address);
+
+      await expect(vault.connect(executorWallet).withdrawETH(amount))
+        .to.emit(vault, "TokensWithdrawn")
+        .withArgs(ethers.ZeroAddress, owner.address, amount);
+    });
+  });
+
+  // Test for WETH unwrap and withdraw
+  describe("WETH Unwrap and Withdraw", function() {
+    let weth;
+
+    beforeEach(async function() {
+      // Deploy mock WETH
+      const MockWETH = await ethers.getContractFactory("MockWETH");
+      weth = await MockWETH.deploy();
+      await weth.waitForDeployment();
+    });
+
+    it("should unwrap WETH and send ETH to owner", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+
+      // Wrap ETH to get WETH, then transfer to vault
+      await weth.deposit({ value: amount });
+      await weth.transfer(vaultAddress, amount);
+
+      // Verify vault has WETH
+      expect(await weth.balanceOf(vaultAddress)).to.equal(amount);
+
+      const initialOwnerBalance = await ethers.provider.getBalance(owner.address);
+
+      // Unwrap and withdraw
+      const tx = await vault.unwrapAndWithdrawETH(await weth.getAddress(), amount);
+      const receipt = await tx.wait();
+      const gasCost = receipt.gasUsed * receipt.gasPrice;
+
+      // Verify owner received ETH (minus gas)
+      const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
+      expect(finalOwnerBalance).to.equal(initialOwnerBalance + amount - gasCost);
+
+      // Verify vault WETH is zero
+      expect(await weth.balanceOf(vaultAddress)).to.equal(0);
+    });
+
+    it("should emit TokensWithdrawn with address(0)", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+
+      // Wrap ETH to get WETH, then transfer to vault
+      await weth.deposit({ value: amount });
+      await weth.transfer(vaultAddress, amount);
+
+      await expect(vault.unwrapAndWithdrawETH(await weth.getAddress(), amount))
+        .to.emit(vault, "TokensWithdrawn")
+        .withArgs(ethers.ZeroAddress, owner.address, amount);
+    });
+
+    it("should revert with zero WETH address", async function() {
+      await expect(vault.unwrapAndWithdrawETH(ethers.ZeroAddress, ethers.parseEther("1")))
+        .to.be.revertedWith("PositionVault: zero WETH address");
+    });
+
+    it("should only allow authorized callers", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+
+      await weth.deposit({ value: amount });
+      await weth.transfer(vaultAddress, amount);
+
+      await expect(vault.connect(user1).unwrapAndWithdrawETH(await weth.getAddress(), amount))
+        .to.be.revertedWith("PositionVault: caller is not authorized");
+    });
+
+    it("should allow executor to unwrap and withdraw to owner", async function() {
+      const vaultAddress = await vault.getAddress();
+      const amount = ethers.parseEther("1");
+
+      await weth.deposit({ value: amount });
+      await weth.transfer(vaultAddress, amount);
+
+      await vault.setExecutor(executorWallet.address);
+      const initialOwnerBalance = await ethers.provider.getBalance(owner.address);
+
+      await vault.connect(executorWallet).unwrapAndWithdrawETH(await weth.getAddress(), amount);
+
+      const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
+      expect(finalOwnerBalance).to.equal(initialOwnerBalance + amount);
     });
   });
 

@@ -10,6 +10,13 @@ import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
+ * @dev Interface for WETH withdraw function
+ */
+interface IWETH {
+    function withdraw(uint256 wad) external;
+}
+
+/**
  * @title PositionVault
  * @notice User-controlled vault for managing DeFi positions across platforms
  * @dev Holds tokens and NFT positions, executing transactions approved by the owner
@@ -300,6 +307,37 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         IERC20(token).safeTransfer(owner, amount);
 
         emit TokensWithdrawn(token, owner, amount);
+    }
+
+    /**
+     * @notice Withdraws native ETH from the vault to the owner
+     * @param amount Amount of ETH to withdraw
+     */
+    function withdrawETH(uint256 amount) external onlyAuthorized nonReentrant {
+        require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");
+
+        (bool success, ) = owner.call{value: amount}("");
+        require(success, "PositionVault: ETH transfer failed");
+
+        emit TokensWithdrawn(address(0), owner, amount);
+    }
+
+    /**
+     * @notice Unwraps WETH to ETH and withdraws to the owner
+     * @param weth Address of the WETH contract
+     * @param amount Amount of WETH to unwrap and withdraw
+     */
+    function unwrapAndWithdrawETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
+        require(weth != address(0), "PositionVault: zero WETH address");
+
+        // Unwrap WETH to ETH (WETH.withdraw sends ETH to this contract)
+        IWETH(weth).withdraw(amount);
+
+        // Send ETH to owner
+        (bool success, ) = owner.call{value: amount}("");
+        require(success, "PositionVault: ETH transfer failed");
+
+        emit TokensWithdrawn(address(0), owner, amount);
     }
 
     /**
