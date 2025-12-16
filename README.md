@@ -35,7 +35,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 │                      Smart Contracts                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
 │  │ VaultFactory │  │PositionVault │  │   Strategy Contracts  │  │
-│  │   (v1.0.0)   │  │   (v1.0.0)   │  │ BabySteps (v1.0.0)    │  │
+│  │   (v1.0.0)   │  │   (v1.1.0)   │  │ BabySteps (v1.0.0)    │  │
 │  │              │  │              │  │ ParrisIsland (v0.1.0) │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -50,19 +50,19 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 
 ## Smart Contracts
 
-### Production Ready (v1.0.0)
+### Production Ready
 
-| Contract | Description |
-|----------|-------------|
-| **PositionVault** | User-controlled vault holding ERC20 tokens and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports EIP-1271 signature validation. |
-| **VaultFactory** | Factory contract for creating and tracking PositionVault instances. Maintains registry of user vaults. |
-| **BabyStepsStrategy** | Basic automation strategy with template-based parameters for range width, rebalance thresholds, fee reinvestment, and risk management. |
+| Contract | Version | Description |
+|----------|---------|-------------|
+| **PositionVault** | v1.1.0 | User-controlled vault holding ERC20 tokens, native ETH, and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports native ETH deposits/withdrawals and WETH unwrapping. Supports EIP-1271 signature validation. |
+| **VaultFactory** | v1.0.0 | Factory contract for creating and tracking PositionVault instances. Maintains registry of user vaults. |
+| **BabyStepsStrategy** | v1.0.0 | Basic automation strategy with template-based parameters for range width, rebalance thresholds, fee reinvestment, and risk management. |
 
-### In Development (v0.1.0)
+### In Development
 
-| Contract | Description |
-|----------|-------------|
-| **ParrisIslandStrategy** | Advanced adaptive strategy with additional parameters for position sizing, pool liquidity requirements, oracle selection, and dynamic range adjustments. |
+| Contract | Version | Description |
+|----------|---------|-------------|
+| **ParrisIslandStrategy** | v0.1.0 | Advanced adaptive strategy with additional parameters for position sizing, pool liquidity requirements, oracle selection, and dynamic range adjustments. |
 
 ## Features
 

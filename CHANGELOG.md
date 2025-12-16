@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2025-12-16
+
+### Native ETH Vault Withdrawals
+
+Adds native ETH withdrawal support and WETH unwrap option for vault token withdrawals.
+
+#### **Smart Contract Changes**
+- **PositionVault** v1.0.0 → v1.1.0
+  - **ADDED**: `withdrawETH(uint256 amount)` - Withdraw native ETH from vault to owner
+  - **ADDED**: `unwrapAndWithdrawETH(address weth, uint256 amount)` - Unwrap WETH to ETH and withdraw to owner
+  - **ADDED**: `IWETH` interface for WETH contract interaction
+  - Both functions use `onlyAuthorized` modifier (owner or executor can call)
+  - Both functions emit `TokensWithdrawn` event with `address(0)` for native ETH
+
+#### **Frontend Changes**
+- **TokenWithdrawModal**: Added toggle to withdraw WETH as native ETH
+- **TokenDepositModal**: Support for native ETH deposits
+- **vaultsHelpers**: Added `isWeth` flag to identify WETH tokens for withdrawal options
+
+#### **Documentation**
+- **README**: Updated contract version table format with version column
+
+**Status**: Production Ready
+**Breaking Changes**: None
+
+---
+
 ## [1.0.3] - 2025-12-10
 
 ### Demo Page Chain Configuration

@@ -593,15 +593,42 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
 
   try {
     const allTokens = getAllTokens();
-    const tokenAddresses = Object.values(allTokens)
-      .filter(token => token.addresses[chainId])
-      .map(token => ({
-        ...token,
-        address: token.addresses[chainId]
-      }));
 
-    // First, get all token symbols for prefetching prices
-    const allSymbols = tokenAddresses.map(token => token.symbol);
+    // Build token list including both native ETH and WETH as separate entries
+    const tokenList = [];
+    Object.values(allTokens).forEach(token => {
+      if (token.isNative) {
+        // Add native ETH entry
+        tokenList.push({
+          ...token,
+          address: null,
+          isNativeEntry: true
+        });
+        // Add WETH entry (virtual token from wethAddresses)
+        if (token.wethAddresses?.[chainId]) {
+          tokenList.push({
+            symbol: 'WETH',
+            name: 'Wrapped Ether',
+            displaySymbol: 'WETH',
+            decimals: 18,
+            address: token.wethAddresses[chainId],
+            logoURI: token.wethLogoURI || token.logoURI,
+            coingeckoId: token.coingeckoId, // Same price as ETH
+            isNativeEntry: false,
+            isWeth: true // Flag for withdraw modal to offer unwrap option
+          });
+        }
+      } else if (token.addresses[chainId]) {
+        tokenList.push({
+          ...token,
+          address: token.addresses[chainId],
+          isNativeEntry: false
+        });
+      }
+    });
+
+    // First, get all token symbols for prefetching prices (ETH price works for both ETH and WETH)
+    const allSymbols = tokenList.map(token => token.symbol === 'WETH' ? 'ETH' : token.symbol);
 
     // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
     let prices = {};
@@ -614,18 +641,30 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
     const tokenPricesLoaded = true;
 
     const tokenBalances = await Promise.all(
-      tokenAddresses.map(async (token) => {
+      tokenList.map(async (token) => {
         try {
-          const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
-          const balance = await tokenContract.balanceOf(vaultAddress);
-          const formattedBalance = ethers.utils.formatUnits(balance, token.decimals);
+          let balance;
+          let formattedBalance;
+
+          if (token.isNativeEntry) {
+            // Native ETH - use provider.getBalance
+            balance = await provider.getBalance(vaultAddress);
+            formattedBalance = ethers.utils.formatEther(balance);
+          } else {
+            // ERC20 (including WETH) - use balanceOf
+            const tokenContract = new ethers.Contract(token.address, ERC20ABI, provider);
+            balance = await tokenContract.balanceOf(vaultAddress);
+            formattedBalance = ethers.utils.formatUnits(balance, token.decimals);
+          }
+
           const numericalBalance = parseFloat(formattedBalance);
 
           // Skip tokens with 0 balance
           if (numericalBalance === 0) return null;
 
-          // Calculate USD value
-          const price = prices[token.symbol];
+          // Calculate USD value (WETH uses ETH price)
+          const priceKey = token.symbol === 'WETH' ? 'ETH' : token.symbol;
+          const price = prices[priceKey];
           if (!price) {
             console.error(`⚠️ No price available for token ${token.symbol} - setting tokenHasPartialData`);
             tokenHasPartialData = true;
@@ -661,7 +700,10 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
         numericalBalance: token.numericalBalance,
         valueUsd: token.valueUsd,
         decimals: token.decimals,
-        logoURI: token.logoURI
+        logoURI: token.logoURI,
+        isNativeEntry: token.isNativeEntry || false,
+        isWeth: token.isWeth || false, // Flag for withdraw modal to offer unwrap option
+        address: token.address // Include address for withdrawals
       };
     });
 

@@ -1,16 +1,15 @@
 // src/components/TokenDepositModal.js
 import React, { useState, useEffect } from "react";
-import { Modal, Button, Form, InputGroup, Spinner, Alert, Card } from "react-bootstrap";
+import { Modal, Button, Form, InputGroup, Spinner, Alert } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
 import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
-import Image from "next/image";
 
-// CSS to hide number input spinner arrows
-const numberInputStyles = `
-  /* Chrome, Safari, Edge, Opera */
+// CSS styles for the modal
+const modalStyles = `
+  /* Hide number input spinner arrows - Chrome, Safari, Edge, Opera */
   input.no-number-spinner::-webkit-outer-spin-button,
   input.no-number-spinner::-webkit-inner-spin-button {
     -webkit-appearance: none;
@@ -20,6 +19,67 @@ const numberInputStyles = `
   /* Firefox */
   input.no-number-spinner[type=number] {
     -moz-appearance: textfield;
+  }
+
+  /* Token pill selector styles */
+  .token-pill-container {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 8px 4px;
+    scrollbar-width: thin;
+    scrollbar-color: #6c757d transparent;
+  }
+
+  .token-pill-container::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .token-pill-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .token-pill-container::-webkit-scrollbar-thumb {
+    background-color: #6c757d;
+    border-radius: 3px;
+  }
+
+  .token-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 2px solid #dee2e6;
+    background: #f8f9fa;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    min-width: 70px;
+  }
+
+  .token-pill:hover {
+    border-color: #adb5bd;
+    background: #e9ecef;
+  }
+
+  .token-pill.selected {
+    border-color: #8b1538;
+    background: #fff;
+    box-shadow: 0 0 0 1px #8b1538;
+  }
+
+  .token-pill img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+  }
+
+  .token-pill-symbol {
+    font-weight: 600;
+    font-size: 12px;
+    color: #212529;
   }
 `;
 
@@ -59,9 +119,37 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Get all available tokens
+  // Build token list including both native ETH and WETH as separate entries
   const tokens = getAllTokens();
-  const tokenList = Object.values(tokens).filter(token => token.addresses[chainId]);
+  const tokenList = [];
+  Object.values(tokens).forEach(token => {
+    if (token.isNative) {
+      // Add native ETH entry
+      tokenList.push({
+        ...token,
+        address: null,
+        isNativeEntry: true
+      });
+      // Add WETH entry (virtual token from wethAddresses)
+      if (token.wethAddresses?.[chainId]) {
+        tokenList.push({
+          symbol: 'WETH',
+          name: 'Wrapped Ether',
+          displaySymbol: 'WETH',
+          decimals: 18,
+          address: token.wethAddresses[chainId],
+          logoURI: token.wethLogoURI || token.logoURI,
+          isNativeEntry: false
+        });
+      }
+    } else if (token.addresses[chainId]) {
+      tokenList.push({
+        ...token,
+        address: token.addresses[chainId],
+        isNativeEntry: false
+      });
+    }
+  });
 
   // Reset state when modal closes
   useEffect(() => {
@@ -81,10 +169,19 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
 
       setIsLoading(true);
       try {
-        const tokenAddress = selectedToken.addresses[chainId];
-        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider);
-        const balance = await tokenContract.balanceOf(userAddress);
-        const formattedBalance = ethers.utils.formatUnits(balance, selectedToken.decimals);
+        let formattedBalance;
+
+        if (selectedToken.isNativeEntry) {
+          // Native ETH - use provider.getBalance
+          const balance = await readProvider.getBalance(userAddress);
+          formattedBalance = ethers.utils.formatEther(balance);
+        } else {
+          // ERC20 (including WETH) - use balanceOf
+          const tokenContract = new ethers.Contract(selectedToken.address, ERC20_ABI, readProvider);
+          const balance = await tokenContract.balanceOf(userAddress);
+          formattedBalance = ethers.utils.formatUnits(balance, selectedToken.decimals);
+        }
+
         setUserBalance(formattedBalance);
         setError("");
       } catch (err) {
@@ -157,16 +254,21 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     setError("");
 
     try {
-      const tokenAddress = selectedToken.addresses[chainId];
-
       const signer = await getSigner();
-      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-
-      // Convert amount to token units
       const amountInUnits = ethers.utils.parseUnits(amount, selectedToken.decimals);
 
-      // Use standard ERC-20 transfer
-      const tx = await tokenContract.transfer(vaultAddress, amountInUnits);
+      let tx;
+      if (selectedToken.isNativeEntry) {
+        // Send native ETH directly to vault
+        tx = await signer.sendTransaction({
+          to: vaultAddress,
+          value: amountInUnits
+        });
+      } else {
+        // ERC20 transfer (including WETH)
+        const tokenContract = new ethers.Contract(selectedToken.address, ERC20_ABI, signer);
+        tx = await tokenContract.transfer(vaultAddress, amountInUnits);
+      }
 
       await tx.wait();
 
@@ -201,7 +303,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
       size="lg"
       backdrop="static"
     >
-      <style>{numberInputStyles}</style>
+      <style>{modalStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>Deposit Tokens to Vault</Modal.Title>
       </Modal.Header>
@@ -209,32 +311,25 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
         {error && <Alert variant="danger">{error}</Alert>}
 
         <Form>
-          {/* Token Selection */}
-          <Form.Group className="mb-5">
+          {/* Token Selection - Horizontal Pill Selector */}
+          <Form.Group className="mb-4">
             <Form.Label>Select Token</Form.Label>
-            <div className="d-flex flex-wrap gap-2">
+            <div className="token-pill-container">
               {tokenList.map((token) => (
-                <Card
+                <div
                   key={token.symbol}
-                  className={`token-select-card ${selectedToken?.symbol === token.symbol ? 'border-primary' : ''}`}
-                  style={{ cursor: 'pointer', minWidth: '100px' }}
+                  className={`token-pill ${selectedToken?.symbol === token.symbol ? 'selected' : ''}`}
                   onClick={() => handleTokenSelect(token)}
+                  title={token.name}
                 >
-                  <Card.Body className="text-center py-2">
-                    {token.logoURI && (
-                      <div className="mb-2">
-                        <img
-                          src={token.logoURI}
-                          alt={token.symbol}
-                          width={32}
-                          height={32}
-                        />
-                      </div>
-                    )}
-                    <div className="fw-bold">{token.symbol}</div>
-                    <small className="text-muted">{token.name}</small>
-                  </Card.Body>
-                </Card>
+                  {token.logoURI && (
+                    <img
+                      src={token.logoURI}
+                      alt={token.symbol}
+                    />
+                  )}
+                  <span className="token-pill-symbol">{token.symbol}</span>
+                </div>
               ))}
             </div>
           </Form.Group>
