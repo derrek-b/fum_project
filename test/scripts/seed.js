@@ -539,6 +539,9 @@ async function main() {
   // Define token addresses for Arbitrum
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
+  const USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'; // USDT on Arbitrum
+  const WBTC_ADDRESS = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f'; // WBTC on Arbitrum
+  const LINK_ADDRESS = '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4'; // LINK on Arbitrum
 
   // Create token instances
   const WETH = new Token(
@@ -574,7 +577,8 @@ async function main() {
   // 3. Execute the swap through the Uniswap router
 
   // Step 1: Wrap ETH to WETH using the WETH contract
-  console.log(`Wrapping 20 ETH to WETH...`);
+  // 45 ETH total: 5 WETH to keep + 10 WETH each for USDC, USDT, WBTC, LINK swaps
+  console.log(`Wrapping 45 ETH to WETH...`);
 
   // WETH contract address is the same as the token address
   const wethContractWithABI = new ethers.Contract(
@@ -591,9 +595,9 @@ async function main() {
   let currentNonce = await provider.getTransactionCount(wallet.address);
   console.log(`Current nonce: ${currentNonce}`);
 
-  // Deposit 5 ETH to get WETH
+  // Deposit 45 ETH to get WETH
   const wrapTx = await wethContractWithABI.deposit({
-    value: ethers.utils.parseEther('20'),
+    value: ethers.utils.parseEther('45'),
     nonce: currentNonce++
   });
 
@@ -606,10 +610,10 @@ async function main() {
 
   console.log(`Nonce after previous transaction: ${currentNonce}`);
 
-  console.log(`Approving Uniswap Router to spend WETH...`);
+  console.log(`Approving Uniswap Router to spend WETH (40 WETH for all swaps)...`);
   const approveTx = await wethContract.approve(
     UNISWAP_ROUTER_ADDRESS,
-    ethers.utils.parseEther('500'),
+    ethers.utils.parseEther('40'),
     {
       nonce: currentNonce++
     }
@@ -619,7 +623,7 @@ async function main() {
   await approveTx.wait();
   console.log(`Approve transaction confirmed`);
 
-  // Step 3: Execute the swap using the Uniswap Router
+  // Step 3: Execute the swaps using the Uniswap Router
   const UNISWAP_ROUTER_ABI = [
     'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external returns (uint256)'
   ];
@@ -630,36 +634,53 @@ async function main() {
     wallet
   );
 
-  console.log(`Swapping 10 WETH for USDC...`);
-
   // Current timestamp plus 20 minutes (in seconds)
   const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
 
-  const swapTx = await uniswapRouter.exactInputSingle({
-    tokenIn: WETH_ADDRESS,
-    tokenOut: USDC_ADDRESS,
-    fee: 500, // 0.3% fee tier
-    recipient: wallet.address,
-    deadline: deadline,
-    amountIn: ethers.utils.parseEther('10'),
-    amountOutMinimum: 0, // For testing, we accept any amount out (in production, set a min)
-    sqrtPriceLimitX96: 0,
-    nonce: currentNonce++
-  });
+  // Helper function to swap WETH for a token
+  const swapWethForToken = async (tokenOut, tokenSymbol, fee = 500) => {
+    console.log(`Swapping 10 WETH for ${tokenSymbol}...`);
+    const swapTx = await uniswapRouter.exactInputSingle({
+      tokenIn: WETH_ADDRESS,
+      tokenOut: tokenOut,
+      fee: fee,
+      recipient: wallet.address,
+      deadline: deadline,
+      amountIn: ethers.utils.parseEther('10'),
+      amountOutMinimum: 0, // For testing, we accept any amount out
+      sqrtPriceLimitX96: 0,
+      nonce: currentNonce++
+    });
+    console.log(`  Swap transaction sent: ${swapTx.hash}`);
+    await swapTx.wait();
+    console.log(`  ${tokenSymbol} swap confirmed`);
+  };
 
-  console.log(`Swap transaction sent: ${swapTx.hash}`);
-  await swapTx.wait();
-  console.log(`Swap transaction confirmed`);
+  // Swap 10 WETH for each token (keeping 5 WETH)
+  await swapWethForToken(USDC_ADDRESS, 'USDC', 500);
+  await swapWethForToken(USDT_ADDRESS, 'USDT', 500);
+  await swapWethForToken(WBTC_ADDRESS, 'WBTC', 500);
+  await swapWethForToken(LINK_ADDRESS, 'LINK', 3000);
 
-  // Get token balances after swap
+  // Get token balances after swaps
+  const usdtContract = new ethers.Contract(USDT_ADDRESS, ERC20ABI, wallet);
+  const wbtcContract = new ethers.Contract(WBTC_ADDRESS, ERC20ABI, wallet);
+  const linkContract = new ethers.Contract(LINK_ADDRESS, ERC20ABI, wallet);
+
   const finalWethBalance = await wethContract.balanceOf(wallet.address);
   const finalUsdcBalance = await usdcContract.balanceOf(wallet.address);
+  const finalUsdtBalance = await usdtContract.balanceOf(wallet.address);
+  const finalWbtcBalance = await wbtcContract.balanceOf(wallet.address);
+  const finalLinkBalance = await linkContract.balanceOf(wallet.address);
 
-  console.log(`Final WETH balance: ${ethers.utils.formatUnits(finalWethBalance, 18)} WETH`);
-  console.log(`Final USDC balance: ${ethers.utils.formatUnits(finalUsdcBalance, 6)} USDC`);
-  console.log(`Acquired ${ethers.utils.formatUnits(finalUsdcBalance - initialUsdcBalance, 6)} USDC`);
+  console.log(`\nFinal token balances:`);
+  console.log(`  WETH: ${ethers.utils.formatUnits(finalWethBalance, 18)} WETH`);
+  console.log(`  USDC: ${ethers.utils.formatUnits(finalUsdcBalance, 6)} USDC`);
+  console.log(`  USDT: ${ethers.utils.formatUnits(finalUsdtBalance, 6)} USDT`);
+  console.log(`  WBTC: ${ethers.utils.formatUnits(finalWbtcBalance, 8)} WBTC`);
+  console.log(`  LINK: ${ethers.utils.formatUnits(finalLinkBalance, 18)} LINK`);
 
-  console.log('ETH to USDC swap completed successfully.');
+  console.log('\nAll token swaps completed successfully.');
 
   console.log('\n=== WALLET FUNDING COMPLETE ===');
   console.log('You can now use the web UI to create positions manually.');

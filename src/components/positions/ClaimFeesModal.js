@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
+import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
@@ -69,7 +70,12 @@ export default function ClaimFeesModal({
     setOperationError(null);
 
     try {
+      // Look up native status for ETH unwrapping
+      const token0Info = getTokenByAddress(token0Data.address, chainId);
+      const token1Info = getTokenByAddress(token1Data.address, chainId);
+
       // Generate transaction data for claiming fees (uses read provider for data lookup)
+      // Pass native flags to trigger unwrapWETH9 for ETH positions
       const txData = await adapter.generateClaimFeesData({
         positionId: position.id,
         provider: readProvider,
@@ -77,7 +83,9 @@ export default function ClaimFeesModal({
         token0Address: token0Data.address,
         token1Address: token1Data.address,
         token0Decimals: token0Data.decimals,
-        token1Decimals: token1Data.decimals
+        token1Decimals: token1Data.decimals,
+        token0IsNative: token0Info?.isNative || false,
+        token1IsNative: token1Info?.isNative || false
       });
 
       // Get signer to send transaction

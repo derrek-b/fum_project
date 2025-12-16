@@ -5,6 +5,7 @@ import { useSelector, useDispatch } from 'react-redux';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
+import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
@@ -114,7 +115,12 @@ export default function ClosePositionModal({
     setOperationError(null);
 
     try {
+      // Look up native status for ETH unwrapping
+      const token0Info = getTokenByAddress(token0Data.address, chainId);
+      const token1Info = getTokenByAddress(token1Data.address, chainId);
+
       // Closing a position is just removing 100% of liquidity (which also collects fees)
+      // Pass native flags to trigger unwrapWETH9 for ETH positions
       const txData = await adapter.generateRemoveLiquidityData({
         position,
         percentage: 100, // Remove 100% to close
@@ -124,7 +130,9 @@ export default function ClosePositionModal({
         token0Data,
         token1Data,
         slippageTolerance,
-        deadlineMinutes: 20
+        deadlineMinutes: 20,
+        token0IsNative: token0Info?.isNative || false,
+        token1IsNative: token1Info?.isNative || false
       });
 
       // Get signer to send transaction

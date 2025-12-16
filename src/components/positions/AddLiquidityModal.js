@@ -8,7 +8,7 @@ import { Token } from '@uniswap/sdk-core';
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatPrice } from 'fum_library/helpers/formatHelpers';
-import { getTokensByChain } from 'fum_library/helpers/tokenHelpers';
+import { getTokensByChain, getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 import { getPlatformTickSpacing } from 'fum_library/helpers/platformHelpers';
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
 
@@ -310,9 +310,30 @@ export default function AddLiquidityModal({
           setToken1Address(token1Data.address);
         }
 
-        // Get token balances
-        if (token0Data.address && token1Data.address && readProvider && address) {
-          fetchTokenBalances(token0Data.address, token1Data.address);
+        // Get token balances - enrich token data with native token info from library
+        if (token0Data.address && token1Data.address && readProvider && address && chainId) {
+          // Look up tokens from library to get isNative and wethAddress properties
+          // getTokenByAddress will match WETH addresses to the ETH token
+          try {
+            const token0FromLib = getTokenByAddress(token0Data.address, chainId);
+            const token1FromLib = getTokenByAddress(token1Data.address, chainId);
+
+            const enrichedToken0 = {
+              ...token0Data,
+              isNative: token0FromLib.isNative || false,
+              wethAddress: token0FromLib.wethAddresses?.[chainId] || null
+            };
+            const enrichedToken1 = {
+              ...token1Data,
+              isNative: token1FromLib.isNative || false,
+              wethAddress: token1FromLib.wethAddresses?.[chainId] || null
+            };
+
+            fetchTokenBalances(enrichedToken0, enrichedToken1);
+          } catch (error) {
+            console.error("Error enriching token data:", error);
+            // Don't fetch balances if we can't identify the tokens properly
+          }
         }
 
         // Calculate current price for existing position
@@ -341,7 +362,7 @@ export default function AddLiquidityModal({
         showError("Error loading position data. Please try again later.");
       }
     }
-  }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, readProvider, adapter, showError]);
+  }, [show, isExistingPosition, position, poolData, token0Data, token1Data, address, readProvider, adapter, showError, chainId]);
 
   // Fetch token balances when token symbols change
   useEffect(() => {
@@ -428,8 +449,11 @@ export default function AddLiquidityModal({
         : amount0 * price;
 
       // Use token1's decimals for proper precision
-      const token1Info = commonTokens.find(t => t.symbol === token1Address);
-      setToken1Amount(calculatedAmount1.toFixed(token1Info.decimals));
+      // For existing positions, use token1Data; for new positions, look up from commonTokens
+      const token1Decimals = isExistingPosition
+        ? token1Data?.decimals
+        : commonTokens.find(t => t.symbol === token1Address)?.decimals;
+      setToken1Amount(calculatedAmount1.toFixed(token1Decimals));
     } catch (error) {
       console.error("Error calculating paired amount:", error);
       setToken1Error("Failed to calculate paired amount");
@@ -465,8 +489,11 @@ export default function AddLiquidityModal({
         : amount1 / price;
 
       // Use token0's decimals for proper precision
-      const token0Info = commonTokens.find(t => t.symbol === token0Address);
-      setToken0Amount(calculatedAmount0.toFixed(token0Info.decimals));
+      // For existing positions, use token0Data; for new positions, look up from commonTokens
+      const token0Decimals = isExistingPosition
+        ? token0Data?.decimals
+        : commonTokens.find(t => t.symbol === token0Address)?.decimals;
+      setToken0Amount(calculatedAmount0.toFixed(token0Decimals));
     } catch (error) {
       console.error("Error calculating paired amount:", error);
       setToken0Error("Failed to calculate paired amount");
@@ -991,12 +1018,86 @@ export default function AddLiquidityModal({
       throw new Error("Position Manager address not found");
     }
 
-    // Setup transaction steps
-    const steps = [
-      { title: `Approve {TOKEN}`, description: 'Grant permission to spend token', tokenIndex: 0 },
-      { title: `Approve {TOKEN}`, description: 'Grant permission to spend token', tokenIndex: 1 },
-      { title: 'Add Liquidity', description: 'Add tokens to your position' }
+    // For existing positions, check if either token is ETH (by looking up via WETH address)
+    // token0Balance/token1Balance already have isNative flag from enrichment
+    const token0IsNative = token0Balance?.isNative || false;
+    const token1IsNative = token1Balance?.isNative || false;
+
+    // Get ETH token info from library if either token is native
+    let ethTokenInfo = null;
+    let ethBalance = null;
+    let ethAmount = null;
+
+    if (token0IsNative && chainId) {
+      try {
+        ethTokenInfo = getTokenByAddress(token0Data.address, chainId);
+        ethBalance = token0Balance;
+        ethAmount = params.token0Amount;
+      } catch (e) {
+        console.error("Error getting ETH token info for token0:", e);
+      }
+    } else if (token1IsNative && chainId) {
+      try {
+        ethTokenInfo = getTokenByAddress(token1Data.address, chainId);
+        ethBalance = token1Balance;
+        ethAmount = params.token1Amount;
+      } catch (e) {
+        console.error("Error getting ETH token info for token1:", e);
+      }
+    }
+
+    let wrapAmount = "0";
+    if (ethTokenInfo && ethBalance && ethAmount) {
+      wrapAmount = calculateWrapAmount(ethAmount, ethBalance);
+    }
+    const needsWrap = parseFloat(wrapAmount) > 0;
+
+    // Convert token amounts from human-readable format to wei (needed for allowance check)
+    const token0AmountWei = ethers.utils.parseUnits(
+      params.token0Amount || "0",
+      token0Data.decimals
+    ).toString();
+
+    const token1AmountWei = ethers.utils.parseUnits(
+      params.token1Amount || "0",
+      token1Data.decimals
+    ).toString();
+
+    // ERC20 ABI for approve and allowance
+    const erc20ABI = [
+      'function approve(address spender, uint256 amount) returns (bool)',
+      'function allowance(address owner, address spender) view returns (uint256)'
     ];
+
+    // Check allowances BEFORE building steps to know which approve steps are needed
+    let needsToken0Approval = false;
+    let needsToken1Approval = false;
+
+    if (token0AmountWei !== "0") {
+      const token0Contract = new ethers.Contract(token0Data.address, erc20ABI, readProvider);
+      const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+      needsToken0Approval = ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei));
+    }
+
+    if (token1AmountWei !== "0") {
+      const token1Contract = new ethers.Contract(token1Data.address, erc20ABI, readProvider);
+      const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+      needsToken1Approval = ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei));
+    }
+
+    // Build transaction steps dynamically based on what's actually needed
+    const steps = [];
+    if (needsWrap) {
+      steps.push({ title: 'Prepare ETH', description: `Preparing ${parseFloat(wrapAmount).toFixed(6)} ETH for the position` });
+    }
+    if (needsToken0Approval) {
+      steps.push({ title: `Approve ${token0Data?.symbol}`, description: 'Grant permission to spend token' });
+    }
+    if (needsToken1Approval) {
+      steps.push({ title: `Approve ${token1Data?.symbol}`, description: 'Grant permission to spend token' });
+    }
+    steps.push({ title: 'Add Liquidity', description: 'Add tokens to your position' });
+
     setTransactionSteps(steps);
     setCurrentTxStep(0);
     setTransactionError('');
@@ -1008,63 +1109,54 @@ export default function AddLiquidityModal({
     setOperationError(null);
 
     try {
-      // Convert token amounts from human-readable format to wei
-      const token0AmountWei = ethers.utils.parseUnits(
-        params.token0Amount || "0",
-        token0Data.decimals
-      ).toString();
-
-      const token1AmountWei = ethers.utils.parseUnits(
-        params.token1Amount || "0",
-        token1Data.decimals
-      ).toString();
-
       // Get signer
       const signer = getSigner();
 
-      // ERC20 ABI for approve and allowance
-      const erc20ABI = [
-        'function approve(address spender, uint256 amount) returns (bool)',
-        'function allowance(address owner, address spender) view returns (uint256)'
-      ];
+      // Track current step index
+      let stepIndex = 0;
 
-      // Step 1: Check and approve token0 if needed
-      if (token0AmountWei !== "0") {
+      // Step (conditional): Wrap ETH to WETH if needed
+      if (needsWrap) {
+        const wrapAmountWei = ethers.utils.parseEther(wrapAmount);
+        const wethAddress = ethTokenInfo.wethAddresses?.[chainId];
+
+        const WETH_ABI = ['function deposit() payable'];
+        const wethContract = new ethers.Contract(wethAddress, WETH_ABI, signer);
+
+        const wrapTx = await wethContract.deposit({ value: wrapAmountWei });
+        await wrapTx.wait();
+
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
+      }
+
+      // Step (conditional): Approve token0 if needed
+      if (needsToken0Approval) {
         const token0Contract = new ethers.Contract(token0Data.address, erc20ABI, readProvider);
-        const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+        const token0ContractWithSigner = token0Contract.connect(signer);
+        const approveTx = await token0ContractWithSigner.approve(
+          positionManagerAddress,
+          ethers.constants.MaxUint256
+        );
+        await approveTx.wait();
 
-        if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
-          // Need approval for token0
-          const token0ContractWithSigner = token0Contract.connect(signer);
-          const approveTx = await token0ContractWithSigner.approve(
-            positionManagerAddress,
-            ethers.constants.MaxUint256
-          );
-          await approveTx.wait();
-        }
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
       }
 
-      // Move to step 2
-      setCurrentTxStep(1);
-
-      // Step 2: Check and approve token1 if needed
-      if (token1AmountWei !== "0") {
+      // Step (conditional): Approve token1 if needed
+      if (needsToken1Approval) {
         const token1Contract = new ethers.Contract(token1Data.address, erc20ABI, readProvider);
-        const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+        const token1ContractWithSigner = token1Contract.connect(signer);
+        const approveTx = await token1ContractWithSigner.approve(
+          positionManagerAddress,
+          ethers.constants.MaxUint256
+        );
+        await approveTx.wait();
 
-        if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
-          // Need approval for token1
-          const token1ContractWithSigner = token1Contract.connect(signer);
-          const approveTx = await token1ContractWithSigner.approve(
-            positionManagerAddress,
-            ethers.constants.MaxUint256
-          );
-          await approveTx.wait();
-        }
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
       }
-
-      // Move to step 3
-      setCurrentTxStep(2);
 
       // Step 3: Generate transaction data using the library
       const txData = await adapter.generateAddLiquidityData({
@@ -1090,7 +1182,7 @@ export default function AddLiquidityModal({
       const receipt = await tx.wait();
 
       // All steps complete
-      setCurrentTxStep(3);
+      setCurrentTxStep(steps.length - 1);
 
       // Show success message with transaction hash
       showSuccess("Successfully added liquidity!", receipt.hash);
@@ -1102,8 +1194,16 @@ export default function AddLiquidityModal({
         dispatch(triggerUpdate());
       }, 1500);
     } catch (error) {
+      // Check if user rejected the transaction - handle silently
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001 || error.message?.includes('user rejected')) {
+        setShowTransactionModal(false);
+        setIsAddingLiquidity(false);
+        return;
+      }
+
+      // Real error - log and show user-friendly message
       console.error("Error adding liquidity:", error);
-      const errorMessage = error.message || "Failed to add liquidity";
+      const errorMessage = error.reason || error.message || "Failed to add liquidity";
       setTransactionError(errorMessage);
       setOperationError(`Error adding liquidity: ${errorMessage}`);
       showError(`Error adding liquidity: ${errorMessage}`);
@@ -1163,13 +1263,54 @@ export default function AddLiquidityModal({
     }
     const needsWrap = parseFloat(wrapAmount) > 0;
 
-    // Build transaction steps dynamically
+    // If tokens were swapped during sorting, swap the amounts to match pool order
+    const amount0ForPool = tokensSwapped ? params.token1Amount : params.token0Amount;
+    const amount1ForPool = tokensSwapped ? params.token0Amount : params.token1Amount;
+
+    // Convert token amounts from human-readable format to wei
+    const token0AmountWei = ethers.utils.parseUnits(
+      amount0ForPool || "0",
+      sortedToken0Data.decimals
+    ).toString();
+
+    const token1AmountWei = ethers.utils.parseUnits(
+      amount1ForPool || "0",
+      sortedToken1Data.decimals
+    ).toString();
+
+    // ERC20 ABI for approve and allowance
+    const erc20ABI = [
+      'function approve(address spender, uint256 amount) returns (bool)',
+      'function allowance(address owner, address spender) view returns (uint256)'
+    ];
+
+    // Check allowances BEFORE building steps to know which approve steps are needed
+    let needsToken0Approval = false;
+    let needsToken1Approval = false;
+
+    if (token0AmountWei !== "0") {
+      const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, readProvider);
+      const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
+      needsToken0Approval = ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei));
+    }
+
+    if (token1AmountWei !== "0") {
+      const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, readProvider);
+      const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
+      needsToken1Approval = ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei));
+    }
+
+    // Build transaction steps dynamically based on what's actually needed
     const steps = [];
     if (needsWrap) {
       steps.push({ title: 'Prepare ETH', description: `Preparing ${parseFloat(wrapAmount).toFixed(6)} ETH for the position` });
     }
-    steps.push({ title: `Approve ${sortedToken0Data.symbol}`, description: 'Grant permission to spend token' });
-    steps.push({ title: `Approve ${sortedToken1Data.symbol}`, description: 'Grant permission to spend token' });
+    if (needsToken0Approval) {
+      steps.push({ title: `Approve ${sortedToken0Data.symbol}`, description: 'Grant permission to spend token' });
+    }
+    if (needsToken1Approval) {
+      steps.push({ title: `Approve ${sortedToken1Data.symbol}`, description: 'Grant permission to spend token' });
+    }
     steps.push({ title: 'Create Position', description: 'Mint new liquidity position' });
 
     setTransactionSteps(steps);
@@ -1183,20 +1324,6 @@ export default function AddLiquidityModal({
     setOperationError(null);
 
     try {
-      // If tokens were swapped during sorting, swap the amounts to match pool order
-      const amount0ForPool = tokensSwapped ? params.token1Amount : params.token0Amount;
-      const amount1ForPool = tokensSwapped ? params.token0Amount : params.token1Amount;
-
-      // Convert token amounts from human-readable format to wei
-      const token0AmountWei = ethers.utils.parseUnits(
-        amount0ForPool || "0",
-        sortedToken0Data.decimals
-      ).toString();
-
-      const token1AmountWei = ethers.utils.parseUnits(
-        amount1ForPool || "0",
-        sortedToken1Data.decimals
-      ).toString();
 
       // Get signer
       const signer = getSigner();
@@ -1219,49 +1346,31 @@ export default function AddLiquidityModal({
         setCurrentTxStep(stepIndex);
       }
 
-      // ERC20 ABI for approve and allowance
-      const erc20ABI = [
-        'function approve(address spender, uint256 amount) returns (bool)',
-        'function allowance(address owner, address spender) view returns (uint256)'
-      ];
+      // Step: Approve token0 if needed
+      if (needsToken0Approval) {
+        const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, signer);
+        const approveTx = await token0Contract.approve(
+          positionManagerAddress,
+          ethers.constants.MaxUint256
+        );
+        await approveTx.wait();
 
-      // Step: Check and approve token0 if needed
-      if (token0AmountWei !== "0") {
-        const token0Contract = new ethers.Contract(sortedToken0Data.address, erc20ABI, readProvider);
-        const token0Allowance = await token0Contract.allowance(address, positionManagerAddress);
-
-        if (ethers.BigNumber.from(token0Allowance).lt(ethers.BigNumber.from(token0AmountWei))) {
-          const token0ContractWithSigner = token0Contract.connect(signer);
-          const approveTx = await token0ContractWithSigner.approve(
-            positionManagerAddress,
-            ethers.constants.MaxUint256
-          );
-          await approveTx.wait();
-        }
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
       }
 
-      // Move to next step
-      stepIndex++;
-      setCurrentTxStep(stepIndex);
+      // Step: Approve token1 if needed
+      if (needsToken1Approval) {
+        const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, signer);
+        const approveTx = await token1Contract.approve(
+          positionManagerAddress,
+          ethers.constants.MaxUint256
+        );
+        await approveTx.wait();
 
-      // Step: Check and approve token1 if needed
-      if (token1AmountWei !== "0") {
-        const token1Contract = new ethers.Contract(sortedToken1Data.address, erc20ABI, readProvider);
-        const token1Allowance = await token1Contract.allowance(address, positionManagerAddress);
-
-        if (ethers.BigNumber.from(token1Allowance).lt(ethers.BigNumber.from(token1AmountWei))) {
-          const token1ContractWithSigner = token1Contract.connect(signer);
-          const approveTx = await token1ContractWithSigner.approve(
-            positionManagerAddress,
-            ethers.constants.MaxUint256
-          );
-          await approveTx.wait();
-        }
+        stepIndex++;
+        setCurrentTxStep(stepIndex);
       }
-
-      // Move to final step (Create Position)
-      stepIndex++;
-      setCurrentTxStep(stepIndex);
 
       // Step 3: Generate transaction data using the library
       // Ensure tickLower < tickUpper for the SDK
@@ -1305,7 +1414,7 @@ export default function AddLiquidityModal({
       const receipt = await tx.wait();
 
       // All steps complete
-      setCurrentTxStep(3);
+      setCurrentTxStep(steps.length - 1);
 
       // Show success message with transaction hash
       showSuccess(`Successfully created new ${params.platformId} position!`, receipt.transactionHash);

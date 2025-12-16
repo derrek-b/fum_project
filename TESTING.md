@@ -173,14 +173,32 @@ npm run manipulate-price:up
 # Push USDC price down (sell pressure)
 npm run manipulate-price:down
 
-# Generate fees on USDC/USDT pool (run with --swaps=N for more volume)
+# Generate fees on USDC/USDT pool (default)
 npm run generate-fees
-npm run generate-fees -- --swaps=300
+
+# Generate fees for other token pairs
+npm run generate-fees:weth    # USDC/WETH (0.05% pool)
+npm run generate-fees:wbtc    # USDC/WBTC (0.05% pool)
+npm run generate-fees:link    # USDC/LINK (0.3% pool)
+
+# Custom options
+npm run generate-fees -- --swaps=10           # More round-trip swaps (default: 5)
+npm run generate-fees -- --token=WETH         # Specify token
+npm run generate-fees -- --fee=3000           # Override fee tier (100, 500, 3000, 10000)
+npm run generate-fees:weth -- --fee=3000      # WETH on 0.3% pool instead of default 0.05%
 ```
 
-> **Note:** These scripts interact with forked Uniswap V3 pools. Depending on pool liquidity and price state at the time of the fork, you may need to adjust swap amounts in the scripts (`SWAP_AMOUNT` constant) or run them multiple times to achieve the desired effect. Large swaps may fail if they exceed available liquidity at the current price tick.
+**Token defaults:**
+| Token | Default Fee Tier | Swap Amount |
+|-------|-----------------|-------------|
+| USDT  | 100 (0.01%)     | 250,000 USDC |
+| WETH  | 500 (0.05%)     | 10,000 USDC |
+| WBTC  | 500 (0.05%)     | 10,000 USDC |
+| LINK  | 3000 (0.3%)     | 10,000 USDC |
 
-> **Important:** These scripts are designed for USDC/USDT stablecoin pairs. To trigger rebalances, you must first configure the vault's strategy via the frontend UI with tight range parameters:
+> **Note:** These scripts interact with forked Uniswap V3 pools. Depending on pool liquidity and price state at the time of the fork, you may need to run them multiple times to achieve the desired effect. Large swaps may fail if they exceed available liquidity at the current price tick.
+
+> **Important:** The default `generate-fees` uses USDC/USDT stablecoin pairs. To trigger rebalances, you must first configure the vault's strategy via the frontend UI with tight range parameters:
 >
 > 1. Set the vault's strategy to **BabySteps**
 > 2. Select the **Stablecoin** template
@@ -300,6 +318,9 @@ npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 | `npm run seed-localhost` | fum | Create test vault and position |
 | `npm run manipulate-price:up` | fum | Simulate price increase |
 | `npm run manipulate-price:down` | fum | Simulate price decrease |
-| `npm run generate-fees` | fum | Generate trading fees |
+| `npm run generate-fees` | fum | Generate fees on USDC/USDT (0.01%) |
+| `npm run generate-fees:weth` | fum | Generate fees on USDC/WETH (0.05%) |
+| `npm run generate-fees:wbtc` | fum | Generate fees on USDC/WBTC (0.05%) |
+| `npm run generate-fees:link` | fum | Generate fees on USDC/LINK (0.3%) |
 | `npm run start` | fum_automation | Start automation service |
 | `npm run contracts:test` | fum | Run contract unit tests |
