@@ -5,6 +5,27 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-12-16
+
+### Native ETH Vault Withdrawals
+
+Adds native ETH withdrawal support to PositionVault contract, plus WETH unwrap option.
+
+#### **Contract Changes (PositionVault)**
+- **ADDED**: `withdrawETH(uint256 amount)` - Withdraw native ETH from vault to owner
+- **ADDED**: `unwrapAndWithdrawETH(address weth, uint256 amount)` - Unwrap WETH to ETH and withdraw to owner
+- **ADDED**: `IWETH` interface for WETH unwrapping
+- Both functions use `onlyAuthorized` modifier (owner or executor can call)
+- Both functions emit `TokensWithdrawn` event with `address(0)` for native ETH
+
+#### **Token Configuration**
+- **ADDED**: `wethLogoURI` property for native tokens (allows WETH to display its own logo)
+
+**Status**: Production Ready
+**Breaking Changes**: None
+
+---
+
 ## [1.1.1] - 2025-12-16
 
 ### Native ETH Unwrapping Fix
