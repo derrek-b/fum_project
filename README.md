@@ -35,7 +35,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 │                      Smart Contracts                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
 │  │ VaultFactory │  │PositionVault │  │   Strategy Contracts  │  │
-│  │   (v1.0.0)   │  │   (v1.1.0)   │  │ BabySteps (v1.0.0)    │  │
+│  │   (v1.0.0)   │  │   (v1.2.0)   │  │ BabySteps (v1.0.0)    │  │
 │  │              │  │              │  │ ParrisIsland (v0.1.0) │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -54,7 +54,7 @@ F.U.M. combines a Next.js frontend with Solidity smart contracts to provide:
 
 | Contract | Version | Description |
 |----------|---------|-------------|
-| **PositionVault** | v1.1.0 | User-controlled vault holding ERC20 tokens, native ETH, and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports native ETH deposits/withdrawals and WETH unwrapping. Supports EIP-1271 signature validation. |
+| **PositionVault** | v1.2.0 | User-controlled vault holding ERC20 tokens, native ETH, and ERC721 position NFTs. Executes swaps, mints, liquidity operations with security validations. Supports native ETH deposits/withdrawals, ETH↔WETH wrapping/unwrapping, and EIP-1271 signature validation. |
 | **VaultFactory** | v1.0.0 | Factory contract for creating and tracking PositionVault instances. Maintains registry of user vaults. |
 | **BabyStepsStrategy** | v1.0.0 | Basic automation strategy with template-based parameters for range width, rebalance thresholds, fee reinvestment, and risk management. |
 
@@ -254,6 +254,7 @@ fum/
 
 ## Version History
 
+- **v0.9.0** - PositionVault v1.2.0 with ETH wrapping functions (wrapETH, unwrapETH)
 - **v0.8.0** - PositionVault empty batch validation
 - **v0.7.0** - Dual provider architecture (dedicated RPC + wallet)
 - **v0.6.0** - Demo page, transaction history, APY calculations

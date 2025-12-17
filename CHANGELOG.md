@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2025-12-17
+
+### Native ETH Wrap/Unwrap for Automation
+
+Adds in-vault ETH wrapping and unwrapping functions for automation service operations.
+
+#### **Smart Contract Changes**
+- **PositionVault** v1.1.0 → v1.2.0
+  - **ADDED**: `wrapETH(address weth, uint256 amount)` - Wrap native ETH to WETH (stays in vault)
+  - **ADDED**: `unwrapETH(address weth, uint256 amount)` - Unwrap WETH to native ETH (stays in vault)
+  - **ADDED**: `deposit()` to IWETH interface for wrapping support
+  - Both functions use `onlyAuthorized` modifier (owner or executor can call)
+  - Both functions emit `TransactionExecuted` event for tracking
+
+#### **Use Cases**
+- Automation service wraps native ETH before adding liquidity to Uniswap V3 positions
+- Automation service unwraps WETH to native ETH after fee collection when vault targets ETH
+
+**Status**: Production Ready
+**Breaking Changes**: None
+**Dependency**: Used by fum_automation v1.0.4+
+
+---
+
 ## [1.0.4] - 2025-12-16
 
 ### Native ETH Vault Withdrawals

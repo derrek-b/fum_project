@@ -10,9 +10,10 @@ import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
- * @dev Interface for WETH withdraw function
+ * @dev Interface for WETH deposit/withdraw functions
  */
 interface IWETH {
+    function deposit() external payable;
     function withdraw(uint256 wad) external;
 }
 
@@ -338,6 +339,37 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         require(success, "PositionVault: ETH transfer failed");
 
         emit TokensWithdrawn(address(0), owner, amount);
+    }
+
+    /**
+     * @notice Wraps native ETH to WETH (keeps WETH in vault)
+     * @dev Used to prepare native ETH for Uniswap V3 operations which require WETH
+     * @param weth Address of the WETH contract
+     * @param amount Amount of ETH to wrap
+     */
+    function wrapETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
+        require(weth != address(0), "PositionVault: zero WETH address");
+        require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");
+
+        // Deposit ETH to get WETH (WETH stays in vault)
+        IWETH(weth).deposit{value: amount}();
+
+        emit TransactionExecuted(weth, abi.encodeWithSelector(IWETH.deposit.selector), true, "wrap");
+    }
+
+    /**
+     * @notice Unwraps WETH to native ETH (keeps ETH in vault)
+     * @dev Used to prepare WETH for Uniswap V4 operations which use native ETH
+     * @param weth Address of the WETH contract
+     * @param amount Amount of WETH to unwrap
+     */
+    function unwrapETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
+        require(weth != address(0), "PositionVault: zero WETH address");
+
+        // Withdraw WETH to get ETH (ETH stays in vault)
+        IWETH(weth).withdraw(amount);
+
+        emit TransactionExecuted(weth, abi.encodeWithSelector(IWETH.withdraw.selector, amount), true, "unwrap");
     }
 
     /**
@@ -732,6 +764,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "1.1.0";
+        return "1.2.0";
     }
 }
