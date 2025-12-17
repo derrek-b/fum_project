@@ -13,8 +13,9 @@ import VaultDataService from './VaultDataService.js';
 import Tracker from './Tracker.js';
 import SSEBroadcaster from './SSEBroadcaster.js';
 import { retryWithBackoff, retryBatchOperations } from './RetryHelper.js';
-import { getChainConfig, AdapterFactory, getTokensByChain } from 'fum_library';
+import { getChainConfig, AdapterFactory, getTokensByChain, getVaultContract } from 'fum_library';
 import { getContract, getVaultFactory, getAuthorizedVaults } from 'fum_library/blockchain/contracts';
+import { isNativeToken, getWethAddress } from 'fum_library/helpers/tokenHelpers';
 // Permit2 canonical address - same on all chains
 // See: https://github.com/Uniswap/permit2#deployments
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
@@ -594,9 +595,20 @@ class AutomationService {
           decimals: config.decimals,
           name: config.name
         };
+
+        // For native ETH, also create a WETH entry using wethAddresses
+        // This allows strategies to use 'WETH' as a target token for V3 operations
+        if (config.isNative && config.wethAddresses && config.wethAddresses[this.chainId]) {
+          this.tokens['WETH'] = {
+            symbol: 'WETH',
+            address: config.wethAddresses[this.chainId],
+            decimals: config.decimals,
+            name: 'Wrapped Ether'
+          };
+        }
       }
 
-      this.log(`Successfully initialized ${chainTokens.length} token configurations`);
+      this.log(`Successfully initialized ${Object.keys(this.tokens).length} token configurations`);
     } catch (error) {
       console.error('Failed to initialize tokens:', error);
       throw new Error(`Token initialization failed: ${error.message}`);
@@ -688,6 +700,15 @@ class AutomationService {
         throw new Error('Permit2 approval setup failed');
       }
 
+      // Step 2.5: Wrap any native ETH to WETH (V3 requires WETH, not native ETH)
+      const ethBalance = vault.tokens?.['ETH'];
+      if (ethBalance && ethers.BigNumber.from(ethBalance).gt(0)) {
+        this.log(`Vault ${vaultAddress} has native ETH balance, wrapping to WETH for V3 operations...`);
+        await this.wrapVaultETH(vaultAddress, ethers.BigNumber.from(ethBalance));
+        // Refresh vault data after wrapping to get updated WETH balance
+        vault = await this.vaultDataService.getVault(vaultAddress, true);
+      }
+
       // Step 3: Initialize the vault for its strategy (may execute swaps/adds liquidity)
       initSuccess = await this.initializeVaultForStrategy(vault);
       if (!initSuccess) {
@@ -769,6 +790,12 @@ class AutomationService {
 
     // Check each token
     for (const tokenSymbol of allTokenSymbols) {
+      // Skip native tokens - they don't need Permit2 approval
+      if (isNativeToken(tokenSymbol)) {
+        this.log(`Skipping Permit2 approval for native token ${tokenSymbol}`);
+        continue;
+      }
+
       const tokenData = this.tokens[tokenSymbol];
       if (!tokenData) {
         this.log(`Token ${tokenSymbol} not found in token registry, skipping`);
@@ -893,6 +920,54 @@ class AutomationService {
     } catch (error) {
       this.log(`❌ Error executing Permit2 approval for ${tokenSymbol}: ${error.message}`);
       throw error; // Re-throw to be handled by caller
+    }
+  }
+
+  /**
+   * Wrap native ETH to WETH in a vault
+   * Used when a vault has native ETH that needs to be wrapped before V3 operations
+   * @memberof module:AutomationService~AutomationService
+   * @param {string} vaultAddress - Vault address
+   * @param {ethers.BigNumber} amount - Amount of ETH to wrap
+   * @returns {Promise<void>}
+   * @since 1.0.0
+   */
+  async wrapVaultETH(vaultAddress, amount) {
+    try {
+      this.log(`Wrapping ${ethers.utils.formatEther(amount)} ETH to WETH in vault ${vaultAddress}...`);
+
+      const wethAddress = getWethAddress(this.chainId);
+      const vaultContract = getVaultContract(vaultAddress, this.provider);
+
+      const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
+      if (!automationPrivateKey) {
+        throw new Error('AUTOMATION_PRIVATE_KEY not found');
+      }
+
+      const signer = new ethers.Wallet(automationPrivateKey, this.provider);
+      const vaultWithSigner = vaultContract.connect(signer);
+
+      // Use the vault's dedicated wrapETH function (PositionVault v1.2.0+)
+      const tx = await vaultWithSigner.wrapETH(wethAddress, amount);
+      const receipt = await tx.wait();
+
+      this.log(`✅ Wrapped ${ethers.utils.formatEther(amount)} ETH to WETH in vault ${vaultAddress}, tx: ${receipt.transactionHash}`);
+
+      // Emit event for tracking
+      this.eventManager.emit('VaultETHWrapped', {
+        vaultAddress,
+        amount: amount.toString(),
+        transactionHash: receipt.transactionHash,
+        log: {
+          level: 'info',
+          message: `Wrapped ${ethers.utils.formatEther(amount)} ETH to WETH in vault ${vaultAddress}`,
+          includeData: false
+        }
+      });
+
+    } catch (error) {
+      this.log(`❌ Error wrapping ETH in vault ${vaultAddress}: ${error.message}`);
+      throw error;
     }
   }
 

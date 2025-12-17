@@ -1,5 +1,36 @@
 # F.U.M. Project Changelog
 
+## [1.0.4] - 2025-12-17
+
+### Native ETH Support
+
+#### **Vault Operations**
+- **ADDED**: Native ETH handling throughout the automation service
+- **ADDED**: Automatic WETH wrapping when vaults hold native ETH for position operations
+- **ADDED**: Native ETH unwrapping for fee distributions when vault targets ETH
+- **IMPROVED**: Token lookup logic to handle ETH/WETH equivalence in target token matching
+
+#### **VaultDataService**
+- **ADDED**: `wrapVaultETH()` method to wrap native ETH balance to WETH via vault execution
+- **ADDED**: `unwrapVaultWETH()` method to unwrap WETH to native ETH via vault execution
+- **IMPROVED**: Token balance retrieval to include native ETH when applicable
+
+#### **BabyStepsStrategy**
+- **ADDED**: Pre-operation ETH wrapping in `addLiquidityToPosition()` when vault has native ETH
+- **ADDED**: Post-fee-collection WETH unwrapping when vault's target tokens include ETH
+- **IMPROVED**: Fee distribution logic to respect native ETH preferences
+
+#### **Testing**
+- **ADDED**: `BS-1vault-nativeETH.test.js` - comprehensive native ETH workflow tests
+- **ADDED**: Test coverage for ETH wrapping during vault setup
+- **ADDED**: Test coverage for native ETH fee distribution
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Dependency**: Requires fum_library v1.2.0
+
+---
+
 ## [1.0.3] - 2025-12-10
 
 ### Railway Volume Support

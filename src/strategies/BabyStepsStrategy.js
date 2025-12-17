@@ -10,6 +10,7 @@
 import { ethers } from 'ethers';
 import StrategyBase from './StrategyBase.js';
 import { fetchTokenPrices, CACHE_DURATIONS, getStrategyDetails, getPoolTVLAverage, getPoolAge, getVaultContract, getMinDeploymentForGas, getMinLiquidityAmount, getMinDeploymentMultiplier, getMinBufferSwapValue } from 'fum_library';
+import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
 import { retryExternalService } from '../RetryHelper.js';
 import ERC20ABI from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import BabyStepsStrategyFactory from './babySteps/BabyStepsStrategyFactory.js';
@@ -516,6 +517,14 @@ class BabyStepsStrategy extends StrategyBase {
       const token0Data = this.tokens[poolMetadata.token0Symbol];
       const token1Data = this.tokens[poolMetadata.token1Symbol];
 
+      // Validate token data exists
+      if (!token0Data) {
+        throw new Error(`Token data not found for ${poolMetadata.token0Symbol}. Available tokens: ${Object.keys(this.tokens).join(', ')}`);
+      }
+      if (!token1Data) {
+        throw new Error(`Token data not found for ${poolMetadata.token1Symbol}. Available tokens: ${Object.keys(this.tokens).join(', ')}`);
+      }
+
       // Get position values, prices, and pool data from assetValues
       const positionValues = assetValues.positions[position.id];
 
@@ -671,6 +680,13 @@ class BabyStepsStrategy extends StrategyBase {
       }
 
       // Step 3: Verify final token balances (should pass thanks to buffer swaps)
+      // Validate vault token balances exist
+      if (vault.tokens[token0Data.symbol] === undefined) {
+        throw new Error(`Vault has no balance for ${token0Data.symbol}. Vault tokens: ${Object.keys(vault.tokens).join(', ')}`);
+      }
+      if (vault.tokens[token1Data.symbol] === undefined) {
+        throw new Error(`Vault has no balance for ${token1Data.symbol}. Vault tokens: ${Object.keys(vault.tokens).join(', ')}`);
+      }
       const finalToken0 = BigInt(vault.tokens[token0Data.symbol]);
       const finalToken1 = BigInt(vault.tokens[token1Data.symbol]);
       const requiredToken0 = BigInt(quote.position.amount0.quotient.toString());
@@ -885,6 +901,10 @@ class BabyStepsStrategy extends StrategyBase {
       });
 
       // Calculate ratio from test quote using VALUE instead of token amounts
+      // Validate testQuote structure before accessing nested properties
+      if (!testQuote?.position?.amount0?.quotient || !testQuote?.position?.amount1?.quotient) {
+        throw new Error(`Invalid testQuote structure: position=${!!testQuote?.position}, amount0=${!!testQuote?.position?.amount0}, amount1=${!!testQuote?.position?.amount1}, quotient0=${!!testQuote?.position?.amount0?.quotient}, quotient1=${!!testQuote?.position?.amount1?.quotient}`);
+      }
       const testToken0 = Number(ethers.utils.formatUnits(testQuote.position.amount0.quotient.toString(), token0Data.decimals));
       const testToken1 = Number(ethers.utils.formatUnits(testQuote.position.amount1.quotient.toString(), token1Data.decimals));
 
@@ -912,6 +932,11 @@ class BabyStepsStrategy extends StrategyBase {
         token0Data,
         token1Data
       });
+
+      // Validate quote1 structure before accessing nested properties
+      if (!quote1?.position?.amount0?.quotient || !quote1?.position?.amount1?.quotient) {
+        throw new Error(`Invalid quote1 structure for ${token0Data.symbol}/${token1Data.symbol}: position=${!!quote1?.position}, amount0=${!!quote1?.position?.amount0}, amount1=${!!quote1?.position?.amount1}, quotient0=${!!quote1?.position?.amount0?.quotient}, quotient1=${!!quote1?.position?.amount1?.quotient}`);
+      }
 
       // Emit comprehensive position parameters event
       this.eventManager.emit('PositionParametersCalculated', {
@@ -2237,11 +2262,22 @@ class BabyStepsStrategy extends StrategyBase {
         const signer = new ethers.Wallet(automationPrivateKey, this.provider);
         const vaultContractWithSigner = vaultContract.connect(signer);
 
-        // Distribute fees using withdrawTokens (recipient hardcoded to owner in contract)
+        // Get WETH address for unwrapping check
+        const wethAddress = getWethAddress(this.chainId);
+
+        // Distribute fees - use unwrapAndWithdrawETH for WETH, withdrawTokens for other tokens
         if (token0ToOwner.gt(0)) {
-          const gasEstimate = await vaultContractWithSigner.estimateGas.withdrawTokens(token0Data.address, token0ToOwner);
-          const gasLimit = gasEstimate.mul(120).div(100);
-          const tx = await vaultContractWithSigner.withdrawTokens(token0Data.address, token0ToOwner, { gasLimit });
+          let tx;
+          if (token0Data.address.toLowerCase() === wethAddress.toLowerCase()) {
+            // WETH → unwrap to native ETH for owner
+            const gasEstimate = await vaultContractWithSigner.estimateGas.unwrapAndWithdrawETH(wethAddress, token0ToOwner);
+            const gasLimit = gasEstimate.mul(120).div(100);
+            tx = await vaultContractWithSigner.unwrapAndWithdrawETH(wethAddress, token0ToOwner, { gasLimit });
+          } else {
+            const gasEstimate = await vaultContractWithSigner.estimateGas.withdrawTokens(token0Data.address, token0ToOwner);
+            const gasLimit = gasEstimate.mul(120).div(100);
+            tx = await vaultContractWithSigner.withdrawTokens(token0Data.address, token0ToOwner, { gasLimit });
+          }
           const receipt = await tx.wait();
           if (receipt.status !== 1) {
             throw new Error(`Fee distribution for ${token0Data.symbol} failed with status ${receipt.status}`);
@@ -2250,9 +2286,17 @@ class BabyStepsStrategy extends StrategyBase {
         }
 
         if (token1ToOwner.gt(0)) {
-          const gasEstimate = await vaultContractWithSigner.estimateGas.withdrawTokens(token1Data.address, token1ToOwner);
-          const gasLimit = gasEstimate.mul(120).div(100);
-          const tx = await vaultContractWithSigner.withdrawTokens(token1Data.address, token1ToOwner, { gasLimit });
+          let tx;
+          if (token1Data.address.toLowerCase() === wethAddress.toLowerCase()) {
+            // WETH → unwrap to native ETH for owner
+            const gasEstimate = await vaultContractWithSigner.estimateGas.unwrapAndWithdrawETH(wethAddress, token1ToOwner);
+            const gasLimit = gasEstimate.mul(120).div(100);
+            tx = await vaultContractWithSigner.unwrapAndWithdrawETH(wethAddress, token1ToOwner, { gasLimit });
+          } else {
+            const gasEstimate = await vaultContractWithSigner.estimateGas.withdrawTokens(token1Data.address, token1ToOwner);
+            const gasLimit = gasEstimate.mul(120).div(100);
+            tx = await vaultContractWithSigner.withdrawTokens(token1Data.address, token1ToOwner, { gasLimit });
+          }
           const receipt = await tx.wait();
           if (receipt.status !== 1) {
             throw new Error(`Fee distribution for ${token1Data.symbol} failed with status ${receipt.status}`);

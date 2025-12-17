@@ -286,7 +286,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
       expect(service.vaultDataService.tokens).toBeDefined();
       expect(typeof service.vaultDataService.tokens).toBe('object');
       expect(service.vaultDataService.tokens).toBe(service.tokens); // Same reference
-      expect(Object.keys(service.vaultDataService.tokens).length).toBe(5); // Should have all 5 tokens
+      expect(Object.keys(service.vaultDataService.tokens).length).toBe(6); // Should have all 6 tokens (ETH, USDC, USDT, WBTC, LINK, WETH)
 
       // Test 11d: Verify EventManager dependency injection (same pattern as VaultDataService)
       expect(service.eventManager.poolData).toBeDefined();
@@ -305,7 +305,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
 
       // Test 12: Token configuration initialization
       expect(typeof service.tokens).toBe('object');
-      expect(Object.keys(service.tokens).length).toBe(5); // Should have all 5 tokens for chain 1337
+      expect(Object.keys(service.tokens).length).toBe(6); // Should have all 6 tokens for chain 1337 (ETH, USDC, USDT, WBTC, LINK, WETH)
 
       // Test that all expected tokens exist
       expect(service.tokens.USDC).toBeDefined();

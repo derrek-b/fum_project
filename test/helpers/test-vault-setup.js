@@ -6,6 +6,7 @@
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
+import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain';
 
 const ERC20_ABI = [
@@ -13,6 +14,31 @@ const ERC20_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
   'function approve(address spender, uint256 amount) returns (bool)'
 ];
+
+/**
+ * Get token address, handling WETH specially since it's not in the token config
+ * @param {string} symbol - Token symbol
+ * @param {number} chainId - Chain ID
+ * @returns {string} Token address
+ */
+function getTokenAddressForTest(symbol, chainId) {
+  if (symbol === 'WETH') {
+    return getWethAddress(chainId);
+  }
+  return getTokenAddress(symbol, chainId);
+}
+
+/**
+ * Get token data by symbol, handling WETH specially since it's not in the token config
+ * @param {string} symbol - Token symbol
+ * @returns {Object} Token data with decimals and symbol
+ */
+function getTokenBySymbolForTest(symbol) {
+  if (symbol === 'WETH') {
+    return { symbol: 'WETH', decimals: 18 };
+  }
+  return getTokenBySymbol(symbol);
+}
 
 /**
  * Set up a test vault with configurable positions, tokens, and balances
@@ -26,6 +52,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
   const defaults = {
     // Token configuration
     wrapEthAmount: '10',        // How much ETH to wrap
+    nativeEthAmount: null,      // Amount of native ETH to send directly to vault (null = none)
     swapTokens: [               // Which tokens to swap for and amounts
       { from: 'WETH', to: 'USDC', amount: '2' }
     ],
@@ -102,6 +129,17 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
   const adapter = new UniswapV3Adapter(1337);
   const owner = hardhat.signers[0];
 
+  // Step 0.5: Send native ETH to vault (if configured)
+  if (settings.nativeEthAmount && parseFloat(settings.nativeEthAmount) > 0) {
+    console.log(`  - Sending ${settings.nativeEthAmount} native ETH to vault...`);
+    const tx = await owner.sendTransaction({
+      to: vaultAddress,
+      value: ethers.utils.parseEther(settings.nativeEthAmount)
+    });
+    await tx.wait();
+    console.log('  - Native ETH sent to vault successfully');
+  }
+
   // Step 1: Wrap ETH to WETH
   console.log(`  - Wrapping ${settings.wrapEthAmount} ETH to WETH...`);
   const WETH_ABI = [
@@ -110,7 +148,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     ...ERC20_ABI
   ];
 
-  const wethAddress = getTokenAddress('WETH', 1337);
+  const wethAddress = getWethAddress(1337);
   const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
 
   const wrapTx = await weth.deposit({ value: ethers.utils.parseEther(settings.wrapEthAmount) });
@@ -125,8 +163,8 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     console.log(`  - Swapping ${swap.amount} ${swap.from} for ${swap.to}...`);
 
     // Get token addresses
-    const tokenInAddress = getTokenAddress(swap.from, 1337);
-    const tokenOutAddress = getTokenAddress(swap.to, 1337);
+    const tokenInAddress = getTokenAddressForTest(swap.from, 1337);
+    const tokenOutAddress = getTokenAddressForTest(swap.to, 1337);
 
     // Create contracts if we haven't already
     if (!tokenContracts[swap.from]) {
@@ -137,8 +175,8 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     }
 
     // Get token decimals
-    const tokenInData = getTokenBySymbol(swap.from);
-    const tokenOutData = getTokenBySymbol(swap.to);
+    const tokenInData = getTokenBySymbolForTest(swap.from);
+    const tokenOutData = getTokenBySymbolForTest(swap.to);
 
     // Approve router to spend input token
     const approveTx = await tokenContracts[swap.from].approve(
@@ -175,7 +213,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
   for (const [tokenSymbol, contract] of Object.entries(tokenContracts)) {
     const balance = await contract.balanceOf(owner.address);
     tokenBalances[tokenSymbol] = balance;
-    const tokenData = getTokenBySymbol(tokenSymbol);
+    const tokenData = getTokenBySymbolForTest(tokenSymbol);
     console.log(`  - ${tokenSymbol}: ${ethers.utils.formatUnits(balance, tokenData.decimals)}`);
   }
 
@@ -193,8 +231,8 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     console.log(`  - Creating position ${i + 1}: ${positionConfig.token0}/${positionConfig.token1}...`);
 
     // Get token addresses and sort them
-    const token0Address = getTokenAddress(positionConfig.token0, 1337);
-    const token1Address = getTokenAddress(positionConfig.token1, 1337);
+    const token0Address = getTokenAddressForTest(positionConfig.token0, 1337);
+    const token1Address = getTokenAddressForTest(positionConfig.token1, 1337);
 
     const [sortedToken0, sortedToken1, sortedSymbol0, sortedSymbol1] =
       token0Address.toLowerCase() < token1Address.toLowerCase()
@@ -328,8 +366,8 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
       // Find the adapter and pool address
       const adapter = new UniswapV3Adapter(1337, hardhat.provider);
       const poolAddress = await adapter.getPoolAddress(
-        getTokenAddress(pool.token0, 1337),
-        getTokenAddress(pool.token1, 1337),
+        getTokenAddressForTest(pool.token0, 1337),
+        getTokenAddressForTest(pool.token1, 1337),
         pool.fee,
         hardhat.provider
       );
@@ -337,13 +375,13 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
       // Execute each swap in the sequence
       for (let i = 0; i < swaps.length; i++) {
         const swap = swaps[i];
-        const tokenIn = getTokenBySymbol(swap.from);
+        const tokenIn = getTokenBySymbolForTest(swap.from);
 
         // Execute swap to generate fees
         const swapAmount = ethers.utils.parseUnits(swap.amount, tokenIn.decimals);
         const swapParams = {
-          tokenIn: getTokenAddress(swap.from, 1337),
-          tokenOut: getTokenAddress(swap.to, 1337),
+          tokenIn: getTokenAddressForTest(swap.from, 1337),
+          tokenOut: getTokenAddressForTest(swap.to, 1337),
           fee: pool.fee,
           recipient: hardhat.signers[0].address,
           amountIn: swapAmount.toString(),
@@ -357,7 +395,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
 
         // Approve SwapRouter to spend tokenIn
         const tokenInContract = new ethers.Contract(
-          getTokenAddress(swap.from, 1337),
+          getTokenAddressForTest(swap.from, 1337),
           ERC20_ABI,
           hardhat.signers[0]
         );
@@ -388,7 +426,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
       const transferAmount = tokenBalances[tokenSymbol].mul(transferPercent).div(100);
       if (transferAmount.gt(0)) {
         await (await tokenContracts[tokenSymbol].transfer(vaultAddress, transferAmount)).wait();
-        const tokenData = getTokenBySymbol(tokenSymbol);
+        const tokenData = getTokenBySymbolForTest(tokenSymbol);
         console.log(`    Transferred ${ethers.utils.formatUnits(transferAmount, tokenData.decimals)} ${tokenSymbol}`);
       }
 

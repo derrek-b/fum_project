@@ -72,10 +72,10 @@ describe('Swap Event Detection', () => {
     console.log('Building USDC reserves in swap wallet...');
 
     // Get token addresses
-    const { getTokenAddress, getTokenBySymbol } = await import('fum_library');
-    const wethAddress = getTokenAddress('WETH', 1337);
+    const { getTokenAddress, getTokenBySymbol, getWethAddress } = await import('fum_library');
+    const wethAddress = getWethAddress(1337);
     const usdcAddress = getTokenAddress('USDC', 1337);
-    const wethData = getTokenBySymbol('WETH');
+    const wethData = { symbol: 'WETH', decimals: 18 }; // WETH not in token config, create manually
     const usdcData = getTokenBySymbol('USDC');
 
     // Wrap 100 ETH for signer[1]

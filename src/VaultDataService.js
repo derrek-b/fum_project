@@ -23,6 +23,7 @@ import {
   getAllTokenSymbols,
   AdapterFactory
 } from 'fum_library';
+import { isNativeToken, getWethAddress } from 'fum_library/helpers/tokenHelpers';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 const ERC20ABI = ERC20ARTIFACT.abi;
 
@@ -264,7 +265,23 @@ class VaultDataService {
       // Get token addresses and create balance queries
       const balancePromises = tokenSymbols.map(async (symbol) => {
         try {
-          const tokenAddress = getTokenAddress(symbol, this.chainId);
+          // Handle native ETH differently - use provider.getBalance()
+          if (isNativeToken(symbol)) {
+            const balance = await this.provider.getBalance(vaultAddress);
+            return {
+              symbol,
+              balance: balance.toString()
+            };
+          }
+
+          // Handle WETH specially - not in token config, use getWethAddress()
+          let tokenAddress;
+          if (symbol === 'WETH') {
+            tokenAddress = getWethAddress(this.chainId);
+          } else {
+            // ERC20 tokens - use getTokenAddress from fum_library
+            tokenAddress = getTokenAddress(symbol, this.chainId);
+          }
           const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
           const balance = await tokenContract.balanceOf(vaultAddress);
 
