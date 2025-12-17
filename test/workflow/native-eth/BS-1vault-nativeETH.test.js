@@ -56,8 +56,8 @@ describe('BabySteps Strategy - Native ETH Support', () => {
   let vaultNativeEthBefore;
 
   beforeAll(async () => {
-    // Setup Hardhat fork
-    testEnv = await setupTestBlockchain({ port: 8552 });
+    // Setup blockchain (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
     console.log('Hardhat fork started');
 
     // Get owner address for fee distribution verification

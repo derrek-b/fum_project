@@ -6,13 +6,15 @@ This document describes how to run and create tests for the FUM Automation Servi
 
 ## Overview
 
-The test suite is organized into two categories: unit & workflow tests...
+The test suite uses a **shared Hardhat instance** architecture for reliable, deterministic testing. A single Hardhat blockchain is started once before all tests, contracts are deployed once, and each test file reverts to a clean snapshot for isolation.
 
 ```
 test/
-├── setup.js                 # Global test setup (loads env, initializes fum_library)
+├── global-setup.js          # Starts shared Hardhat, deploys contracts, takes snapshot
+├── shared-state.js          # State sharing between globalSetup and tests
+├── setup.js                 # Per-test setup (loads env, initializes fum_library)
 ├── helpers/
-│   ├── hardhat-setup.js     # Blockchain environment setup (Hardhat fork)
+│   ├── hardhat-setup.js     # Connects to shared Hardhat, reverts to snapshot
 │   └── test-vault-setup.js  # Test vault creation utilities
 ├── unit/                    # Fast, isolated unit tests
 │   ├── AutomationService.config.test.js
@@ -22,12 +24,48 @@ test/
 │   ├── service-stop/        # Graceful shutdown tests
 │   ├── swap-event/          # Swap detection and rebalancing
 │   ├── vault-auth/          # Vault authorization workflow
-│   └── vault-revoke/        # Vault revocation workflow
+│   ├── vault-revoke/        # Vault revocation workflow
+│   └── native-eth/          # Native ETH handling tests
 └── scenarios/               # JSON configs for custom test scenarios
     ├── README.md            # Scenario configuration reference
     ├── default.json
     └── *.json
 ```
+
+## Test Architecture
+
+### Shared Hardhat Instance
+
+Unlike traditional test setups where each test file spawns its own blockchain, we use a shared instance:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    globalSetup.js                        │
+│  1. Start Hardhat (port 8545)                           │
+│  2. Deploy FUM contracts ONCE                            │
+│  3. Take BASE_SNAPSHOT (contracts deployed, no vaults)   │
+│  4. Save state to .hardhat-state.json                    │
+└──────────────────────────────────────────────────────────┘
+                             ↓
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Test File A     │  │ Test File B     │  │ Test File C     │
+│ Revert to BASE  │  │ Revert to BASE  │  │ Revert to BASE  │
+│ Setup vault     │  │ Setup vault     │  │ Setup vault     │
+│ Run tests       │  │ Run tests       │  │ Run tests       │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+                             ↓
+┌──────────────────────────────────────────────────────────┐
+│                   globalTeardown                         │
+│  1. Stop Hardhat                                         │
+│  2. Clean up state file                                  │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Benefits:**
+- **Consistent addresses** - Contracts deployed once, addresses never drift
+- **Faster tests** - No Hardhat startup per file (~3-5s saved per file)
+- **No race conditions** - contracts.js updated once in globalSetup
+- **Clean isolation** - Snapshots ensure each test file starts fresh
 
 ## Prerequisites
 
@@ -90,7 +128,7 @@ Unit tests are fast (~2-3 seconds) and don't require a blockchain connection. Th
 npm test test/workflow
 ```
 
-Workflow tests spin up a Hardhat fork of Arbitrum, deploy contracts, and test real scenarios. They take longer (~15-180 seconds or longer each).
+Workflow tests connect to the shared Hardhat fork of Arbitrum, revert to clean state, and test real scenarios. They take longer (~15-180 seconds each).
 
 ### Specific Test File
 
@@ -192,6 +230,13 @@ Tests vault revocation handling:
 - Cleaning up vault monitoring
 - Removing vault from active management
 
+### native-eth/
+
+Tests native ETH handling:
+- Vault setup with native ETH instead of WETH
+- Fee distribution as native ETH
+- ETH wrapping/unwrapping during operations
+
 ## Custom Test Scenarios
 
 For testing specific vault configurations without writing code, use the configurable test with JSON scenarios.
@@ -226,12 +271,27 @@ See [test/scenarios/README.md](test/scenarios/README.md) for complete documentat
 
 ## Test Helper Files
 
+### global-setup.js
+
+Runs once before all tests:
+- Starts a single Hardhat instance on port 8545
+- Deploys FUM contracts (VaultFactory, BabyStepsStrategy)
+- Takes a base snapshot with contracts deployed
+- Saves state to `.hardhat-state.json` for tests to use
+
+### shared-state.js
+
+Utility for sharing state between globalSetup (separate process) and test files:
+- `saveSharedState()` - Saves Hardhat PID, port, snapshot ID, contract addresses
+- `loadSharedState()` - Loads state for test files
+- `clearSharedState()` - Cleans up state file
+
 ### hardhat-setup.js
 
 Provides `setupTestBlockchain()` which:
-- Starts a Hardhat fork of Arbitrum
-- Deploys FUM contracts (VaultFactory, strategies)
-- Validates deterministic addresses
+- Connects to the shared Hardhat instance
+- Reverts to base snapshot (clean state)
+- Syncs blockchain timestamp with real time
 - Returns test environment with signers, contracts, and config
 
 ### test-vault-setup.js
@@ -280,8 +340,8 @@ describe('My Workflow Test', () => {
   let testVault;
 
   beforeAll(async () => {
-    // Setup blockchain (use unique port to avoid conflicts)
-    testEnv = await setupTestBlockchain({ port: 8555 });
+    // Setup blockchain (connects to shared Hardhat, reverts to clean state)
+    testEnv = await setupTestBlockchain();
 
     // Create test vault with specific configuration
     testVault = await setupTestVault(
@@ -318,27 +378,18 @@ describe('My Workflow Test', () => {
 
 Ensure `ALCHEMY_API_KEY` is set in `.env.local`. This is required for workflow tests because the AlphaRouter needs a real Arbitrum RPC.
 
-### "Address mismatch" errors
+### "Shared Hardhat state not found"
 
-Contract addresses are deterministic based on deployer nonce. If deployed addresses don't match stored addresses, the test **fails fast and exits** to avoid running with incorrect addresses.
-
-This is expected behavior on first run or after changes:
-1. The test exits with error "DETERMINISTIC ADDRESS VALIDATION FAILED"
-2. Before exiting, it auto-saves the new addresses to fum_library (both src/ and dist/)
-3. **Re-run the test** - it will now use the updated addresses and pass
-
-After tests update addresses, run `npm run pack` in fum_library to reinstall the library with new addresses.
-
-### Port conflicts
-
-Each workflow test uses a unique Hardhat port. If running tests in parallel fails, check for port conflicts in the 8545-8560 range.
+This error means `globalSetup.js` didn't run. Ensure:
+- `vitest.config.js` has `globalSetup: './test/global-setup.js'`
+- No previous test run left stale state (delete `test/.hardhat-state.json` and retry)
 
 ### Timeout errors
 
 Workflow tests have extended timeouts (30-180 seconds). If tests still timeout:
 - Check network connectivity (Alchemy RPC)
 - Increase timeout in vitest.config.js
-- Run tests individually instead of in parallel
+- Check if Hardhat is hanging (look for zombie processes on port 8545)
 
 ### Stale contract data
 
@@ -347,3 +398,17 @@ If tests fail with contract-related errors after code changes:
 cd ../fum_library
 npm run pack  # Rebuilds and reinstalls library to fum and fum_automation
 ```
+
+### WebSocket connection errors
+
+The shared Hardhat instance uses WebSocket connections. If you see connection errors:
+- Ensure no other process is using port 8545
+- Check that `cleanupTestBlockchain()` is called in `afterAll`
+- The cleanup only closes WebSocket connections, not the shared Hardhat instance
+
+### Tests pass individually but fail together
+
+This is rare with the shared Hardhat architecture, but if it happens:
+- Check that tests properly clean up after themselves
+- Ensure `afterAll` blocks call `service.stop()` and `cleanupTestBlockchain()`
+- Each test file reverts to the base snapshot, so state shouldn't leak

@@ -28,8 +28,8 @@ describe('Vault Authorization Revocation Workflow - 1111 Configuration', () => {
   let vaultPositionChecksClearedEvent = null;
 
   beforeAll(async () => {
-    // 1. Setup blockchain on port 8548 (different from other tests)
-    testEnv = await setupTestBlockchain({ port: 8553 });
+    // 1. Setup blockchain (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
 
     // 2. Create test vault with 1111 configuration and set executor
     testVault = await setupTestVault(

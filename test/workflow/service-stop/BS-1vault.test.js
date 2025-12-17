@@ -26,8 +26,8 @@ describe('Service Stop Workflow - 1111 Configuration', () => {
   let vaultPositionChecksClearedEvents = [];
 
   beforeAll(async () => {
-    // 1. Setup blockchain on port 8549 (different from other tests)
-    testEnv = await setupTestBlockchain({ port: 8550 });
+    // 1. Setup blockchain (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
 
     // 2. Create test vault with simple fast setup
     testVault = await setupTestVault(

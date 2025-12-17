@@ -41,8 +41,8 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
       // Ignore errors if directory doesn't exist
     }
 
-    // Setup blockchain environment on port 8547 (to avoid conflicts with 0202 and 1111 tests)
-    testEnv = await setupTestBlockchain({ port: 8548 });
+    // Setup blockchain environment (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
 
     // Create test vault with 2 aligned positions and 2 aligned tokens using new setup
     testVault = await setupTestVault(

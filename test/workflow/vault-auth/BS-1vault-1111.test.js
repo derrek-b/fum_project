@@ -36,8 +36,8 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
   let tokensSwappedEvents = [];
 
   beforeAll(async () => {
-    // 1. Setup blockchain on port 8547 (different from other tests)
-    testEnv = await setupTestBlockchain({ port: 8552 });
+    // 1. Setup blockchain (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
 
     // 2. Initialize and start the automation service FIRST
     service = new AutomationService(testEnv.testConfig);

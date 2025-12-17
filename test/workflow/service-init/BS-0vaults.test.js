@@ -11,7 +11,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
   let testEnv;
 
   beforeAll(async () => {
-    testEnv = await setupTestBlockchain({ port: 8545 });
+    testEnv = await setupTestBlockchain();
   });
 
   afterAll(async () => {

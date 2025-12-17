@@ -52,8 +52,8 @@ describe('Swap Event Detection', () => {
   let testVault;
 
   beforeAll(async () => {
-    // Setup Hardhat fork
-    testEnv = await setupTestBlockchain({ port: 8551 });
+    // Setup blockchain (uses shared Hardhat instance)
+    testEnv = await setupTestBlockchain();
     console.log('Hardhat fork started');
 
     // Fund signer[1] for market manipulation (swaps)

@@ -1,26 +1,122 @@
 /**
  * @fileoverview Shared Hardhat blockchain setup for automation service tests
- * Provides standardized test blockchain environment with deployed contracts
+ *
+ * Connects to the shared Hardhat instance started by globalSetup.
+ * Each test file reverts to the base snapshot (contracts deployed, no vaults)
+ * to ensure clean isolation between test files.
  */
 
 import { ethers } from 'ethers';
-import { startHardhat, TEST_ACCOUNTS } from 'fum_library/test/setup/hardhat-config';
-import { deployFUMContracts } from 'fum_library/test/setup/test-contracts';
+import { TEST_ACCOUNTS } from 'fum_library/test/setup/hardhat-config';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import { loadSharedState } from '../shared-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Connect to the shared Hardhat instance and revert to base snapshot
+ * @returns {Promise<Object>} Shared Hardhat connection with helpers
+ */
+async function connectToSharedHardhat() {
+  const state = loadSharedState();
+
+  // Create providers connecting to shared Hardhat
+  const provider = new ethers.providers.JsonRpcProvider(`http://localhost:${state.port}`);
+  const wsProvider = new ethers.providers.WebSocketProvider(`ws://localhost:${state.port}`);
+
+  // Revert to base snapshot (clean state with only contracts deployed)
+  // This ensures each test file starts with the same state
+  await provider.send('evm_revert', [state.baseSnapshotId]);
+
+  // Sync blockchain timestamp with real time
+  // After reverting to snapshot, the blockchain time may be in the past OR equal to current time.
+  // Swap transactions use Date.now() for deadlines, which would fail with "Transaction too old"
+  // if the blockchain timestamp is behind real time.
+  // Also, Hardhat requires the next block timestamp to be STRICTLY GREATER than the previous block.
+  // So we get the current block timestamp and ensure we set a timestamp that's greater.
+  const currentBlock = await provider.getBlock('latest');
+  const currentBlockTime = currentBlock.timestamp;
+  const currentRealTime = Math.floor(Date.now() / 1000);
+  // Use whichever is larger, plus 1 second to guarantee it's strictly greater
+  const nextTimestamp = Math.max(currentRealTime, currentBlockTime) + 1;
+  await provider.send('evm_setNextBlockTimestamp', [nextTimestamp]);
+  await provider.send('evm_mine', []);
+
+  // Re-take snapshot so subsequent test files can also revert to base
+  // (evm_revert consumes the snapshot, so we need to re-create it)
+  const newBaseSnapshot = await provider.send('evm_snapshot', []);
+
+  // Update the shared state with new base snapshot ID
+  // (This is safe because tests run sequentially)
+  const { saveSharedState } = await import('../shared-state.js');
+  saveSharedState({
+    ...state,
+    baseSnapshotId: newBaseSnapshot
+  });
+
+  // Create signers from test accounts
+  const signers = TEST_ACCOUNTS.map(
+    account => new ethers.Wallet(account.privateKey, provider)
+  );
+
+  return {
+    provider,
+    wsProvider,
+    signers,
+    deployer: signers[0],
+    deployedContracts: state.deployedContracts,
+    port: state.port,
+
+    /**
+     * Take a snapshot (for test-specific isolation within a file)
+     */
+    async takeSnapshot() {
+      return await provider.send('evm_snapshot', []);
+    },
+
+    /**
+     * Revert to a snapshot
+     */
+    async revertToSnapshot(snapshotId) {
+      await provider.send('evm_revert', [snapshotId]);
+    },
+
+    /**
+     * Cleanup WebSocket provider (don't stop Hardhat - it's shared)
+     */
+    async cleanup() {
+      try {
+        if (wsProvider) {
+          await wsProvider.destroy();
+        }
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    },
+
+    /**
+     * Dummy stop function for compatibility with existing test patterns
+     * Does NOT actually stop Hardhat since it's shared
+     */
+    async stop() {
+      await this.cleanup();
+    }
+  };
+}
+
+/**
  * Set up a complete test blockchain environment with deployed contracts
- * @param {Object} options - Configuration options
- * @param {number} options.port - Port for Hardhat server (default: 8545)
+ * Connects to the shared Hardhat instance and prepares test config.
+ *
+ * @param {Object} options - Configuration options (port is ignored - uses shared instance)
  * @returns {Promise<Object>} Test environment with server, contracts, signers, and config
  */
 export async function setupTestBlockchain(options = {}) {
-  const { port = 8545 } = options;
+  // Connect to shared Hardhat instance (ignores port option)
+  const shared = await connectToSharedHardhat();
 
   // Clean tracking data directory before starting test
   const trackingDataDir = path.join(__dirname, '../../data/vaults');
@@ -31,41 +127,49 @@ export async function setupTestBlockchain(options = {}) {
     // Directory might not exist, that's OK
   }
 
-  // Start Hardhat with fork on specified port
-  const hardhatServer = await startHardhat({ port });
-  const { signers } = hardhatServer;
-  const deployer = signers[0];
+  // Load contract ABIs directly from fum_library artifacts (bypasses test mocks)
+  const contractsModule = await import('fum_library/artifacts/contracts');
+  const contractArtifacts = contractsModule.default;
+  const VaultFactoryAbi = contractArtifacts.VaultFactory.abi;
+  const BabyStepsStrategyAbi = contractArtifacts.bob.abi; // 'bob' is the artifact key for BabyStepsStrategy
 
-  // Deploy FUM contracts and update library with addresses
-  const deployment = await deployFUMContracts(deployer, {
-    updateContractsFile: true
-  });
-  const deployedContracts = deployment.addresses;
-  const contracts = deployment.contracts;
+  const vaultFactory = new ethers.Contract(
+    shared.deployedContracts.VaultFactory,
+    VaultFactoryAbi,
+    shared.deployer
+  );
 
-  // Derive SSE port from Hardhat port to ensure uniqueness when running tests in parallel
-  // Port 8545 -> SSE 3090, Port 8546 -> SSE 3091, etc.
-  const ssePort = 3090 + (port - 8545);
+  const babyStepsStrategy = new ethers.Contract(
+    shared.deployedContracts.BabyStepsStrategy,
+    BabyStepsStrategyAbi,
+    shared.deployer
+  );
+
+  const contracts = {
+    vaultFactory,
+    babyStepsStrategy
+  };
 
   // Use account #4 from standard Hardhat test accounts as automation service
   const automationServiceAddress = TEST_ACCOUNTS[4].address; // 0xabA472B2EA519490EE10E643A422D578a507197A
 
   // Standard test configuration for AutomationService
+  // Always use port 8545 since we have a shared instance
   const testConfig = {
     automationServiceAddress,
     chainId: 1337,
-    wsUrl: `ws://localhost:${port}`,
+    wsUrl: `ws://localhost:${shared.port}`,
     debug: true,
     envPath: path.join(__dirname, '../.env.test'),
     blacklistFilePath: path.join(__dirname, '../../data/.vault-blacklist.json'),
     trackingDataDir: path.join(__dirname, '../../data/vaults'),
-    ssePort, // Derived from Hardhat port to avoid conflicts in parallel tests
+    ssePort: 3090, // Fixed port since shared instance
     retryIntervalMs: 5000, // 5 seconds between retries
     maxFailureDurationMs: 60000 // 1 minute max failure duration
   };
 
   // Fund the automation service account with ETH for gas costs
-  const fundingTx = await deployer.sendTransaction({
+  const fundingTx = await shared.deployer.sendTransaction({
     to: automationServiceAddress,
     value: ethers.utils.parseEther("100") // Send 100 ETH for gas costs
   });
@@ -73,21 +177,23 @@ export async function setupTestBlockchain(options = {}) {
   console.log(`Funded automation service account ${automationServiceAddress} with 100 ETH`);
 
   return {
-    hardhatServer,
-    deployedContracts,
-    contracts, // Add this for vault setup
-    signers,
-    deployer,
+    hardhatServer: shared, // For compatibility - has stop(), takeSnapshot(), etc.
+    deployedContracts: shared.deployedContracts,
+    contracts,
+    signers: shared.signers,
+    deployer: shared.deployer,
     testConfig
   };
 }
 
 /**
  * Clean up test blockchain environment
+ * Only cleans up WebSocket - does NOT stop Hardhat (it's shared)
+ *
  * @param {Object} testEnv - Test environment from setupTestBlockchain()
  */
 export async function cleanupTestBlockchain(testEnv) {
-  if (testEnv?.hardhatServer?.stop) {
-    await testEnv.hardhatServer.stop();
+  if (testEnv?.hardhatServer?.cleanup) {
+    await testEnv.hardhatServer.cleanup();
   }
 }

@@ -48,8 +48,8 @@ describe(`Configurable Service Init - ${scenario.name}`, () => {
   let service;
 
   beforeAll(async () => {
-    // Setup blockchain environment with configured port
-    testEnv = await setupTestBlockchain({ port: scenario.port });
+    // Setup blockchain environment (uses shared Hardhat instance, port from scenario is ignored)
+    testEnv = await setupTestBlockchain();
 
     // Create test vault using scenario configuration
     testVault = await setupTestVault(

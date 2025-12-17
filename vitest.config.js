@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Global setup/teardown - starts shared Hardhat instance once for all tests
+    globalSetup: './test/global-setup.js',
+    // Per-file setup - loads env vars, initializes fum_library
     setupFiles: ['./test/setup.js'],
     include: ['./test/**/*.test.js'],
     testTimeout: 30000, // 30 seconds for integration tests
