@@ -342,7 +342,7 @@ describe("PositionVault - 1.1.0", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("1.1.0");
+      expect(await vault.getVersion()).to.equal("1.2.0");
     });
   });
 
@@ -570,6 +570,198 @@ describe("PositionVault - 1.1.0", function() {
 
       const finalOwnerBalance = await ethers.provider.getBalance(owner.address);
       expect(finalOwnerBalance).to.equal(initialOwnerBalance + amount);
+    });
+  });
+
+  // Test for ETH wrapping functions (wrapETH and unwrapETH)
+  describe("ETH Wrapping Functions", function() {
+    let weth;
+
+    beforeEach(async function() {
+      // Deploy mock WETH
+      const MockWETH = await ethers.getContractFactory("MockWETH");
+      weth = await MockWETH.deploy();
+      await weth.waitForDeployment();
+    });
+
+    describe("wrapETH", function() {
+      it("should wrap native ETH to WETH and keep in vault", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        // Send ETH to vault
+        await owner.sendTransaction({ to: vaultAddress, value: amount });
+
+        // Verify vault has ETH
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(amount);
+        expect(await weth.balanceOf(vaultAddress)).to.equal(0);
+
+        // Wrap ETH
+        await vault.wrapETH(await weth.getAddress(), amount);
+
+        // Verify vault now has WETH instead of ETH
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(0);
+        expect(await weth.balanceOf(vaultAddress)).to.equal(amount);
+      });
+
+      it("should emit TransactionExecuted with wrap type", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        await owner.sendTransaction({ to: vaultAddress, value: amount });
+
+        await expect(vault.wrapETH(await weth.getAddress(), amount))
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(await weth.getAddress(), "0xd0e30db0", true, "wrap");
+      });
+
+      it("should revert with zero WETH address", async function() {
+        const vaultAddress = await vault.getAddress();
+        await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1") });
+
+        await expect(vault.wrapETH(ethers.ZeroAddress, ethers.parseEther("1")))
+          .to.be.revertedWith("PositionVault: zero WETH address");
+      });
+
+      it("should revert if insufficient ETH balance", async function() {
+        await expect(vault.wrapETH(await weth.getAddress(), ethers.parseEther("100")))
+          .to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should only allow authorized callers", async function() {
+        const vaultAddress = await vault.getAddress();
+        await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1") });
+
+        await expect(vault.connect(user1).wrapETH(await weth.getAddress(), ethers.parseEther("1")))
+          .to.be.revertedWith("PositionVault: caller is not authorized");
+      });
+
+      it("should allow executor to wrap ETH", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        await owner.sendTransaction({ to: vaultAddress, value: amount });
+        await vault.setExecutor(executorWallet.address);
+
+        await vault.connect(executorWallet).wrapETH(await weth.getAddress(), amount);
+
+        expect(await weth.balanceOf(vaultAddress)).to.equal(amount);
+      });
+
+      it("should wrap partial ETH balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const totalAmount = ethers.parseEther("2");
+        const wrapAmount = ethers.parseEther("1");
+
+        await owner.sendTransaction({ to: vaultAddress, value: totalAmount });
+
+        await vault.wrapETH(await weth.getAddress(), wrapAmount);
+
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(wrapAmount);
+        expect(await weth.balanceOf(vaultAddress)).to.equal(wrapAmount);
+      });
+    });
+
+    describe("unwrapETH", function() {
+      it("should unwrap WETH to native ETH and keep in vault", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        // Get WETH and transfer to vault
+        await weth.deposit({ value: amount });
+        await weth.transfer(vaultAddress, amount);
+
+        // Verify vault has WETH
+        expect(await weth.balanceOf(vaultAddress)).to.equal(amount);
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(0);
+
+        // Unwrap WETH
+        await vault.unwrapETH(await weth.getAddress(), amount);
+
+        // Verify vault now has ETH instead of WETH
+        expect(await weth.balanceOf(vaultAddress)).to.equal(0);
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(amount);
+      });
+
+      it("should emit TransactionExecuted with unwrap type", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        await weth.deposit({ value: amount });
+        await weth.transfer(vaultAddress, amount);
+
+        // The selector for withdraw(uint256) is 0x2e1a7d4d
+        const expectedData = weth.interface.encodeFunctionData("withdraw", [amount]);
+
+        await expect(vault.unwrapETH(await weth.getAddress(), amount))
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(await weth.getAddress(), expectedData, true, "unwrap");
+      });
+
+      it("should revert with zero WETH address", async function() {
+        await expect(vault.unwrapETH(ethers.ZeroAddress, ethers.parseEther("1")))
+          .to.be.revertedWith("PositionVault: zero WETH address");
+      });
+
+      it("should only allow authorized callers", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        await weth.deposit({ value: amount });
+        await weth.transfer(vaultAddress, amount);
+
+        await expect(vault.connect(user1).unwrapETH(await weth.getAddress(), amount))
+          .to.be.revertedWith("PositionVault: caller is not authorized");
+      });
+
+      it("should allow executor to unwrap WETH", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        await weth.deposit({ value: amount });
+        await weth.transfer(vaultAddress, amount);
+
+        await vault.setExecutor(executorWallet.address);
+
+        await vault.connect(executorWallet).unwrapETH(await weth.getAddress(), amount);
+
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(amount);
+      });
+
+      it("should unwrap partial WETH balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const totalAmount = ethers.parseEther("2");
+        const unwrapAmount = ethers.parseEther("1");
+
+        await weth.deposit({ value: totalAmount });
+        await weth.transfer(vaultAddress, totalAmount);
+
+        await vault.unwrapETH(await weth.getAddress(), unwrapAmount);
+
+        expect(await weth.balanceOf(vaultAddress)).to.equal(unwrapAmount);
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(unwrapAmount);
+      });
+    });
+
+    describe("Round-trip ETH wrapping", function() {
+      it("should wrap and unwrap ETH with no loss", async function() {
+        const vaultAddress = await vault.getAddress();
+        const amount = ethers.parseEther("1");
+
+        // Start with native ETH in vault
+        await owner.sendTransaction({ to: vaultAddress, value: amount });
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(amount);
+
+        // Wrap ETH -> WETH
+        await vault.wrapETH(await weth.getAddress(), amount);
+        expect(await weth.balanceOf(vaultAddress)).to.equal(amount);
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(0);
+
+        // Unwrap WETH -> ETH
+        await vault.unwrapETH(await weth.getAddress(), amount);
+        expect(await weth.balanceOf(vaultAddress)).to.equal(0);
+        expect(await ethers.provider.getBalance(vaultAddress)).to.equal(amount);
+      });
     });
   });
 
