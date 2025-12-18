@@ -1487,6 +1487,24 @@
       {
         "inputs": [
           {
+            "internalType": "address",
+            "name": "weth",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "name": "unwrapETH",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
             "internalType": "uint256",
             "name": "amount",
             "type": "uint256"
@@ -1529,6 +1547,24 @@
           }
         ],
         "name": "withdrawTokens",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "weth",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "name": "wrapETH",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"

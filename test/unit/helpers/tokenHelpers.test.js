@@ -30,11 +30,14 @@ import tokens from '../../../src/configs/tokens.js';
 describe('Token Helpers', () => {
   describe('getAllTokens', () => {
     describe('Success Cases', () => {
-      it('should return all tokens from configuration', () => {
+      it('should return all tokens from configuration including WETH', () => {
         const result = getAllTokens();
-        expect(result).toBe(tokens);
         expect(typeof result).toBe('object');
         expect(Array.isArray(result)).toBe(false);
+        // Should include all base tokens plus WETH
+        expect(Object.keys(result)).toContain('WETH');
+        expect(Object.keys(result)).toContain('ETH');
+        expect(Object.keys(result)).toContain('USDC');
       });
 
       it('should return tokens with expected structure', () => {
@@ -72,10 +75,17 @@ describe('Token Helpers', () => {
         });
       });
 
-      it('should return the same reference on multiple calls', () => {
-        const result1 = getAllTokens();
-        const result2 = getAllTokens();
-        expect(result1).toBe(result2);
+      it('should include WETH derived from ETH wethAddresses', () => {
+        const result = getAllTokens();
+        const weth = result.WETH;
+
+        expect(weth).toBeDefined();
+        expect(weth.symbol).toBe('WETH');
+        expect(weth.name).toBe('Wrapped Ether');
+        expect(weth.isNative).toBe(false);
+        expect(weth.addresses).toBeDefined();
+        // WETH addresses should come from ETH's wethAddresses
+        expect(weth.addresses[1]).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
       });
     });
   });
@@ -586,22 +596,24 @@ describe('Token Helpers', () => {
         expect(result.symbol).toBe('USDC');
       });
 
-      it('should resolve WETH address to ETH token', () => {
+      it('should resolve WETH address to WETH token (not ETH)', () => {
         const address = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
         const result = getTokenByAddress(address, 42161);
 
         expect(result).toBeDefined();
-        expect(result.symbol).toBe('ETH');
-        expect(result.isNative).toBe(true);
+        expect(result.symbol).toBe('WETH');
+        expect(result.isNative).toBe(false);
+        expect(result.name).toBe('Wrapped Ether');
       });
 
-      it('should resolve WETH address on Ethereum mainnet to ETH token', () => {
+      it('should resolve WETH address on Ethereum mainnet to WETH token', () => {
         const address = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
         const result = getTokenByAddress(address, 1);
 
         expect(result).toBeDefined();
-        expect(result.symbol).toBe('ETH');
-        expect(result.isNative).toBe(true);
+        expect(result.symbol).toBe('WETH');
+        expect(result.isNative).toBe(false);
+        expect(result.name).toBe('Wrapped Ether');
       });
 
     });

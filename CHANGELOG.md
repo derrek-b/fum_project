@@ -5,6 +5,34 @@ All notable changes to the F.U.M. library will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2025-12-17
+
+### WETH Token Helpers Consistency
+
+Fixes `getAllTokens()` and related functions to include WETH as a derived token entry, consistent with `getAllTokenSymbols()`.
+
+#### **Token Helpers Changes**
+- **FIXED**: `getAllTokens()` now includes WETH entry derived from ETH's `wethAddresses`
+- **FIXED**: `validateTokensExist()` now uses `getAllTokens()` to properly validate WETH
+- **FIXED**: `getTokensByType()` now uses `getAllTokens()` to include WETH in volatile tokens
+- **FIXED**: `getTokenByAddress()` returns token with `symbol: 'WETH'` for WETH addresses (not 'ETH')
+
+#### **Technical Details**
+- WETH is now a first-class token entry in `getAllTokens()` with properties:
+  - `symbol: 'WETH'`
+  - `name: 'Wrapped Ether'`
+  - `isNative: false`
+  - `addresses`: copied from ETH's `wethAddresses`
+- This makes `getAllTokens()` consistent with `getAllTokenSymbols()` which includes WETH
+- Pool token symbols now correctly return 'WETH' for WETH addresses (e.g., in `getPositionsForVDS`)
+
+**Status**: Production Ready
+**Breaking Changes**:
+- `getTokenByAddress()` with WETH address now returns `symbol: 'WETH'` instead of `symbol: 'ETH'`
+- `getAllTokens()` returns 6 tokens instead of 5 (WETH added)
+
+---
+
 ## [1.2.0] - 2025-12-16
 
 ### Native ETH Vault Withdrawals

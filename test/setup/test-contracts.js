@@ -61,7 +61,7 @@ async function deployContract(deployer, contractName, args = []) {
   const factory = new ethers.ContractFactory(abi, bytecode, deployer);
   const contract = await factory.deploy(...args, {
     gasLimit: 5000000,
-    gasPrice: ethers.utils.parseUnits("0.1", "gwei"),
+    gasPrice: ethers.utils.parseUnits("1", "gwei"),  // Must exceed fork's baseFeePerGas
   });
   await contract.deployed();
 

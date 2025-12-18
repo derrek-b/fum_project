@@ -5046,14 +5046,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(poolData.platform).toBe('uniswapV3');
 
         // Verify token symbols match the test position's tokens
-        // Test environment uses ETH and USDC, order depends on addresses
+        // Test environment uses WETH and USDC (WETH addresses resolve to 'WETH' symbol, not 'ETH')
         const tokenSymbols = [poolData.token0Symbol, poolData.token1Symbol].sort();
-        expect(tokenSymbols).toEqual(['ETH', 'USDC']);
+        expect(tokenSymbols).toEqual(['USDC', 'WETH']);
 
         // Verify the token order matches the test position setup
         // env.testPosition.token0 and token1 are the actual addresses in pool order
-        const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'ETH' : 'USDC';
-        const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'ETH' : 'USDC';
+        // WETH addresses now correctly return 'WETH' symbol (not 'ETH')
+        const expectedToken0Symbol = env.testPosition.token0.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
+        const expectedToken1Symbol = env.testPosition.token1.toLowerCase() === env.wethAddress.toLowerCase() ? 'WETH' : 'USDC';
         expect(poolData.token0Symbol).toBe(expectedToken0Symbol);
         expect(poolData.token1Symbol).toBe(expectedToken1Symbol);
 

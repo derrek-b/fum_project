@@ -110,7 +110,10 @@ function validateTokenSymbols(symbols) {
  * @since 1.0.0
  */
 export function getAllTokenSymbols() {
-  return Object.keys(tokens);
+  // Include WETH in addition to the base token symbols
+  // WETH is derived from ETH's wethAddresses but is needed for position tracking
+  // (Uniswap V3 positions use WETH, not native ETH)
+  return [...Object.keys(tokens), 'WETH'];
 }
 
 /**
@@ -134,6 +137,23 @@ export function getAllTokenSymbols() {
  * @since 1.0.0
  */
 export function getAllTokens() {
+  const ethToken = tokens['ETH'];
+
+  // If ETH has wethAddresses, create a WETH entry
+  // This makes getAllTokens() consistent with getAllTokenSymbols() which includes WETH
+  if (ethToken?.wethAddresses) {
+    return {
+      ...tokens,
+      WETH: {
+        ...ethToken,
+        symbol: 'WETH',
+        name: 'Wrapped Ether',
+        isNative: false,
+        addresses: ethToken.wethAddresses
+      }
+    };
+  }
+
   return tokens;
 }
 
@@ -381,9 +401,9 @@ export function getTokensBySymbol(symbols) {
  * // Returns: { symbol: "USDC", name: "USD Coin", ... }
  *
  * @example
- * // Look up ETH token by WETH address
+ * // Look up WETH token by its contract address
  * const token = getTokenByAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', 1);
- * // Returns: { symbol: "ETH", name: "Ether", isNative: true, ... }
+ * // Returns: { symbol: "WETH", name: "Wrapped Ether", isNative: false, ... }
  *
  * @example
  * // Identify token from transaction
@@ -409,11 +429,20 @@ export function getTokenByAddress(address, chainId) {
       return token;
     }
 
-    // Also check wethAddresses for native tokens (e.g., WETH address -> ETH token)
+    // Also check wethAddresses for native tokens
+    // When looking up a WETH contract address, return a modified token with 'WETH' symbol
+    // This allows position tracking to distinguish between native ETH and wrapped ETH
     if (token.wethAddresses &&
         token.wethAddresses[chainId] &&
         token.wethAddresses[chainId].toLowerCase() === normalizedAddress) {
-      return token;
+      // Return a modified copy with WETH symbol and the WETH address
+      return {
+        ...token,
+        symbol: 'WETH',
+        name: 'Wrapped Ether',
+        isNative: false,
+        addresses: { [chainId]: token.wethAddresses[chainId] }
+      };
     }
   }
 
@@ -445,7 +474,7 @@ export function getTokensByType(isStablecoin) {
     throw new Error('isStablecoin parameter must be a boolean');
   }
 
-  return Object.values(tokens).filter(token =>
+  return Object.values(getAllTokens()).filter(token =>
     token.isStablecoin === isStablecoin
   );
 }
@@ -593,7 +622,8 @@ export function areTokensSupportedOnChain(symbols, chainId) {
 export function validateTokensExist(symbols) {
   validateTokenSymbols(symbols);
 
-  return symbols.every(symbol => tokens[symbol] !== undefined);
+  const allTokens = getAllTokens();
+  return symbols.every(symbol => allTokens[symbol] !== undefined);
 }
 
 /**
@@ -619,6 +649,11 @@ export function validateTokensExist(symbols) {
  */
 export function getCoingeckoId(symbol) {
   validateTokenSymbol(symbol);
+
+  // WETH uses the same price as ETH (coingecko id: 'ethereum')
+  if (symbol === 'WETH') {
+    return tokens['ETH'].coingeckoId;
+  }
 
   const token = tokens[symbol];
   if (!token) {
@@ -659,6 +694,12 @@ export function getCoingeckoId(symbol) {
  */
 export function isNativeToken(symbol) {
   validateTokenSymbol(symbol);
+
+  // WETH is not in the token config (ETH is, with wethAddresses)
+  // WETH is explicitly not a native token - it's a wrapped version
+  if (symbol === 'WETH') {
+    return false;
+  }
 
   const token = tokens[symbol];
   if (!token) {
