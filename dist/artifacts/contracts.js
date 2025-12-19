@@ -1,4 +1,4 @@
-// src/artifacts/contracts.js
+// artifacts/contracts.js
       /**
        * Contract ABIs and addresses for the F.U.M. project
        * This file is auto-generated and should not be edited directly
@@ -819,7 +819,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x865B84d6bA604D24a43eADD464f6f75101965D06",
+      "1337": "0xe80a4962191410D6D07be8655c36F57D05d7034e",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -1995,7 +1995,7 @@
       }
     ],
     "addresses": {
-      "1337": "0x32Cf7c29bAa92AB75A9f55E91603B8BabfEAA2c0",
+      "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
   }

@@ -15,6 +15,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress } from "../helpers/tokenHelpers.js";
+import { PERMIT2_ADDRESS, wrapWithPermit2 } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
@@ -94,9 +95,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.universalRouterInterface = new ethers.utils.Interface(this.universalRouterABI);
     this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
 
-    // Store provider and initialize AlphaRouter for optimal swap routing
-    this.provider = provider;
-
     // For test chain (1337), use real Arbitrum provider and chainId for AlphaRouter
     // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
     this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
@@ -108,7 +106,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } else {
       this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider });
     }
+  }
 
+  /**
+   * Get the address that tokens should be approved to for swaps
+   * For Uniswap V3, tokens should be approved to Permit2 (Universal Router pulls via Permit2)
+   * @returns {string} The Permit2 contract address
+   */
+  getApprovalTarget() {
+    return PERMIT2_ADDRESS;
   }
 
   /**
@@ -3416,29 +3422,26 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Generate swap transaction data using AlphaRouter route + Universal Router + Permit2
+   *
+   * This method wraps the swap calldata with a pre-generated Permit2 signature.
+   * The caller is responsible for:
+   * 1. Fetching/tracking the nonce (use getPermit2Nonce from Permit2Helper)
+   * 2. Generating the signature (use generatePermit2Signature from Permit2Helper)
+   * 3. Setting an appropriate deadline
+   *
    * @param {Object} params - Parameters for swap
    * @param {Object} params.route - Route object from getSwapRoute() with methodParameters
-   * @param {string} params.tokenInAddress - Address of input token (for Permit2 struct)
-   * @param {string} params.amountIn - Amount of input tokens in wei string (for Permit2 struct)
-   * @param {string} params.recipient - Address to receive output tokens
-   * @param {string} params.walletAddress - Address of the wallet/vault executing the swap
-   * @param {string} params.permit2Signature - Permit2 signature for gasless approval (hex string)
-   * @param {number} params.permit2Nonce - Nonce for the Permit2 signature (non-negative integer)
-   * @param {number} params.permit2Deadline - Deadline timestamp for Permit2 permit (Unix timestamp)
+   * @param {string} params.recipient - Address to receive output tokens (also the token owner)
+   * @param {string} params.tokenInAddress - Address of input token
+   * @param {string} params.amountIn - Amount of input tokens (as string)
+   * @param {string} params.permit2Signature - Pre-generated EIP-712 signature for PermitSingle
+   * @param {number} params.permit2Nonce - Current nonce for this token/owner/spender combination
+   * @param {number} params.permit2Deadline - Unix timestamp when signature expires
    * @returns {Promise<Object>} Transaction data with {to, data, value}
    * @throws {Error} If parameters are invalid
    */
   async generateAlphaSwapData(params) {
-    const {
-      route,
-      tokenInAddress,
-      amountIn,
-      recipient,
-      walletAddress,
-      permit2Signature,
-      permit2Nonce,
-      permit2Deadline
-    } = params;
+    const { route, recipient, tokenInAddress, amountIn, permit2Signature, permit2Nonce, permit2Deadline } = params;
 
     // Validate route object
     if (!route || typeof route !== 'object' || Array.isArray(route)) {
@@ -3451,35 +3454,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Route methodParameters must include calldata');
     }
 
-    // Validate tokenInAddress
-    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
-      throw new Error('TokenIn address parameter is required');
-    }
-    try {
-      ethers.utils.getAddress(tokenInAddress);
-    } catch (error) {
-      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
-    }
-
-    // Validate amountIn
-    if (!amountIn) {
-      throw new Error('AmountIn parameter is required');
-    }
-    if (typeof amountIn !== 'string') {
-      throw new Error('AmountIn must be a string');
-    }
-    if (!/^\d+$/.test(amountIn)) {
-      throw new Error('AmountIn must be a positive numeric string');
-    }
-    if (amountIn === '0') {
-      throw new Error('AmountIn cannot be zero');
-    }
-    // Validate amountIn fits in uint160 (Permit2 requirement)
-    const maxUint160 = ethers.BigNumber.from(2).pow(160).sub(1);
-    if (ethers.BigNumber.from(amountIn).gt(maxUint160)) {
-      throw new Error('AmountIn exceeds uint160 maximum value');
-    }
-
     // Validate recipient
     if (!recipient || typeof recipient !== 'string') {
       throw new Error('Recipient address parameter is required');
@@ -3490,36 +3464,30 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid recipient address: ${recipient}`);
     }
 
-    // Validate walletAddress
-    if (!walletAddress || typeof walletAddress !== 'string') {
-      throw new Error('Wallet address parameter is required');
+    // Validate tokenInAddress
+    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+      throw new Error('TokenInAddress parameter is required');
     }
     try {
-      ethers.utils.getAddress(walletAddress);
+      ethers.utils.getAddress(tokenInAddress);
     } catch (error) {
-      throw new Error(`Invalid wallet address: ${walletAddress}`);
+      throw new Error(`Invalid tokenInAddress: ${tokenInAddress}`);
     }
 
-    // Validate Permit2 signature
+    // Validate amountIn
+    if (!amountIn) {
+      throw new Error('AmountIn parameter is required');
+    }
+
+    // Validate Permit2 parameters
     if (!permit2Signature || typeof permit2Signature !== 'string') {
-      throw new Error('Permit2 signature is required');
+      throw new Error('permit2Signature parameter is required and must be a string');
     }
-    if (!/^0x[0-9a-fA-F]+$/.test(permit2Signature)) {
-      throw new Error('Permit2 signature must be a valid hex string');
+    if (typeof permit2Nonce !== 'number' || permit2Nonce < 0) {
+      throw new Error('permit2Nonce parameter is required and must be a non-negative number');
     }
-
-    // Validate Permit2 nonce
-    if (typeof permit2Nonce !== 'number' || !Number.isInteger(permit2Nonce) || permit2Nonce < 0) {
-      throw new Error('Permit2 nonce must be a non-negative integer');
-    }
-
-    // Validate Permit2 deadline
-    if (typeof permit2Deadline !== 'number' || !Number.isInteger(permit2Deadline) || permit2Deadline <= 0) {
-      throw new Error('Permit2 deadline must be a positive integer timestamp');
-    }
-    const now = Math.floor(Date.now() / 1000);
-    if (permit2Deadline < now) {
-      throw new Error('Permit2 deadline has already passed');
+    if (typeof permit2Deadline !== 'number' || permit2Deadline <= 0) {
+      throw new Error('permit2Deadline parameter is required and must be a positive number');
     }
 
     // Validate Universal Router address
@@ -3527,8 +3495,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`No Universal Router address found for chainId: ${this.chainId}`);
     }
 
-    // Build Permit2 permit data structure
-    const permit2Data = {
+    // Construct permitData from provided parameters
+    const permitData = {
       details: {
         token: tokenInAddress,
         amount: amountIn,
@@ -3539,10 +3507,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       sigDeadline: permit2Deadline
     };
 
-    // Wrap the swap calldata with Permit2 permit
-    const wrappedCalldata = this._wrapWithPermit2(
+    // Wrap calldata with Permit2 command
+    const wrappedCalldata = wrapWithPermit2(
+      this.universalRouterInterface,
       route.methodParameters.calldata,
-      permit2Data,
+      permitData,
       permit2Signature
     );
 
@@ -3551,72 +3520,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       data: wrappedCalldata,
       value: route.methodParameters.value
     };
-  }
-
-  /**
-   * Encode PermitSingle and signature for Universal Router PERMIT2_PERMIT command
-   * @param {Object} permit2Data - Permit2 permit structure
-   * @param {string} permit2Signature - Permit2 signature hex string
-   * @returns {string} ABI-encoded permit input
-   * @private
-   */
-  _encodePermit2Input(permit2Data, permit2Signature) {
-    // PermitSingle structure for ABI encoding
-    // CRITICAL: Must match exact Solidity types including uint160, uint48
-    const permitSingleTuple = {
-      details: {
-        token: permit2Data.details.token,
-        amount: permit2Data.details.amount,        // Must be uint160
-        expiration: permit2Data.details.expiration, // Must be uint48
-        nonce: permit2Data.details.nonce           // Must be uint48
-      },
-      spender: permit2Data.spender,
-      sigDeadline: permit2Data.sigDeadline
-    };
-
-    // ABI encode PermitSingle + signature
-    // Type signature must exactly match Solidity: (PermitSingle, bytes)
-    const encoded = ethers.utils.defaultAbiCoder.encode(
-      [
-        'tuple(tuple(address token, uint160 amount, uint48 expiration, uint48 nonce) details, address spender, uint256 sigDeadline)',
-        'bytes'
-      ],
-      [permitSingleTuple, permit2Signature]
-    );
-
-    return encoded;
-  }
-
-  /**
-   * Wrap swap calldata with Permit2 permit command for Universal Router
-   * @param {string} swapCalldata - Original swap calldata from AlphaRouter
-   * @param {Object} permit2Data - Permit2 permit structure
-   * @param {string} permit2Signature - Permit2 signature hex string
-   * @returns {string} Wrapped calldata for Universal Router execute()
-   * @private
-   */
-  _wrapWithPermit2(swapCalldata, permit2Data, permit2Signature) {
-    // Step 1: Decode the existing Universal Router execute() call
-    // Use full signature because Universal Router has multiple execute() overloads
-    // AlphaRouter generates execute(bytes,bytes[]) - the 2-parameter version without deadline
-    const decoded = this.universalRouterInterface.decodeFunctionData('execute(bytes,bytes[])', swapCalldata);
-    const existingCommands = decoded.commands;
-    const existingInputs = decoded.inputs;
-
-    // Step 2: Encode Permit2 permit input
-    const permitInput = this._encodePermit2Input(permit2Data, permit2Signature);
-
-    // Step 3: Prepend PERMIT2_PERMIT command (0x0a) to existing commands
-    const commands = '0x0a' + existingCommands.slice(2);
-
-    // Step 4: Prepend permit input to existing inputs array
-    const inputs = [permitInput, ...existingInputs];
-
-    // Step 5: Re-encode execute() with new commands + inputs (2-parameter version)
-    return this.universalRouterInterface.encodeFunctionData('execute(bytes,bytes[])', [
-      commands,
-      inputs
-    ]);
   }
 
   /**

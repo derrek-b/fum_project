@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-18T00:24:33.976Z
+Generated on: 2025-12-19T14:03:59.921Z
 
 ## Table of Contents
 
@@ -70,6 +70,7 @@ UniswapV3Adapter - Uniswap V3 Protocol Integration
 **Path:** `src/adapters/UniswapV3Adapter.js`
 
 **Imports:**
+- from `../helpers/Permit2Helper.js`
 - from `../helpers/chainHelpers.js`
 - from `../helpers/platformHelpers.js`
 - from `../helpers/tokenHelpers.js`
@@ -257,6 +258,25 @@ Token configuration with addresses on multiple chains
 - re-exports from `./tokenHelpers.js`
 - re-exports from `./strategyHelpers.js`
 - re-exports from `./formatHelpers.js`
+- re-exports from `./Permit2Helper.js`
+
+---
+
+### Permit2Helper.js
+
+Permit2 Helper Functions - Reusable functions for Permit2 signature generation and calldata wrapping. See [Permit2Helper Documentation](./helpers/permit2-helper.md) for details.
+
+**Path:** `src/helpers/Permit2Helper.js`
+
+**Imports:**
+- from `ethers`
+
+**Exports:**
+- `PERMIT2_ADDRESS` (variable)
+- `getPermit2Nonce` (function)
+- `generatePermit2Signature` (function)
+- `encodePermit2Input` (function)
+- `wrapWithPermit2` (function)
 
 ---
 

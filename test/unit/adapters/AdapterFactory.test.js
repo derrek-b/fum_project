@@ -48,7 +48,6 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
         expect(result.adapters[0].chainId).toBe(42161);
         expect(result.adapters[0].platformId).toBe('uniswapV3');
-        expect(result.adapters[0].provider).toBe(mockProvider);
       });
 
       it('should return adapters for Ethereum mainnet (1)', () => {
@@ -59,7 +58,6 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result.failures.length).toBe(0);
         expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
         expect(result.adapters[0].chainId).toBe(1);
-        expect(result.adapters[0].provider).toBe(mockProvider);
       });
 
       it('should return adapters for local test chain (1337)', () => {
@@ -70,7 +68,6 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result.failures.length).toBe(0);
         expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
         expect(result.adapters[0].chainId).toBe(1337);
-        expect(result.adapters[0].provider).toBe(mockProvider);
       });
 
       it('should throw error for unsupported chain', () => {

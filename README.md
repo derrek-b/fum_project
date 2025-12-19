@@ -114,7 +114,12 @@ import {
   getTokenBySymbol,
   getAllTokens,
   getStrategyDetails,
-  validateStrategyParams
+  validateStrategyParams,
+  // Permit2 helpers for token approvals
+  PERMIT2_ADDRESS,
+  getPermit2Nonce,
+  generatePermit2Signature,
+  wrapWithPermit2
 } from 'fum_library/helpers';
 
 // Format price with appropriate precision
@@ -132,6 +137,12 @@ const strategy = getStrategyDetails('bob');
 
 // Validate strategy parameters
 const validation = validateStrategyParams('bob', parameters);
+
+// Permit2 signature generation (for Universal Router swaps)
+const nonce = await getPermit2Nonce(provider, vaultAddress, tokenAddress, routerAddress);
+const { signature, permitData } = await generatePermit2Signature(
+  signer, chainId, tokenAddress, amount, routerAddress, nonce, deadline
+);
 ```
 
 ### Blockchain Utilities

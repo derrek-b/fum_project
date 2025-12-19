@@ -10,10 +10,10 @@ test/
 │   ├── hardhat-config.js    # Hardhat setup and blockchain utilities
 │   └── test-contracts.js    # Contract deployment logic
 ├── unit/                    # Unit tests (pure functions)
-│   ├── adapters/           # Adapter unit tests
+│   ├── adapters/           # Adapter unit tests (UniswapV3Adapter, etc.)
 │   ├── blockchain/         # Blockchain module tests
 │   ├── configs/            # Config module tests
-│   ├── helpers/            # Helper unit tests
+│   ├── helpers/            # Helper unit tests (Permit2Helper, etc.)
 │   └── services/           # Service unit tests
 ├── test-env.js             # Main test environment setup
 ├── setup.js                # Global test configuration

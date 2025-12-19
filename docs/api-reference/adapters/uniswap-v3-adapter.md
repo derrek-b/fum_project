@@ -482,20 +482,39 @@ const txData = await adapter.generateSwapData({
 
 ### generateAlphaSwapData
 
-Generate swap transaction data using AlphaRouter route + Universal Router + Permit2.
+Generate swap transaction data using AlphaRouter route + Universal Router. Permit2 signature generation and calldata wrapping is handled internally by the adapter.
 
 ```javascript
 const txData = await adapter.generateAlphaSwapData({
   route,                    // Route from getSwapRoute()
-  tokenInAddress: '0x...',
-  amountIn: '1000000000000000000',
-  recipient: '0x...',
-  walletAddress: '0x...',
-  permit2Signature: '0x...',
-  permit2Nonce: 0,
-  permit2Deadline: Math.floor(Date.now() / 1000) + 3600
+  recipient: '0x...',       // Address to receive output tokens
+  signer,                   // Ethers Wallet (for Permit2 signature generation)
+  tokenInAddress: '0x...',  // Input token address
+  amountIn: '...'           // Amount of input tokens (wei string)
 });
 ```
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `route` | `Object` | Route object from `getSwapRoute()` |
+| `recipient` | `string` | Address to receive swap output |
+| `signer` | `ethers.Wallet` | Wallet instance for signing Permit2 authorization |
+| `tokenInAddress` | `string` | Address of input token |
+| `amountIn` | `string` | Amount of input tokens in wei |
+
+#### Returns
+
+```javascript
+{
+  to: string,    // Universal Router address
+  data: string,  // Encoded calldata (with Permit2 command prepended)
+  value: string  // Transaction value
+}
+```
+
+Note: The adapter internally handles Permit2 nonce lookup, signature generation, and calldata wrapping. The signer must have a provider attached.
 
 ---
 

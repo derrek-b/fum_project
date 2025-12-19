@@ -234,6 +234,14 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get the address that tokens should be approved to for swaps on this platform
+   * @returns {string} The approval target address (e.g., Universal Router for Uniswap)
+   */
+  getApprovalTarget() {
+    throw new Error("getApprovalTarget must be implemented by subclasses");
+  }
+
+  /**
    * Discover available pools for a token pair across all fee tiers
    * @param {string} token0Address - Address of first token
    * @param {string} token1Address - Address of second token

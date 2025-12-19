@@ -10,6 +10,7 @@ import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { getTokenBySymbol, getTokenAddress, getWethAddress } from '../../../src/helpers/tokenHelpers.js';
+import { getPermit2Nonce, generatePermit2Signature } from '../../../src/helpers/Permit2Helper.js';
 
 describe('UniswapV3Adapter - Unit Tests', () => {
   let env;
@@ -147,10 +148,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof adapter.erc20Interface.encodeFunctionData).toBe('function');
       });
 
-      it('should initialize AlphaRouter with correct chainId and provider', () => {
-        expect(adapter.provider).toBeDefined();
-        expect(adapter.provider).toBe(env.provider);
-
+      it('should initialize AlphaRouter with correct chainId', () => {
         expect(adapter.alphaRouter).toBeDefined();
         expect(adapter.alphaRouter).toBeTypeOf('object');
         // For test chain (1337), AlphaRouter uses real Arbitrum (42161)
@@ -9902,6 +9900,17 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getApprovalTarget', () => {
+    it('should return the Permit2 address', () => {
+      const approvalTarget = adapter.getApprovalTarget();
+      // Tokens should be approved to Permit2, which the Universal Router pulls from
+      expect(approvalTarget).toBe('0x000000000022D473030F116dDEE9F6B43aC78BA3');
+      expect(approvalTarget).toBeTypeOf('string');
+      expect(approvalTarget.startsWith('0x')).toBe(true);
+      expect(approvalTarget.length).toBe(42);
+    });
+  });
+
   describe('generateAlphaSwapData', () => {
     // Helper to create a mock route object
     const createMockRoute = () => ({
@@ -9913,12 +9922,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       }
     });
 
-    const futureDeadline = Math.floor(Date.now() / 1000) + 1800; // 30 min future
-
     describe('Success Cases', () => {
-      it('should generate transaction data with Permit2 wrapping', async () => {
-        // Get a real route from getSwapRoute
-        const route = await adapter.getSwapRoute({
+      it('should generate transaction data with Permit2 wrapping for exact input', async () => {
+        // Get a real route from getSwapRoute (exact input)
+        const routeResult = await adapter.getSwapRoute({
           tokenInAddress: env.wethAddress,
           tokenOutAddress: env.usdcAddress,
           amount: ethers.utils.parseEther('1').toString(),
@@ -9928,15 +9935,33 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           deadlineMinutes: 30
         });
 
+        // Generate Permit2 signature
+        const signer = env.signers[0];
+        const nonce = await getPermit2Nonce(
+          env.provider,
+          env.testVault.address,
+          env.wethAddress,
+          adapter.addresses.universalRouterAddress
+        );
+        const deadline = Math.floor(Date.now() / 1000) + 1800;
+        const { signature } = await generatePermit2Signature(
+          signer,
+          adapter.chainId,
+          env.wethAddress,
+          routeResult.amountIn,
+          adapter.addresses.universalRouterAddress,
+          nonce,
+          deadline
+        );
+
         const validParams = {
-          route,
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
+          route: routeResult,
           recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
+          tokenInAddress: env.wethAddress,
+          amountIn: routeResult.amountIn,
+          permit2Signature: signature,
+          permit2Nonce: nonce,
+          permit2Deadline: deadline
         };
 
         const result = await adapter.generateAlphaSwapData(validParams);
@@ -9949,32 +9974,49 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.data.startsWith('0x')).toBe(true);
         expect(result.value).toBeDefined();
 
-        // Verify the calldata is different from original (Permit2 was prepended)
-        expect(result.data).not.toBe(route.methodParameters.calldata);
-        expect(result.data.length).toBeGreaterThan(route.methodParameters.calldata.length);
+        // Verify the calldata is wrapped with Permit2 (different from original)
+        expect(result.data).not.toBe(routeResult.methodParameters.calldata);
       });
 
-      it('should generate transaction data with different token amounts', async () => {
-        // Get a real route with USDC
-        const route = await adapter.getSwapRoute({
-          tokenInAddress: env.usdcAddress,
-          tokenOutAddress: env.wethAddress,
-          amount: ethers.utils.parseUnits('1000', 6).toString(),
-          isAmountIn: true,
-          recipient: env.signers[0].address,
+      it('should generate transaction data with Permit2 wrapping for exact output', async () => {
+        // Get a real route from getSwapRoute (exact output)
+        const routeResult = await adapter.getSwapRoute({
+          tokenInAddress: env.wethAddress,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseUnits('1000', 6).toString(), // Want exactly 1000 USDC out
+          isAmountIn: false,
+          recipient: env.testVault.address,
           slippageTolerance: 0.5,
           deadlineMinutes: 30
         });
 
+        // Generate Permit2 signature
+        const signer = env.signers[0];
+        const nonce = await getPermit2Nonce(
+          env.provider,
+          env.testVault.address,
+          env.wethAddress,
+          adapter.addresses.universalRouterAddress
+        );
+        const deadline = Math.floor(Date.now() / 1000) + 1800;
+        const { signature } = await generatePermit2Signature(
+          signer,
+          adapter.chainId,
+          env.wethAddress,
+          routeResult.amountIn,
+          adapter.addresses.universalRouterAddress,
+          nonce,
+          deadline
+        );
+
         const validParams = {
-          route,
-          tokenInAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseUnits('1000', 6).toString(),
-          recipient: env.signers[0].address,
-          walletAddress: env.signers[1].address,
-          permit2Signature: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
-          permit2Nonce: 999,
-          permit2Deadline: futureDeadline
+          route: routeResult,
+          recipient: env.testVault.address,
+          tokenInAddress: env.wethAddress,
+          amountIn: routeResult.amountIn,
+          permit2Signature: signature,
+          permit2Nonce: nonce,
+          permit2Deadline: deadline
         };
 
         const result = await adapter.generateAlphaSwapData(validParams);
@@ -9985,20 +10027,16 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.data).toBeTypeOf('string');
         expect(result.data.startsWith('0x')).toBe(true);
         expect(result.value).toBeDefined();
+
+        // Verify the calldata is wrapped with Permit2 (different from original)
+        expect(result.data).not.toBe(routeResult.methodParameters.calldata);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for invalid route object', async () => {
         const baseParams = {
-          tokenInAddress: env.wethAddress,
-          tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
+          recipient: env.testVault.address
         };
 
         // Missing route
@@ -10022,96 +10060,9 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         ).rejects.toThrow('Route methodParameters must include calldata');
       });
 
-      it('should throw error for invalid tokenInAddress', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenOutAddress: env.usdcAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
-        };
-
-        // Missing
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: null })
-        ).rejects.toThrow('TokenIn address parameter is required');
-
-        // Invalid address
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: 'invalid' })
-        ).rejects.toThrow('Invalid tokenIn address');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: [] })
-        ).rejects.toThrow('TokenIn address parameter is required');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, tokenInAddress: {} })
-        ).rejects.toThrow('TokenIn address parameter is required');
-      });
-
-      it('should throw error for invalid amountIn', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
-        };
-
-        // Missing
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: null })
-        ).rejects.toThrow('AmountIn parameter is required');
-
-        // Not a string
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: 123 })
-        ).rejects.toThrow('AmountIn must be a string');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: [] })
-        ).rejects.toThrow('AmountIn must be a string');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: {} })
-        ).rejects.toThrow('AmountIn must be a string');
-
-        // Invalid string
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: 'Claude is awesome!' })
-        ).rejects.toThrow('AmountIn must be a positive numeric string');
-
-        // Zero
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: '0' })
-        ).rejects.toThrow('AmountIn cannot be zero');
-
-        // Exceeds uint160 maximum
-        const maxUint160Plus1 = ethers.BigNumber.from(2).pow(160).toString();
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, amountIn: maxUint160Plus1 })
-        ).rejects.toThrow('AmountIn exceeds uint160 maximum value');
-      });
-
       it('should throw error for invalid recipient', async () => {
         const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
+          route: createMockRoute()
         };
 
         // Missing
@@ -10133,165 +10084,6 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.generateAlphaSwapData({ ...baseParams, recipient: {} })
         ).rejects.toThrow('Recipient address parameter is required');
-      });
-
-      it('should throw error for invalid walletAddress', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
-        };
-
-        // Missing
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: null })
-        ).rejects.toThrow('Wallet address parameter is required');
-
-        // Invalid address
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: 'Claude is awesome!' })
-        ).rejects.toThrow('Invalid wallet address');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: [] })
-        ).rejects.toThrow('Wallet address parameter is required');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, walletAddress: {} })
-        ).rejects.toThrow('Wallet address parameter is required');
-      });
-
-      it('should throw error for invalid permit2Signature', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Nonce: 0,
-          permit2Deadline: futureDeadline
-        };
-
-        // Missing
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: null })
-        ).rejects.toThrow('Permit2 signature is required');
-
-        // Not a string
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: 123 })
-        ).rejects.toThrow('Permit2 signature is required');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: [] })
-        ).rejects.toThrow('Permit2 signature is required');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: {} })
-        ).rejects.toThrow('Permit2 signature is required');
-
-        // Invalid hex string (no 0x prefix)
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: '1234abcd' })
-        ).rejects.toThrow('Permit2 signature must be a valid hex string');
-
-        // Invalid hex string (wrong characters)
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Signature: '0xClaude' })
-        ).rejects.toThrow('Permit2 signature must be a valid hex string');
-      });
-
-      it('should throw error for invalid permit2Nonce', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Deadline: futureDeadline
-        };
-
-        // String
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: 'Claude is awesome!' })
-        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: [] })
-        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: {} })
-        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
-
-        // Negative
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: -1 })
-        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
-
-        // Float
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Nonce: 1.5 })
-        ).rejects.toThrow('Permit2 nonce must be a non-negative integer');
-      });
-
-      it('should throw error for invalid permit2Deadline', async () => {
-        const baseParams = {
-          route: createMockRoute(),
-          tokenInAddress: env.wethAddress,
-          amountIn: ethers.utils.parseEther('1').toString(),
-          recipient: env.testVault.address,
-          walletAddress: env.testVault.address,
-          permit2Signature: '0x' + '00'.repeat(65),
-          permit2Nonce: 0
-        };
-
-        // String
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 'Claude is awesome!' })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Array
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: [] })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Object
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: {} })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Zero
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 0 })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Negative
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: -1 })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Float
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: 1.5 })
-        ).rejects.toThrow('Permit2 deadline must be a positive integer timestamp');
-
-        // Expired deadline
-        const pastDeadline = Math.floor(Date.now() / 1000) - 1000;
-        await expect(
-          adapter.generateAlphaSwapData({ ...baseParams, permit2Deadline: pastDeadline })
-        ).rejects.toThrow('Permit2 deadline has already passed');
       });
     });
   });

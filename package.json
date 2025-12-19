@@ -18,6 +18,7 @@
     "./helpers/platformHelpers": "./dist/helpers/platformHelpers.js",
     "./helpers/strategyHelpers": "./dist/helpers/strategyHelpers.js",
     "./helpers/vaultHelpers": "./dist/helpers/vaultHelpers.js",
+    "./helpers/Permit2Helper": "./dist/helpers/Permit2Helper.js",
     "./blockchain": "./dist/blockchain/index.js",
     "./blockchain/wallet": "./dist/blockchain/wallet.js",
     "./blockchain/contracts": "./dist/blockchain/contracts.js",
