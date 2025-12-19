@@ -11,6 +11,7 @@ This testing suite validates the core smart contracts used in the FUM platform:
 | `PositionVault` | User-controlled vault for managing DeFi positions across platforms |
 | `VaultFactory` | Factory contract for deploying new vaults |
 | `BabyStepsStrategy` | Liquidity management strategy with conservative rebalancing |
+| `ParrisIslandStrategy` | Advanced liquidity management strategy with aggressive rebalancing |
 
 ## Prerequisites
 
@@ -57,9 +58,10 @@ npx hardhat test test/unit/PositionVault.test.js
 ```
 test/
 └── unit/
-    ├── PositionVault.test.js      # Vault functionality tests
-    ├── VaultFactory.test.js       # Factory deployment tests
-    └── BabyStepsStrategy.test.js  # BabySteps strategy tests
+    ├── PositionVault.test.js        # Vault functionality tests
+    ├── VaultFactory.test.js         # Factory deployment tests
+    ├── BabyStepsStrategy.test.js    # BabySteps strategy tests
+    └── ParrisIslandStrategy.test.js # ParrisIsland strategy tests
 ```
 
 ## Mock Contracts
@@ -70,6 +72,7 @@ The tests use mock contracts to simulate external dependencies:
 - `MockPositionNFT` - NFT contract for testing position management
 - `MockNonfungiblePositionManager` - Simulates Uniswap V3 position manager
 - `MockUniversalRouter` - Simulates Uniswap Universal Router
+- `MockWETH` - Wrapped ETH contract for testing ETH/WETH conversions
 
 ## Network Configuration
 

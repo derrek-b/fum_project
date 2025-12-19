@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 1.1.0", function() {
+describe("PositionVault - 1.3.0", function() {
   let PositionVault;
   let MockPositionNFT;
   let MockToken;
@@ -342,7 +342,7 @@ describe("PositionVault - 1.1.0", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("1.2.0");
+      expect(await vault.getVersion()).to.equal("1.3.0");
     });
   });
 
@@ -773,9 +773,10 @@ describe("PositionVault - 1.1.0", function() {
       return iface.encodeFunctionData("approve", [spender, amount]);
     }
 
-    it("should approve tokens for permit2", async function() {
+    it("should approve tokens for universal router", async function() {
       const amount = ethers.parseEther("100");
-      const approveData = encodeApprove(permit2Address, amount);
+      const universalRouterAddress = await router.getAddress();
+      const approveData = encodeApprove(universalRouterAddress, amount);
 
       await expect(vault.approve(
         [await token.getAddress()],
@@ -784,7 +785,7 @@ describe("PositionVault - 1.1.0", function() {
         .withArgs(await token.getAddress(), approveData, true, "approval");
 
       // Verify allowance was set
-      const allowance = await token.allowance(await vault.getAddress(), permit2Address);
+      const allowance = await token.allowance(await vault.getAddress(), universalRouterAddress);
       expect(allowance).to.equal(amount);
     });
 
@@ -804,7 +805,8 @@ describe("PositionVault - 1.1.0", function() {
     it("should batch approve multiple tokens", async function() {
       const amount1 = ethers.parseEther("100");
       const amount2 = ethers.parseEther("200");
-      const approveData1 = encodeApprove(permit2Address, amount1);
+      const universalRouterAddress = await router.getAddress();
+      const approveData1 = encodeApprove(universalRouterAddress, amount1);
       const approveData2 = encodeApprove(nonfungiblePositionManagerAddress, amount2);
 
       await vault.approve(
@@ -812,26 +814,15 @@ describe("PositionVault - 1.1.0", function() {
         [approveData1, approveData2]
       );
 
-      const allowance1 = await token.allowance(await vault.getAddress(), permit2Address);
+      const allowance1 = await token.allowance(await vault.getAddress(), universalRouterAddress);
       const allowance2 = await token2.allowance(await vault.getAddress(), nonfungiblePositionManagerAddress);
 
       expect(allowance1).to.equal(amount1);
       expect(allowance2).to.equal(amount2);
     });
 
-    it("should reject invalid spender address", async function() {
-      const approveData = encodeApprove(user1.address, ethers.parseEther("100"));
-
-      await expect(
-        vault.approve(
-          [await token.getAddress()],
-          [approveData]
-        )
-      ).to.be.revertedWith("PositionVault: invalid spender");
-    });
-
     it("should reject zero token address", async function() {
-      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+      const approveData = encodeApprove(nonfungiblePositionManagerAddress, ethers.parseEther("100"));
 
       await expect(
         vault.approve(
@@ -842,7 +833,7 @@ describe("PositionVault - 1.1.0", function() {
     });
 
     it("should reject mismatched array lengths", async function() {
-      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+      const approveData = encodeApprove(nonfungiblePositionManagerAddress, ethers.parseEther("100"));
 
       await expect(
         vault.approve(
@@ -862,7 +853,7 @@ describe("PositionVault - 1.1.0", function() {
     });
 
     it("should only allow authorized callers", async function() {
-      const approveData = encodeApprove(permit2Address, ethers.parseEther("100"));
+      const approveData = encodeApprove(nonfungiblePositionManagerAddress, ethers.parseEther("100"));
 
       await expect(
         vault.connect(user1).approve(
@@ -877,14 +868,15 @@ describe("PositionVault - 1.1.0", function() {
       await vault.setExecutor(executorWallet.address);
 
       const amount = ethers.parseEther("100");
-      const approveData = encodeApprove(permit2Address, amount);
+      const universalRouterAddress = await router.getAddress();
+      const approveData = encodeApprove(universalRouterAddress, amount);
 
       await vault.connect(executorWallet).approve(
         [await token.getAddress()],
         [approveData]
       );
 
-      const allowance = await token.allowance(await vault.getAddress(), permit2Address);
+      const allowance = await token.allowance(await vault.getAddress(), universalRouterAddress);
       expect(allowance).to.equal(amount);
     });
 
@@ -893,7 +885,7 @@ describe("PositionVault - 1.1.0", function() {
       const iface = new ethers.Interface([
         "function transfer(address to, uint256 amount)"
       ]);
-      const transferData = iface.encodeFunctionData("transfer", [permit2Address, ethers.parseEther("100")]);
+      const transferData = iface.encodeFunctionData("transfer", [user1.address, ethers.parseEther("100")]);
 
       await expect(
         vault.approve(

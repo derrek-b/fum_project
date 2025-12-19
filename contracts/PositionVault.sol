@@ -374,8 +374,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
 
     /**
      * @notice Approves spenders to spend vault tokens
-     * @dev Only allows approval to known DeFi protocol addresses (Permit2, NonfungiblePositionManager)
-     *      Decodes the spender from ERC20.approve calldata for validation
+     * @dev Validates that the call is an ERC20.approve(address,uint256) call.
      * @param targets Array of token addresses to approve
      * @param data Array of encoded ERC20.approve(spender, amount) calls
      * @return results Array of success flags for each approval
@@ -398,14 +397,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             // Validate selector is approve(address,uint256) = 0x095ea7b3
             bytes4 selector = bytes4(data[i][:4]);
             require(selector == 0x095ea7b3, "PositionVault: not an approve call");
-
-            // Decode spender from ERC20.approve calldata (skip 4-byte selector)
-            (address spender, ) = abi.decode(data[i][4:], (address, uint256));
-
-            require(
-                spender == permit2 || spender == nonfungiblePositionManager,
-                "PositionVault: invalid spender"
-            );
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
@@ -764,6 +755,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "1.2.0";
+        return "1.3.0";
     }
 }
