@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2025-12-18
+
+### Platform-Agnostic Approval Model
+
+Removes the spender whitelist from PositionVault to enable platform-agnostic token approvals. This change supports the broader goal of making the automation service work with multiple DEX platforms beyond Uniswap.
+
+#### **Smart Contract Changes**
+- **PositionVault** v1.2.0 → v1.3.0
+  - **REMOVED**: Spender whitelist validation in `approve()` function
+  - **REMOVED**: Restriction to only Permit2 and NonfungiblePositionManager as spenders
+  - **MAINTAINED**: ERC20 approve selector validation (only `approve(address,uint256)` calls allowed)
+
+#### **Security Note**
+The spender whitelist was originally defense-in-depth. It is now safe to remove because:
+- The `execute()` function is owner-only - executors cannot make arbitrary calls
+- All executor-accessible functions (`swap`, `mint`, `collect`, etc.) validate recipients must be the vault
+- All withdrawal functions (`withdrawTokens`, `withdrawETH`, `withdrawPosition`) hardcode the recipient to the vault owner
+- The executor cannot redirect assets anywhere except back to the vault or the vault owner
+
+#### **Impact**
+- Enables standard ERC20 approvals to Universal Router (no longer requires Permit2 signatures)
+- Supports future integration with other DEX platforms (Camelot, PancakeSwap, etc.)
+- Simplifies automation service approval flow
+
+**Status**: Production Ready
+**Breaking Changes**: None (loosens restrictions, doesn't add new requirements)
+**Dependency**: Enables fum_automation Permit2 removal refactor
+
+---
+
 ## [1.0.5] - 2025-12-17
 
 ### Native ETH Wrap/Unwrap for Automation
