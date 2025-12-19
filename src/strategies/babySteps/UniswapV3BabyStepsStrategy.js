@@ -5,15 +5,8 @@
 
 import { ethers } from 'ethers';
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
-import { generatePermit2Signature } from '../../Permit2Helpers.js';
-
-// Permit2 address is a constant (same on all chains)
-const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
-
-// Permit2 ABI - minimal interface for allowance function
-const PERMIT2_ABI = [
-  'function allowance(address owner, address token, address spender) external view returns (uint160 amount, uint48 expiration, uint48 nonce)'
-];
+import { getPermit2Nonce, generatePermit2Signature } from 'fum_library/helpers/Permit2Helper';
+import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 
 /**
  * Uniswap V3 specific handler for BabySteps strategy
@@ -351,7 +344,7 @@ export default class UniswapV3BabyStepsStrategy {
   }
 
   /**
-   * Generate buffer swap transactions using AlphaRouter + Permit2
+   * Generate buffer swap transactions using AlphaRouter
    * @memberof module:strategies/babySteps/UniswapV3BabyStepsStrategy
    * @param {Array} swapInstructions - Array of swap instruction objects
    * @param {Object} vault - Vault object
@@ -362,19 +355,11 @@ export default class UniswapV3BabyStepsStrategy {
     const swaps = [];
     const swapMetadata = [];
 
-    // Get Universal Router address from adapter
-    const universalRouterAddress = this.adapter.addresses.universalRouterAddress;
-    if (!universalRouterAddress) {
-      throw new Error('Universal Router address not configured for Uniswap V3');
-    }
+    this.log(`Generating ${swapInstructions.length} buffer swap transactions`);
 
-    this.log(`🔄 Generating ${swapInstructions.length} buffer swap transactions with Permit2`);
-
-    // Track next available nonce per token for batch execution
-    // Map: tokenAddress -> nextNonce
-    const tokenNonces = new Map();
-
-    const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, PERMIT2_ABI, this.provider);
+    // Create nonce tracker for batched swaps to avoid nonce collisions
+    // When multiple swaps use the same input token, we need to track and increment nonces
+    const nonceTracker = new Map();
 
     for (let i = 0; i < swapInstructions.length; i++) {
       const instruction = swapInstructions[i];
@@ -382,24 +367,6 @@ export default class UniswapV3BabyStepsStrategy {
         const { tokenIn, tokenOut, amountIn, symbol, tokenData } = instruction;
 
         this.log(`Generating swap: ${ethers.utils.formatUnits(amountIn, tokenData.decimals)} ${symbol} → ${instruction.tokenOutSymbol}`);
-
-        // Get nonce for this token (fetch from chain if first time, otherwise use cached)
-        let swapNonce;
-        if (!tokenNonces.has(tokenIn)) {
-          // First time - fetch from chain
-          const allowanceData = await permit2Contract.allowance(
-            vault.address,
-            tokenIn,
-            universalRouterAddress
-          );
-          swapNonce = allowanceData.nonce;
-        } else {
-          // Already cached - use it
-          swapNonce = tokenNonces.get(tokenIn);
-        }
-
-        // Use this nonce and cache the next one
-        tokenNonces.set(tokenIn, swapNonce + 1);
 
         // Generate swap transaction using generic method
         // Buffer swaps always use EXACT_INPUT since we're swapping all available amount
@@ -410,11 +377,11 @@ export default class UniswapV3BabyStepsStrategy {
           true,  // isAmountIn: true for EXACT_INPUT
           vault.address,
           vault.strategy.parameters.maxSlippage,
-          swapNonce,
-          vault
+          vault,
+          nonceTracker  // Pass tracker for nonce management
         );
 
-        this.log(`  ✓ Swap transaction generated (nonce: ${swapNonce})`);
+        this.log(`  Swap transaction generated`);
 
         // Store transaction
         swaps.push(swapResult.transaction);
@@ -431,18 +398,18 @@ export default class UniswapV3BabyStepsStrategy {
         });
 
       } catch (error) {
-        this.log(`❌ Failed to generate swap for ${instruction.symbol}: ${error.message}`);
+        this.log(`Failed to generate swap for ${instruction.symbol}: ${error.message}`);
         throw new Error(`Buffer swap generation failed for ${instruction.symbol}: ${error.message}`);
       }
     }
 
-    this.log(`✅ Generated ${swaps.length} buffer swap transactions`);
+    this.log(`Generated ${swaps.length} buffer swap transactions`);
 
     return { swaps, metadata: swapMetadata };
   }
 
   /**
-   * Generate a single swap transaction using AlphaRouter + Permit2
+   * Generate a single swap transaction using AlphaRouter
    * @memberof module:strategies/babySteps/UniswapV3BabyStepsStrategy
    * @param {string} tokenInAddress - Address of input token
    * @param {string} tokenOutAddress - Address of output token
@@ -450,26 +417,13 @@ export default class UniswapV3BabyStepsStrategy {
    * @param {boolean} isAmountIn - True for EXACT_INPUT (amount is input), false for EXACT_OUTPUT (amount is output)
    * @param {string} recipient - Recipient address (vault address)
    * @param {number} slippageTolerance - Slippage tolerance percentage
-   * @param {number} nonce - Permit2 nonce to use (provided by caller)
    * @param {Object} vault - Vault object
+   * @param {Map} [nonceTracker] - Optional nonce tracker for batched swaps
    * @returns {Promise<Object>} Transaction object with { to, data, value }
    * @since 1.0.0
    */
-  async generateSwapTransaction(tokenInAddress, tokenOutAddress, amount, isAmountIn, recipient, slippageTolerance, nonce, vault) {
+  async generateSwapTransaction(tokenInAddress, tokenOutAddress, amount, isAmountIn, recipient, slippageTolerance, vault, nonceTracker = null) {
     try {
-      // Create executor wallet for Permit2 signing
-      const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
-      if (!automationPrivateKey) {
-        throw new Error('AUTOMATION_PRIVATE_KEY not found in environment variables');
-      }
-      const executorWallet = new ethers.Wallet(automationPrivateKey, this.provider);
-
-      // Get Universal Router address from adapter
-      const universalRouterAddress = this.adapter.addresses.universalRouterAddress;
-      if (!universalRouterAddress) {
-        throw new Error('Universal Router address not configured for Uniswap V3');
-      }
-
       // Get optimal swap route from AlphaRouter
       const routeResult = await this.adapter.getSwapRoute({
         tokenInAddress: tokenInAddress,
@@ -484,30 +438,61 @@ export default class UniswapV3BabyStepsStrategy {
       // Capture quoted amounts from route
       const quotedAmountIn = routeResult.amountIn;
       const quotedAmountOut = routeResult.amountOut;
-      const amountIn = quotedAmountIn; // For Permit2, we always need the input amount (what we're spending)
+
+      // Create signer for Permit2 signature
+      const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
+      if (!automationPrivateKey) {
+        throw new Error('AUTOMATION_PRIVATE_KEY environment variable is required for Permit2 signatures');
+      }
+      const signer = new ethers.Wallet(automationPrivateKey, this.provider);
+
+      // Get Universal Router address for Permit2 spender
+      const addresses = getPlatformAddresses(this.chainId, 'uniswapV3');
+      const universalRouterAddress = addresses.universalRouterAddress;
+
+      // Get or track nonce for this token
+      // For batched swaps, we increment nonces to avoid collisions
+      let nonce;
+      if (nonceTracker && nonceTracker.has(tokenInAddress)) {
+        // Use tracked nonce (already incremented from previous swap with this token)
+        nonce = nonceTracker.get(tokenInAddress);
+      } else {
+        // Fetch current nonce from Permit2 contract
+        nonce = await getPermit2Nonce(
+          this.provider,
+          recipient,
+          tokenInAddress,
+          universalRouterAddress
+        );
+      }
+
+      // Update tracker with next nonce for this token
+      if (nonceTracker) {
+        nonceTracker.set(tokenInAddress, nonce + 1);
+      }
+
+      // Calculate deadline (30 minutes from now)
+      const deadline = Math.floor(Date.now() / 1000) + 1800;
 
       // Generate Permit2 signature
-      const { signature, nonce: usedNonce, deadline } = await generatePermit2Signature({
-        wallet: executorWallet,
-        vaultAddress: vault.address,
-        tokenAddress: tokenInAddress,
-        amount: amountIn,
-        universalRouterAddress: universalRouterAddress,
-        chainId: this.chainId,
-        provider: this.provider,
-        deadlineMinutes: Math.floor(this.parent.config.strategyProperties.transactionDeadlineSeconds / 60),
-        nonce: nonce
-      });
+      const { signature } = await generatePermit2Signature(
+        signer,
+        this.chainId,
+        tokenInAddress,
+        quotedAmountIn,
+        universalRouterAddress,
+        nonce,
+        deadline
+      );
 
       // Generate swap transaction data with Permit2
       const swapData = await this.adapter.generateAlphaSwapData({
         route: routeResult.route,
-        tokenInAddress: tokenInAddress,
-        amountIn: amountIn,
         recipient: recipient,
-        walletAddress: vault.address,
+        tokenInAddress: tokenInAddress,
+        amountIn: quotedAmountIn,
         permit2Signature: signature,
-        permit2Nonce: usedNonce,
+        permit2Nonce: nonce,
         permit2Deadline: deadline
       });
 

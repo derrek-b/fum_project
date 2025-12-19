@@ -876,7 +876,7 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
           const expectedRouterAddress = adapter.addresses.universalRouterAddress;
 
           for (const tx of tokenPrepEvent.swapTransactions) {
-            // Verify transaction goes to UniversalRouter (Permit2 swaps)
+            // Verify transaction goes to UniversalRouter
             expect(tx.to).toBe(expectedRouterAddress);
 
             expect(tx.data).toBeDefined();
@@ -885,14 +885,14 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
 
             console.log(`   ✅ Swap transaction verified: universalRouter=${tx.to}`);
           }
-          console.log(`   Generated ${tokenPrepEvent.swapTransactions.length} Permit2 swap transaction(s)`);
+          console.log(`   Generated ${tokenPrepEvent.swapTransactions.length} swap transaction(s)`);
         }
 
-        // Test approval transactions - should be empty with Permit2
+        // Test approval transactions - token approvals are handled during vault setup
         if (tokenPrepEvent.preparationResult === 'swaps_generated') {
-          // Permit2 swaps don't need separate approval transactions (uses signatures instead)
+          // No separate approval transactions needed - approvals done during vault initialization
           expect(tokenPrepEvent.swapTransactions.length).toBeGreaterThan(0);
-          console.log(`   ✅ No separate approval transactions needed with Permit2`);
+          console.log(`   ✅ Swap transactions generated (approvals handled during vault setup)`);
         }
 
         // 2020 scenario specific tests - should NOT use non-aligned tokens (there are none)
@@ -915,13 +915,13 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
       // Test 14: Verify BatchTransactionExecuted event for token swaps (if any occurred)
       console.log('Testing BatchTransactionExecuted event for token swaps...');
 
-      // Find batch transaction events for swaps (Permit2 doesn't need separate approvals)
+      // Find batch transaction events for swaps
       const swapBatchEvents = batchTransactionEvents.filter(event => event.operationType === 'deficit covering swaps');
 
-      // Should have swap batch transactions when swaps were generated (no separate approvals with Permit2)
+      // Should have swap batch transactions when swaps were generated
       expect(swapBatchEvents.length).toBeGreaterThan(0);
 
-      // Test the most recent swap batch event (Permit2 swaps don't need separate approval batches)
+      // Test the most recent swap batch event
       const swapBatchEvent = swapBatchEvents[swapBatchEvents.length - 1];
       expect(swapBatchEvent.vaultAddress).toBe(vault.address);
       expect(swapBatchEvent.strategyId).toBe(vault.strategy.strategyId);
@@ -932,7 +932,7 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
       expect(swapBatchEvent.gasUsed).toBeDefined();
       expect(swapBatchEvent.gasEstimated).toBeDefined();
 
-      console.log(`✅ BatchTransactionExecuted event verified for Permit2 swaps:`);
+      console.log(`✅ BatchTransactionExecuted event verified for swaps:`);
       console.log(`   Swap transactions: ${swapBatchEvent.transactionCount}`);
       console.log(`   Gas used: ${swapBatchEvent.gasUsed} (estimated: ${swapBatchEvent.gasEstimated})`);
 
@@ -1287,13 +1287,16 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
 
       console.log(`✅ Emergency exit baseline properly cleaned up for vault ${vault.address}`);
 
-      // Step 11: Verify Permit2 approvals were set for ALL vault tokens
-      console.log('\n🔐 Step 11: Verifying Permit2 approvals...');
+      // Step 11: Verify token approvals were set for ALL vault tokens
+      console.log('\n🔐 Step 11: Verifying token approvals...');
 
-      const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+      // Get approval target from the adapter (platform-agnostic)
+      const adapter = service.adapters.get('uniswapV3');
+      const approvalTarget = adapter.getApprovalTarget();
       const vaultTokenSymbols = ['USDC', 'WETH']; // Hardcoded tokens for 2020 test
 
-      console.log(`   Checking Permit2 approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+      console.log(`   Checking token approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+      console.log(`   Approval target: ${approvalTarget}`);
 
       for (const tokenSymbol of vaultTokenSymbols) {
         const tokenData = service.tokens[tokenSymbol];
@@ -1306,14 +1309,14 @@ describe('AutomationService Initialization - 1 Vault (2AP/0NP/2AT/0NT)', () => {
           service.provider
         );
 
-        const allowance = await tokenContract.allowance(vault.address, PERMIT2_ADDRESS);
+        const allowance = await tokenContract.allowance(vault.address, approvalTarget);
         const isApproved = allowance.gte(ethers.constants.MaxUint256.div(2));
 
         expect(isApproved).toBe(true);
-        console.log(`   ✅ ${tokenSymbol}: Permit2 approval = ${allowance.toString()}`);
+        console.log(`   ✅ ${tokenSymbol}: token approval = ${allowance.toString()}`);
       }
 
-      console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have Permit2 approvals set`);
+      console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have token approvals set`);
 
       // Clean up subscriptions
       unsubscribe();

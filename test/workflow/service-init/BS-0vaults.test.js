@@ -262,8 +262,6 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults', () => {
         expect(uniswapAdapter.alphaRouter.provider).toBe(service.provider); // AlphaRouter uses same provider
       }
 
-      expect(uniswapAdapter.provider).toBe(service.provider); // Adapter uses service provider
-
       // Test 11a: Verify adapter cache was passed to VaultDataService
       expect(service.vaultDataService.adapters).toBeDefined();
       expect(service.vaultDataService.adapters).toBeInstanceOf(Map);

@@ -15,9 +15,6 @@ import { retryExternalService } from '../RetryHelper.js';
 import ERC20ABI from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import BabyStepsStrategyFactory from './babySteps/BabyStepsStrategyFactory.js';
 
-// Permit2 address is a constant (same on all chains)
-const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
-
 /**
  * @class BabyStepsStrategy
  * @memberof module:BabyStepsStrategy
@@ -643,7 +640,7 @@ class BabyStepsStrategy extends StrategyBase {
         if (bufferSwaps.swaps.length > 0) {
           this.log(`Executing ${bufferSwaps.swaps.length} buffer swaps to ensure sufficient balances`);
 
-          // Execute swaps (no approvals needed with Permit2)
+          // Execute swaps (tokens pre-approved to platform router)
           const txResult = await this.executeBatchTransactions(vault, bufferSwaps.swaps, 'buffer swaps', 'swap');
 
           // Extract actual swap amounts from receipt
@@ -1033,7 +1030,7 @@ class BabyStepsStrategy extends StrategyBase {
         if (bufferSwaps.swaps.length > 0) {
           this.log(`Executing ${bufferSwaps.swaps.length} buffer swaps to ensure sufficient balances`);
 
-          // Execute swaps (no approvals needed with Permit2)
+          // Execute swaps (tokens pre-approved to platform router)
           const txResult = await this.executeBatchTransactions(vault, bufferSwaps.swaps, 'buffer swaps', 'swap');
 
           // Extract actual swap amounts from receipt
@@ -1295,10 +1292,9 @@ class BabyStepsStrategy extends StrategyBase {
       const swapTransactions = [];
       const swapMetadata = [];
 
-      // Set up nonce tracking for Permit2
-      const tokenNonces = new Map();
-      const PERMIT2_ABI = ['function allowance(address user, address token, address spender) external view returns (uint160 amount, uint48 expiration, uint48 nonce)'];
-      const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, PERMIT2_ABI, this.provider);
+      // Create nonce tracker for batched deficit swaps
+      // When multiple swaps use the same input token, we need to track and increment nonces
+      const nonceTracker = new Map();
 
       // Track remaining deficits and balances
       let remainingToken0Deficit = token0Deficit;
@@ -1326,15 +1322,6 @@ class BabyStepsStrategy extends StrategyBase {
 
         // Handle token0 deficit first
         if (!this.isDeficitEffectivelyCovered(remainingToken0Deficit, token0Deficit) && remainingBalances[tokenSymbol] > 0n) {
-          // Get or fetch nonce for tokenIn
-          let swapNonce;
-          if (!tokenNonces.has(tokenData.address)) {
-            const allowanceData = await permit2Contract.allowance(vault.address, tokenData.address, handler.adapter.addresses.universalRouterAddress);
-            swapNonce = allowanceData.nonce;
-          } else {
-            swapNonce = tokenNonces.get(tokenData.address);
-          }
-
           const swapResult = await this.handleDeficitSwaps(
             handler,
             tokenData,
@@ -1343,12 +1330,9 @@ class BabyStepsStrategy extends StrategyBase {
             remainingToken0Deficit,
             vault.address,
             vault.strategy.parameters.maxSlippage,
-            swapNonce,
-            vault
+            vault,
+            nonceTracker
           );
-
-          // Increment nonce for next use
-          tokenNonces.set(tokenData.address, swapNonce + 1);
 
           if (swapResult.transaction) {
             swapTransactions.push(swapResult.transaction);
@@ -1370,15 +1354,6 @@ class BabyStepsStrategy extends StrategyBase {
 
         // Handle token1 deficit if non-aligned tokens remain
         if (!this.isDeficitEffectivelyCovered(remainingToken1Deficit, token1Deficit) && remainingBalances[tokenSymbol] > 0n) {
-          // Get or fetch nonce for tokenIn
-          let swapNonce;
-          if (!tokenNonces.has(tokenData.address)) {
-            const allowanceData = await permit2Contract.allowance(vault.address, tokenData.address, handler.adapter.addresses.universalRouterAddress);
-            swapNonce = allowanceData.nonce;
-          } else {
-            swapNonce = tokenNonces.get(tokenData.address);
-          }
-
           const swapResult = await this.handleDeficitSwaps(
             handler,
             tokenData,
@@ -1387,12 +1362,9 @@ class BabyStepsStrategy extends StrategyBase {
             remainingToken1Deficit,
             vault.address,
             vault.strategy.parameters.maxSlippage,
-            swapNonce,
-            vault
+            vault,
+            nonceTracker
           );
-
-          // Increment nonce for next use
-          tokenNonces.set(tokenData.address, swapNonce + 1);
 
           if (swapResult.transaction) {
             swapTransactions.push(swapResult.transaction);
@@ -1420,15 +1392,6 @@ class BabyStepsStrategy extends StrategyBase {
 
         // Use excess token1 to cover token0 deficit
         if (!this.isDeficitEffectivelyCovered(remainingToken0Deficit, token0Deficit) && excessToken1 > 0n) {
-          // Get or fetch nonce for tokenIn
-          let swapNonce;
-          if (!tokenNonces.has(token1Data.address)) {
-            const allowanceData = await permit2Contract.allowance(vault.address, token1Data.address, handler.adapter.addresses.universalRouterAddress);
-            swapNonce = allowanceData.nonce;
-          } else {
-            swapNonce = tokenNonces.get(token1Data.address);
-          }
-
           const swapResult = await this.handleDeficitSwaps(
             handler,
             token1Data,
@@ -1437,12 +1400,9 @@ class BabyStepsStrategy extends StrategyBase {
             remainingToken0Deficit,
             vault.address,
             vault.strategy.parameters.maxSlippage,
-            swapNonce,
-            vault
+            vault,
+            nonceTracker
           );
-
-          // Increment nonce for next use
-          tokenNonces.set(token1Data.address, swapNonce + 1);
 
           if (swapResult.transaction) {
             swapTransactions.push(swapResult.transaction);
@@ -1463,15 +1423,6 @@ class BabyStepsStrategy extends StrategyBase {
 
         // Use excess token0 to cover token1 deficit
         if (!this.isDeficitEffectivelyCovered(remainingToken1Deficit, token1Deficit) && excessToken0 > 0n) {
-          // Get or fetch nonce for tokenIn
-          let swapNonce;
-          if (!tokenNonces.has(token0Data.address)) {
-            const allowanceData = await permit2Contract.allowance(vault.address, token0Data.address, handler.adapter.addresses.universalRouterAddress);
-            swapNonce = allowanceData.nonce;
-          } else {
-            swapNonce = tokenNonces.get(token0Data.address);
-          }
-
           const swapResult = await this.handleDeficitSwaps(
             handler,
             token0Data,
@@ -1480,12 +1431,9 @@ class BabyStepsStrategy extends StrategyBase {
             remainingToken1Deficit,
             vault.address,
             vault.strategy.parameters.maxSlippage,
-            swapNonce,
-            vault
+            vault,
+            nonceTracker
           );
-
-          // Increment nonce for next use
-          tokenNonces.set(token0Data.address, swapNonce + 1);
 
           if (swapResult.transaction) {
             swapTransactions.push(swapResult.transaction);
@@ -1536,7 +1484,7 @@ class BabyStepsStrategy extends StrategyBase {
           timestamp: Date.now(),
           log: {
             level: 'info',
-            message: `Generated ${swapTransactions.length} swap transactions with Permit2 to prepare tokens`,
+            message: `Generated ${swapTransactions.length} swap transactions to prepare tokens`,
             includeData: false
           }
         });
@@ -2872,12 +2820,11 @@ class BabyStepsStrategy extends StrategyBase {
    * @param {bigint} targetDeficit - Target deficit amount in output token
    * @param {string} recipient - Recipient address (vault address)
    * @param {number} slippageTolerance - Slippage tolerance percentage from strategy
-   * @param {number} nonce - Permit2 nonce for this swap
    * @param {Object} vault - Vault object
    * @returns {Promise<Object>} Swap result with transaction data or null
    * @since 1.0.0
    */
-  async handleDeficitSwaps(handler, tokenIn, tokenOut, availableAmount, targetDeficit, recipient, slippageTolerance, nonce, vault) {
+  async handleDeficitSwaps(handler, tokenIn, tokenOut, availableAmount, targetDeficit, recipient, slippageTolerance, vault, nonceTracker = null) {
     try {
       // Get adapter from handler
       const adapter = handler.adapter;
@@ -2916,7 +2863,7 @@ class BabyStepsStrategy extends StrategyBase {
         decidedAmountOut = BigInt(fallbackQuote.amountOut);
       }
 
-      // Generate swap transaction using platform handler with Permit2
+      // Generate swap transaction using platform handler
       // Always use EXACT_INPUT (isAmountIn: true) for execution since we're specifying the input amount
       const swapResult = await handler.generateSwapTransaction(
         tokenIn.address,
@@ -2925,8 +2872,8 @@ class BabyStepsStrategy extends StrategyBase {
         true,
         recipient,
         slippageTolerance,
-        nonce,
-        vault
+        vault,
+        nonceTracker
       );
 
       return {

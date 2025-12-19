@@ -206,13 +206,13 @@ class VaultDataService {
         throw new Error(`Failed to load strategy data for vault ${normalizedAddress} (strategy: ${strategyAddress}): ${error.message}`);
       }
 
-      // 4. Get token balances and positions in parallel
+      // 5. Get token balances and positions in parallel
       const [tokenBalances, positions] = await Promise.all([
         this.fetchTokenBalances(normalizedAddress, getAllTokenSymbols()),
         this.fetchPositions(vaultContract.address)
       ]);
 
-      // 5. Assemble vault data
+      // 6. Assemble vault data
       const vault = this.assembleVaultData({
         address: normalizedAddress,
         owner: vaultInfo.owner,

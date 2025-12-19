@@ -16,9 +16,6 @@ import { retryWithBackoff, retryBatchOperations } from './RetryHelper.js';
 import { getChainConfig, AdapterFactory, getTokensByChain, getVaultContract } from 'fum_library';
 import { getContract, getVaultFactory, getAuthorizedVaults } from 'fum_library/blockchain/contracts';
 import { isNativeToken, getWethAddress } from 'fum_library/helpers/tokenHelpers';
-// Permit2 canonical address - same on all chains
-// See: https://github.com/Uniswap/permit2#deployments
-const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import axios from 'axios';
 import fs from 'fs/promises';
@@ -665,7 +662,7 @@ class AutomationService {
     let monitoringStarted = false;
 
     // Lock vault at the START of setup to prevent recovery mechanism from running in parallel
-    // This must happen before any async operations (Permit2 approvals, initialization, etc.)
+    // This must happen before any async operations (token approvals, initialization, etc.)
     this.lockVault(vaultAddress);
 
     try {
@@ -694,10 +691,10 @@ class AutomationService {
         this.log(`📊 Captured baseline for vault ${vaultAddress}: $${baselineAssets.totalVaultValue.toFixed(2)}`);
       }
 
-      // Step 2: Setup Permit2 approvals for gasless operations (BEFORE initialization)
-      const permit2Success = await this.setupPermit2Approvals(vault);
-      if (!permit2Success) {
-        throw new Error('Permit2 approval setup failed');
+      // Step 2: Setup token approvals for platform router (BEFORE initialization)
+      const approvalSuccess = await this.setupTokenApprovals(vault);
+      if (!approvalSuccess) {
+        throw new Error('Token approval setup failed');
       }
 
       // Step 2.5: Wrap any native ETH to WETH (V3 requires WETH, not native ETH)
@@ -757,13 +754,24 @@ class AutomationService {
   }
 
   /**
-   * Setup Permit2 approvals for all tokens in a vault (both vault tokens and target tokens)
+   * Setup token approvals for all tokens in a vault (both vault tokens and target tokens)
+   * Approvals are set to the platform's designated router (e.g., Universal Router for Uniswap)
    * @memberof module:AutomationService~AutomationService
    * @param {Object} vault - Vault object with tokens and strategy
    * @returns {Promise<boolean>} True if setup succeeded, false otherwise
    * @since 1.0.0
    */
-  async setupPermit2Approvals(vault) {
+  async setupTokenApprovals(vault) {
+    // Get the platform adapter to determine approval target
+    const platformId = vault.positions && Object.values(vault.positions)[0]?.platformId || 'uniswapV3';
+    const adapter = this.adapters.get(platformId);
+    if (!adapter) {
+      throw new Error(`No adapter found for platform: ${platformId}`);
+    }
+
+    // Get approval target from adapter (platform-agnostic)
+    const approvalTarget = adapter.getApprovalTarget();
+
     // Get all unique tokens: vault tokens + target tokens + position tokens
     const vaultTokenSymbols = Object.keys(vault.tokens);
     const targetTokenSymbols = vault.targetTokens;
@@ -780,19 +788,19 @@ class AutomationService {
     const allTokenSymbols = [...new Set([...vaultTokenSymbols, ...targetTokenSymbols, ...positionTokenSymbols])];
 
     if (allTokenSymbols.length === 0) {
-      this.log(`No tokens found for vault ${vault.address}, skipping Permit2 setup`);
+      this.log(`No tokens found for vault ${vault.address}, skipping approval setup`);
       throw new Error('Vault has no target tokens set');
     }
 
-    this.log(`Setting up Permit2 approvals for ${allTokenSymbols.length} tokens in vault ${vault.address}`);
+    this.log(`Setting up token approvals for ${allTokenSymbols.length} tokens in vault ${vault.address} to ${approvalTarget}`);
 
     const approvalsNeeded = [];
 
     // Check each token
     for (const tokenSymbol of allTokenSymbols) {
-      // Skip native tokens - they don't need Permit2 approval
+      // Skip native tokens - they don't need approval
       if (isNativeToken(tokenSymbol)) {
-        this.log(`Skipping Permit2 approval for native token ${tokenSymbol}`);
+        this.log(`Skipping approval for native token ${tokenSymbol}`);
         continue;
       }
 
@@ -802,11 +810,12 @@ class AutomationService {
         continue;
       }
 
-      // Check if Permit2 approval already exists
-      const needsApproval = await this.checkPermit2Approval(
+      // Check if approval already exists
+      const needsApproval = await this.checkTokenApproval(
         vault.address,
         tokenData.address,
-        tokenSymbol
+        tokenSymbol,
+        approvalTarget
       );
 
       if (needsApproval) {
@@ -816,30 +825,31 @@ class AutomationService {
 
     // Execute approvals if needed
     if (approvalsNeeded.length > 0) {
-      this.log(`Executing ${approvalsNeeded.length} Permit2 approvals for vault ${vault.address}`);
+      this.log(`Executing ${approvalsNeeded.length} token approvals for vault ${vault.address}`);
 
       for (const { tokenAddress, tokenSymbol } of approvalsNeeded) {
-        await this.executePermit2Approval(vault.address, tokenAddress, tokenSymbol);
+        await this.executeTokenApproval(vault.address, tokenAddress, tokenSymbol, approvalTarget);
       }
 
-      this.log(`✅ Permit2 approvals complete for vault ${vault.address}`);
+      this.log(`Token approvals complete for vault ${vault.address}`);
     } else {
-      this.log(`✅ All Permit2 approvals already in place for vault ${vault.address}`);
+      this.log(`All token approvals already in place for vault ${vault.address}`);
     }
 
     return true;
   }
 
   /**
-   * Check if a token has Permit2 approval from vault
+   * Check if a token has approval from vault to spender
    * @memberof module:AutomationService~AutomationService
    * @param {string} vaultAddress - Vault address
    * @param {string} tokenAddress - Token address
    * @param {string} tokenSymbol - Token symbol for logging
+   * @param {string} spender - Spender address to check approval for
    * @returns {Promise<boolean>} True if approval needed, false if already approved
    * @since 1.0.0
    */
-  async checkPermit2Approval(vaultAddress, tokenAddress, tokenSymbol) {
+  async checkTokenApproval(vaultAddress, tokenAddress, tokenSymbol, spender) {
     try {
       const tokenContract = new ethers.Contract(
         tokenAddress,
@@ -847,32 +857,33 @@ class AutomationService {
         this.provider
       );
 
-      const currentAllowance = await tokenContract.allowance(vaultAddress, PERMIT2_ADDRESS);
+      const currentAllowance = await tokenContract.allowance(vaultAddress, spender);
 
       // Check if allowance is at least half of max (to handle decreasing allowances)
       const needsApproval = currentAllowance.lt(ethers.constants.MaxUint256.div(2));
 
-      this.log(`${tokenSymbol} Permit2 approval for vault ${vaultAddress}: ${needsApproval ? 'NEEDED' : 'EXISTS'} (current: ${currentAllowance.toString()})`);
+      this.log(`${tokenSymbol} approval for vault ${vaultAddress}: ${needsApproval ? 'NEEDED' : 'EXISTS'} (current: ${currentAllowance.toString()})`);
 
       return needsApproval;
     } catch (error) {
-      this.log(`Error checking Permit2 approval for ${tokenSymbol}: ${error.message}`);
+      this.log(`Error checking token approval for ${tokenSymbol}: ${error.message}`);
       return true; // Assume approval needed if check fails
     }
   }
 
   /**
-   * Execute Permit2 approval transaction for a token
+   * Execute token approval transaction
    * @memberof module:AutomationService~AutomationService
    * @param {string} vaultAddress - Vault address
    * @param {string} tokenAddress - Token address to approve
    * @param {string} tokenSymbol - Token symbol for logging
+   * @param {string} spender - Spender address to approve
    * @returns {Promise<void>}
    * @since 1.0.0
    */
-  async executePermit2Approval(vaultAddress, tokenAddress, tokenSymbol) {
+  async executeTokenApproval(vaultAddress, tokenAddress, tokenSymbol, spender) {
     try {
-      this.log(`Executing Permit2 approval for ${tokenSymbol} in vault ${vaultAddress}`);
+      this.log(`Executing token approval for ${tokenSymbol} in vault ${vaultAddress} to ${spender}`);
 
       // Get vault contract with signer
       const { getVaultContract } = await import('fum_library');
@@ -894,7 +905,7 @@ class AutomationService {
       );
 
       const approvalData = tokenContract.interface.encodeFunctionData('approve', [
-        PERMIT2_ADDRESS,
+        spender,
         ethers.constants.MaxUint256
       ]);
 
@@ -902,23 +913,24 @@ class AutomationService {
       const tx = await vaultContractWithSigner.approve([tokenAddress], [approvalData]);
       const receipt = await tx.wait();
 
-      this.log(`✅ Permit2 approval successful for ${tokenSymbol} in vault ${vaultAddress}, tx: ${receipt.transactionHash}`);
+      this.log(`Token approval successful for ${tokenSymbol} in vault ${vaultAddress}, tx: ${receipt.transactionHash}`);
 
       // Emit event for tracking
-      this.eventManager.emit('Permit2ApprovalExecuted', {
+      this.eventManager.emit('TokenApprovalExecuted', {
         vaultAddress,
         tokenAddress,
         tokenSymbol,
+        spender,
         transactionHash: receipt.transactionHash,
         log: {
           level: 'info',
-          message: `Permit2 approval granted for ${tokenSymbol} in vault ${vaultAddress}`,
+          message: `Token approval granted for ${tokenSymbol} in vault ${vaultAddress} to ${spender}`,
           includeData: false
         }
       });
 
     } catch (error) {
-      this.log(`❌ Error executing Permit2 approval for ${tokenSymbol}: ${error.message}`);
+      this.log(`Error executing token approval for ${tokenSymbol}: ${error.message}`);
       throw error; // Re-throw to be handled by caller
     }
   }

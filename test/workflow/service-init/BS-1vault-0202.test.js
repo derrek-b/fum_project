@@ -978,7 +978,7 @@ describe('AutomationService Initialization - 1 Vault (0AP/2NP/0AT/2NT)', () => {
       expect(event5050.conversionResult).toBe('swaps_generated');
       expect(event5050.swapTransactions.length).toBe(2);
 
-      // Verify swaps are to Universal Router (Permit2 enabled)
+      // Verify swaps are to Universal Router
       const universalRouter = '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD';
       event5050.swapTransactions.forEach(swap => {
         expect(swap.to).toBe(universalRouter);
@@ -1207,13 +1207,15 @@ describe('AutomationService Initialization - 1 Vault (0AP/2NP/0AT/2NT)', () => {
 
       console.log(`✅ Emergency exit baseline properly cleaned up for vault ${vault.address}`);
 
-      // Step 11: Verify Permit2 approvals were set for ALL vault tokens
-      console.log('\n🔐 Step 11: Verifying Permit2 approvals...');
+      // Step 11: Verify token approvals were set for ALL vault tokens
+      console.log('\n🔐 Step 11: Verifying token approvals...');
 
-      const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+      // Get approval target from the adapter (platform-agnostic)
+      const approvalTarget = adapter.getApprovalTarget();
       const vaultTokenSymbols = ['WBTC', 'USD₮0', 'WETH']; // Hardcoded tokens for 0202 test
 
-      console.log(`   Checking Permit2 approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+      console.log(`   Checking token approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+      console.log(`   Approval target: ${approvalTarget}`);
 
       for (const tokenSymbol of vaultTokenSymbols) {
         const tokenData = service.tokens[tokenSymbol];
@@ -1226,14 +1228,14 @@ describe('AutomationService Initialization - 1 Vault (0AP/2NP/0AT/2NT)', () => {
           service.provider
         );
 
-        const allowance = await tokenContract.allowance(vault.address, PERMIT2_ADDRESS);
+        const allowance = await tokenContract.allowance(vault.address, approvalTarget);
         const isApproved = allowance.gte(ethers.constants.MaxUint256.div(2));
 
         expect(isApproved).toBe(true);
-        console.log(`   ✅ ${tokenSymbol}: Permit2 approval = ${allowance.toString()}`);
+        console.log(`   ✅ ${tokenSymbol}: token approval = ${allowance.toString()}`);
       }
 
-      console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have Permit2 approvals set`);
+      console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have token approvals set`);
 
       // Clean up subscriptions
       unsubscribeDataFetch();

@@ -298,16 +298,19 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
     console.log(`   Tick difference: ${tickDifference}`);
   });
 
-  it('should set up Permit2 approvals for all vault tokens', async () => {
-    console.log('\n🔐 Verifying Permit2 approvals...');
+  it('should set up token approvals for Universal Router for all vault tokens', async () => {
+    console.log('\n🔐 Verifying token approvals...');
 
-    const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+    // Get approval target from the adapter (platform-agnostic)
+    const adapter = service.adapters.get('uniswapV3');
+    const approvalTarget = adapter.getApprovalTarget();
     const vaultTokenSymbols = ['USDC', 'WBTC', 'WETH']; // Hardcoded tokens for 1111 test
 
     const vault = await service.vaultDataService.getVault(testVault.vaultAddress);
     expect(vault).not.toBeNull();
 
-    console.log(`   Checking Permit2 approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+    console.log(`   Checking token approvals for ${vaultTokenSymbols.length} vault tokens: ${vaultTokenSymbols.join(', ')}`);
+    console.log(`   Approval target: ${approvalTarget}`);
 
     for (const tokenSymbol of vaultTokenSymbols) {
       const tokenData = service.tokens[tokenSymbol];
@@ -320,14 +323,14 @@ describe('Vault Authorization Workflow - 1111 Configuration', () => {
         service.provider
       );
 
-      const allowance = await tokenContract.allowance(vault.address, PERMIT2_ADDRESS);
+      const allowance = await tokenContract.allowance(vault.address, approvalTarget);
       const isApproved = allowance.gte(ethers.constants.MaxUint256.div(2));
 
       expect(isApproved).toBe(true);
-      console.log(`   ✅ ${tokenSymbol}: Permit2 approval = ${allowance.toString()}`);
+      console.log(`   ✅ ${tokenSymbol}: token approval = ${allowance.toString()}`);
     }
 
-    console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have Permit2 approvals set`);
+    console.log(`✅ All ${vaultTokenSymbols.length} vault tokens have token approvals set`);
   });
 
   it('should emit VaultBaselineCaptured event before vault initialization', async () => {
