@@ -17,6 +17,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Empty blacklist template for cleanup
+ */
+const EMPTY_BLACKLIST = {
+  version: "1.0",
+  blacklisted: {}
+};
+
+/**
  * Connect to the shared Hardhat instance and revert to base snapshot
  * @returns {Promise<Object>} Shared Hardhat connection with helpers
  */
@@ -187,8 +195,28 @@ export async function setupTestBlockchain(options = {}) {
 }
 
 /**
+ * Clear blacklist files to ensure clean state for next test
+ * Resets both data/ and test/data/ blacklist files
+ */
+export async function clearBlacklist() {
+  const blacklistPaths = [
+    path.join(__dirname, '../../data/.vault-blacklist.json'),
+    path.join(__dirname, '../data/.vault-blacklist.json')
+  ];
+
+  for (const blacklistPath of blacklistPaths) {
+    try {
+      await fs.writeFile(blacklistPath, JSON.stringify(EMPTY_BLACKLIST, null, 2));
+    } catch (err) {
+      // File might not exist or directory missing, that's OK
+    }
+  }
+}
+
+/**
  * Clean up test blockchain environment
- * Only cleans up WebSocket - does NOT stop Hardhat (it's shared)
+ * Cleans up WebSocket and resets blacklist files
+ * Does NOT stop Hardhat (it's shared)
  *
  * @param {Object} testEnv - Test environment from setupTestBlockchain()
  */
@@ -196,4 +224,7 @@ export async function cleanupTestBlockchain(testEnv) {
   if (testEnv?.hardhatServer?.cleanup) {
     await testEnv.hardhatServer.cleanup();
   }
+
+  // Clear blacklist files for next test run
+  await clearBlacklist();
 }

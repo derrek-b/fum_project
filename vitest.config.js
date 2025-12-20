@@ -12,6 +12,7 @@ export default defineConfig({
     include: ['./test/**/*.test.js'],
     testTimeout: 30000, // 30 seconds for integration tests
     hookTimeout: 30000, // 30 seconds for setup/teardown
+    teardownTimeout: 5000, // 5 seconds for teardown (reduces hanging wait)
     // Run tests sequentially - workflow tests use Hardhat forks which are resource-intensive
     // and cannot run in parallel without resource contention issues
     fileParallelism: false,

@@ -10,7 +10,7 @@ import { ethers } from 'ethers';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import AutomationService from '../src/AutomationService.js';
+import AutomationService from '../src/core/AutomationService.js';
 import contracts from 'fum_library/artifacts/contracts';
 import { initFumLibrary } from 'fum_library';
 
@@ -113,8 +113,8 @@ async function main() {
     console.log(`  Retry Interval: ${config.retryIntervalMs}ms (${config.retryIntervalMs / 1000}s)`);
     console.log(`  Max Failure Duration: ${config.maxFailureDurationMs}ms (${config.maxFailureDurationMs / (1000 * 60 * 60)}h)\n`);
 
-    // Get contract addresses from fum_library
-    console.log(`Loading contract addresses from fum_library for chain ${config.chainId}...`);
+    // Verify contract addresses exist in fum_library for this chain
+    console.log(`Checking contract addresses in fum_library for chain ${config.chainId}...`);
 
     const vaultFactoryAddress = contracts.VaultFactory.addresses[config.chainId];
     const bobStrategyAddress = contracts.bob.addresses[config.chainId];
@@ -134,7 +134,6 @@ async function main() {
       automationServiceAddress: config.executorAddress,
       chainId: config.chainId,
       wsUrl: config.wsUrl,
-      bobStrategyAddress,
       blacklistFilePath: config.blacklistFilePath,
       trackingDataDir: config.trackingDataDir,
       ssePort: config.ssePort,
@@ -143,7 +142,6 @@ async function main() {
     });
 
     try {
-      await service.initialize(vaultFactoryAddress);
       await service.start();
       console.log("\n========================================");
       console.log("Automation Service Running");
