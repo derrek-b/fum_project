@@ -5,7 +5,8 @@
  */
 
 import { ethers } from 'ethers';
-import { getAdaptersForChain, getAllTokens, getContract } from 'fum_library';
+import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
+import { retryRpcCall } from '../utils/RetryHelper.js';
 
 import EventManager from './EventManager.js';
 import VaultDataService from './VaultDataService.js';
@@ -144,6 +145,135 @@ class AutomationService {
 
   //#endregion
 
+  //#region Service Lifecycle
+
+  /**
+   * Start the automation service
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this.isRunning) {
+      this.log('Service is already running');
+      return;
+    }
+
+    this.log('Starting AutomationService...');
+
+    try {
+      // Phase 1: Core service initialization
+      await this.initialize();
+
+      // Phase 2: Load blacklist from disk
+      await this.loadBlacklist();
+
+      // Phase 3: Discover and load authorized vaults
+      await this.loadAuthorizedVaults();
+
+      // Phase 4: Initialize tracker
+      await this.tracker.initialize();
+
+      // Phase 5: Start SSE broadcaster
+      await this.sseBroadcaster.start();
+
+      // Phase 6: Subscribe to global blockchain events
+      this.subscribeToAuthorizationEvents();
+      this.subscribeToStrategyParameterEvents();
+
+      // Phase 7: Start failed vault retry timer
+      this.startFailedVaultRetryTimer();
+
+      this.isRunning = true;
+
+      this.eventManager.emit('ServiceStarted', {
+        chainId: this.chainId,
+        automationServiceAddress: this.automationServiceAddress,
+        adaptersLoaded: this.adapters.size,
+        tokensLoaded: Object.keys(this.tokens).length,
+        timestamp: Date.now(),
+        log: {
+          level: 'info',
+          message: `AutomationService started on chain ${this.chainId}`
+        }
+      });
+
+      this.log('AutomationService started successfully');
+
+    } catch (error) {
+      console.error('Failed to start AutomationService:', error);
+
+      this.eventManager.emit('ServiceStartFailed', {
+        error: error.message,
+        timestamp: Date.now(),
+        log: {
+          level: 'error',
+          message: `Failed to start AutomationService: ${error.message}`
+        }
+      });
+
+      // Force cleanup of any resources allocated during partial initialization
+      await this.stop(true);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Stop the automation service
+   * @param {boolean} [force=false] - Force cleanup even if service isn't fully running (for initialization failures)
+   * @returns {Promise<void>}
+   */
+  async stop(force = false) {
+    if (!this.isRunning && !force) {
+      this.log('Service is not running');
+      return;
+    }
+
+    this.log(force ? 'Force stopping AutomationService...' : 'Stopping AutomationService...');
+    this.isShuttingDown = true;
+
+    // Disable event processing
+    this.eventManager.setEnabled(false);
+
+    // Stop failed vault retry timer
+    if (this.failedVaultRetryTimer) {
+      clearInterval(this.failedVaultRetryTimer);
+      this.failedVaultRetryTimer = null;
+    }
+
+    // Remove all event listeners
+    await this.eventManager.removeAllListeners();
+
+    // Stop SSE broadcaster
+    await this.sseBroadcaster.stop();
+
+    // Shutdown tracker (persists data)
+    await this.tracker.shutdown();
+
+    // Save blacklist - log error but don't block shutdown
+    try {
+      await this.saveBlacklist();
+    } catch (error) {
+      console.error('Failed to save blacklist during shutdown:', error);
+    }
+
+    // Close provider connection
+    if (this.provider) {
+      this.provider.removeAllListeners();
+      // Destroy WebSocket connection
+      if (typeof this.provider.destroy === 'function') {
+        await this.provider.destroy();
+      }
+      this.provider = null;
+    }
+
+    this.isRunning = false;
+    this.isShuttingDown = false;
+
+    this.log('AutomationService stopped');
+  }
+
+  //#endregion
+
   //#region Service Initialization
 
   /**
@@ -202,8 +332,13 @@ class AutomationService {
 
     this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
 
-    // Test connection
-    const network = await this.provider.getNetwork();
+    // Test connection with retry logic for transient network failures
+    const network = await retryRpcCall(
+      () => this.provider.getNetwork(),
+      'getNetwork',
+      { log: (msg) => this.log(msg) }
+    );
+
     if (network.chainId !== this.chainId) {
       throw new Error(`Provider chain ID (${network.chainId}) does not match config (${this.chainId})`);
     }
@@ -264,17 +399,19 @@ class AutomationService {
   /**
    * Initialize strategy contracts
    * @private
+   * @throws {Error} If strategy contracts cannot be loaded after retries
    */
   async initializeStrategyContracts() {
     this.log('Pre-initializing strategy contracts...');
 
-    // Load BabySteps (bob) strategy contract
-    try {
-      this.contracts.bobStrategy = await getContract('bob', this.provider);
-      this.log('Loaded bob strategy contract');
-    } catch (error) {
-      this.log(`Warning: Could not load bob strategy contract: ${error.message}`);
-    }
+    // Load BabySteps (bob) strategy contract with retry logic
+    // Failure is fatal - service cannot operate without strategy contracts
+    this.contracts.bobStrategy = await retryRpcCall(
+      () => getContract('bob', this.provider),
+      'getContract(bob)',
+      { log: (msg) => this.log(msg) }
+    );
+    this.log('Loaded bob strategy contract');
 
     // Future: Load other strategy contracts as needed
     // this.contracts.parrisStrategy = await getContract('parris', this.provider);
@@ -321,124 +458,6 @@ class AutomationService {
       strategy.serviceConfig = serviceConfig;
       this.log(`Updated dependencies for strategy: ${strategyId}`);
     }
-  }
-
-  //#endregion
-
-  //#region Service Lifecycle
-
-  /**
-   * Start the automation service
-   * @returns {Promise<void>}
-   */
-  async start() {
-    if (this.isRunning) {
-      this.log('Service is already running');
-      return;
-    }
-
-    this.log('Starting AutomationService...');
-
-    try {
-      // Phase 1: Core service initialization
-      await this.initialize();
-
-      // Phase 2: Load blacklist from disk
-      await this.loadBlacklist();
-
-      // Phase 3: Initialize tracker
-      await this.tracker.initialize();
-
-      // Phase 4: Start SSE broadcaster
-      await this.sseBroadcaster.start();
-
-      // Phase 5: Subscribe to global blockchain events
-      this.subscribeToAuthorizationEvents();
-      this.subscribeToStrategyParameterEvents();
-
-      // Phase 6: Start failed vault retry timer
-      this.startFailedVaultRetryTimer();
-
-      this.isRunning = true;
-
-      this.eventManager.emit('ServiceStarted', {
-        chainId: this.chainId,
-        automationServiceAddress: this.automationServiceAddress,
-        adaptersLoaded: this.adapters.size,
-        tokensLoaded: Object.keys(this.tokens).length,
-        timestamp: Date.now(),
-        log: {
-          level: 'info',
-          message: `AutomationService started on chain ${this.chainId}`
-        }
-      });
-
-      this.log('AutomationService started successfully');
-
-    } catch (error) {
-      console.error('Failed to start AutomationService:', error);
-
-      this.eventManager.emit('ServiceStartFailed', {
-        error: error.message,
-        timestamp: Date.now(),
-        log: {
-          level: 'error',
-          message: `Failed to start AutomationService: ${error.message}`
-        }
-      });
-
-      throw error;
-    }
-  }
-
-  /**
-   * Stop the automation service
-   * @returns {Promise<void>}
-   */
-  async stop() {
-    if (!this.isRunning) {
-      this.log('Service is not running');
-      return;
-    }
-
-    this.log('Stopping AutomationService...');
-    this.isShuttingDown = true;
-
-    // Disable event processing
-    this.eventManager.setEnabled(false);
-
-    // Stop failed vault retry timer
-    if (this.failedVaultRetryTimer) {
-      clearInterval(this.failedVaultRetryTimer);
-      this.failedVaultRetryTimer = null;
-    }
-
-    // Remove all event listeners
-    await this.eventManager.removeAllListeners();
-
-    // Stop SSE broadcaster
-    await this.sseBroadcaster.stop();
-
-    // Shutdown tracker (persists data)
-    await this.tracker.shutdown();
-
-    // Save blacklist
-    await this.saveBlacklist();
-
-    // Close provider connection
-    if (this.provider) {
-      this.provider.removeAllListeners();
-      // Destroy WebSocket connection
-      if (typeof this.provider.destroy === 'function') {
-        await this.provider.destroy();
-      }
-      this.provider = null;
-    }
-
-    this.isRunning = false;
-    this.isShuttingDown = false;
-
-    this.log('AutomationService stopped');
   }
 
   //#endregion
@@ -672,7 +691,7 @@ class AutomationService {
    * @param {string} vaultAddress - Vault address
    * @param {string} reason - Reason for blacklisting
    */
-  blacklistVault(vaultAddress, reason) {
+  async blacklistVault(vaultAddress, reason) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
 
     this.blacklistedVaults.set(normalizedAddress, {
@@ -690,15 +709,19 @@ class AutomationService {
       }
     });
 
-    // Persist blacklist
-    this.saveBlacklist();
+    // Persist blacklist - fatal if save fails
+    try {
+      await this.saveBlacklist();
+    } catch (error) {
+      this.handleFatalError(error);
+    }
   }
 
   /**
    * Remove vault from blacklist
    * @param {string} vaultAddress - Vault address
    */
-  unblacklistVault(vaultAddress) {
+  async unblacklistVault(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
 
     if (this.blacklistedVaults.delete(normalizedAddress)) {
@@ -710,8 +733,12 @@ class AutomationService {
         }
       });
 
-      // Persist blacklist
-      this.saveBlacklist();
+      // Persist blacklist - fatal if save fails
+      try {
+        await this.saveBlacklist();
+      } catch (error) {
+        this.handleFatalError(error);
+      }
     }
   }
 
@@ -740,10 +767,17 @@ class AutomationService {
   /**
    * Load blacklist from disk
    * @private
+   * @throws {Error} If directory doesn't exist or file is invalid/unreadable
    */
   async loadBlacklist() {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+
+    // Verify directory exists (deployment requirement)
+    const dir = path.dirname(this.blacklistFilePath);
+    await fs.access(dir); // Throws if directory doesn't exist
+
     try {
-      const fs = await import('fs/promises');
       const data = await fs.readFile(this.blacklistFilePath, 'utf-8');
       const blacklist = JSON.parse(data);
 
@@ -753,31 +787,181 @@ class AutomationService {
 
       this.log(`Loaded ${this.blacklistedVaults.size} blacklisted vault(s)`);
     } catch (error) {
-      // File doesn't exist or is invalid - start with empty blacklist
-      this.log('No existing blacklist found');
+      if (error.code === 'ENOENT') {
+        // First run - directory exists but file doesn't, create empty blacklist
+        this.log('No blacklist file found, creating empty blacklist');
+        await this.saveBlacklist();
+        return;
+      }
+      // All other errors (permissions, parse errors) - fail hard
+      throw error;
     }
   }
 
   /**
    * Save blacklist to disk
    * @private
+   * @throws {Error} If write fails (directory must exist via deployment)
    */
   async saveBlacklist() {
+    const fs = await import('fs/promises');
+    const data = JSON.stringify(this.getBlacklistData(), null, 2);
+    await fs.writeFile(this.blacklistFilePath, data, 'utf-8');
+    this.log('Blacklist saved');
+  }
+
+  //#endregion
+
+  //#region Vault Discovery
+
+  /**
+   * Discover and load all vaults authorized to this service
+   * @private
+   * @returns {Promise<Object>} Results summary
+   */
+  async loadAuthorizedVaults() {
+    this.log('Discovering authorized vaults...');
+
+    // Get all vaults that have authorized this executor
+    const authorizedVaultAddresses = await retryRpcCall(
+      () => getAuthorizedVaults(this.automationServiceAddress, this.provider),
+      'getAuthorizedVaults',
+      { log: (msg) => this.log(msg) }
+    );
+
+    this.log(`Found ${authorizedVaultAddresses.length} authorized vault(s)`);
+
+    const results = {
+      total: authorizedVaultAddresses.length,
+      successful: [],
+      failed: [],
+      skippedBlacklisted: []
+    };
+
+    for (const vaultAddress of authorizedVaultAddresses) {
+      // Skip blacklisted vaults
+      if (this.isVaultBlacklisted(vaultAddress)) {
+        this.log(`Skipping blacklisted vault: ${vaultAddress}`);
+        results.skippedBlacklisted.push(vaultAddress);
+        continue;
+      }
+
+      try {
+        await this.setupVault(vaultAddress);
+        results.successful.push(vaultAddress);
+      } catch (error) {
+        console.error(`Failed to setup vault ${vaultAddress}:`, error.message);
+        results.failed.push({ vaultAddress, error: error.message });
+        this.trackFailedVault(vaultAddress, error.message);
+      }
+    }
+
+    this.eventManager.emit('VaultsLoaded', {
+      total: results.total,
+      successful: results.successful.length,
+      failed: results.failed.length,
+      skippedBlacklisted: results.skippedBlacklisted.length,
+      timestamp: Date.now(),
+      log: {
+        level: results.failed.length > 0 ? 'warn' : 'info',
+        message: `Loaded ${results.successful.length}/${results.total} vaults (${results.failed.length} failed, ${results.skippedBlacklisted.length} blacklisted)`
+      }
+    });
+
+    return results;
+  }
+
+  /**
+   * Set up a vault for automation
+   * @param {string} vaultAddress - Vault address
+   * @param {Object} [options] - Setup options
+   * @param {boolean} [options.forceRefresh=true] - Force refresh vault data
+   * @returns {Promise<Object>} Setup result
+   */
+  async setupVault(vaultAddress, options = {}) {
+    const { forceRefresh = true } = options;
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+    this.log(`Setting up vault ${normalizedAddress}...`);
+
+    let vault = null;
+    let baselineCaptured = false;
+
     try {
-      const fs = await import('fs/promises');
-      const path = await import('path');
+      // Step 1: Load vault data
+      this.log(`Step 1: Loading vault data for ${normalizedAddress}`);
+      vault = await this.vaultDataService.getVault(normalizedAddress, forceRefresh);
 
-      // Ensure directory exists
-      const dir = path.dirname(this.blacklistFilePath);
-      await fs.mkdir(dir, { recursive: true });
+      if (!vault) {
+        throw new Error(`Failed to get vault data for ${normalizedAddress}`);
+      }
 
-      // Write blacklist
-      const data = JSON.stringify(this.getBlacklistData(), null, 2);
-      await fs.writeFile(this.blacklistFilePath, data, 'utf-8');
+      this.log(`Loaded vault ${normalizedAddress} with ${Object.keys(vault.positions).length} position(s)`);
 
-      this.log('Blacklist saved');
+      // Step 2: Capture baseline asset values (if not already tracked)
+      if (!this.tracker.getMetadata(normalizedAddress)) {
+        this.log(`Step 2: Capturing baseline for ${normalizedAddress}`);
+        const baselineAssets = await this.vaultDataService.fetchAssetValues(vault);
+
+        this.eventManager.emit('VaultBaselineCaptured', {
+          vaultAddress: normalizedAddress,
+          totalVaultValue: baselineAssets.totalVaultValue,
+          tokenValue: baselineAssets.totalTokenValue,
+          positionValue: baselineAssets.totalPositionValue,
+          tokens: baselineAssets.tokens,
+          positions: baselineAssets.positions,
+          timestamp: Date.now(),
+          capturePoint: 'pre_initialization',
+          strategyId: vault.strategy?.strategyId,
+          log: {
+            level: 'info',
+            message: `Captured baseline for vault ${normalizedAddress}: $${baselineAssets.totalVaultValue.toFixed(2)}`
+          }
+        });
+
+        baselineCaptured = true;
+      } else {
+        this.log(`Step 2: Skipped baseline capture (already tracked) for ${normalizedAddress}`);
+      }
+
+      // TODO: Step 3 - Token approvals (future)
+      // TODO: Step 4 - ETH wrapping (future)
+      // TODO: Step 5 - Strategy initialization (future)
+      // TODO: Step 6 - Monitoring setup (future)
+
+      this.eventManager.emit('VaultSetupComplete', {
+        vaultAddress: normalizedAddress,
+        strategyId: vault.strategy?.strategyId,
+        positionCount: Object.keys(vault.positions).length,
+        tokenCount: Object.keys(vault.tokens).length,
+        baselineCaptured,
+        timestamp: Date.now(),
+        log: {
+          level: 'info',
+          message: `Vault ${normalizedAddress} setup complete (steps 1-2)`
+        }
+      });
+
+      return {
+        success: true,
+        vault,
+        vaultLoaded: true,
+        baselineCaptured
+      };
+
     } catch (error) {
-      console.error('Failed to save blacklist:', error);
+      this.eventManager.emit('VaultSetupFailed', {
+        vaultAddress: normalizedAddress,
+        error: error.message,
+        step: vault ? 'baseline_capture' : 'vault_loading',
+        timestamp: Date.now(),
+        log: {
+          level: 'error',
+          message: `Vault ${normalizedAddress} setup failed: ${error.message}`
+        }
+      });
+
+      throw error;
     }
   }
 

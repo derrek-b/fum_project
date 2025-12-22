@@ -18,10 +18,21 @@ const __dirname = path.dirname(__filename);
 
 describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architecture)', () => {
   let testEnv;
+  let testConfig;
+  let service;
   const testBlacklistPath = path.join(__dirname, '../../../data/.test-0vaults-blacklist.json');
+
+  // Event capture
+  let serviceStartedEvent = null;
+  let initializedEvent = null;
+  let poolDataFetchedEvent = null;
 
   beforeAll(async () => {
     testEnv = await setupTestBlockchain();
+    testConfig = {
+      ...testEnv.testConfig,
+      blacklistFilePath: testBlacklistPath
+    };
     // Clean up test blacklist file
     try {
       await fs.unlink(testBlacklistPath);
@@ -31,6 +42,9 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
   });
 
   afterAll(async () => {
+    if (service && service.isRunning) {
+      await service.stop();
+    }
     await cleanupTestBlockchain(testEnv);
     // Clean up test blacklist file
     try {
@@ -87,20 +101,20 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
     });
 
     it('should use default values for optional config', () => {
-      const service = new AutomationService({
+      const svc = new AutomationService({
         automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1337,
         wsUrl: 'ws://localhost:8545'
       });
 
-      expect(service.debug).toBe(false);
-      expect(service.ssePort).toBe(3001);
-      expect(service.retryIntervalMs).toBe(300000);
-      expect(service.maxFailureDurationMs).toBe(3600000);
+      expect(svc.debug).toBe(false);
+      expect(svc.ssePort).toBe(3001);
+      expect(svc.retryIntervalMs).toBe(300000);
+      expect(svc.maxFailureDurationMs).toBe(3600000);
     });
 
     it('should update poolData when PoolDataFetched event is emitted', () => {
-      const service = new AutomationService({
+      const svc = new AutomationService({
         automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1337,
         wsUrl: 'ws://localhost:8545'
@@ -114,70 +128,65 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
         }
       };
 
-      service.eventManager.emit('PoolDataFetched', { poolData: testPoolData });
+      svc.eventManager.emit('PoolDataFetched', { poolData: testPoolData });
 
-      expect(service.poolData['0x1234567890123456789012345678901234567890']).toBeDefined();
-      expect(service.poolData['0x1234567890123456789012345678901234567890'].token0Symbol).toBe('USDC');
+      expect(svc.poolData['0x1234567890123456789012345678901234567890']).toBeDefined();
+      expect(svc.poolData['0x1234567890123456789012345678901234567890'].token0Symbol).toBe('USDC');
     });
   });
 
-  describe('Success Case - Complete Service Initialization (0 Vaults)', () => {
-    it('should successfully initialize service and all components', async () => {
-      // Use test-specific blacklist path
-      const testConfig = {
-        ...testEnv.testConfig,
-        blacklistFilePath: testBlacklistPath
-      };
+  describe('Phase 1: Pre-Start State', () => {
+    it('should create service with correct configuration', () => {
+      service = new AutomationService(testConfig);
 
-      // ========================================
-      // PHASE 1: Constructor and Pre-Start State
-      // ========================================
-
-      const service = new AutomationService(testConfig);
-
-      // Test 1: Configuration validation and property assignment
       expect(service.automationServiceAddress).toBe(testConfig.automationServiceAddress);
       expect(service.chainId).toBe(testConfig.chainId);
       expect(service.wsUrl).toBe(testConfig.wsUrl);
       expect(service.debug).toBe(testConfig.debug);
+    });
 
-      // Test 2: Basic service state initialization (before start)
+    it('should have correct initial service state', () => {
       expect(service.isRunning).toBe(false);
       expect(service.provider).toBe(null);
       expect(service.contracts).toEqual({});
+    });
 
-      // Test 3: Data structure initialization
+    it('should initialize data structures correctly', () => {
       expect(service.vaultLocks).toEqual({});
       expect(service.adapters).toBeInstanceOf(Map);
       expect(service.adapters.size).toBe(0);
       expect(service.tokens).toEqual({});
       expect(service.poolData).toEqual({});
+    });
 
-      // Test 4: EventManager initialization
+    it('should initialize EventManager correctly', () => {
       expect(service.eventManager).toBeDefined();
       expect(typeof service.eventManager.setDebug).toBe('function');
       expect(typeof service.eventManager.registerContractListener).toBe('function');
       expect(service.eventManager.listeners).toEqual({});
       expect(service.eventManager.debug).toBe(testConfig.debug);
       expect(service.eventManager.enabled).toBe(true);
+    });
 
-      // Test 5: VaultDataService constructor initialization
+    it('should initialize VaultDataService correctly', () => {
       expect(service.vaultDataService).toBeDefined();
       expect(service.vaultDataService.vaults).toBeInstanceOf(Map);
       expect(service.vaultDataService.vaults.size).toBe(0);
       expect(service.vaultDataService.eventManager).toBe(service.eventManager);
       expect(service.vaultDataService.provider).toBe(null);
       expect(service.vaultDataService.chainId).toBe(null);
+    });
 
-      // Test 6: Tracker constructor initialization
+    it('should initialize Tracker correctly', () => {
       expect(service.tracker).toBeDefined();
       expect(service.tracker.vaultMetadata).toBeInstanceOf(Map);
       expect(service.tracker.vaultMetadata.size).toBe(0);
       expect(service.tracker.eventManager).toBe(service.eventManager);
       expect(service.tracker.dataDir).toContain('vaults');
       expect(service.tracker.debug).toBe(testConfig.debug);
+    });
 
-      // Test 7: SSEBroadcaster constructor initialization
+    it('should initialize SSEBroadcaster correctly', () => {
       expect(service.sseBroadcaster).toBeDefined();
       expect(service.sseBroadcaster.eventManager).toBe(service.eventManager);
       expect(service.sseBroadcaster.port).toBe(testConfig.ssePort);
@@ -188,8 +197,9 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(service.sseBroadcaster.server).toBe(null);
       expect(Array.isArray(service.sseBroadcaster.broadcastEvents)).toBe(true);
       expect(service.sseBroadcaster.broadcastEvents.length).toBeGreaterThan(10);
+    });
 
-      // Test 8: Strategies initialized in constructor
+    it('should initialize strategies with correct dependencies', () => {
       expect(service.strategies).toBeInstanceOf(Map);
       expect(service.strategies.size).toBe(1);
       expect(service.strategies.has('bob')).toBe(true);
@@ -198,7 +208,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(bobStrategy.type).toBe('bob');
       expect(bobStrategy.name).toBe('Baby Steps Strategy');
 
-      // Test dependency injection (before start)
+      // Dependency injection (before start)
       expect(bobStrategy.vaultDataService).toBe(service.vaultDataService);
       expect(bobStrategy.eventManager).toBe(service.eventManager);
       expect(bobStrategy.provider).toBe(null);
@@ -209,37 +219,31 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(bobStrategy.vaultLocks).toBe(service.vaultLocks);
       expect(bobStrategy.poolData).toBe(service.poolData);
 
-      // Test strategy config loaded
+      // Strategy config loaded
       expect(bobStrategy.config).toBeDefined();
       expect(bobStrategy.config.id).toBe('bob');
 
-      // Test strategy-specific caches initialized
+      // Strategy-specific caches initialized
       expect(bobStrategy.lastPositionCheck).toEqual({});
       expect(bobStrategy.registeredListenerKeys).toEqual({});
+    });
+  });
 
+  describe('Phase 2: Service Start', () => {
+    it('should start service successfully', async () => {
       // Set up event listeners before start
-      let serviceStartedEvent = null;
       service.eventManager.subscribe('ServiceStarted', (data) => {
         serviceStartedEvent = data;
       });
-
-      let initializedEvent = null;
       service.eventManager.subscribe('initialized', (data) => {
         initializedEvent = data;
       });
-
-      let poolDataFetchedEvent = null;
       service.eventManager.subscribe('PoolDataFetched', (data) => {
         poolDataFetchedEvent = data;
       });
 
-      // ========================================
-      // PHASE 2: Service Start
-      // ========================================
-
       await service.start();
 
-      // Test 9: Service is now running
       expect(service.isRunning).toBe(true);
       expect(serviceStartedEvent).toBeDefined();
       expect(serviceStartedEvent.chainId).toBe(testConfig.chainId);
@@ -247,18 +251,21 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(serviceStartedEvent.adaptersLoaded).toBeGreaterThan(0);
       expect(serviceStartedEvent.tokensLoaded).toBeGreaterThan(0);
       expect(serviceStartedEvent.timestamp).toBeGreaterThan(0);
+    });
 
-      // Test 10: Provider initialization
+    it('should initialize provider correctly', () => {
       expect(service.provider).toBeDefined();
       expect(service.provider.constructor.name).toBe('WebSocketProvider');
+    });
 
-      // Test 11: VaultDataService initialization event
+    it('should emit VaultDataService initialized event', () => {
       expect(initializedEvent).toBeDefined();
       expect(initializedEvent.chainId).toBe(testConfig.chainId);
       expect(service.vaultDataService.provider).toBe(service.provider);
       expect(service.vaultDataService.chainId).toBe(testConfig.chainId);
+    });
 
-      // Test 12: Platform adapter initialization
+    it('should initialize platform adapters', () => {
       expect(service.adapters).toBeInstanceOf(Map);
       expect(service.adapters.size).toBeGreaterThan(0);
       expect(service.adapters.has('uniswapV3')).toBe(true);
@@ -267,54 +274,63 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(uniswapAdapter).toBeDefined();
       expect(uniswapAdapter.platformId).toBe('uniswapV3');
       expect(typeof uniswapAdapter.getPositions).toBe('function');
+    });
 
-      // Test 13: VaultDataService has adapters reference
+    it('should share adapters with VaultDataService', () => {
       expect(service.vaultDataService.adapters).toBe(service.adapters);
       expect(service.vaultDataService.adapters.has('uniswapV3')).toBe(true);
+    });
 
-      // Test 14: Token configuration initialization
+    it('should initialize token configuration', () => {
       expect(Object.keys(service.tokens).length).toBeGreaterThan(0);
       expect(service.tokens.USDC).toBeDefined();
       expect(service.tokens.USDC.symbol).toBe('USDC');
       expect(service.tokens.USDC.decimals).toBe(6);
       expect(service.tokens.WETH).toBeDefined();
       expect(service.tokens.WETH.decimals).toBe(18);
+    });
 
-      // Test 15: VaultDataService has tokens reference
+    it('should share tokens with VaultDataService', () => {
       expect(service.vaultDataService.tokens).toBe(service.tokens);
+    });
 
-      // Test 16: VaultDataService has poolData reference
+    it('should share poolData with VaultDataService', () => {
       expect(service.vaultDataService.poolData).toBe(service.poolData);
+    });
 
-      // Test 17: Strategy contract initialization
+    it('should initialize strategy contracts', () => {
       expect(service.contracts.bobStrategy).toBeDefined();
       expect(typeof service.contracts.bobStrategy.getVersion).toBe('function');
       expect(typeof service.contracts.bobStrategy.getAllParameters).toBe('function');
+    });
 
-      // Test 17a: Strategy dependencies updated after start
-      const bobStrategyAfterStart = service.strategies.get('bob');
-      expect(bobStrategyAfterStart.provider).toBe(service.provider);
-      expect(bobStrategyAfterStart.adapters).toBe(service.adapters);
-      expect(bobStrategyAfterStart.tokens).toBe(service.tokens);
-      expect(bobStrategyAfterStart.serviceConfig).toBeDefined();
-      expect(bobStrategyAfterStart.serviceConfig.chainId).toBe(service.chainId);
-      expect(bobStrategyAfterStart.serviceConfig.automationServiceAddress).toBe(service.automationServiceAddress);
+    it('should update strategy dependencies after start', () => {
+      const bobStrategy = service.strategies.get('bob');
+      expect(bobStrategy.provider).toBe(service.provider);
+      expect(bobStrategy.adapters).toBe(service.adapters);
+      expect(bobStrategy.tokens).toBe(service.tokens);
+      expect(bobStrategy.serviceConfig).toBeDefined();
+      expect(bobStrategy.serviceConfig.chainId).toBe(service.chainId);
+      expect(bobStrategy.serviceConfig.automationServiceAddress).toBe(service.automationServiceAddress);
+    });
 
-      // Test 18: Tracker event handlers registered
+    it('should register Tracker event handlers', () => {
       const trackerEvents = ['VaultBaselineCaptured', 'FeesCollected', 'PositionRebalanced'];
       trackerEvents.forEach(eventName => {
         expect(service.eventManager.eventHandlers[eventName]).toBeDefined();
         expect(service.eventManager.eventHandlers[eventName].length).toBeGreaterThan(0);
       });
+    });
 
-      // Test 19: SSEBroadcaster started
+    it('should start SSEBroadcaster', () => {
       expect(service.sseBroadcaster.isRunning).toBe(true);
       expect(service.sseBroadcaster.server).not.toBe(null);
       service.sseBroadcaster.broadcastEvents.forEach(eventName => {
         expect(service.eventManager.eventHandlers[eventName]).toBeDefined();
       });
+    });
 
-      // Test 20: Authorization event listener registered
+    it('should register authorization event listener', () => {
       const authListeners = Object.keys(service.eventManager.listeners).filter(key =>
         key.includes('authorization')
       );
@@ -323,36 +339,41 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       const authListener = service.eventManager.listeners[authListeners[0]];
       expect(authListener.type).toBe('filter');
       expect(authListener.address).toBe('global');
+    });
 
-      // Test 21: Strategy parameter event listener registered
+    it('should register strategy parameter event listener', () => {
       const paramListeners = Object.keys(service.eventManager.listeners).filter(key =>
         key.includes('parameter-update')
       );
       expect(paramListeners.length).toBeGreaterThan(0);
+    });
 
-      // Test 22: Failed vault retry timer started
+    it('should start failed vault retry timer', () => {
       expect(service.failedVaultRetryTimer).toBeDefined();
+    });
 
-      // Test 23: Start is idempotent
+    it('should be idempotent (start twice is safe)', async () => {
       await service.start();
       expect(service.isRunning).toBe(true);
+    });
+  });
 
-      // ========================================
-      // PHASE 3: 0-Vault State Verification
-      // ========================================
-
-      // Test 24: No vaults in VaultDataService
+  describe('Phase 3: 0-Vault State Verification', () => {
+    it('should have no vaults in VaultDataService', () => {
       const allVaults = service.vaultDataService.getAllVaults();
       expect(Array.isArray(allVaults)).toBe(true);
       expect(allVaults.length).toBe(0);
+    });
 
-      // Test 25: Empty poolData (no vaults = no pools fetched)
+    it('should have empty poolData (no vaults = no pools)', () => {
       expect(Object.keys(service.poolData).length).toBe(0);
+    });
 
-      // Test 26: PoolDataFetched never emitted with 0 vaults
+    it('should not emit PoolDataFetched with 0 vaults', () => {
       expect(poolDataFetchedEvent).toBe(null);
+    });
 
-      // Test 27: Only system listeners registered (no vault-specific)
+    it('should only have system listeners registered', () => {
       const listeners = service.eventManager.listeners;
       const listenerKeys = Object.keys(listeners);
 
@@ -369,8 +390,9 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
         !k.includes('global')
       );
       expect(vaultListeners.length).toBe(0);
+    });
 
-      // Test 28: Service status reflects 0-vault state
+    it('should report correct status for 0-vault state', () => {
       const status = service.getStatus();
       expect(status.isRunning).toBe(true);
       expect(status.adaptersLoaded).toBeGreaterThan(0);
@@ -380,12 +402,11 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(status.failedVaults).toBe(0);
       expect(status.blacklistedVaults).toBe(0);
       expect(status.sse.isRunning).toBe(true);
+    });
+  });
 
-      // ========================================
-      // PHASE 4: Blacklist and Failed Vault Management
-      // ========================================
-
-      // Test 29: Track failed vault
+  describe('Phase 4: Blacklist and Failed Vault Management', () => {
+    it('should track failed vault and emit event', () => {
       const failedVaultAddress = '0x1234567890123456789012345678901234567890';
       let failedEvent = null;
       service.eventManager.subscribe('VaultLoadFailed', (data) => {
@@ -400,68 +421,77 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(failedData.lastError).toBe('Test error message');
       expect(failedData.attempts).toBe(1);
       expect(failedEvent.vaultAddress).toBe(failedVaultAddress);
+    });
 
-      // Test 30: Increment attempts on subsequent failures
+    it('should increment attempts on subsequent failures', () => {
+      const failedVaultAddress = '0x1234567890123456789012345678901234567890';
       service.trackFailedVault(failedVaultAddress, 'Error 2');
       service.trackFailedVault(failedVaultAddress, 'Error 3');
       expect(service.failedVaults.get(failedVaultAddress).attempts).toBe(3);
+    });
 
-      // Test 31: Blacklist vault
+    it('should blacklist vault and emit event', async () => {
       const blacklistAddress = '0x2222222222222222222222222222222222222222';
       let blacklistEvent = null;
       service.eventManager.subscribe('VaultBlacklisted', (data) => {
         blacklistEvent = data;
       });
 
-      service.blacklistVault(blacklistAddress, 'Test blacklist reason');
+      await service.blacklistVault(blacklistAddress, 'Test blacklist reason');
 
       expect(service.isVaultBlacklisted(blacklistAddress)).toBe(true);
       expect(blacklistEvent).toBeDefined();
       expect(blacklistEvent.reason).toBe('Test blacklist reason');
+    });
 
-      // Test 32: Unblacklist vault
+    it('should unblacklist vault and emit event', async () => {
+      const blacklistAddress = '0x2222222222222222222222222222222222222222';
       let unblacklistEvent = null;
       service.eventManager.subscribe('VaultUnblacklisted', (data) => {
         unblacklistEvent = data;
       });
 
-      service.unblacklistVault(blacklistAddress);
+      await service.unblacklistVault(blacklistAddress);
 
       expect(service.isVaultBlacklisted(blacklistAddress)).toBe(false);
       expect(unblacklistEvent).toBeDefined();
+    });
 
-      // Test 33: Get blacklist data
-      service.blacklistVault('0x3333333333333333333333333333333333333333', 'Reason 1');
-      service.blacklistVault('0x4444444444444444444444444444444444444444', 'Reason 2');
+    it('should return blacklist data', async () => {
+      await service.blacklistVault('0x3333333333333333333333333333333333333333', 'Reason 1');
+      await service.blacklistVault('0x4444444444444444444444444444444444444444', 'Reason 2');
       const blacklistData = service.getBlacklistData();
       expect(Object.keys(blacklistData).length).toBe(2);
+    });
 
-      // Test 34: Blacklist persists to disk
-      await new Promise(resolve => setTimeout(resolve, 100));
+    it('should persist blacklist to disk', async () => {
       const fileContents = await fs.readFile(testBlacklistPath, 'utf-8');
       const savedBlacklist = JSON.parse(fileContents);
       expect(Object.keys(savedBlacklist).length).toBe(2);
+    });
+  });
 
-      // ========================================
-      // PHASE 5: Service Stop
-      // ========================================
-
-      // Test 35: Stop cleanly
+  describe('Phase 5: Service Stop', () => {
+    it('should stop service cleanly', async () => {
       await service.stop();
 
       expect(service.isRunning).toBe(false);
       expect(service.provider).toBe(null);
+    });
 
-      // Test 36: SSEBroadcaster stopped
+    it('should stop SSEBroadcaster', () => {
       expect(service.sseBroadcaster.isRunning).toBe(false);
+    });
 
-      // Test 37: Failed vault retry timer cleared
+    it('should clear failed vault retry timer', () => {
       expect(service.failedVaultRetryTimer).toBe(null);
+    });
 
-      // Test 38: EventManager disabled
+    it('should disable EventManager', () => {
       expect(service.eventManager.enabled).toBe(false);
+    });
 
-      // Test 39: Stop is idempotent
+    it('should be idempotent (stop twice is safe)', async () => {
       await service.stop();
       expect(service.isRunning).toBe(false);
     });

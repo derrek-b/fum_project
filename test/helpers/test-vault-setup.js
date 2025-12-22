@@ -16,6 +16,17 @@ const ERC20_ABI = [
 ];
 
 /**
+ * Map strategy IDs to deployed contract names
+ * Add new strategies here as they are implemented
+ */
+const STRATEGY_CONTRACT_MAP = {
+  'bob': 'BabyStepsStrategy',
+  // Future strategies:
+  // 'parris': 'ParrisStrategy',
+  // 'fed': 'FedStrategy',
+};
+
+/**
  * Get token address, handling WETH specially since it's not in the token config
  * @param {string} symbol - Token symbol
  * @param {number} chainId - Chain ID
@@ -80,6 +91,9 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     // Vault target configuration
     targetTokens: null,         // If null, auto-derived from positions. If specified, uses exact tokens
     targetPlatforms: ['uniswapV3'], // Target platforms for the vault
+
+    // Strategy configuration
+    strategy: 'bob',            // Strategy ID: 'bob' | 'parris' | 'fed' (future)
 
     vaultName: 'Test Vault',
     slippageTolerance: 1
@@ -439,11 +453,18 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
   // Step 6: Configure vault for AutomationService discovery
   console.log('  - Configuring vault for automation service...');
 
-  // Configure vault with Baby Steps strategy
-  console.log('    Configuring vault with Baby Steps strategy...');
-  const setStrategyTx = await testVault.setStrategy(deployedContracts.BabyStepsStrategy);
+  // Configure vault with specified strategy
+  console.log(`    Configuring vault with ${settings.strategy} strategy...`);
+  const strategyContractName = STRATEGY_CONTRACT_MAP[settings.strategy];
+  if (!strategyContractName) {
+    throw new Error(`Unknown strategy ID: ${settings.strategy}. Valid options: ${Object.keys(STRATEGY_CONTRACT_MAP).join(', ')}`);
+  }
+  if (!deployedContracts[strategyContractName]) {
+    throw new Error(`Strategy contract not deployed: ${strategyContractName}`);
+  }
+  const setStrategyTx = await testVault.setStrategy(deployedContracts[strategyContractName]);
   await setStrategyTx.wait();
-  console.log(`    Strategy set to: ${deployedContracts.BabyStepsStrategy}`);
+  console.log(`    Strategy set to: ${deployedContracts[strategyContractName]}`);
 
   // Configure target tokens
   const targetTokens = settings.targetTokens || [...new Set(settings.positions.map(p => [p.token0, p.token1]).flat())];

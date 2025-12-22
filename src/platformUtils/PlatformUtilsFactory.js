@@ -1,6 +1,9 @@
 /**
  * @module platformUtils/PlatformUtilsFactory
  * @description Factory for selecting platform-specific utility modules
+ *
+ * Phase 1: Basic structure only.
+ * Factory methods TBD during Phase 2 design.
  */
 
 import * as UniswapV3Utils from './v3/UniswapV3Utils.js';
@@ -47,14 +50,5 @@ export default class PlatformUtilsFactory {
    */
   static getSupportedPlatforms() {
     return Object.keys(PLATFORM_UTILS);
-  }
-
-  /**
-   * Register a new platform utils module (for testing or dynamic loading)
-   * @param {string} platformId - The platform identifier
-   * @param {Object} utilsModule - The utility module to register
-   */
-  static registerUtils(platformId, utilsModule) {
-    PLATFORM_UTILS[platformId] = utilsModule;
   }
 }
