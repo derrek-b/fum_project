@@ -103,7 +103,7 @@
           },
           {
             "indexed": false,
-            "internalType": "enum BabyStepsStrategy.Template",
+            "internalType": "uint8",
             "name": "template",
             "type": "uint8"
           }
@@ -129,6 +129,71 @@
         ],
         "name": "VaultAuthorized",
         "type": "event"
+      },
+      {
+        "inputs": [],
+        "name": "TEMPLATE_AGGRESSIVE",
+        "outputs": [
+          {
+            "internalType": "uint8",
+            "name": "",
+            "type": "uint8"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "TEMPLATE_CONSERVATIVE",
+        "outputs": [
+          {
+            "internalType": "uint8",
+            "name": "",
+            "type": "uint8"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "TEMPLATE_MODERATE",
+        "outputs": [
+          {
+            "internalType": "uint8",
+            "name": "",
+            "type": "uint8"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "TEMPLATE_NONE",
+        "outputs": [
+          {
+            "internalType": "uint8",
+            "name": "",
+            "type": "uint8"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "TEMPLATE_STABLECOIN",
+        "outputs": [
+          {
+            "internalType": "uint8",
+            "name": "",
+            "type": "uint8"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
       },
       {
         "inputs": [],
@@ -256,54 +321,9 @@
         "name": "getAllParameters",
         "outputs": [
           {
-            "internalType": "uint16",
+            "internalType": "bytes",
             "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "bool",
-            "name": "",
-            "type": "bool"
-          },
-          {
-            "internalType": "uint256",
-            "name": "",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
+            "type": "bytes"
           }
         ],
         "stateMutability": "view",
@@ -663,7 +683,7 @@
       {
         "inputs": [
           {
-            "internalType": "enum BabyStepsStrategy.Template",
+            "internalType": "uint8",
             "name": "template",
             "type": "uint8"
           }
@@ -684,7 +704,7 @@
         "name": "selectedTemplate",
         "outputs": [
           {
-            "internalType": "enum BabyStepsStrategy.Template",
+            "internalType": "uint8",
             "name": "",
             "type": "uint8"
           }

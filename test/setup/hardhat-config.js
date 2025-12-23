@@ -156,6 +156,10 @@ export async function startHardhat(options = {}) {
 
   // Helper to stop the server
   const stop = async () => {
+    // Remove process listeners we registered (prevents hanging on exit)
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+
     try {
       await wsProvider.destroy();
       hardhatProcess.kill('SIGINT');

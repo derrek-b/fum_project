@@ -1061,13 +1061,13 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
  * Map strategy parameters from contract return value to named objects
  * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - Strategy ID (e.g., 'bob', 'parris', 'fed')
- * @param {Array} params - Raw parameters array from contract getAllParameters call
+ * @param {string} rawBytes - ABI-encoded bytes from contract getAllParameters call
  * @returns {Object} Named parameters with human-readable values
- * @throws {Error} If strategyId is invalid or params array is invalid
+ * @throws {Error} If strategyId is invalid or rawBytes cannot be decoded
  * @example
  * // Map Bob strategy parameters from contract
- * const rawParams = [10200, 9800, 200, 200, true, 10000, 8000, 50, 100, 9500];
- * const mapped = mapStrategyParameters('bob', rawParams);
+ * const rawBytes = await strategyContract.getAllParameters(vaultAddress);
+ * const mapped = mapStrategyParameters('bob', rawBytes);
  * // Returns: {
  * //   targetRangeUpper: 102,
  * //   targetRangeLower: 98,
@@ -1076,17 +1076,17 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
  * // }
  * @since 1.0.0
  */
-export function mapStrategyParameters(strategyId, params) {
+export function mapStrategyParameters(strategyId, rawBytes) {
   // Validate strategyId parameter
   validateIdString(strategyId);
 
-  // Validate params parameter
-  if (!Array.isArray(params)) {
-    throw new Error('Parameters must be an array');
+  // Validate rawBytes parameter
+  if (rawBytes === null || rawBytes === undefined) {
+    throw new Error('rawBytes parameter is required');
   }
 
-  if (params.length === 0) {
-    throw new Error('Parameters array cannot be empty');
+  if (typeof rawBytes !== 'string') {
+    throw new Error('rawBytes must be a hex string');
   }
 
   // Validate strategy exists
@@ -1098,29 +1098,13 @@ export function mapStrategyParameters(strategyId, params) {
   try {
     const strategyIdLower = strategyId.toLowerCase();
 
-    // Strategy-specific parameter mappings with validation
+    // Strategy-specific parameter decoding and mapping
     if (strategyIdLower === 'bob') {
-      // Bob strategy expects exactly 10 parameters
-      if (params.length !== 10) {
-        throw new Error(`Bob strategy expects 10 parameters, got ${params.length}`);
-      }
-
-      // Validate parameter types for Bob strategy
-      for (let i = 0; i < 10; i++) {
-        if (i === 4) { // feeReinvestment is boolean
-          if (typeof params[i] !== 'boolean') {
-            throw new Error(`Bob strategy parameter ${i} (feeReinvestment) must be boolean, got ${typeof params[i]}`);
-          }
-        } else { // All other parameters should be numeric
-          if (params[i] === null || params[i] === undefined) {
-            throw new Error(`Bob strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-          const numValue = Number(params[i]);
-          if (isNaN(numValue) || !isFinite(numValue)) {
-            throw new Error(`Bob strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-        }
-      }
+      // Decode bytes to typed values
+      const params = ethers.utils.defaultAbiCoder.decode(
+        ['uint16', 'uint16', 'uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16', 'uint16'],
+        rawBytes
+      );
 
       return {
         // Range Parameters
@@ -1141,27 +1125,20 @@ export function mapStrategyParameters(strategyId, params) {
       };
     }
     else if (strategyIdLower === 'parris') {
-      // Parris strategy expects exactly 26 parameters
-      if (params.length !== 26) {
-        throw new Error(`Parris strategy expects 26 parameters, got ${params.length}`);
-      }
-
-      // Validate parameter types for Parris strategy
-      for (let i = 0; i < 26; i++) {
-        if (i === 4 || i === 10) { // feeReinvestment and adaptiveRanges are boolean
-          if (typeof params[i] !== 'boolean') {
-            throw new Error(`Parris strategy parameter ${i} must be boolean, got ${typeof params[i]}`);
-          }
-        } else { // All other parameters should be numeric
-          if (params[i] === null || params[i] === undefined) {
-            throw new Error(`Parris strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-          const numValue = Number(params[i]);
-          if (isNaN(numValue) || !isFinite(numValue)) {
-            throw new Error(`Parris strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-        }
-      }
+      // Decode bytes to typed values
+      // Note: OracleSource and PlatformSelectionCriteria enums are uint8 in Solidity
+      const params = ethers.utils.defaultAbiCoder.decode(
+        [
+          'uint16', 'uint16', 'uint16', 'uint16',           // Range params
+          'bool', 'uint256', 'uint16',                       // Fee settings
+          'uint16', 'uint16', 'uint16',                      // Risk management
+          'bool', 'uint8', 'uint8', 'uint16', 'uint16', 'uint16', 'uint16', 'uint16', 'uint16', // Adaptive
+          'uint8', 'uint16',                                 // Oracle (enum is uint8)
+          'uint16', 'uint256', 'uint16',                     // Position sizing
+          'uint8', 'uint256'                                 // Platform (enum is uint8)
+        ],
+        rawBytes
+      );
 
       return {
         // Range Parameters
@@ -1206,27 +1183,11 @@ export function mapStrategyParameters(strategyId, params) {
       };
     }
     else if (strategyIdLower === 'fed') {
-      // Fed strategy expects exactly 4 parameters
-      if (params.length !== 4) {
-        throw new Error(`Fed strategy expects 4 parameters, got ${params.length}`);
-      }
-
-      // Validate parameter types for Fed strategy
-      for (let i = 0; i < 4; i++) {
-        if (i === 2) { // feeReinvestment is boolean
-          if (typeof params[i] !== 'boolean') {
-            throw new Error(`Fed strategy parameter ${i} (feeReinvestment) must be boolean, got ${typeof params[i]}`);
-          }
-        } else { // All other parameters should be numeric
-          if (params[i] === null || params[i] === undefined) {
-            throw new Error(`Fed strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-          const numValue = Number(params[i]);
-          if (isNaN(numValue) || !isFinite(numValue)) {
-            throw new Error(`Fed strategy parameter ${i} must be a valid number, got ${params[i]}`);
-          }
-        }
-      }
+      // Decode bytes to typed values
+      const params = ethers.utils.defaultAbiCoder.decode(
+        ['uint16', 'uint16', 'bool', 'uint16'],
+        rawBytes
+      );
 
       return {
         targetRange: parseInt(params[0]) / 100,
@@ -1239,11 +1200,11 @@ export function mapStrategyParameters(strategyId, params) {
     // If we reach here, we don't know how to map this strategy
     throw new Error(`No parameter mapping defined for strategy ${strategyId}`);
   } catch (error) {
-    // Re-throw validation errors as-is
-    if (error.message.includes('expects') || error.message.includes('must be') || error.message.includes('No parameter mapping')) {
+    // Re-throw our custom errors as-is
+    if (error.message.includes('No parameter mapping')) {
       throw error;
     }
-    // Wrap other errors with context
+    // Wrap decode/other errors with context
     throw new Error(`Error mapping strategy parameters for ${strategyId}: ${error.message}`);
   }
 }
