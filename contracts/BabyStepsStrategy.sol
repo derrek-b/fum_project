@@ -1,63 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "./StrategyBase.sol";
 
 /**
  * @title BabyStepsStrategy
  * @dev Contract that stores and manages parameters for the Baby Steps liquidity management strategy
  * A simplified strategy focused on the core essentials of liquidity management
  */
-contract BabyStepsStrategy is Ownable {
+contract BabyStepsStrategy is StrategyBase {
     // Version information
-    string public constant VERSION = "1.1.0";
-
-    // ==================== Events ====================
-    event ParameterUpdated(address indexed vault, string paramName);
-    event TemplateSelected(address indexed vault, Template template);
-    event CustomizationUpdated(address indexed vault, uint256 bitmap);
-    event VaultAuthorized(address indexed vault, bool authorized);
-
-    // ==================== Authorization ====================
-    // Mapping to track vaults that can modify their own parameters
-    mapping(address => bool) public authorizedVaults;
-
-    // Modifier to ensure caller is an authorized vault
-    modifier onlyAuthorizedVault() {
-        require(authorizedVaults[msg.sender], "BabyStepsStrategy: caller is not an authorized vault");
-        _;
-    }
-
-    // Functions to manage vault authorization - only vault owners can authorize their own vaults
-    function authorizeVault(address vault) external {
-        require(vault != address(0), "BabyStepsStrategy: zero vault address");
-
-        // Verify caller is the vault owner
-        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
-        require(success && data.length == 32, "BabyStepsStrategy: failed to get vault owner");
-        address vaultOwner = abi.decode(data, (address));
-        require(msg.sender == vaultOwner, "BabyStepsStrategy: caller is not vault owner");
-
-        authorizedVaults[vault] = true;
-        emit VaultAuthorized(vault, true);
-    }
-
-    function deauthorizeVault(address vault) external {
-        // Verify caller is the vault owner
-        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
-        require(success && data.length == 32, "BabyStepsStrategy: failed to get vault owner");
-        address vaultOwner = abi.decode(data, (address));
-        require(msg.sender == vaultOwner, "BabyStepsStrategy: caller is not vault owner");
-
-        authorizedVaults[vault] = false;
-        emit VaultAuthorized(vault, false);
-    }
-
-    // ==================== Enums ====================
-    // Templates
-    enum Template { None, Conservative, Moderate, Aggressive, Stablecoin }
+    string public constant VERSION = "1.3.0";
 
     // ==================== Template Constants ====================
+    uint8 public constant TEMPLATE_NONE = 0;
+    uint8 public constant TEMPLATE_CONSERVATIVE = 1;
+    uint8 public constant TEMPLATE_MODERATE = 2;
+    uint8 public constant TEMPLATE_AGGRESSIVE = 3;
+    uint8 public constant TEMPLATE_STABLECOIN = 4;
+
     // Conservative template values - WIDER ranges, fewer rebalances
     uint16 private constant CONS_TARGET_RANGE_UPPER = 1000;          // 10.00%
     uint16 private constant CONS_TARGET_RANGE_LOWER = 1000;          // 10.00%
@@ -103,13 +64,6 @@ contract BabyStepsStrategy is Ownable {
     uint16 private constant STBL_EMERGENCY_EXIT_TRIGGER = 100;       // 1.00%
     uint16 private constant STBL_MAX_UTILIZATION = 9000;             // 90.00%
 
-    // ==================== Customization Bitmap ====================
-    // Bitmap tracks which parameters have been customized (1 = customized, 0 = use template)
-    mapping(address => uint256) public customizationBitmap;
-
-    // ==================== Template Selection ====================
-    mapping(address => Template) public selectedTemplate;
-
     // ==================== Parameter Storage ====================
     // Range Parameters
     mapping(address => uint16) public targetRangeUpper;         // Basis points (1/100th of a percent)
@@ -132,23 +86,6 @@ contract BabyStepsStrategy is Ownable {
      */
     constructor() Ownable(msg.sender) {}
 
-    // ==================== Template Selection ====================
-
-    /**
-     * @dev Select a template
-     * @param template Template to select
-     */
-    function selectTemplate(Template template) external onlyAuthorizedVault {
-        selectedTemplate[msg.sender] = template;
-
-        // Clear customization bitmap if selecting a non-None template
-        if (template != Template.None) {
-            customizationBitmap[msg.sender] = 0;
-        }
-
-        emit TemplateSelected(msg.sender, template);
-    }
-
     // ==================== Parameter Getters ====================
 
     /**
@@ -158,18 +95,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getTargetRangeUpper(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if (customizationBitmap[vault] & (1 << 0) != 0) {
+        if (_isCustomized(vault, 0)) {
             return targetRangeUpper[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_TARGET_RANGE_UPPER;
-        if (template == Template.Moderate) return MOD_TARGET_RANGE_UPPER;
-        if (template == Template.Aggressive) return AGG_TARGET_RANGE_UPPER;
-        if (template == Template.Stablecoin) return STBL_TARGET_RANGE_UPPER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_TARGET_RANGE_UPPER;
+        if (template == TEMPLATE_MODERATE) return MOD_TARGET_RANGE_UPPER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_TARGET_RANGE_UPPER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_TARGET_RANGE_UPPER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_TARGET_RANGE_UPPER;
     }
 
@@ -180,18 +117,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getTargetRangeLower(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 1)) != 0) {
+        if (_isCustomized(vault, 1)) {
             return targetRangeLower[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_TARGET_RANGE_LOWER;
-        if (template == Template.Moderate) return MOD_TARGET_RANGE_LOWER;
-        if (template == Template.Aggressive) return AGG_TARGET_RANGE_LOWER;
-        if (template == Template.Stablecoin) return STBL_TARGET_RANGE_LOWER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_TARGET_RANGE_LOWER;
+        if (template == TEMPLATE_MODERATE) return MOD_TARGET_RANGE_LOWER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_TARGET_RANGE_LOWER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_TARGET_RANGE_LOWER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_TARGET_RANGE_LOWER;
     }
 
@@ -202,18 +139,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getRebalanceThresholdUpper(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 2)) != 0) {
+        if (_isCustomized(vault, 2)) {
             return rebalanceThresholdUpper[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REBALANCE_THRESHOLD_UPPER;
-        if (template == Template.Moderate) return MOD_REBALANCE_THRESHOLD_UPPER;
-        if (template == Template.Aggressive) return AGG_REBALANCE_THRESHOLD_UPPER;
-        if (template == Template.Stablecoin) return STBL_REBALANCE_THRESHOLD_UPPER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_UPPER;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_UPPER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_UPPER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_REBALANCE_THRESHOLD_UPPER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_REBALANCE_THRESHOLD_UPPER;
     }
 
@@ -224,18 +161,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getRebalanceThresholdLower(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 3)) != 0) {
+        if (_isCustomized(vault, 3)) {
             return rebalanceThresholdLower[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REBALANCE_THRESHOLD_LOWER;
-        if (template == Template.Moderate) return MOD_REBALANCE_THRESHOLD_LOWER;
-        if (template == Template.Aggressive) return AGG_REBALANCE_THRESHOLD_LOWER;
-        if (template == Template.Stablecoin) return STBL_REBALANCE_THRESHOLD_LOWER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_LOWER;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_LOWER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_LOWER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_REBALANCE_THRESHOLD_LOWER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_REBALANCE_THRESHOLD_LOWER;
     }
 
@@ -246,18 +183,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getFeeReinvestment(address vault) public view returns (bool) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 4)) != 0) {
+        if (_isCustomized(vault, 4)) {
             return feeReinvestment[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_FEE_REINVESTMENT;
-        if (template == Template.Moderate) return true;
-        if (template == Template.Aggressive) return true;
-        if (template == Template.Stablecoin) return true;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_FEE_REINVESTMENT;
+        if (template == TEMPLATE_MODERATE) return true;
+        if (template == TEMPLATE_AGGRESSIVE) return true;
+        if (template == TEMPLATE_STABLECOIN) return true;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return true;
     }
 
@@ -268,18 +205,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getReinvestmentTrigger(address vault) public view returns (uint256) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 5)) != 0) {
+        if (_isCustomized(vault, 5)) {
             return reinvestmentTrigger[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REINVESTMENT_TRIGGER;
-        if (template == Template.Moderate) return MOD_REINVESTMENT_TRIGGER;
-        if (template == Template.Aggressive) return AGG_REINVESTMENT_TRIGGER;
-        if (template == Template.Stablecoin) return STBL_REINVESTMENT_TRIGGER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REINVESTMENT_TRIGGER;
+        if (template == TEMPLATE_MODERATE) return MOD_REINVESTMENT_TRIGGER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REINVESTMENT_TRIGGER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_REINVESTMENT_TRIGGER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_REINVESTMENT_TRIGGER;
     }
 
@@ -290,18 +227,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getReinvestmentRatio(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 6)) != 0) {
+        if (_isCustomized(vault, 6)) {
             return reinvestmentRatio[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REINVESTMENT_RATIO;
-        if (template == Template.Moderate) return MOD_REINVESTMENT_RATIO;
-        if (template == Template.Aggressive) return AGG_REINVESTMENT_RATIO;
-        if (template == Template.Stablecoin) return STBL_REINVESTMENT_RATIO;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REINVESTMENT_RATIO;
+        if (template == TEMPLATE_MODERATE) return MOD_REINVESTMENT_RATIO;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REINVESTMENT_RATIO;
+        if (template == TEMPLATE_STABLECOIN) return STBL_REINVESTMENT_RATIO;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_REINVESTMENT_RATIO;
     }
 
@@ -312,18 +249,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getMaxSlippage(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 7)) != 0) {
+        if (_isCustomized(vault, 7)) {
             return maxSlippage[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MAX_SLIPPAGE;
-        if (template == Template.Moderate) return MOD_MAX_SLIPPAGE;
-        if (template == Template.Aggressive) return AGG_MAX_SLIPPAGE;
-        if (template == Template.Stablecoin) return STBL_MAX_SLIPPAGE;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_SLIPPAGE;
+        if (template == TEMPLATE_MODERATE) return MOD_MAX_SLIPPAGE;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_SLIPPAGE;
+        if (template == TEMPLATE_STABLECOIN) return STBL_MAX_SLIPPAGE;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_MAX_SLIPPAGE;
     }
 
@@ -334,18 +271,18 @@ contract BabyStepsStrategy is Ownable {
      */
     function getEmergencyExitTrigger(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 8)) != 0) {
+        if (_isCustomized(vault, 8)) {
             return emergencyExitTrigger[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_EMERGENCY_EXIT_TRIGGER;
-        if (template == Template.Moderate) return MOD_EMERGENCY_EXIT_TRIGGER;
-        if (template == Template.Aggressive) return AGG_EMERGENCY_EXIT_TRIGGER;
-        if (template == Template.Stablecoin) return STBL_EMERGENCY_EXIT_TRIGGER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_EMERGENCY_EXIT_TRIGGER;
+        if (template == TEMPLATE_MODERATE) return MOD_EMERGENCY_EXIT_TRIGGER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_EMERGENCY_EXIT_TRIGGER;
+        if (template == TEMPLATE_STABLECOIN) return STBL_EMERGENCY_EXIT_TRIGGER;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_EMERGENCY_EXIT_TRIGGER;
     }
 
@@ -356,32 +293,28 @@ contract BabyStepsStrategy is Ownable {
      */
     function getMaxUtilization(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 9)) != 0) {
+        if (_isCustomized(vault, 9)) {
             return maxUtilization[vault];
         }
 
         // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MAX_UTILIZATION;
-        if (template == Template.Moderate) return MOD_MAX_UTILIZATION;
-        if (template == Template.Aggressive) return AGG_MAX_UTILIZATION;
-        if (template == Template.Stablecoin) return STBL_MAX_UTILIZATION;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_UTILIZATION;
+        if (template == TEMPLATE_MODERATE) return MOD_MAX_UTILIZATION;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_UTILIZATION;
+        if (template == TEMPLATE_STABLECOIN) return STBL_MAX_UTILIZATION;
 
-        // Default value if no template or Template.None
+        // Default value if no template or TEMPLATE_NONE
         return MOD_MAX_UTILIZATION;
     }
 
     /**
      * @dev Get all parameters for a vault in a single call (with template fallbacks)
      * @param vault Address of the vault
-     * @return All strategy parameters packaged in a tuple
+     * @return ABI-encoded parameters
      */
-    function getAllParameters(address vault) external view returns (
-        uint16, uint16, uint16, uint16,
-        bool, uint256, uint16,
-        uint16, uint16, uint16
-    ) {
-        return (
+    function getAllParameters(address vault) external view override returns (bytes memory) {
+        return abi.encode(
             // Range Parameters
             getTargetRangeUpper(vault), getTargetRangeLower(vault),
             getRebalanceThresholdUpper(vault), getRebalanceThresholdLower(vault),
@@ -415,12 +348,9 @@ contract BabyStepsStrategy is Ownable {
         rebalanceThresholdLower[msg.sender] = lowerThreshold;
 
         // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3));
 
         emit ParameterUpdated(msg.sender, "rangeParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -439,12 +369,9 @@ contract BabyStepsStrategy is Ownable {
         reinvestmentRatio[msg.sender] = ratio;
 
         // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 4) | (1 << 5) | (1 << 6);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 4) | (1 << 5) | (1 << 6));
 
         emit ParameterUpdated(msg.sender, "feeParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -463,39 +390,9 @@ contract BabyStepsStrategy is Ownable {
         maxUtilization[msg.sender] = utilization;
 
         // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 7) | (1 << 8) | (1 << 9);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 7) | (1 << 8) | (1 << 9));
 
         emit ParameterUpdated(msg.sender, "riskParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
-    }
-
-    /**
-     * @dev Reset customizations to revert to template defaults
-     */
-    function resetToTemplate() external {
-        // This effectively removes all customizations
-        customizationBitmap[msg.sender] = 0;
-
-        emit ParameterUpdated(msg.sender, "resetToTemplate");
-        emit CustomizationUpdated(msg.sender, 0);
-    }
-
-    /**
-     * @dev Reset all parameters and template selection
-     * Effectively sets all parameters to default values
-     */
-    function resetAll() external {
-        // Reset template selection
-        selectedTemplate[msg.sender] = Template.None;
-
-        // Reset customization bitmap
-        customizationBitmap[msg.sender] = 0;
-
-        emit TemplateSelected(msg.sender, Template.None);
-        emit ParameterUpdated(msg.sender, "resetAll");
-        emit CustomizationUpdated(msg.sender, 0);
     }
 
     // ==================== Admin Functions ====================

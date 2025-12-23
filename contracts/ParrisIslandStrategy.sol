@@ -1,69 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "./StrategyBase.sol";
 
 /**
  * @title ParrisIslandStrategy
  * @dev Contract that stores and manages parameters for the Parris Island liquidity management strategy
  * Uses templates as source of truth with efficient parameter customization
  */
-contract ParrisIslandStrategy is Ownable {
+contract ParrisIslandStrategy is StrategyBase {
     // Version information
-    string public constant VERSION = "0.2.0";
+    string public constant VERSION = "0.4.0";
 
-    // ==================== Events ====================
-    event ParameterUpdated(address indexed vault, string paramName);
-    event TemplateSelected(address indexed vault, Template template);
-    event CustomizationUpdated(address indexed vault, uint256 bitmap);
-    event VaultAuthorized(address indexed vault, bool authorized);
-
-    // ==================== Authorization ====================
-    // Mapping to track vaults that can modify their own parameters
-    mapping(address => bool) public authorizedVaults;
-
-    // Modifier to ensure caller is an authorized vault
-    modifier onlyAuthorizedVault() {
-        require(authorizedVaults[msg.sender], "ParrisIslandStrategy: caller is not an authorized vault");
-        _;
-    }
-
-    // Functions to manage vault authorization - only vault owners can authorize their own vaults
-    function authorizeVault(address vault) external {
-        require(vault != address(0), "ParrisIslandStrategy: zero vault address");
-
-        // Verify caller is the vault owner
-        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
-        require(success && data.length == 32, "ParrisIslandStrategy: failed to get vault owner");
-        address vaultOwner = abi.decode(data, (address));
-        require(msg.sender == vaultOwner, "ParrisIslandStrategy: caller is not vault owner");
-
-        authorizedVaults[vault] = true;
-        emit VaultAuthorized(vault, true);
-    }
-
-    function deauthorizeVault(address vault) external {
-        // Verify caller is the vault owner
-        (bool success, bytes memory data) = vault.staticcall(abi.encodeWithSignature("owner()"));
-        require(success && data.length == 32, "ParrisIslandStrategy: failed to get vault owner");
-        address vaultOwner = abi.decode(data, (address));
-        require(msg.sender == vaultOwner, "ParrisIslandStrategy: caller is not vault owner");
-
-        authorizedVaults[vault] = false;
-        emit VaultAuthorized(vault, false);
-    }
+    // ==================== Template Constants ====================
+    uint8 public constant TEMPLATE_NONE = 0;
+    uint8 public constant TEMPLATE_CONSERVATIVE = 1;
+    uint8 public constant TEMPLATE_MODERATE = 2;
+    uint8 public constant TEMPLATE_AGGRESSIVE = 3;
 
     // ==================== Enums ====================
-    // Templates
-    enum Template { None, Conservative, Moderate, Aggressive }
-
     // Oracle sources
     enum OracleSource { DEX, Chainlink, TWAP }
 
     // Platform selection criteria
     enum PlatformSelectionCriteria { HighestTVL, HighestVolume, LowestFees, HighestRewards }
 
-    // ==================== Template Constants ====================
+    // ==================== Template Values ====================
     // Conservative template values
     uint16 private constant CONS_TARGET_RANGE_UPPER = 300;          // 3.00%
     uint16 private constant CONS_TARGET_RANGE_LOWER = 300;          // 3.00%
@@ -126,13 +88,6 @@ contract ParrisIslandStrategy is Ownable {
     uint16 private constant AGG_PRICE_DEVIATION_TOLERANCE = 200;    // 2.00%
     uint256 private constant AGG_MIN_POOL_LIQUIDITY = 50000 ether;  // $50,000
 
-    // ==================== Customization Bitmap ====================
-    // Bitmap tracks which parameters have been customized (1 = customized, 0 = use template)
-    mapping(address => uint256) public customizationBitmap;
-
-    // ==================== Template Selection ====================
-    mapping(address => Template) public selectedTemplate;
-
     // ==================== Parameter Storage ====================
     // Range Parameters
     mapping(address => uint16) public targetRangeUpper;         // Basis points (1/100th of a percent)
@@ -179,23 +134,6 @@ contract ParrisIslandStrategy is Ownable {
      */
     constructor() Ownable(msg.sender) {}
 
-    // ==================== Template Selection ====================
-
-    /**
-     * @dev Select a template
-     * @param template Template to select
-     */
-    function selectTemplate(Template template) external onlyAuthorizedVault {
-        selectedTemplate[msg.sender] = template;
-
-        // Clear customization bitmap if selecting a non-None template
-        if (template != Template.None) {
-            customizationBitmap[msg.sender] = 0;
-        }
-
-        emit TemplateSelected(msg.sender, template);
-    }
-
     // ==================== Parameter Getters ====================
 
     /**
@@ -204,18 +142,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getTargetRangeUpper(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if (customizationBitmap[vault] & (1 << 0) != 0) {
+        if (_isCustomized(vault, 0)) {
             return targetRangeUpper[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_TARGET_RANGE_UPPER;
-        if (template == Template.Moderate) return MOD_TARGET_RANGE_UPPER;
-        if (template == Template.Aggressive) return AGG_TARGET_RANGE_UPPER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_TARGET_RANGE_UPPER;
+        if (template == TEMPLATE_MODERATE) return MOD_TARGET_RANGE_UPPER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_TARGET_RANGE_UPPER;
 
-        // Default value if no template or Template.None
         return MOD_TARGET_RANGE_UPPER;
     }
 
@@ -225,18 +160,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getTargetRangeLower(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 1)) != 0) {
+        if (_isCustomized(vault, 1)) {
             return targetRangeLower[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_TARGET_RANGE_LOWER;
-        if (template == Template.Moderate) return MOD_TARGET_RANGE_LOWER;
-        if (template == Template.Aggressive) return AGG_TARGET_RANGE_LOWER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_TARGET_RANGE_LOWER;
+        if (template == TEMPLATE_MODERATE) return MOD_TARGET_RANGE_LOWER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_TARGET_RANGE_LOWER;
 
-        // Default value if no template or Template.None
         return MOD_TARGET_RANGE_LOWER;
     }
 
@@ -246,18 +178,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRebalanceThresholdUpper(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 2)) != 0) {
+        if (_isCustomized(vault, 2)) {
             return rebalanceThresholdUpper[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REBALANCE_THRESHOLD_UPPER;
-        if (template == Template.Moderate) return MOD_REBALANCE_THRESHOLD_UPPER;
-        if (template == Template.Aggressive) return AGG_REBALANCE_THRESHOLD_UPPER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_UPPER;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_UPPER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_UPPER;
 
-        // Default value if no template or Template.None
         return MOD_REBALANCE_THRESHOLD_UPPER;
     }
 
@@ -267,18 +196,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRebalanceThresholdLower(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 3)) != 0) {
+        if (_isCustomized(vault, 3)) {
             return rebalanceThresholdLower[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_REBALANCE_THRESHOLD_LOWER;
-        if (template == Template.Moderate) return MOD_REBALANCE_THRESHOLD_LOWER;
-        if (template == Template.Aggressive) return AGG_REBALANCE_THRESHOLD_LOWER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_LOWER;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_LOWER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_LOWER;
 
-        // Default value if no template or Template.None
         return MOD_REBALANCE_THRESHOLD_LOWER;
     }
 
@@ -288,18 +214,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getFeeReinvestment(address vault) public view returns (bool) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 4)) != 0) {
+        if (_isCustomized(vault, 4)) {
             return feeReinvestment[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return false;
-        if (template == Template.Moderate) return true;
-        if (template == Template.Aggressive) return true;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return false;
+        if (template == TEMPLATE_MODERATE) return true;
+        if (template == TEMPLATE_AGGRESSIVE) return true;
 
-        // Default value if no template or Template.None
         return true;
     }
 
@@ -309,18 +232,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getReinvestmentTrigger(address vault) public view returns (uint256) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 5)) != 0) {
+        if (_isCustomized(vault, 5)) {
             return reinvestmentTrigger[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since reinvestment is off
-        if (template == Template.Moderate) return MOD_REINVESTMENT_TRIGGER;
-        if (template == Template.Aggressive) return AGG_REINVESTMENT_TRIGGER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_REINVESTMENT_TRIGGER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REINVESTMENT_TRIGGER;
 
-        // Default value if no template or Template.None
         return MOD_REINVESTMENT_TRIGGER;
     }
 
@@ -330,18 +250,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getReinvestmentRatio(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 6)) != 0) {
+        if (_isCustomized(vault, 6)) {
             return reinvestmentRatio[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since reinvestment is off
-        if (template == Template.Moderate) return MOD_REINVESTMENT_RATIO;
-        if (template == Template.Aggressive) return AGG_REINVESTMENT_RATIO;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_REINVESTMENT_RATIO;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REINVESTMENT_RATIO;
 
-        // Default value if no template or Template.None
         return MOD_REINVESTMENT_RATIO;
     }
 
@@ -351,18 +268,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getMaxSlippage(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 7)) != 0) {
+        if (_isCustomized(vault, 7)) {
             return maxSlippage[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MAX_SLIPPAGE;
-        if (template == Template.Moderate) return MOD_MAX_SLIPPAGE;
-        if (template == Template.Aggressive) return AGG_MAX_SLIPPAGE;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_SLIPPAGE;
+        if (template == TEMPLATE_MODERATE) return MOD_MAX_SLIPPAGE;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_SLIPPAGE;
 
-        // Default value if no template or Template.None
         return MOD_MAX_SLIPPAGE;
     }
 
@@ -372,18 +286,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getEmergencyExitTrigger(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 8)) != 0) {
+        if (_isCustomized(vault, 8)) {
             return emergencyExitTrigger[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_EMERGENCY_EXIT_TRIGGER;
-        if (template == Template.Moderate) return MOD_EMERGENCY_EXIT_TRIGGER;
-        if (template == Template.Aggressive) return AGG_EMERGENCY_EXIT_TRIGGER;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_EMERGENCY_EXIT_TRIGGER;
+        if (template == TEMPLATE_MODERATE) return MOD_EMERGENCY_EXIT_TRIGGER;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_EMERGENCY_EXIT_TRIGGER;
 
-        // Default value if no template or Template.None
         return MOD_EMERGENCY_EXIT_TRIGGER;
     }
 
@@ -393,18 +304,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getMaxVaultUtilization(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 9)) != 0) {
+        if (_isCustomized(vault, 9)) {
             return maxVaultUtilization[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MAX_VAULT_UTILIZATION;
-        if (template == Template.Moderate) return MOD_MAX_VAULT_UTILIZATION;
-        if (template == Template.Aggressive) return AGG_MAX_VAULT_UTILIZATION;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_VAULT_UTILIZATION;
+        if (template == TEMPLATE_MODERATE) return MOD_MAX_VAULT_UTILIZATION;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_VAULT_UTILIZATION;
 
-        // Default value if no template or Template.None
         return MOD_MAX_VAULT_UTILIZATION;
     }
 
@@ -414,18 +322,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getAdaptiveRanges(address vault) public view returns (bool) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 10)) != 0) {
+        if (_isCustomized(vault, 10)) {
             return adaptiveRanges[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return false;
-        if (template == Template.Moderate) return true;
-        if (template == Template.Aggressive) return true;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return false;
+        if (template == TEMPLATE_MODERATE) return true;
+        if (template == TEMPLATE_AGGRESSIVE) return true;
 
-        // Default value if no template or Template.None
         return true;
     }
 
@@ -435,18 +340,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRebalanceCountThresholdHigh(address vault) public view returns (uint8) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 11)) != 0) {
+        if (_isCustomized(vault, 11)) {
             return rebalanceCountThresholdHigh[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_REBALANCE_COUNT_THRESHOLD_HIGH;
-        if (template == Template.Aggressive) return AGG_REBALANCE_COUNT_THRESHOLD_HIGH;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_COUNT_THRESHOLD_HIGH;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_COUNT_THRESHOLD_HIGH;
 
-        // Default value if no template or Template.None
         return MOD_REBALANCE_COUNT_THRESHOLD_HIGH;
     }
 
@@ -456,18 +358,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRebalanceCountThresholdLow(address vault) public view returns (uint8) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 12)) != 0) {
+        if (_isCustomized(vault, 12)) {
             return rebalanceCountThresholdLow[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_REBALANCE_COUNT_THRESHOLD_LOW;
-        if (template == Template.Aggressive) return AGG_REBALANCE_COUNT_THRESHOLD_LOW;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_COUNT_THRESHOLD_LOW;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_COUNT_THRESHOLD_LOW;
 
-        // Default value if no template or Template.None
         return MOD_REBALANCE_COUNT_THRESHOLD_LOW;
     }
 
@@ -477,18 +376,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getAdaptiveTimeframeHigh(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 13)) != 0) {
+        if (_isCustomized(vault, 13)) {
             return adaptiveTimeframeHigh[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_ADAPTIVE_TIMEFRAME_HIGH;
-        if (template == Template.Aggressive) return AGG_ADAPTIVE_TIMEFRAME_HIGH;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_ADAPTIVE_TIMEFRAME_HIGH;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_ADAPTIVE_TIMEFRAME_HIGH;
 
-        // Default value if no template or Template.None
         return MOD_ADAPTIVE_TIMEFRAME_HIGH;
     }
 
@@ -498,18 +394,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getAdaptiveTimeframeLow(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 14)) != 0) {
+        if (_isCustomized(vault, 14)) {
             return adaptiveTimeframeLow[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_ADAPTIVE_TIMEFRAME_LOW;
-        if (template == Template.Aggressive) return AGG_ADAPTIVE_TIMEFRAME_LOW;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_ADAPTIVE_TIMEFRAME_LOW;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_ADAPTIVE_TIMEFRAME_LOW;
 
-        // Default value if no template or Template.None
         return MOD_ADAPTIVE_TIMEFRAME_LOW;
     }
 
@@ -519,18 +412,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRangeAdjustmentPercentHigh(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 15)) != 0) {
+        if (_isCustomized(vault, 15)) {
             return rangeAdjustmentPercentHigh[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_RANGE_ADJUSTMENT_PERCENT_HIGH;
-        if (template == Template.Aggressive) return AGG_RANGE_ADJUSTMENT_PERCENT_HIGH;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_RANGE_ADJUSTMENT_PERCENT_HIGH;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_RANGE_ADJUSTMENT_PERCENT_HIGH;
 
-        // Default value if no template or Template.None
         return MOD_RANGE_ADJUSTMENT_PERCENT_HIGH;
     }
 
@@ -540,18 +430,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getThresholdAdjustmentPercentHigh(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 16)) != 0) {
+        if (_isCustomized(vault, 16)) {
             return thresholdAdjustmentPercentHigh[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_THRESHOLD_ADJUSTMENT_PERCENT_HIGH;
-        if (template == Template.Aggressive) return AGG_THRESHOLD_ADJUSTMENT_PERCENT_HIGH;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_THRESHOLD_ADJUSTMENT_PERCENT_HIGH;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_THRESHOLD_ADJUSTMENT_PERCENT_HIGH;
 
-        // Default value if no template or Template.None
         return MOD_THRESHOLD_ADJUSTMENT_PERCENT_HIGH;
     }
 
@@ -561,18 +448,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getRangeAdjustmentPercentLow(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 17)) != 0) {
+        if (_isCustomized(vault, 17)) {
             return rangeAdjustmentPercentLow[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_RANGE_ADJUSTMENT_PERCENT_LOW;
-        if (template == Template.Aggressive) return AGG_RANGE_ADJUSTMENT_PERCENT_LOW;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_RANGE_ADJUSTMENT_PERCENT_LOW;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_RANGE_ADJUSTMENT_PERCENT_LOW;
 
-        // Default value if no template or Template.None
         return MOD_RANGE_ADJUSTMENT_PERCENT_LOW;
     }
 
@@ -582,18 +466,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getThresholdAdjustmentPercentLow(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 18)) != 0) {
+        if (_isCustomized(vault, 18)) {
             return thresholdAdjustmentPercentLow[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return 0;              // Not used since adaptive is off
-        if (template == Template.Moderate) return MOD_THRESHOLD_ADJUSTMENT_PERCENT_LOW;
-        if (template == Template.Aggressive) return AGG_THRESHOLD_ADJUSTMENT_PERCENT_LOW;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return 0;
+        if (template == TEMPLATE_MODERATE) return MOD_THRESHOLD_ADJUSTMENT_PERCENT_LOW;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_THRESHOLD_ADJUSTMENT_PERCENT_LOW;
 
-        // Default value if no template or Template.None
         return MOD_THRESHOLD_ADJUSTMENT_PERCENT_LOW;
     }
 
@@ -603,18 +484,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getOracleSource(address vault) public view returns (OracleSource) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 19)) != 0) {
+        if (_isCustomized(vault, 19)) {
             return oracleSource[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return OracleSource.Chainlink;
-        if (template == Template.Moderate) return OracleSource.DEX;
-        if (template == Template.Aggressive) return OracleSource.TWAP;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return OracleSource.Chainlink;
+        if (template == TEMPLATE_MODERATE) return OracleSource.DEX;
+        if (template == TEMPLATE_AGGRESSIVE) return OracleSource.TWAP;
 
-        // Default value if no template or Template.None
         return OracleSource.DEX;
     }
 
@@ -624,18 +502,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getPriceDeviationTolerance(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 20)) != 0) {
+        if (_isCustomized(vault, 20)) {
             return priceDeviationTolerance[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_PRICE_DEVIATION_TOLERANCE;
-        if (template == Template.Moderate) return MOD_PRICE_DEVIATION_TOLERANCE;
-        if (template == Template.Aggressive) return AGG_PRICE_DEVIATION_TOLERANCE;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_PRICE_DEVIATION_TOLERANCE;
+        if (template == TEMPLATE_MODERATE) return MOD_PRICE_DEVIATION_TOLERANCE;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_PRICE_DEVIATION_TOLERANCE;
 
-        // Default value if no template or Template.None
         return MOD_PRICE_DEVIATION_TOLERANCE;
     }
 
@@ -645,18 +520,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getMaxPositionSizePercent(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 21)) != 0) {
+        if (_isCustomized(vault, 21)) {
             return maxPositionSizePercent[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MAX_POSITION_SIZE_PERCENT;
-        if (template == Template.Moderate) return MOD_MAX_POSITION_SIZE_PERCENT;
-        if (template == Template.Aggressive) return AGG_MAX_POSITION_SIZE_PERCENT;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_POSITION_SIZE_PERCENT;
+        if (template == TEMPLATE_MODERATE) return MOD_MAX_POSITION_SIZE_PERCENT;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_POSITION_SIZE_PERCENT;
 
-        // Default value if no template or Template.None
         return MOD_MAX_POSITION_SIZE_PERCENT;
     }
 
@@ -666,18 +538,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getMinPositionSize(address vault) public view returns (uint256) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 22)) != 0) {
+        if (_isCustomized(vault, 22)) {
             return minPositionSize[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MIN_POSITION_SIZE;
-        if (template == Template.Moderate) return MOD_MIN_POSITION_SIZE;
-        if (template == Template.Aggressive) return AGG_MIN_POSITION_SIZE;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MIN_POSITION_SIZE;
+        if (template == TEMPLATE_MODERATE) return MOD_MIN_POSITION_SIZE;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MIN_POSITION_SIZE;
 
-        // Default value if no template or Template.None
         return MOD_MIN_POSITION_SIZE;
     }
 
@@ -687,18 +556,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getTargetUtilization(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 23)) != 0) {
+        if (_isCustomized(vault, 23)) {
             return targetUtilization[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_TARGET_UTILIZATION;
-        if (template == Template.Moderate) return MOD_TARGET_UTILIZATION;
-        if (template == Template.Aggressive) return AGG_TARGET_UTILIZATION;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_TARGET_UTILIZATION;
+        if (template == TEMPLATE_MODERATE) return MOD_TARGET_UTILIZATION;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_TARGET_UTILIZATION;
 
-        // Default value if no template or Template.None
         return MOD_TARGET_UTILIZATION;
     }
 
@@ -708,18 +574,15 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getPlatformSelectionCriteria(address vault) public view returns (PlatformSelectionCriteria) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 24)) != 0) {
+        if (_isCustomized(vault, 24)) {
             return platformSelectionCriteria[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return PlatformSelectionCriteria.HighestTVL;
-        if (template == Template.Moderate) return PlatformSelectionCriteria.HighestVolume;
-        if (template == Template.Aggressive) return PlatformSelectionCriteria.HighestRewards;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return PlatformSelectionCriteria.HighestTVL;
+        if (template == TEMPLATE_MODERATE) return PlatformSelectionCriteria.HighestVolume;
+        if (template == TEMPLATE_AGGRESSIVE) return PlatformSelectionCriteria.HighestRewards;
 
-        // Default value if no template or Template.None
         return PlatformSelectionCriteria.HighestVolume;
     }
 
@@ -729,36 +592,25 @@ contract ParrisIslandStrategy is Ownable {
      * @return Parameter value
      */
     function getMinPoolLiquidity(address vault) public view returns (uint256) {
-        // Check if parameter is customized
-        if ((customizationBitmap[vault] & (1 << 25)) != 0) {
+        if (_isCustomized(vault, 25)) {
             return minPoolLiquidity[vault];
         }
 
-        // Return template value
-        Template template = selectedTemplate[vault];
-        if (template == Template.Conservative) return CONS_MIN_POOL_LIQUIDITY;
-        if (template == Template.Moderate) return MOD_MIN_POOL_LIQUIDITY;
-        if (template == Template.Aggressive) return AGG_MIN_POOL_LIQUIDITY;
+        uint8 template = selectedTemplate[vault];
+        if (template == TEMPLATE_CONSERVATIVE) return CONS_MIN_POOL_LIQUIDITY;
+        if (template == TEMPLATE_MODERATE) return MOD_MIN_POOL_LIQUIDITY;
+        if (template == TEMPLATE_AGGRESSIVE) return AGG_MIN_POOL_LIQUIDITY;
 
-        // Default value if no template or Template.None
         return MOD_MIN_POOL_LIQUIDITY;
     }
 
     /**
      * @dev Get all parameters for a vault in a single call (with template fallbacks)
      * @param vault Address of the vault
-     * @return All strategy parameters packaged in a tuple
+     * @return ABI-encoded parameters
      */
-    function getAllParameters(address vault) external view returns (
-        uint16, uint16, uint16, uint16,
-        bool, uint256, uint16,
-        uint16, uint16, uint16,
-        bool, uint8, uint8, uint16, uint16, uint16, uint16, uint16, uint16,
-        OracleSource, uint16,
-        uint16, uint256, uint16,
-        PlatformSelectionCriteria, uint256
-    ) {
-        return (
+    function getAllParameters(address vault) external view override returns (bytes memory) {
+        return abi.encode(
             // Range Parameters
             getTargetRangeUpper(vault), getTargetRangeLower(vault),
             getRebalanceThresholdUpper(vault), getRebalanceThresholdLower(vault),
@@ -806,13 +658,9 @@ contract ParrisIslandStrategy is Ownable {
         rebalanceThresholdUpper[msg.sender] = upperThreshold;
         rebalanceThresholdLower[msg.sender] = lowerThreshold;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3));
 
         emit ParameterUpdated(msg.sender, "rangeParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -830,13 +678,9 @@ contract ParrisIslandStrategy is Ownable {
         reinvestmentTrigger[msg.sender] = trigger;
         reinvestmentRatio[msg.sender] = ratio;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 4) | (1 << 5) | (1 << 6);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 4) | (1 << 5) | (1 << 6));
 
         emit ParameterUpdated(msg.sender, "feeParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -854,13 +698,9 @@ contract ParrisIslandStrategy is Ownable {
         emergencyExitTrigger[msg.sender] = exitTrigger;
         maxVaultUtilization[msg.sender] = utilization;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 7) | (1 << 8) | (1 << 9);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 7) | (1 << 8) | (1 << 9));
 
         emit ParameterUpdated(msg.sender, "riskParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -896,14 +736,10 @@ contract ParrisIslandStrategy is Ownable {
         rangeAdjustmentPercentLow[msg.sender] = rangeLow;
         thresholdAdjustmentPercentLow[msg.sender] = thresholdLow;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 10) | (1 << 11) | (1 << 12) | (1 << 13) | (1 << 14) |
-                 (1 << 15) | (1 << 16) | (1 << 17) | (1 << 18);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 10) | (1 << 11) | (1 << 12) | (1 << 13) | (1 << 14) |
+                 (1 << 15) | (1 << 16) | (1 << 17) | (1 << 18));
 
         emit ParameterUpdated(msg.sender, "adaptiveParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -918,13 +754,9 @@ contract ParrisIslandStrategy is Ownable {
         oracleSource[msg.sender] = source;
         priceDeviationTolerance[msg.sender] = tolerance;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 19) | (1 << 20);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 19) | (1 << 20));
 
         emit ParameterUpdated(msg.sender, "oracleParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -942,13 +774,9 @@ contract ParrisIslandStrategy is Ownable {
         minPositionSize[msg.sender] = minSize;
         targetUtilization[msg.sender] = utilization;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 21) | (1 << 22) | (1 << 23);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 21) | (1 << 22) | (1 << 23));
 
         emit ParameterUpdated(msg.sender, "positionSizingParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
     }
 
     /**
@@ -963,40 +791,9 @@ contract ParrisIslandStrategy is Ownable {
         platformSelectionCriteria[msg.sender] = criteria;
         minPoolLiquidity[msg.sender] = liquidity;
 
-        // Update customization bitmap
-        uint256 bitmap = customizationBitmap[msg.sender];
-        bitmap |= (1 << 24) | (1 << 25);
-        customizationBitmap[msg.sender] = bitmap;
+        _markCustomized((1 << 24) | (1 << 25));
 
         emit ParameterUpdated(msg.sender, "platformParameters");
-        emit CustomizationUpdated(msg.sender, bitmap);
-    }
-
-    /**
-     * @dev Reset customizations to revert to template defaults
-     */
-    function resetToTemplate() external {
-        // This effectively removes all customizations
-        customizationBitmap[msg.sender] = 0;
-
-        emit ParameterUpdated(msg.sender, "resetToTemplate");
-        emit CustomizationUpdated(msg.sender, 0);
-    }
-
-    /**
-     * @dev Reset all parameters and template selection
-     * Effectively sets all parameters to default values
-     */
-    function resetAll() external {
-        // Reset template selection
-        selectedTemplate[msg.sender] = Template.None;
-
-        // Reset customization bitmap
-        customizationBitmap[msg.sender] = 0;
-
-        emit TemplateSelected(msg.sender, Template.None);
-        emit ParameterUpdated(msg.sender, "resetAll");
-        emit CustomizationUpdated(msg.sender, 0);
     }
 
     // ==================== Admin Functions ====================
