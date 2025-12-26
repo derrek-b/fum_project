@@ -18,6 +18,8 @@
  * | getPoolData                  | VDS.fetchAssetValues       | CONFIRMED |
  * | calculateTokenAmounts        | VDS.fetchAssetValues       | CONFIRMED |
  * | getApprovalTarget(opType)    | Strategy.ensureApprovals   | CONFIRMED |
+ * | discoverAvailablePools       | Strategy.selectBestPool    | CONFIRMED |
+ * | sortTokens                   | Strategy.selectBestPool    | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -43,7 +45,6 @@
  * | getSwapEventSignature        | Platform-specific event format      |
  * | getPoolABI                   | Platform-specific                   |
  * | getPositionManagerABI        | Platform-specific                   |
- * | discoverAvailablePools       | Platform-specific discovery         |
  * | getPositions                 | Superseded by getPositionsForVDS?   |
  * =============================================================================
  */
@@ -289,6 +290,27 @@ export default class PlatformAdapter {
    */
   getApprovalTarget(operationType) {
     throw new Error("getApprovalTarget must be implemented by subclasses");
+  }
+
+  /**
+   * Sort tokens into the platform's canonical ordering for pool operations
+   *
+   * Most platforms order tokens by address (lower address = token0), but
+   * implementations may vary. All adapters must implement this to ensure
+   * consistent token ordering when interacting with pools.
+   *
+   * @param {Object} token0 - First token data object
+   * @param {string} token0.address - Token contract address
+   * @param {string} token0.symbol - Token symbol
+   * @param {Object} token1 - Second token data object
+   * @param {string} token1.address - Token contract address
+   * @param {string} token1.symbol - Token symbol
+   * @returns {{sortedToken0: Object, sortedToken1: Object, tokensSwapped: boolean}}
+   *          Sorted tokens and flag indicating if order was swapped
+   * @throws {Error} If token addresses are missing or invalid
+   */
+  sortTokens(token0, token1) {
+    throw new Error("sortTokens must be implemented by subclasses");
   }
 
   /**
