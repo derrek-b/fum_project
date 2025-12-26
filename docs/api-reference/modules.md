@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-26T22:08:41.872Z
+Generated on: 2025-12-26T23:30:03.767Z
 
 ## Table of Contents
 
@@ -331,7 +331,6 @@ Permit2 Helper Functions
 - `getParameterSetterMethod` (function)
 - `shouldShowParameter` (function)
 - `getStrategyTokens` (function)
-- `strategySupportsTokens` (function)
 - `formatParameterValue` (function)
 - `validateTokensForStrategy` (function)
 - `validatePositionsForStrategy` (function)

@@ -738,12 +738,13 @@ export function shouldShowParameter(conditionalParam, testValueSet) {
  * Get supported tokens for a strategy based on tokenSupport configuration
  * @memberof module:helpers/strategyHelpers
  * @param {string} strategyId - ID of the strategy
- * @returns {Object} Object with supported token symbols as keys
+ * @returns {Object} Object with supported token symbols as keys (WETH is filtered out - use ETH)
  * @throws {Error} If strategy not found or tokenSupport configuration invalid
  * @example
  * // Get tokens for strategy that supports all tokens
  * const tokens = getStrategyTokens('bob');
  * // Returns: { ETH: { name: "Ether", ... }, USDC: { ... }, ... }
+ * // Note: WETH is filtered out - strategies use ETH, automation handles wrapping
  *
  * @example
  * // Get tokens for stablecoin-only strategy
@@ -764,76 +765,49 @@ export function getStrategyTokens(strategyId) {
     throw new Error(`Strategy ${strategyId} not found`);
   }
 
+  let tokens;
+
   // Handle backward compatibility - if strategy still has supportedTokens but no tokenSupport
   if (strategy.supportedTokens && !strategy.tokenSupport) {
-    return strategy.supportedTokens;
+    tokens = strategy.supportedTokens;
+  } else {
+    // Validate tokenSupport field exists
+    if (!strategy.tokenSupport) {
+      throw new Error(`Strategy ${strategyId} missing tokenSupport configuration`);
+    }
+
+    // Validate tokenSupport enum value
+    if (typeof strategy.tokenSupport !== 'string') {
+      throw new Error(`Strategy ${strategyId} tokenSupport must be a string`);
+    }
+
+    switch (strategy.tokenSupport) {
+      case 'all':
+        tokens = getAllTokens();
+        break;
+
+      case 'stablecoins':
+        tokens = getStablecoins();
+        break;
+
+      case 'custom':
+        if (!strategy.supportedTokens || typeof strategy.supportedTokens !== 'object' || Array.isArray(strategy.supportedTokens)) {
+          throw new Error(`Strategy ${strategyId} with tokenSupport "custom" must have valid supportedTokens object`);
+        }
+        if (Object.keys(strategy.supportedTokens).length === 0) {
+          throw new Error(`Strategy ${strategyId} with tokenSupport "custom" must have non-empty supportedTokens`);
+        }
+        tokens = strategy.supportedTokens;
+        break;
+
+      default:
+        throw new Error(`Strategy ${strategyId} has invalid tokenSupport value: ${strategy.tokenSupport}. Must be "all", "stablecoins", or "custom"`);
+    }
   }
 
-  // Validate tokenSupport field exists
-  if (!strategy.tokenSupport) {
-    throw new Error(`Strategy ${strategyId} missing tokenSupport configuration`);
-  }
-
-  // Validate tokenSupport enum value
-  if (typeof strategy.tokenSupport !== 'string') {
-    throw new Error(`Strategy ${strategyId} tokenSupport must be a string`);
-  }
-
-  switch (strategy.tokenSupport) {
-    case 'all':
-      return getAllTokens();
-    
-    case 'stablecoins':
-      return getStablecoins();
-    
-    case 'custom':
-      if (!strategy.supportedTokens || typeof strategy.supportedTokens !== 'object' || Array.isArray(strategy.supportedTokens)) {
-        throw new Error(`Strategy ${strategyId} with tokenSupport "custom" must have valid supportedTokens object`);
-      }
-      if (Object.keys(strategy.supportedTokens).length === 0) {
-        throw new Error(`Strategy ${strategyId} with tokenSupport "custom" must have non-empty supportedTokens`);
-      }
-      return strategy.supportedTokens;
-    
-    default:
-      throw new Error(`Strategy ${strategyId} has invalid tokenSupport value: ${strategy.tokenSupport}. Must be "all", "stablecoins", or "custom"`);
-  }
-}
-
-/**
- * Check if a strategy supports specific tokens
- * @memberof module:helpers/strategyHelpers
- * @param {string} strategyId - ID of the strategy
- * @param {Array<string>} tokenSymbols - Array of token symbols to check
- * @returns {boolean} Whether the strategy supports all specified tokens
- * @example
- * // Check if Bob supports ETH/USDC pair
- * const supported = strategySupportsTokens('bob', ['ETH', 'USDC']);
- * // Returns: true
- *
- * @example
- * // Filter strategies by token support
- * const compatibleStrategies = lookupAvailableStrategies()
- *   .filter(strategy =>
- *     strategySupportsTokens(strategy.id, selectedTokens)
- *   );
- * @since 1.0.0
- */
-export function strategySupportsTokens(strategyId, tokenSymbols) {
-  validateIdString(strategyId);
-
-  if (!Array.isArray(tokenSymbols)) {
-    throw new Error('Token symbols must be an array');
-  }
-
-  try {
-    const supportedTokens = getStrategyTokens(strategyId);
-    const supportedSymbols = Object.keys(supportedTokens);
-    return tokenSymbols.every(symbol => supportedSymbols.includes(symbol));
-  } catch (error) {
-    // If we can't get strategy tokens, assume no support
-    return false;
-  }
+  // Filter out WETH - strategies use ETH, automation handles wrapping
+  const { WETH, ...filteredTokens } = tokens;
+  return filteredTokens;
 }
 
 /**

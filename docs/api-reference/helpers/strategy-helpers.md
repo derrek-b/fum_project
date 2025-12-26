@@ -605,7 +605,7 @@ getStrategyTokens(strategyId: string): Object
 
 ### Returns
 
-`Object` - Object with supported token symbols as keys and token configuration objects as values
+`Object` - Object with supported token symbols as keys and token configuration objects as values. WETH is filtered out - strategies use ETH, and the automation service handles wrapping.
 
 ### Throws
 
@@ -621,7 +621,8 @@ getStrategyTokens(strategyId: string): Object
 import { getStrategyTokens } from 'fum_library/helpers/strategyHelpers';
 
 const tokens = getStrategyTokens('bob');
-// Returns: { WETH: { name: "Wrapped Ether", ... }, USDC: { ... }, ... }
+// Returns: { ETH: { name: "Ether", ... }, USDC: { ... }, ... }
+// Note: WETH is filtered out - strategies use ETH, automation handles wrapping
 ```
 
 #### Get tokens for stablecoin-only strategy
@@ -647,45 +648,6 @@ The function handles three types of token support based on the strategy's `token
 ### Backward Compatibility
 
 The function maintains backward compatibility with older strategy configurations that use `supportedTokens` directly without `tokenSupport`.
-
----
-
-## strategySupportsTokens
-
-Check if a strategy supports specific tokens.
-
-### Signature
-```javascript
-strategySupportsTokens(strategyId: string, tokenSymbols: Array<string>): boolean
-```
-
-### Parameters
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| strategyId | `string` | Yes | - | ID of the strategy |
-| tokenSymbols | `Array<string>` | Yes | - | Array of token symbols to check |
-
-### Returns
-
-`boolean` - Whether the strategy supports all specified tokens
-
-### Examples
-
-```javascript
-// Check if Bob supports ETH/USDC pair
-const supported = strategySupportsTokens('bob', ['ETH', 'USDC']);
-// Returns: true
-
-// Filter strategies by token support
-const compatibleStrategies = getAvailableStrategies()
-  .filter(strategy => 
-    strategySupportsTokens(strategy.id, selectedTokens)
-  );
-```
-
-### Side Effects
-None - Pure function
 
 ---
 

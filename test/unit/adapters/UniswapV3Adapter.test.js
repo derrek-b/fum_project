@@ -5031,15 +5031,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         const poolData = result.poolData[poolAddresses[0]];
 
-        // Verify pool metadata structure
-        expect(poolData).toHaveProperty('poolAddress');
+        // Verify pool metadata structure (poolAddress is the key, not a property)
         expect(poolData).toHaveProperty('token0Symbol');
         expect(poolData).toHaveProperty('token1Symbol');
         expect(poolData).toHaveProperty('fee');
         expect(poolData).toHaveProperty('platform');
 
-        // Verify pool metadata values match test environment
-        expect(poolData.poolAddress).toBe(env.poolData.poolAddress); // Exact pool address
+        // Verify pool address is correct (it's the key in poolData)
+        expect(poolAddresses[0]).toBe(env.poolData.poolAddress);
         expect(poolData.fee).toBe(env.testPosition.fee); // Exact fee tier from setup (500)
         expect(poolData.platform).toBe('uniswapV3');
 
@@ -5057,7 +5056,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(poolData.token1Symbol).toBe(expectedToken1Symbol);
 
         // Verify only expected fields in poolData (no time-sensitive data)
-        const expectedPoolFields = ['poolAddress', 'token0Symbol', 'token1Symbol', 'fee', 'platform'];
+        // Note: poolAddress is the key to access this data, not a property within it
+        const expectedPoolFields = ['token0Symbol', 'token1Symbol', 'fee', 'platform'];
         expect(Object.keys(poolData).sort()).toEqual(expectedPoolFields.sort());
       });
 

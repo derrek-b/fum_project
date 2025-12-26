@@ -21,7 +21,6 @@ import {
   getParameterSetterMethod,
   shouldShowParameter,
   getStrategyTokens,
-  strategySupportsTokens,
   formatParameterValue,
   validateTokensForStrategy,
   validatePositionsForStrategy,
@@ -1870,6 +1869,18 @@ describe('Strategy Helpers', () => {
         expect(tokens).toHaveProperty('USDC');
       });
 
+      it('should filter out WETH (strategies use ETH, automation handles wrapping)', () => {
+        const tokens = getStrategyTokens('bob');
+
+        // Should have ETH but NOT WETH
+        expect(tokens).toHaveProperty('ETH');
+        expect(tokens).not.toHaveProperty('WETH');
+
+        // Verify WETH is in getAllTokens (it's filtered specifically for strategies)
+        const allTokens = getAllTokens();
+        expect(allTokens).toHaveProperty('WETH');
+      });
+
       it('should return stablecoin tokens for strategy with tokenSupport "stablecoins"', () => {
         const tokens = getStrategyTokens('fed');
 
@@ -1993,186 +2004,6 @@ describe('Strategy Helpers', () => {
         expect(result).toEqual(legacyTokens);
 
         strategies.bob = originalBob;
-      });
-    });
-  });
-
-  describe('strategySupportsTokens', () => {
-    describe('Success Cases', () => {
-      it('should return true when all tokens are supported', () => {
-        // Bob strategy supports all tokens
-        const result = strategySupportsTokens('bob', ['ETH', 'USDC']);
-        expect(result).toBe(true);
-      });
-
-      it('should return true for single supported token', () => {
-        const result = strategySupportsTokens('bob', ['ETH']);
-        expect(result).toBe(true);
-      });
-
-      it('should return true for empty token array', () => {
-        // every() returns true for empty arrays
-        const result = strategySupportsTokens('bob', []);
-        expect(result).toBe(true);
-      });
-
-      it('should work with multiple supported tokens', () => {
-        const result = strategySupportsTokens('bob', ['ETH', 'USDC', 'USDC', 'WBTC']);
-        expect(result).toBe(true);
-      });
-
-      it('should work with parris strategy that supports all tokens', () => {
-        const result = strategySupportsTokens('parris', ['ETH', 'USDC', 'LINK']);
-        expect(result).toBe(true);
-      });
-
-      it('should work with fed strategy limited token support', () => {
-        // Fed strategy only supports stablecoins
-        const stablecoinResult = strategySupportsTokens('fed', ['USDC', 'USDC']);
-        expect(stablecoinResult).toBe(true);
-
-        // Should return false for non-stablecoins
-        const nonStablecoinResult = strategySupportsTokens('fed', ['ETH', 'WBTC']);
-        expect(nonStablecoinResult).toBe(false);
-      });
-
-      it('should work with none strategy', () => {
-        const result = strategySupportsTokens('none', ['ETH', 'USDC']);
-        expect(result).toBe(true);
-      });
-
-      it('should handle case-sensitive token symbols', () => {
-        // Should work with correct case
-        expect(strategySupportsTokens('bob', ['ETH'])).toBe(true);
-
-        // Should not work with incorrect case
-        expect(strategySupportsTokens('bob', ['eth'])).toBe(false);
-        expect(strategySupportsTokens('bob', ['Eth'])).toBe(false);
-      });
-
-      it('should check that ALL tokens are supported', () => {
-        // Mix of supported and unsupported tokens should return false
-        const result = strategySupportsTokens('fed', ['USDC', 'ETH']); // USDC supported, ETH not supported by fed
-        expect(result).toBe(false);
-      });
-    });
-
-    describe('Failure Cases', () => {
-      it('should return false for non-existent strategy', () => {
-        const result = strategySupportsTokens('nonExistentStrategy', ['ETH']);
-        expect(result).toBe(false);
-      });
-
-      it('should return false when strategy has invalid tokenSupport', () => {
-        const originalBob = strategies.bob;
-        strategies.bob = { ...originalBob, tokenSupport: 'invalid' };
-
-        const result = strategySupportsTokens('bob', ['ETH']);
-        expect(result).toBe(false);
-
-        strategies.bob = originalBob;
-      });
-
-      it('should return false when strategy has missing tokenSupport', () => {
-        const originalBob = strategies.bob;
-        strategies.bob = { ...originalBob, tokenSupport: undefined };
-
-        const result = strategySupportsTokens('bob', ['ETH']);
-        expect(result).toBe(false);
-
-        strategies.bob = originalBob;
-      });
-
-      it('should return false when some tokens are not supported', () => {
-        // Fed strategy doesn't support ETH
-        const result = strategySupportsTokens('fed', ['ETH']);
-        expect(result).toBe(false);
-      });
-
-      it('should return false when any token in array is not supported', () => {
-        // Fed strategy supports USDC but not ETH
-        const result = strategySupportsTokens('fed', ['USDC', 'ETH']);
-        expect(result).toBe(false);
-      });
-
-      it('should return false for completely unsupported tokens', () => {
-        const result = strategySupportsTokens('fed', ['INVALID_TOKEN', 'ANOTHER_INVALID']);
-        expect(result).toBe(false);
-      });
-    });
-
-    describe('Error Cases', () => {
-      it('should throw error for null strategyId', () => {
-        expect(() => strategySupportsTokens(null, ['ETH'])).toThrow('ID parameter is required');
-      });
-
-      it('should throw error for undefined strategyId', () => {
-        expect(() => strategySupportsTokens(undefined, ['ETH'])).toThrow('ID parameter is required');
-      });
-
-      it('should throw error for non-string strategyId', () => {
-        expect(() => strategySupportsTokens(123, ['ETH'])).toThrow('ID must be a string');
-        expect(() => strategySupportsTokens({}, ['ETH'])).toThrow('ID must be a string');
-      });
-
-      it('should throw error for empty strategyId', () => {
-        expect(() => strategySupportsTokens('', ['ETH'])).toThrow('ID cannot be empty');
-      });
-
-      it('should handle null tokenSymbols gracefully', () => {
-        // Should throw when trying to call every() on null
-        expect(() => strategySupportsTokens('bob', null)).toThrow();
-      });
-
-      it('should handle undefined tokenSymbols gracefully', () => {
-        // Should throw when trying to call every() on undefined
-        expect(() => strategySupportsTokens('bob', undefined)).toThrow();
-      });
-
-      it('should handle non-array tokenSymbols gracefully', () => {
-        // Should throw when trying to call every() on non-array
-        expect(() => strategySupportsTokens('bob', 'ETH')).toThrow();
-        expect(() => strategySupportsTokens('bob', {})).toThrow();
-        expect(() => strategySupportsTokens('bob', 123)).toThrow();
-      });
-
-      it('should handle array with non-string token symbols', () => {
-        // Should not throw, but likely return false since includes() will do strict comparison
-        expect(strategySupportsTokens('bob', [null, undefined, 123])).toBe(false);
-        expect(strategySupportsTokens('bob', [{}])).toBe(false);
-      });
-    });
-
-    describe('Real-world Usage Scenarios', () => {
-      it('should work for common DeFi token pairs', () => {
-        // ETH/USDC pair
-        expect(strategySupportsTokens('bob', ['ETH', 'USDC'])).toBe(true);
-        expect(strategySupportsTokens('parris', ['ETH', 'USDC'])).toBe(true);
-        expect(strategySupportsTokens('fed', ['ETH', 'USDC'])).toBe(false); // Fed doesn't support ETH
-
-        // Stablecoin pairs
-        expect(strategySupportsTokens('fed', ['USDC', 'USDC'])).toBe(true);
-        expect(strategySupportsTokens('bob', ['USDC', 'USDC'])).toBe(true);
-      });
-
-      it('should handle large token lists', () => {
-        const manyTokens = ['ETH', 'USDC', 'USDC', 'WBTC', 'LINK'];
-
-        expect(strategySupportsTokens('bob', manyTokens)).toBe(true);
-        expect(strategySupportsTokens('parris', manyTokens)).toBe(true);
-        expect(strategySupportsTokens('fed', manyTokens)).toBe(false); // Fed doesn't support non-stablecoins
-      });
-
-      it('should be useful for filtering compatible strategies', () => {
-        const selectedTokens = ['ETH', 'USDC'];
-
-        // Filter strategies that support the selected tokens
-        const compatibleStrategies = ['bob', 'parris', 'fed', 'none'].filter(strategyId =>
-          strategySupportsTokens(strategyId, selectedTokens)
-        );
-
-        // Fed should be filtered out because it doesn't support ETH
-        expect(compatibleStrategies).toEqual(['bob', 'parris', 'none']);
       });
     });
   });
