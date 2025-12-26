@@ -10,7 +10,7 @@ import "./StrategyBase.sol";
  */
 contract BabyStepsStrategy is StrategyBase {
     // Version information
-    string public constant VERSION = "1.3.0";
+    string public constant VERSION = "2.0.0";
 
     // ==================== Template Constants ====================
     uint8 public constant TEMPLATE_NONE = 0;
@@ -22,8 +22,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Conservative template values - WIDER ranges, fewer rebalances
     uint16 private constant CONS_TARGET_RANGE_UPPER = 1000;          // 10.00%
     uint16 private constant CONS_TARGET_RANGE_LOWER = 1000;          // 10.00%
-    uint16 private constant CONS_REBALANCE_THRESHOLD_UPPER = 600;    // 6.00%
-    uint16 private constant CONS_REBALANCE_THRESHOLD_LOWER = 600;    // 6.00%
     uint256 private constant CONS_REINVESTMENT_TRIGGER = 5000;       // $50.00 (in cents)
     uint16 private constant CONS_REINVESTMENT_RATIO = 3000;          // 30.00%
     uint16 private constant CONS_MAX_SLIPPAGE = 50;                  // 0.50%
@@ -34,8 +32,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Moderate template values - MEDIUM ranges, moderate rebalances
     uint16 private constant MOD_TARGET_RANGE_UPPER = 500;            // 5.00%
     uint16 private constant MOD_TARGET_RANGE_LOWER = 500;            // 5.00%
-    uint16 private constant MOD_REBALANCE_THRESHOLD_UPPER = 400;     // 4.00%
-    uint16 private constant MOD_REBALANCE_THRESHOLD_LOWER = 400;     // 4.00%
     uint256 private constant MOD_REINVESTMENT_TRIGGER = 5000;        // $50.00 (in cents)
     uint16 private constant MOD_REINVESTMENT_RATIO = 5000;           // 50.00%
     uint16 private constant MOD_MAX_SLIPPAGE = 50;                   // 0.50%
@@ -45,8 +41,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Aggressive template values - TIGHTER ranges, frequent rebalances
     uint16 private constant AGG_TARGET_RANGE_UPPER = 300;            // 3.00%
     uint16 private constant AGG_TARGET_RANGE_LOWER = 300;            // 3.00%
-    uint16 private constant AGG_REBALANCE_THRESHOLD_UPPER = 80;      // 0.80%
-    uint16 private constant AGG_REBALANCE_THRESHOLD_LOWER = 80;      // 0.80%
     uint256 private constant AGG_REINVESTMENT_TRIGGER = 5000;        // $50.00 (in cents)
     uint16 private constant AGG_REINVESTMENT_RATIO = 9000;           // 90.00%
     uint16 private constant AGG_MAX_SLIPPAGE = 50;                   // 0.50%
@@ -56,8 +50,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Stablecoin template values - VERY TIGHT ranges for stablecoins
     uint16 private constant STBL_TARGET_RANGE_UPPER = 20;            // 0.20%
     uint16 private constant STBL_TARGET_RANGE_LOWER = 20;            // 0.20%
-    uint16 private constant STBL_REBALANCE_THRESHOLD_UPPER = 1250;   // 12.50%
-    uint16 private constant STBL_REBALANCE_THRESHOLD_LOWER = 1250;   // 12.50%
     uint256 private constant STBL_REINVESTMENT_TRIGGER = 1000;       // $10.00 (in cents)
     uint16 private constant STBL_REINVESTMENT_RATIO = 10000;         // 100.00%
     uint16 private constant STBL_MAX_SLIPPAGE = 20;                  // 0.20%
@@ -68,8 +60,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Range Parameters
     mapping(address => uint16) public targetRangeUpper;         // Basis points (1/100th of a percent)
     mapping(address => uint16) public targetRangeLower;         // Basis points
-    mapping(address => uint16) public rebalanceThresholdUpper;  // Basis points
-    mapping(address => uint16) public rebalanceThresholdLower;  // Basis points
 
     // Fee Settings
     mapping(address => bool) public feeReinvestment;
@@ -133,57 +123,13 @@ contract BabyStepsStrategy is StrategyBase {
     }
 
     /**
-     * @dev Get rebalance threshold upper value with template fallback
-     * @param vault Address of the vault
-     * @return Parameter value
-     */
-    function getRebalanceThresholdUpper(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if (_isCustomized(vault, 2)) {
-            return rebalanceThresholdUpper[vault];
-        }
-
-        // Return template value
-        uint8 template = selectedTemplate[vault];
-        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_UPPER;
-        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_UPPER;
-        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_UPPER;
-        if (template == TEMPLATE_STABLECOIN) return STBL_REBALANCE_THRESHOLD_UPPER;
-
-        // Default value if no template or TEMPLATE_NONE
-        return MOD_REBALANCE_THRESHOLD_UPPER;
-    }
-
-    /**
-     * @dev Get rebalance threshold lower value with template fallback
-     * @param vault Address of the vault
-     * @return Parameter value
-     */
-    function getRebalanceThresholdLower(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if (_isCustomized(vault, 3)) {
-            return rebalanceThresholdLower[vault];
-        }
-
-        // Return template value
-        uint8 template = selectedTemplate[vault];
-        if (template == TEMPLATE_CONSERVATIVE) return CONS_REBALANCE_THRESHOLD_LOWER;
-        if (template == TEMPLATE_MODERATE) return MOD_REBALANCE_THRESHOLD_LOWER;
-        if (template == TEMPLATE_AGGRESSIVE) return AGG_REBALANCE_THRESHOLD_LOWER;
-        if (template == TEMPLATE_STABLECOIN) return STBL_REBALANCE_THRESHOLD_LOWER;
-
-        // Default value if no template or TEMPLATE_NONE
-        return MOD_REBALANCE_THRESHOLD_LOWER;
-    }
-
-    /**
      * @dev Get fee reinvestment flag with template fallback
      * @param vault Address of the vault
      * @return Parameter value
      */
     function getFeeReinvestment(address vault) public view returns (bool) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 4)) {
+        if (_isCustomized(vault, 2)) {
             return feeReinvestment[vault];
         }
 
@@ -205,7 +151,7 @@ contract BabyStepsStrategy is StrategyBase {
      */
     function getReinvestmentTrigger(address vault) public view returns (uint256) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 5)) {
+        if (_isCustomized(vault, 3)) {
             return reinvestmentTrigger[vault];
         }
 
@@ -227,7 +173,7 @@ contract BabyStepsStrategy is StrategyBase {
      */
     function getReinvestmentRatio(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 6)) {
+        if (_isCustomized(vault, 4)) {
             return reinvestmentRatio[vault];
         }
 
@@ -249,7 +195,7 @@ contract BabyStepsStrategy is StrategyBase {
      */
     function getMaxSlippage(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 7)) {
+        if (_isCustomized(vault, 5)) {
             return maxSlippage[vault];
         }
 
@@ -271,7 +217,7 @@ contract BabyStepsStrategy is StrategyBase {
      */
     function getEmergencyExitTrigger(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 8)) {
+        if (_isCustomized(vault, 6)) {
             return emergencyExitTrigger[vault];
         }
 
@@ -293,7 +239,7 @@ contract BabyStepsStrategy is StrategyBase {
      */
     function getMaxUtilization(address vault) public view returns (uint16) {
         // Check if parameter is customized
-        if (_isCustomized(vault, 9)) {
+        if (_isCustomized(vault, 7)) {
             return maxUtilization[vault];
         }
 
@@ -317,7 +263,6 @@ contract BabyStepsStrategy is StrategyBase {
         return abi.encode(
             // Range Parameters
             getTargetRangeUpper(vault), getTargetRangeLower(vault),
-            getRebalanceThresholdUpper(vault), getRebalanceThresholdLower(vault),
 
             // Fee Settings
             getFeeReinvestment(vault), getReinvestmentTrigger(vault), getReinvestmentRatio(vault),
@@ -333,22 +278,16 @@ contract BabyStepsStrategy is StrategyBase {
      * @dev Update range parameters
      * @param upperRange Target upper range in basis points
      * @param lowerRange Target lower range in basis points
-     * @param upperThreshold Upper rebalance threshold in basis points
-     * @param lowerThreshold Lower rebalance threshold in basis points
      */
     function setRangeParameters(
         uint16 upperRange,
-        uint16 lowerRange,
-        uint16 upperThreshold,
-        uint16 lowerThreshold
+        uint16 lowerRange
     ) external onlyAuthorizedVault {
         targetRangeUpper[msg.sender] = upperRange;
         targetRangeLower[msg.sender] = lowerRange;
-        rebalanceThresholdUpper[msg.sender] = upperThreshold;
-        rebalanceThresholdLower[msg.sender] = lowerThreshold;
 
         // Update customization bitmap
-        _markCustomized((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3));
+        _markCustomized((1 << 0) | (1 << 1));
 
         emit ParameterUpdated(msg.sender, "rangeParameters");
     }
@@ -369,7 +308,7 @@ contract BabyStepsStrategy is StrategyBase {
         reinvestmentRatio[msg.sender] = ratio;
 
         // Update customization bitmap
-        _markCustomized((1 << 4) | (1 << 5) | (1 << 6));
+        _markCustomized((1 << 2) | (1 << 3) | (1 << 4));
 
         emit ParameterUpdated(msg.sender, "feeParameters");
     }
@@ -390,7 +329,7 @@ contract BabyStepsStrategy is StrategyBase {
         maxUtilization[msg.sender] = utilization;
 
         // Update customization bitmap
-        _markCustomized((1 << 7) | (1 << 8) | (1 << 9));
+        _markCustomized((1 << 5) | (1 << 6) | (1 << 7));
 
         emit ParameterUpdated(msg.sender, "riskParameters");
     }

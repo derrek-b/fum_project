@@ -26,7 +26,7 @@ describe("StrategyBase", function () {
   // Strategy function interface for encoding calls
   const strategyInterface = new ethers.Interface([
     "function selectTemplate(uint8 template)",
-    "function setRangeParameters(uint16 upperRange, uint16 lowerRange, uint16 upperThreshold, uint16 lowerThreshold)",
+    "function setRangeParameters(uint16 upperRange, uint16 lowerRange)",
     "function resetToTemplate()",
     "function resetAll()"
   ]);
@@ -130,7 +130,7 @@ describe("StrategyBase", function () {
 
     it("Should fail when unauthorized vault tries to set parameters", async function() {
       // vault1 is NOT authorized - try to set parameters
-      const data = strategyInterface.encodeFunctionData("setRangeParameters", [600, 400, 120, 80]);
+      const data = strategyInterface.encodeFunctionData("setRangeParameters", [600, 400]);
       await expect(
         vault1Contract.connect(user1).execute([strategyAddress], [data])
       ).to.be.revertedWith("PositionVault: transaction failed");
@@ -149,7 +149,7 @@ describe("StrategyBase", function () {
       await strategy.connect(user1).authorizeVault(vault1Address);
 
       // Now should succeed
-      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400, 120, 80]);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400]);
 
       // Verify parameter was set
       expect(await strategy.getTargetRangeUpper(vault1Address)).to.equal(600);
@@ -184,7 +184,7 @@ describe("StrategyBase", function () {
 
     it("Should clear customization bitmap when selecting non-None template", async function () {
       // First set a custom parameter
-      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 100, 100]);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000]);
 
       // Verify bitmap is non-zero
       const bitmapBefore = await strategy.customizationBitmap(vault1Address);
@@ -200,7 +200,7 @@ describe("StrategyBase", function () {
 
     it("Should NOT clear customization bitmap when selecting None template", async function () {
       // First set a custom parameter
-      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 100, 100]);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000]);
 
       // Verify bitmap is non-zero
       const bitmapBefore = await strategy.customizationBitmap(vault1Address);
@@ -234,15 +234,15 @@ describe("StrategyBase", function () {
     });
 
     it("Should update bitmap when setting parameters", async function () {
-      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400, 120, 80]);
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400]);
 
       const bitmap = await strategy.customizationBitmap(vault1Address);
-      // Bits 0-3 should be set (15 = 0b1111)
-      expect(bitmap & 15n).to.equal(15n);
+      // Bits 0-1 should be set (3 = 0b11)
+      expect(bitmap & 3n).to.equal(3n);
     });
 
     it("Should emit CustomizationUpdated event", async function () {
-      const data = strategyInterface.encodeFunctionData("setRangeParameters", [600, 400, 120, 80]);
+      const data = strategyInterface.encodeFunctionData("setRangeParameters", [600, 400]);
 
       await expect(vault1Contract.connect(user1).execute([strategyAddress], [data]))
         .to.emit(strategy, "CustomizationUpdated");
@@ -257,7 +257,7 @@ describe("StrategyBase", function () {
     describe("resetToTemplate", function () {
       it("Should clear customization bitmap", async function () {
         // Set custom parameters
-        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 200, 200]);
+        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000]);
 
         // Verify bitmap is non-zero
         const bitmapBefore = await strategy.customizationBitmap(vault1Address);
@@ -276,7 +276,7 @@ describe("StrategyBase", function () {
         await executeOnStrategy(vault1Contract, user1, "selectTemplate", [TEMPLATE_CONSERVATIVE]);
 
         // Set custom parameters
-        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 200, 200]);
+        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000]);
 
         // Reset to template
         await executeOnStrategy(vault1Contract, user1, "resetToTemplate", []);
@@ -299,7 +299,7 @@ describe("StrategyBase", function () {
     describe("resetAll", function () {
       it("Should clear customization bitmap", async function () {
         // Set custom parameters
-        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000, 200, 200]);
+        await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [1000, 1000]);
 
         // Reset all
         await executeOnStrategy(vault1Contract, user1, "resetAll", []);
@@ -358,8 +358,8 @@ describe("StrategyBase", function () {
     });
 
     it("Should maintain independent customization bitmaps per vault", async function () {
-      // vault1 customizes range parameters (bits 0-3)
-      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400, 120, 80]);
+      // vault1 customizes range parameters (bits 0-1)
+      await executeOnStrategy(vault1Contract, user1, "setRangeParameters", [600, 400]);
 
       // vault2 has no customizations
       const bitmap1 = await strategy.customizationBitmap(vault1Address);
