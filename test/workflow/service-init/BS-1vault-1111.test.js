@@ -30,6 +30,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let vaultsLoadedEvents = [];
   let poolDataFetchedEvents = [];
   let initialPositionsEvaluatedEvents = [];
+  let bestPoolSelectedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -130,6 +131,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('InitialPositionsEvaluated', (data) => {
         initialPositionsEvaluatedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('BestPoolSelected', (data) => {
+        bestPoolSelectedEvents.push(data);
       });
 
       // Start the service
@@ -317,65 +322,147 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   });
 
   describe('setupVault() Step 3: Strategy Initialization', () => {
-    it('should emit InitialPositionsEvaluated event', () => {
-      expect(initialPositionsEvaluatedEvents.length).toBe(1);
+    describe('Position Evaluation', () => {
+      it('should emit InitialPositionsEvaluated event', () => {
+        expect(initialPositionsEvaluatedEvents.length).toBe(1);
 
-      const event = initialPositionsEvaluatedEvents[0];
-      expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
-      expect(event.success).toBe(true);
-      expect(typeof event.timestamp).toBe('number');
+        const event = initialPositionsEvaluatedEvents[0];
+        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(event.success).toBe(true);
+        expect(typeof event.timestamp).toBe('number');
+      });
+
+      it('should identify 1 aligned and 1 non-aligned position', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+
+        expect(event.alignedCount).toBe(1);
+        expect(event.nonAlignedCount).toBe(1);
+      });
+
+      it('should return correct position IDs in aligned/non-aligned arrays', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Should have exactly 1 position in each array
+        expect(event.alignedPositionIds).toHaveLength(1);
+        expect(event.nonAlignedPositionIds).toHaveLength(1);
+
+        // All position IDs should be valid (exist in vault.positions)
+        const allPositionIds = Object.keys(vault.positions);
+        expect(allPositionIds).toContain(event.alignedPositionIds[0]);
+        expect(allPositionIds).toContain(event.nonAlignedPositionIds[0]);
+      });
+
+      it('should classify USDC/WETH position as aligned (correct tokens, platform, in range)', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Find the USDC/WETH position by checking pool metadata
+        const alignedPositionId = event.alignedPositionIds[0];
+        const alignedPosition = vault.positions[alignedPositionId];
+        const poolMetadata = service.poolData[alignedPosition.pool];
+
+        // Verify it's the USDC/WETH position
+        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
+        expect(tokens).toEqual(['USDC', 'WETH']);
+      });
+
+      it('should classify WBTC/WETH position as non-aligned (WBTC not in target tokens)', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Find the WBTC/WETH position by checking pool metadata
+        const nonAlignedPositionId = event.nonAlignedPositionIds[0];
+        const nonAlignedPosition = vault.positions[nonAlignedPositionId];
+        const poolMetadata = service.poolData[nonAlignedPosition.pool];
+
+        // Verify it's the WBTC/WETH position
+        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
+        expect(tokens).toEqual(['WBTC', 'WETH']);
+
+        // Confirm WBTC is not in target tokens
+        expect(vault.targetTokens).not.toContain('WBTC');
+      });
     });
 
-    it('should identify 1 aligned and 1 non-aligned position', () => {
-      const event = initialPositionsEvaluatedEvents[0];
+    describe('Pool Selection', () => {
+      // Uniswap V3 constants for validation
+      const VALID_V3_FEE_TIERS = [100, 500, 3000, 10000];
+      const V3_MIN_TICK = -887272;
+      const V3_MAX_TICK = 887272;
 
-      expect(event.alignedCount).toBe(1);
-      expect(event.nonAlignedCount).toBe(1);
-    });
+      it('should emit BestPoolSelected event', () => {
+        expect(bestPoolSelectedEvents.length).toBe(1);
 
-    it('should return correct position IDs in aligned/non-aligned arrays', () => {
-      const event = initialPositionsEvaluatedEvents[0];
-      const vault = service.vaultDataService.getAllVaults()[0];
+        const event = bestPoolSelectedEvents[0];
+        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(typeof event.timestamp).toBe('number');
+      });
 
-      // Should have exactly 1 position in each array
-      expect(event.alignedPositionIds).toHaveLength(1);
-      expect(event.nonAlignedPositionIds).toHaveLength(1);
+      it('should have correct event structure', () => {
+        const event = bestPoolSelectedEvents[0];
 
-      // All position IDs should be valid (exist in vault.positions)
-      const allPositionIds = Object.keys(vault.positions);
-      expect(allPositionIds).toContain(event.alignedPositionIds[0]);
-      expect(allPositionIds).toContain(event.nonAlignedPositionIds[0]);
-    });
+        // Required fields
+        expect(event).toHaveProperty('vaultAddress');
+        expect(event).toHaveProperty('token0Symbol');
+        expect(event).toHaveProperty('token1Symbol');
+        expect(event).toHaveProperty('platformId');
+        expect(event).toHaveProperty('poolAddress');
+        expect(event).toHaveProperty('poolFee');
+        expect(event).toHaveProperty('poolLiquidity');
+        expect(event).toHaveProperty('poolTick');
+        expect(event).toHaveProperty('poolsDiscovered');
+        expect(event).toHaveProperty('poolsActive');
+        expect(event).toHaveProperty('timestamp');
+      });
 
-    it('should classify USDC/WETH position as aligned (correct tokens, platform, in range)', () => {
-      const event = initialPositionsEvaluatedEvents[0];
-      const vault = service.vaultDataService.getAllVaults()[0];
+      it('should select pool for correct token pair (sorted order)', () => {
+        const event = bestPoolSelectedEvents[0];
 
-      // Find the USDC/WETH position by checking pool metadata
-      const alignedPositionId = event.alignedPositionIds[0];
-      const alignedPosition = vault.positions[alignedPositionId];
-      const poolMetadata = service.poolData[alignedPosition.pool];
+        // Tokens should be sorted by address - verify both target tokens present
+        const tokenPair = [event.token0Symbol, event.token1Symbol].sort();
+        expect(tokenPair).toEqual(['USDC', 'WETH']);
+      });
 
-      // Verify it's the USDC/WETH position
-      const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
-      expect(tokens).toEqual(['USDC', 'WETH']);
-    });
+      it('should select pool on correct platform', () => {
+        const event = bestPoolSelectedEvents[0];
 
-    it('should classify WBTC/WETH position as non-aligned (WBTC not in target tokens)', () => {
-      const event = initialPositionsEvaluatedEvents[0];
-      const vault = service.vaultDataService.getAllVaults()[0];
+        expect(event.platformId).toBe('uniswapV3');
+      });
 
-      // Find the WBTC/WETH position by checking pool metadata
-      const nonAlignedPositionId = event.nonAlignedPositionIds[0];
-      const nonAlignedPosition = vault.positions[nonAlignedPositionId];
-      const poolMetadata = service.poolData[nonAlignedPosition.pool];
+      it('should select pool with valid address', () => {
+        const event = bestPoolSelectedEvents[0];
 
-      // Verify it's the WBTC/WETH position
-      const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
-      expect(tokens).toEqual(['WBTC', 'WETH']);
+        expect(event.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      });
 
-      // Confirm WBTC is not in target tokens
-      expect(vault.targetTokens).not.toContain('WBTC');
+      it('should select pool with valid V3 fee tier', () => {
+        const event = bestPoolSelectedEvents[0];
+
+        expect(VALID_V3_FEE_TIERS).toContain(event.poolFee);
+      });
+
+      it('should select pool with liquidity > 0 (not dead)', () => {
+        const event = bestPoolSelectedEvents[0];
+
+        // Liquidity is returned as string from BigInt
+        expect(BigInt(event.poolLiquidity)).toBeGreaterThan(0n);
+      });
+
+      it('should select pool with tick in valid V3 range', () => {
+        const event = bestPoolSelectedEvents[0];
+
+        expect(event.poolTick).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(event.poolTick).toBeLessThanOrEqual(V3_MAX_TICK);
+      });
+
+      it('should have poolsActive <= poolsDiscovered', () => {
+        const event = bestPoolSelectedEvents[0];
+
+        expect(event.poolsDiscovered).toBeGreaterThanOrEqual(1);
+        expect(event.poolsActive).toBeGreaterThanOrEqual(1);
+        expect(event.poolsActive).toBeLessThanOrEqual(event.poolsDiscovered);
+      });
     });
   });
 

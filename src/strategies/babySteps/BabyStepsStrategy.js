@@ -29,8 +29,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Load strategy config from library
     this.config = getStrategyDetails('bob');
 
-    // Caches - initialized empty, populated during vault initialization
-    this.bestPoolCache = {};
+    // State tracking - initialized empty, populated during vault initialization
     this.lastPositionCheck = {};
     this.rebalanceFailures = {};
     this.emergencyExitBaseline = {};
@@ -59,9 +58,9 @@ export default class BabyStepsStrategy extends StrategyBase {
     //   - Aligned = correct tokens, platform, and in acceptable range
     //   - Returns { alignedPositions, nonAlignedPositions }
     //
-    // Step 2: Determine target pool
-    //   - If aligned position exists → use its pool
-    //   - If no aligned position → run pool selection (selectBestPool)
+    // Step 2: Select best pool
+    //   - Always select best pool based on on-chain liquidity (regardless of aligned positions)
+    //   - Highest liquidity pool wins (better execution, more depth)
     //   - Target pool determines ETH vs WETH requirement
     //
     // Step 3: Prepare tokens for target pool (ETH/WETH handling)
@@ -127,7 +126,18 @@ export default class BabyStepsStrategy extends StrategyBase {
     const evaluation = await this.evaluateInitialPositions(vault);
     this.log(`Evaluation complete: ${Object.keys(evaluation.alignedPositions).length} aligned, ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned`);
 
-    // TODO: Steps 2-7
+    // Step 2: Select best pool
+    const [targetToken0, targetToken1] = vault.targetTokens;
+    const adapter = this.adapters.get(vault.targetPlatforms[0]);
+
+    if (!adapter) {
+      throw new Error(`No adapter available for platform ${vault.targetPlatforms[0]}`);
+    }
+
+    const targetPool = await this.selectBestPool(targetToken0, targetToken1, adapter, vault.address);
+    this.log(`Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
+
+    // TODO: Steps 3-7
 
     return true;
   }
@@ -255,5 +265,100 @@ export default class BabyStepsStrategy extends StrategyBase {
     });
 
     return { alignedPositions, nonAlignedPositions };
+  }
+
+  // ===========================================================================
+  // Pool Selection
+  // ===========================================================================
+
+  /**
+   * Select the best pool for a token pair based on on-chain liquidity
+   *
+   * Selection criteria:
+   * 1. Pool must have liquidity > 0 (not dead)
+   * 2. Highest liquidity wins (more depth = better execution)
+   *
+   * @param {string} tokenASymbol - First token symbol (order doesn't matter)
+   * @param {string} tokenBSymbol - Second token symbol (order doesn't matter)
+   * @param {Object} adapter - Platform adapter
+   * @param {string} vaultAddress - Vault address (for event/debugging)
+   * @returns {Promise<Object>} Best pool with sorted token data
+   * @returns {string} result.address - Pool address
+   * @returns {number} result.fee - Fee tier in basis points
+   * @returns {string} result.liquidity - Pool liquidity (L value)
+   * @returns {string} result.sqrtPriceX96 - Current sqrt price
+   * @returns {number} result.tick - Current tick
+   * @returns {Object} result.token0 - Sorted token0 data
+   * @returns {Object} result.token1 - Sorted token1 data
+   * @throws {Error} If no active pools found for the pair
+   */
+  async selectBestPool(tokenASymbol, tokenBSymbol, adapter, vaultAddress) {
+    const tokenAData = this.tokens[tokenASymbol];
+    const tokenBData = this.tokens[tokenBSymbol];
+
+    if (!tokenAData || !tokenBData) {
+      throw new Error(`Token data not found for ${tokenASymbol} or ${tokenBSymbol}`);
+    }
+
+    const { sortedToken0, sortedToken1 } = adapter.sortTokens(tokenAData, tokenBData);
+
+    this.log(`🔍 Selecting best pool for ${sortedToken0.symbol}/${sortedToken1.symbol} on ${adapter.platformName}`);
+
+    // Discover all pools for this pair
+    const pools = await retryRpcCall(
+      () => adapter.discoverAvailablePools(
+        sortedToken0.address,
+        sortedToken1.address,
+        this.provider
+      ),
+      'discoverAvailablePools',
+      { log: (msg) => this.log(msg) }
+    );
+
+    if (pools.length === 0) {
+      throw new Error(`No pools found for ${sortedToken0.symbol}/${sortedToken1.symbol} on ${adapter.platformName}`);
+    }
+
+    // Filter dead pools (liquidity = 0)
+    const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
+
+    if (activePools.length === 0) {
+      throw new Error(`No active pools for ${sortedToken0.symbol}/${sortedToken1.symbol} on ${adapter.platformName} (${pools.length} pools exist but all have zero liquidity)`);
+    }
+
+    // Sort by liquidity descending
+    activePools.sort((a, b) => {
+      const liqA = BigInt(a.liquidity);
+      const liqB = BigInt(b.liquidity);
+      return liqB > liqA ? 1 : liqB < liqA ? -1 : 0;
+    });
+
+    const bestPool = activePools[0];
+
+    this.log(`🎯 Selected pool: ${bestPool.address} (fee: ${bestPool.fee}bp, liquidity: ${bestPool.liquidity})`);
+
+    this.eventManager.emit('BestPoolSelected', {
+      vaultAddress,
+      token0Symbol: sortedToken0.symbol,
+      token1Symbol: sortedToken1.symbol,
+      platformId: adapter.platformId,
+      poolAddress: bestPool.address,
+      poolFee: bestPool.fee,
+      poolLiquidity: bestPool.liquidity,
+      poolTick: bestPool.tick,
+      poolsDiscovered: pools.length,
+      poolsActive: activePools.length,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Selected ${sortedToken0.symbol}/${sortedToken1.symbol} pool: ${bestPool.address} (fee: ${bestPool.fee}bp)`
+      }
+    });
+
+    return {
+      ...bestPool,
+      token0: sortedToken0,
+      token1: sortedToken1
+    };
   }
 }
