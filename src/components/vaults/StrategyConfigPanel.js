@@ -17,6 +17,35 @@ import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, 
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import { config } from 'dotenv';
 
+/**
+ * Error Boundary for Strategy Details Section
+ * Catches errors during rendering and displays a user-friendly message
+ */
+class StrategyErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Alert variant="danger">
+          <strong>Strategy Configuration Error</strong>
+          <p className="mb-0 mt-2">
+            Failed to load strategy configuration. Please refresh the page.
+          </p>
+        </Alert>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const StrategyConfigPanel = ({
   vaultAddress,
   isOwner,
@@ -1073,18 +1102,20 @@ const StrategyConfigPanel = ({
               No strategy selected for the vault. Select a strategy to configure automated management.
             </Alert>
           ) : (
-            <StrategyDetailsSection
-              vaultAddress={vaultAddress}
-              isOwner={isOwner}
-              strategyId={selectedStrategy}
-              strategyActive={vault?.hasActiveStrategy && !hasUnsavedChanges}
-              editMode={editMode}
-              onEditRequest={handleEditRequest}
-              onCancel={handleCancel}
-              onValidate={handleSetValidation}
-              onParamsChange={handleParamsChange}
-              isDataLoaded={isDataLoaded} // Pass loading state to child
-            />
+            <StrategyErrorBoundary>
+              <StrategyDetailsSection
+                vaultAddress={vaultAddress}
+                isOwner={isOwner}
+                strategyId={selectedStrategy}
+                strategyActive={vault?.hasActiveStrategy && !hasUnsavedChanges}
+                editMode={editMode}
+                onEditRequest={handleEditRequest}
+                onCancel={handleCancel}
+                onValidate={handleSetValidation}
+                onParamsChange={handleParamsChange}
+                isDataLoaded={isDataLoaded} // Pass loading state to child
+              />
+            </StrategyErrorBoundary>
           )}
         </div>
 

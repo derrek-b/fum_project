@@ -114,17 +114,12 @@ const StrategyDetailsSection = ({
   }, [strategyId]);
 
   // Get available tokens for the selected strategy
+  // Errors propagate to Error Boundary - no silent fallback
   const availableTokens = useMemo(() => {
     if (!strategyId || strategyId === 'none') {
       return getAllTokens();
     }
-
-    try {
-      return getStrategyTokens(strategyId);
-    } catch (error) {
-      console.error('Failed to get strategy tokens:', error);
-      return getAllTokens();
-    }
+    return getStrategyTokens(strategyId);
   }, [strategyId]);
 
   // Get available platforms for the current chain
