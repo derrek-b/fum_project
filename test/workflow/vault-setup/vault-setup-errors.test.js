@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import AutomationService from '../../../../src/core/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../../helpers/hardhat-setup.js';
-import { setupTestVault } from '../../../helpers/test-vault-setup.js';
+import AutomationService from '../../../src/core/AutomationService.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
+import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';

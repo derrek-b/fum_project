@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import AutomationService from '../../../src/core/AutomationService.js';
+import AutomationService from '../../src/core/AutomationService.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';

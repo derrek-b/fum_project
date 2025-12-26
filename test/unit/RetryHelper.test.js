@@ -10,7 +10,7 @@ import {
   retryExternalService,
   retryRpcCall,
   retryBatchOperations
-} from '../../../src/utils/RetryHelper.js';
+} from '../../src/utils/RetryHelper.js';
 
 describe('RetryHelper', () => {
   // Mock timers for delay testing

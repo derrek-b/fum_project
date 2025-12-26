@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import VaultDataService from '../../../src/core/VaultDataService.js';
-import EventManager from '../../../src/core/EventManager.js';
+import VaultDataService from '../../src/core/VaultDataService.js';
+import EventManager from '../../src/core/EventManager.js';
 import { ethers } from 'ethers';
 
 describe('VaultDataService', () => {

@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import AutomationService from '../../../../src/core/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../../helpers/hardhat-setup.js';
+import AutomationService from '../../../src/core/AutomationService.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';

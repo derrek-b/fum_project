@@ -427,6 +427,31 @@ class VaultDataService {
    * @returns {Promise<Object>} Asset values
    */
   async fetchAssetValues(vault, cacheDuration = CACHE_DURATIONS['5-SECONDS']) {
+    return retryWithBackoff(
+      () => this._fetchAssetValuesInternal(vault, cacheDuration),
+      {
+        maxRetries: 3,
+        baseDelay: 1000,
+        exponential: true,
+        context: `Fetching asset values for ${vault.address}`,
+        logger: console,
+        onRetry: (attempt, error) => {
+          console.warn(`Retry ${attempt}/3 for fetchAssetValues ${vault.address}: ${error.message}`);
+          this.eventManager.emit('assetValuesFetchRetrying', {
+            vaultAddress: vault.address,
+            attempt,
+            error: error.message
+          });
+        }
+      }
+    );
+  }
+
+  /**
+   * Internal implementation of fetchAssetValues
+   * @private
+   */
+  async _fetchAssetValuesInternal(vault, cacheDuration) {
     try {
       const allTokenSymbols = new Set();
 

@@ -5,6 +5,7 @@
 
 import { StrategyBase } from '../base/index.js';
 import { getStrategyDetails } from 'fum_library';
+import { retryRpcCall } from '../../utils/RetryHelper.js';
 import PlatformUtilsFactory from '../../platformUtils/PlatformUtilsFactory.js';
 
 /**
@@ -216,10 +217,14 @@ export default class BabyStepsStrategy extends StrategyBase {
         throw new Error(`No adapter available for platform ${positionPlatform}`);
       }
 
-      const rangeStatus = await util.evaluatePositionRange(position, {
-        adapter,
-        provider: this.provider
-      });
+      const rangeStatus = await retryRpcCall(
+        () => util.evaluatePositionRange(position, {
+          adapter,
+          provider: this.provider
+        }),
+        'evaluatePositionRange',
+        { log: (msg) => this.log(msg) }
+      );
 
       // 5. Check range alignment result - position must be in range
       if (!rangeStatus.inRange) {

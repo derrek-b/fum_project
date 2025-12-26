@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import EventManager from '../../../src/core/EventManager.js';
+import EventManager from '../../src/core/EventManager.js';
 
 describe('EventManager', () => {
   let eventManager;
