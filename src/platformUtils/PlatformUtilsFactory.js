@@ -6,8 +6,8 @@
  * Factory methods TBD during Phase 2 design.
  */
 
-import * as UniswapV3Utils from './v3/UniswapV3Utils.js';
-import * as UniswapV4Utils from './v4/UniswapV4Utils.js';
+import UniswapV3Utils from './v3/UniswapV3Utils.js';
+import UniswapV4Utils from './v4/UniswapV4Utils.js';
 
 /**
  * Map of platform IDs to their utility modules

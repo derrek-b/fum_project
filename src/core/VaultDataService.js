@@ -482,7 +482,7 @@ class VaultDataService {
         if (!token0Data || !token1Data) continue;
 
         const tokenAmounts = await adapter.calculateTokenAmounts(
-          position, freshPoolData, token0Data, token1Data, this.chainId
+          position, freshPoolData, token0Data, token1Data
         );
 
         const token0Formatted = ethers.utils.formatUnits(tokenAmounts[0], token0Data.decimals);
@@ -505,7 +505,6 @@ class VaultDataService {
       const result = {
         tokens,
         positions,
-        poolData,
         totalTokenValue,
         totalPositionValue,
         totalVaultValue

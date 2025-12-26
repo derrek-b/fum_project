@@ -885,6 +885,7 @@ class AutomationService {
     this.log(`Setting up vault ${normalizedAddress}...`);
 
     let vault = null;
+    let step = 'vault_loading';
     let baselineCaptured = false;
 
     try {
@@ -899,6 +900,7 @@ class AutomationService {
       this.log(`Loaded vault ${normalizedAddress} with ${Object.keys(vault.positions).length} position(s)`);
 
       // Step 2: Capture baseline asset values (if not already tracked)
+      step = 'baseline_capture';
       if (!this.tracker.getMetadata(normalizedAddress)) {
         this.log(`Step 2: Capturing baseline for ${normalizedAddress}`);
         const baselineAssets = await this.vaultDataService.fetchAssetValues(vault);
@@ -912,7 +914,7 @@ class AutomationService {
           positions: baselineAssets.positions,
           timestamp: Date.now(),
           capturePoint: 'pre_initialization',
-          strategyId: vault.strategy?.strategyId,
+          strategyId: vault.strategy.strategyId,
           log: {
             level: 'info',
             message: `Captured baseline for vault ${normalizedAddress}: $${baselineAssets.totalVaultValue.toFixed(2)}`
@@ -924,10 +926,22 @@ class AutomationService {
         this.log(`Step 2: Skipped baseline capture (already tracked) for ${normalizedAddress}`);
       }
 
-      // TODO: Step 3 - Token approvals (future)
-      // TODO: Step 4 - ETH wrapping (future)
-      // TODO: Step 5 - Strategy initialization (future)
+      // Step 3: Strategy initialization (approvals, wrapping, etc.)
+      step = 'strategy_initialization';
+      this.log(`Step 3: Initializing strategy for ${normalizedAddress}`);
+
+      const strategy = this.strategies.get(vault.strategy.strategyId);
+      if (!strategy) {
+        throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+      }
+
+      const initSuccess = await strategy.initializeVault(vault);
+      if (!initSuccess) {
+        throw new Error('Strategy initialization failed');
+      }
+
       // TODO: Step 6 - Monitoring setup (future)
+      step = 'monitoring_setup';
 
       this.eventManager.emit('VaultSetupComplete', {
         vaultAddress: normalizedAddress,
@@ -935,10 +949,11 @@ class AutomationService {
         positionCount: Object.keys(vault.positions).length,
         tokenCount: Object.keys(vault.tokens).length,
         baselineCaptured,
+        strategyInitialized: true,
         timestamp: Date.now(),
         log: {
           level: 'info',
-          message: `Vault ${normalizedAddress} setup complete (steps 1-2)`
+          message: `Vault ${normalizedAddress} setup complete (steps 1-3)`
         }
       });
 
@@ -946,14 +961,15 @@ class AutomationService {
         success: true,
         vault,
         vaultLoaded: true,
-        baselineCaptured
+        baselineCaptured,
+        strategyInitialized: true
       };
 
     } catch (error) {
       this.eventManager.emit('VaultSetupFailed', {
         vaultAddress: normalizedAddress,
         error: error.message,
-        step: vault ? 'baseline_capture' : 'vault_loading',
+        step,
         timestamp: Date.now(),
         log: {
           level: 'error',

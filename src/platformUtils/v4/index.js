@@ -1,1 +1,1 @@
-export * from './UniswapV4Utils.js';
+export { default } from './UniswapV4Utils.js';
