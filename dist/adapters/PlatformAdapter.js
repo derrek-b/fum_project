@@ -3,6 +3,49 @@
  * Base class for DeFi platform adapters.
  * Each platform (Uniswap V3, Sushiswap, etc.) should extend this class
  * and implement all required methods.
+ *
+ * =============================================================================
+ * PLATFORM ADAPTER INTERFACE TRACKING
+ * =============================================================================
+ * This tracks which methods are confirmed as required interface methods vs
+ * platform-specific helpers. Update as we build out the automation service.
+ *
+ * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
+ * -----------------------------------------------------------------------------
+ * | Method                       | Used By                    | Status    |
+ * |------------------------------|----------------------------|-----------|
+ * | getPositionsForVDS           | VDS.fetchPositions         | CONFIRMED |
+ * | getPoolData                  | VDS.fetchAssetValues       | CONFIRMED |
+ * | calculateTokenAmounts        | VDS.fetchAssetValues       | CONFIRMED |
+ * | getApprovalTarget(opType)    | Strategy.ensureApprovals   | CONFIRMED |
+ *
+ * PENDING REVIEW (may be interface or platform-specific):
+ * -----------------------------------------------------------------------------
+ * | Method                       | Notes                               |
+ * |------------------------------|-------------------------------------|
+ * | isPositionInRange            | Likely interface - hides tick logic |
+ * | calculateUncollectedFees     | Likely interface - hides fee logic  |
+ * | generateSwapData             | Likely interface - tx generation    |
+ * | generateAddLiquidityData     | Likely interface - tx generation    |
+ * | generateRemoveLiquidityData  | Likely interface - tx generation    |
+ * | generateCreatePositionData   | Likely interface - tx generation    |
+ * | generateClaimFeesData        | Likely interface - tx generation    |
+ *
+ * LIKELY PLATFORM-SPECIFIC (tick-based AMM only):
+ * -----------------------------------------------------------------------------
+ * | Method                       | Notes                               |
+ * |------------------------------|-------------------------------------|
+ * | getCurrentTick               | Tick-based AMMs only                |
+ * | tickToPrice                  | Tick-based AMMs only                |
+ * | calculatePriceFromSqrtPrice  | Tick-based AMMs only                |
+ * | getPoolAddress               | May vary by platform                |
+ * | checkPoolExists              | May vary by platform                |
+ * | getSwapEventSignature        | Platform-specific event format      |
+ * | getPoolABI                   | Platform-specific                   |
+ * | getPositionManagerABI        | Platform-specific                   |
+ * | discoverAvailablePools       | Platform-specific discovery         |
+ * | getPositions                 | Superseded by getPositionsForVDS?   |
+ * =============================================================================
  */
 export default class PlatformAdapter {
   /**
@@ -186,7 +229,7 @@ export default class PlatformAdapter {
    * @param {number} chainId - Chain ID from the wallet
    * @returns {Promise<Object>} - Token amounts
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
     throw new Error("calculateTokenAmounts must be implemented by subclasses");
   }
 
@@ -234,10 +277,17 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Get the address that tokens should be approved to for swaps on this platform
-   * @returns {string} The approval target address (e.g., Universal Router for Uniswap)
+   * Get the address that tokens should be approved to for operations on this platform
+   * @param {string} [operationType='swap'] - Operation type: 'swap' or 'liquidity'
+   * @returns {string} The approval target address for the specified operation type
+   * @example
+   * // For swaps (Uniswap V3 returns Permit2)
+   * const swapTarget = adapter.getApprovalTarget('swap');
+   *
+   * // For liquidity ops (Uniswap V3 returns NFT Position Manager)
+   * const liquidityTarget = adapter.getApprovalTarget('liquidity');
    */
-  getApprovalTarget() {
+  getApprovalTarget(operationType) {
     throw new Error("getApprovalTarget must be implemented by subclasses");
   }
 
@@ -264,17 +314,17 @@ export default class PlatformAdapter {
    * @example
    * // Basic pool data
    * const poolData = await adapter.getPoolData(poolAddress, {}, provider);
-   * 
+   *
    * // With tick data for specific ticks
    * const poolDataWithTicks = await adapter.getPoolData(poolAddress, {
    *   includeTicks: [-887220, 887220]
    * }, provider);
-   * 
+   *
    * // With token addresses
    * const poolDataWithTokens = await adapter.getPoolData(poolAddress, {
    *   includeTokens: true
    * }, provider);
-   * 
+   *
    * // Combined options
    * const fullPoolData = await adapter.getPoolData(poolAddress, {
    *   includeTicks: [-60000, 60000],

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-19T14:03:59.921Z
+Generated on: 2025-12-26T17:48:39.426Z
 
 ## Table of Contents
 
@@ -264,17 +264,16 @@ Token configuration with addresses on multiple chains
 
 ### Permit2Helper.js
 
-Permit2 Helper Functions - Reusable functions for Permit2 signature generation and calldata wrapping. See [Permit2Helper Documentation](./helpers/permit2-helper.md) for details.
+Permit2 Helper Functions
 
 **Path:** `src/helpers/Permit2Helper.js`
 
 **Imports:**
+- from `./Permit2Helper.js`
 - from `ethers`
 
 **Exports:**
 - `PERMIT2_ADDRESS` (variable)
-- `getPermit2Nonce` (function)
-- `generatePermit2Signature` (function)
 - `encodePermit2Input` (function)
 - `wrapWithPermit2` (function)
 

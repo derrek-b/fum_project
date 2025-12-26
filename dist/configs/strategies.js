@@ -100,8 +100,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 10.0,
           targetRangeLower: 10.0,
-          rebalanceThresholdUpper: 6.0,
-          rebalanceThresholdLower: 6.0,
           maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
@@ -116,8 +114,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 5.0,
           targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 4.0,
-          rebalanceThresholdLower: 4.0,
           maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
@@ -132,8 +128,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 3.0,
           targetRangeLower: 3.0,
-          rebalanceThresholdUpper: 0.8,
-          rebalanceThresholdLower: 0.8,
           maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
@@ -148,8 +142,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 0.2,
           targetRangeLower: 0.2,
-          rebalanceThresholdUpper: 12.5,
-          rebalanceThresholdLower: 12.5,
           maxUtilization: 90,
           maxSlippage: 0.2,
           emergencyExitTrigger: 1.0,
@@ -164,8 +156,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 5.0,
           targetRangeLower: 5.0,
-          rebalanceThresholdUpper: 4.0,
-          rebalanceThresholdLower: 4.0,
           feeReinvestment: true,
           reinvestmentTrigger: 50.00,
           reinvestmentRatio: 50,
@@ -196,30 +186,6 @@ const strategies = {
         defaultValue: 5.0,
         min: 0.1,
         max: 20.0,
-        step: 0.1,
-        suffix: "%",
-        group: 0,
-        contractGroup: "range"
-      },
-      rebalanceThresholdUpper: {
-        name: "Upper Rebalance Trigger",
-        description: "Percentage from top of range that triggers a rebalance",
-        type: "percent",
-        defaultValue: 1.5,
-        min: 0.1,
-        max: 15.0,
-        step: 0.1,
-        suffix: "%",
-        group: 0,
-        contractGroup: "range"
-      },
-      rebalanceThresholdLower: {
-        name: "Lower Rebalance Trigger",
-        description: "Percentage from bottom of range that triggers a rebalance",
-        type: "percent",
-        defaultValue: 1.5,
-        min: 0.1,
-        max: 15.0,
         step: 0.1,
         suffix: "%",
         group: 0,

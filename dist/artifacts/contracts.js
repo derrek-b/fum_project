@@ -413,44 +413,6 @@
             "type": "address"
           }
         ],
-        "name": "getRebalanceThresholdLower",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          }
-        ],
-        "name": "getRebalanceThresholdUpper",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          }
-        ],
         "name": "getReinvestmentRatio",
         "outputs": [
           {
@@ -591,44 +553,6 @@
             "type": "address"
           }
         ],
-        "name": "rebalanceThresholdLower",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "",
-            "type": "address"
-          }
-        ],
-        "name": "rebalanceThresholdUpper",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "",
-            "type": "address"
-          }
-        ],
         "name": "reinvestmentRatio",
         "outputs": [
           {
@@ -745,16 +669,6 @@
           {
             "internalType": "uint16",
             "name": "lowerRange",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "upperThreshold",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "lowerThreshold",
             "type": "uint16"
           }
         ],

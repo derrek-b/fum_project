@@ -109,11 +109,17 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get the address that tokens should be approved to for swaps
-   * For Uniswap V3, tokens should be approved to Permit2 (Universal Router pulls via Permit2)
-   * @returns {string} The Permit2 contract address
+   * Get the address that tokens should be approved to for operations on this platform
+   * For Uniswap V3:
+   * - Swaps: Tokens approved to Permit2 (Universal Router pulls via Permit2)
+   * - Liquidity: Tokens approved directly to NFT Position Manager
+   * @param {string} [operationType='swap'] - Operation type: 'swap' or 'liquidity'
+   * @returns {string} The approval target address for the specified operation type
    */
-  getApprovalTarget() {
+  getApprovalTarget(operationType) {
+    if (operationType === 'liquidity') {
+      return this.addresses.positionManagerAddress;
+    }
     return PERMIT2_ADDRESS;
   }
 
@@ -1141,7 +1147,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         for (const [poolAddress, poolInfo] of Object.entries(result.poolData)) {
           metadataPoolData[poolAddress] = {
             // Only stable metadata - no time-sensitive data
-            poolAddress: poolAddress,
             token0Symbol: poolInfo.token0?.symbol,
             token1Symbol: poolInfo.token1?.symbol,
             fee: poolInfo.fee,
