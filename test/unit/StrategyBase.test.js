@@ -40,18 +40,11 @@ describe("StrategyBase", function () {
   beforeEach(async function () {
     [owner, user1, user2] = await ethers.getSigners();
 
-    // Deploy MockUniversalRouter
-    const MockUniversalRouter = await ethers.getContractFactory("MockUniversalRouter");
-    const router = await MockUniversalRouter.deploy();
-    await router.waitForDeployment();
-
-    // Deploy VaultFactory
+    // Deploy VaultFactory with owner and permit2 (v2.0.0)
     const VaultFactory = await ethers.getContractFactory("VaultFactory");
     factory = await VaultFactory.deploy(
       owner.address,
-      await router.getAddress(),
-      "0x000000000022D473030F116dDEE9F6B43aC78BA3", // permit2
-      "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"  // nonfungiblePositionManager
+      "0x000000000022D473030F116dDEE9F6B43aC78BA3"  // permit2
     );
     await factory.waitForDeployment();
 

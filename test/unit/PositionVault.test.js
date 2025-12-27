@@ -1,13 +1,19 @@
 const { expect } = require("chai");
 const { ethers } = require('hardhat');
 
-describe("PositionVault - 1.3.0", function() {
+describe("PositionVault - 2.0.0", function() {
+  let VaultFactory;
   let PositionVault;
+  let UniversalRouterValidator;
+  let UniswapV3PositionValidator;
   let MockPositionNFT;
   let MockToken;
   let MockUniversalRouter;
   let MockNonfungiblePositionManager;
+  let factory;
   let vault;
+  let swapValidator;
+  let liquidityValidator;
   let nft;
   let token;
   let token2;
@@ -25,7 +31,7 @@ describe("PositionVault - 1.3.0", function() {
     // Get signers
     [owner, user1, user2, strategyContract, executorWallet] = await ethers.getSigners();
 
-    // Deploy mock Universal Router first (needed for vault)
+    // Deploy mock Universal Router first (needed for validator registration)
     MockUniversalRouter = await ethers.getContractFactory("MockUniversalRouter");
     router = await MockUniversalRouter.deploy();
     await router.waitForDeployment();
@@ -40,15 +46,38 @@ describe("PositionVault - 1.3.0", function() {
     // Use deployed mock for position manager
     nonfungiblePositionManagerAddress = await positionManager.getAddress();
 
-    // Deploy the vault with owner, router, permit2, and position manager
-    PositionVault = await ethers.getContractFactory("PositionVault");
-    vault = await PositionVault.deploy(
+    // Deploy validators
+    UniversalRouterValidator = await ethers.getContractFactory("UniversalRouterValidator");
+    swapValidator = await UniversalRouterValidator.deploy();
+    await swapValidator.waitForDeployment();
+
+    UniswapV3PositionValidator = await ethers.getContractFactory("UniswapV3PositionValidator");
+    liquidityValidator = await UniswapV3PositionValidator.deploy();
+    await liquidityValidator.waitForDeployment();
+
+    // Deploy VaultFactory with owner and permit2
+    VaultFactory = await ethers.getContractFactory("VaultFactory");
+    factory = await VaultFactory.deploy(
       owner.address,
-      await router.getAddress(),
-      permit2Address,
-      nonfungiblePositionManagerAddress
+      permit2Address
     );
-    await vault.waitForDeployment();
+    await factory.waitForDeployment();
+
+    // Register validators with factory
+    await factory.setSwapValidator(await router.getAddress(), await swapValidator.getAddress());
+    await factory.setLiquidityValidator(nonfungiblePositionManagerAddress, await liquidityValidator.getAddress());
+
+    // Create vault via factory (factory passes itself as the _factory param)
+    const tx = await factory.connect(owner).createVault("Test Vault");
+    const receipt = await tx.wait();
+    const vaultCreatedEvent = receipt.logs.find(
+      log => log.fragment && log.fragment.name === 'VaultCreated'
+    );
+    const vaultAddress = vaultCreatedEvent.args[1];
+    vault = await ethers.getContractAt("PositionVault", vaultAddress);
+
+    // Get PositionVault contract factory for direct deployment tests
+    PositionVault = await ethers.getContractFactory("PositionVault");
 
     // Deploy mock NFT contract
     MockPositionNFT = await ethers.getContractFactory("MockPositionNFT");
@@ -78,52 +107,40 @@ describe("PositionVault - 1.3.0", function() {
       await expect(
         PositionVault.deploy(
           ethers.ZeroAddress,
-          await router.getAddress(),
           permit2Address,
-          nonfungiblePositionManagerAddress
+          await factory.getAddress()
         )
       ).to.be.revertedWith("PositionVault: zero owner address");
-    });
-
-    it("should reject zero router address", async function() {
-      await expect(
-        PositionVault.deploy(
-          owner.address,
-          ethers.ZeroAddress,
-          permit2Address,
-          nonfungiblePositionManagerAddress
-        )
-      ).to.be.revertedWith("PositionVault: zero router address");
     });
 
     it("should reject zero permit2 address", async function() {
       await expect(
         PositionVault.deploy(
           owner.address,
-          await router.getAddress(),
           ethers.ZeroAddress,
-          nonfungiblePositionManagerAddress
+          await factory.getAddress()
         )
       ).to.be.revertedWith("PositionVault: zero permit2 address");
     });
 
-    it("should reject zero position manager address", async function() {
+    it("should reject zero factory address", async function() {
       await expect(
         PositionVault.deploy(
           owner.address,
-          await router.getAddress(),
           permit2Address,
           ethers.ZeroAddress
         )
-      ).to.be.revertedWith("PositionVault: zero position manager address");
+      ).to.be.revertedWith("PositionVault: zero factory address");
     });
 
     it("should store immutable addresses correctly", async function() {
-      expect(await vault.universalRouter()).to.equal(await router.getAddress());
       expect(await vault.permit2()).to.equal(permit2Address);
-      expect(await vault.nonfungiblePositionManager()).to.equal(nonfungiblePositionManagerAddress);
+      expect(await vault.factory()).to.equal(await factory.getAddress());
     });
   });
+
+  // Note: Validator registration tests moved to VaultFactory.test.js
+  // Validators are now registered in the factory, not individual vaults
 
   // Test for empty batch validation
   describe("Empty Batch Validation", function() {
@@ -135,7 +152,7 @@ describe("PositionVault - 1.3.0", function() {
 
     it("should reject swap() with empty arrays", async function() {
       await expect(
-        vault.swap([], [])
+        vault.swap([], [], [])
       ).to.be.revertedWith("PositionVault: empty batch");
     });
 
@@ -342,7 +359,7 @@ describe("PositionVault - 1.3.0", function() {
   // Test for contract version
   describe("Contract Version", function() {
     it("should return the correct version", async function() {
-      expect(await vault.getVersion()).to.equal("1.3.0");
+      expect(await vault.getVersion()).to.equal("2.0.0");
     });
   });
 
@@ -971,7 +988,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: mint recipient must be vault");
+      ).to.be.revertedWith("UniswapV3PositionValidator: mint recipient must be vault");
     });
 
     it("should reject invalid target address", async function() {
@@ -999,7 +1016,7 @@ describe("PositionVault - 1.3.0", function() {
           [user1.address], // wrong target
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid target");
+      ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
 
     it("should reject mismatched array lengths", async function() {
@@ -1098,7 +1115,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid mint data");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid mint data");
     });
 
     it("should reject non-mint function calls", async function() {
@@ -1114,7 +1131,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [fakeCalldata]
         )
-      ).to.be.revertedWith("PositionVault: not a mint call");
+      ).to.be.revertedWith("UniswapV3PositionValidator: not a mint call");
     });
   });
 
@@ -1157,7 +1174,7 @@ describe("PositionVault - 1.3.0", function() {
           [user1.address],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid target");
+      ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
 
     it("should reject mismatched array lengths", async function() {
@@ -1219,7 +1236,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [collectCalldata]
         )
-      ).to.be.revertedWith("PositionVault: not an increaseLiquidity call");
+      ).to.be.revertedWith("UniswapV3PositionValidator: not an increaseLiquidity call");
     });
 
     it("should reject calldata that is too short", async function() {
@@ -1230,7 +1247,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [shortCalldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid calldata");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");
     });
   });
 
@@ -1298,7 +1315,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: must be multicall");
+      ).to.be.revertedWith("UniswapV3PositionValidator: must be multicall");
     });
 
     it("should reject direct collect calls (must be multicall)", async function() {
@@ -1311,7 +1328,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: must be multicall");
+      ).to.be.revertedWith("UniswapV3PositionValidator: must be multicall");
     });
 
     it("should reject multicall with collect to non-vault recipient", async function() {
@@ -1327,7 +1344,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [multicallData]
         )
-      ).to.be.revertedWith("PositionVault: collect recipient must be vault");
+      ).to.be.revertedWith("UniswapV3PositionValidator: collect recipient must be vault");
     });
 
     it("should reject multicall with disallowed function", async function() {
@@ -1343,7 +1360,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [multicallData]
         )
-      ).to.be.revertedWith("PositionVault: function not allowed in multicall");
+      ).to.be.revertedWith("UniswapV3PositionValidator: function not allowed in multicall");
     });
 
     it("should reject invalid target address", async function() {
@@ -1360,7 +1377,7 @@ describe("PositionVault - 1.3.0", function() {
           [user1.address],
           [multicallData]
         )
-      ).to.be.revertedWith("PositionVault: invalid target");
+      ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
 
     it("should reject mismatched array lengths", async function() {
@@ -1425,7 +1442,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid calldata");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");
     });
 
     it("should reject multicall with empty inner call", async function() {
@@ -1436,7 +1453,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [multicallData]
         )
-      ).to.be.revertedWith("PositionVault: invalid inner calldata");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid inner calldata");
     });
 
     it("should allow multicall with only decreaseLiquidity", async function() {
@@ -1491,7 +1508,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: collect recipient must be vault");
+      ).to.be.revertedWith("UniswapV3PositionValidator: collect recipient must be vault");
     });
 
     it("should reject non-collect function calls", async function() {
@@ -1513,7 +1530,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [decreaseCalldata]
         )
-      ).to.be.revertedWith("PositionVault: not a collect call");
+      ).to.be.revertedWith("UniswapV3PositionValidator: not a collect call");
     });
 
     it("should reject calldata that is too short", async function() {
@@ -1524,7 +1541,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [shortCalldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid collect data");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid collect data");
     });
 
     it("should reject invalid target address", async function() {
@@ -1537,7 +1554,7 @@ describe("PositionVault - 1.3.0", function() {
           [user1.address],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid target");
+      ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
 
     it("should reject mismatched array lengths", async function() {
@@ -1613,7 +1630,7 @@ describe("PositionVault - 1.3.0", function() {
           [user1.address],
           [calldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid target");
+      ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
 
     it("should reject mismatched array lengths", async function() {
@@ -1682,7 +1699,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [collectCalldata]
         )
-      ).to.be.revertedWith("PositionVault: not a burn call");
+      ).to.be.revertedWith("UniswapV3PositionValidator: not a burn call");
     });
 
     it("should reject calldata that is too short", async function() {
@@ -1693,7 +1710,7 @@ describe("PositionVault - 1.3.0", function() {
           [nonfungiblePositionManagerAddress],
           [shortCalldata]
         )
-      ).to.be.revertedWith("PositionVault: invalid calldata");
+      ).to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");
     });
   });
 
@@ -1902,7 +1919,7 @@ describe("PositionVault - 1.3.0", function() {
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
         // Should emit TransactionExecuted with "swap" type
-        await expect(vault.swap([routerAddress], [calldata]))
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
           .to.emit(vault, "TransactionExecuted")
           .withArgs(routerAddress, calldata, true, "swap");
       });
@@ -1918,7 +1935,7 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.connect(executorWallet).swap([routerAddress], [calldata]))
+        await expect(vault.connect(executorWallet).swap([routerAddress], [calldata], [0n]))
           .to.emit(vault, "TransactionExecuted")
           .withArgs(routerAddress, calldata, true, "swap");
       });
@@ -1932,7 +1949,7 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.connect(user1).swap([routerAddress], [calldata]))
+        await expect(vault.connect(user1).swap([routerAddress], [calldata], [0n]))
           .to.be.revertedWith("PositionVault: caller is not authorized");
       });
 
@@ -1944,9 +1961,9 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        // Use a random address as router
-        await expect(vault.swap([user2.address], [calldata]))
-          .to.be.revertedWith("PositionVault: unsupported router");
+        // Use a random address as router (not registered)
+        await expect(vault.swap([user2.address], [calldata], [0n]))
+          .to.be.revertedWith("VaultFactory: no validator for router");
       });
     });
 
@@ -1963,8 +1980,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should allow V3_SWAP_EXACT_IN with ADDRESS_THIS as recipient (multi-hop)", async function() {
@@ -1975,8 +1992,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(ADDRESS_THIS, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should reject V3_SWAP_EXACT_IN with non-vault/non-router recipient", async function() {
@@ -1987,8 +2004,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(user1.address, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should reject V3_SWAP_EXACT_OUT with non-vault/non-router recipient", async function() {
@@ -1999,8 +2016,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV3SwapInput(user1.address, 1000, 1100, path, true);
         const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_OUT], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
     });
 
@@ -2017,8 +2034,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV2SwapInput(vaultAddress, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should allow V2_SWAP_EXACT_IN with ADDRESS_THIS as recipient (multi-hop)", async function() {
@@ -2029,8 +2046,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV2SwapInput(ADDRESS_THIS, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should reject V2_SWAP_EXACT_IN with non-vault/non-router recipient", async function() {
@@ -2041,8 +2058,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV2SwapInput(user1.address, 1000, 900, path, true);
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_IN], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should reject V2_SWAP_EXACT_OUT with non-vault/non-router recipient", async function() {
@@ -2053,8 +2070,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeV2SwapInput(user1.address, 1000, 1100, path, true);
         const calldata = encodeRouterExecute([CMD.V2_SWAP_EXACT_OUT], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
     });
 
@@ -2069,8 +2086,8 @@ describe("PositionVault - 1.3.0", function() {
         const calldata = encodeRouterExecute([CMD.PERMIT2_PERMIT], [mockPermitInput]);
 
         // Should not revert with command not allowed
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: command not allowed");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: command not allowed");
       });
     });
 
@@ -2089,8 +2106,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeSweepInput(tokenAddress, vaultAddress, 0);
         const calldata = encodeRouterExecute([CMD.SWEEP], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.not.be.revertedWith("PositionVault: sweep recipient must be vault");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: sweep recipient must be vault");
       });
 
       it("should reject SWEEP command with non-vault recipient", async function() {
@@ -2100,8 +2117,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeSweepInput(tokenAddress, user1.address, 0);
         const calldata = encodeRouterExecute([CMD.SWEEP], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: sweep recipient must be vault");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: sweep recipient must be vault");
       });
     });
 
@@ -2132,7 +2149,7 @@ describe("PositionVault - 1.3.0", function() {
         // Validation should pass - if it fails, it should be "swap failed" from mock router
         // not from our validation checks
         try {
-          await vault.swap([routerAddress], [calldata]);
+          await vault.swap([routerAddress], [calldata], [0n]);
         } catch (error) {
           // Mock router doesn't execute real swaps, so "swap failed" is expected
           // But validation errors should NOT occur
@@ -2156,8 +2173,8 @@ describe("PositionVault - 1.3.0", function() {
           [swapInput, sweepInput]
         );
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: sweep recipient must be vault");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: sweep recipient must be vault");
       });
     });
 
@@ -2170,8 +2187,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeGenericInput(tokenAddress, vaultAddress, 1000);
         const calldata = encodeRouterExecute([CMD.TRANSFER], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: command not allowed");
       });
 
       it("should reject PAY_PORTION command (0x06)", async function() {
@@ -2182,30 +2199,52 @@ describe("PositionVault - 1.3.0", function() {
         const input = encodeGenericInput(tokenAddress, vaultAddress, 5000);
         const calldata = encodeRouterExecute([CMD.PAY_PORTION], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: command not allowed");
       });
 
-      it("should reject WRAP_ETH command (0x0b)", async function() {
+      it("should allow WRAP_ETH command (0x0b) with vault as recipient", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
         const abiCoder = ethers.AbiCoder.defaultAbiCoder();
         const input = abiCoder.encode(["address", "uint256"], [vaultAddress, ethers.parseEther("1")]);
         const calldata = encodeRouterExecute([CMD.WRAP_ETH], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        // Should not revert on validation (mock router may fail execution)
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: wrap recipient must be vault or router");
       });
 
-      it("should reject UNWRAP_WETH command (0x0c)", async function() {
+      it("should reject WRAP_ETH command (0x0b) with wrong recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const input = abiCoder.encode(["address", "uint256"], [user1.address, ethers.parseEther("1")]);
+        const calldata = encodeRouterExecute([CMD.WRAP_ETH], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: wrap recipient must be vault or router");
+      });
+
+      it("should allow UNWRAP_WETH command (0x0c) with vault as recipient", async function() {
         const vaultAddress = await vault.getAddress();
         const routerAddress = await router.getAddress();
         const abiCoder = ethers.AbiCoder.defaultAbiCoder();
         const input = abiCoder.encode(["address", "uint256"], [vaultAddress, ethers.parseEther("1")]);
         const calldata = encodeRouterExecute([CMD.UNWRAP_WETH], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        // Should not revert on validation (mock router may fail execution)
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: unwrap recipient must be vault");
+      });
+
+      it("should reject UNWRAP_WETH command (0x0c) with wrong recipient", async function() {
+        const routerAddress = await router.getAddress();
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const input = abiCoder.encode(["address", "uint256"], [user1.address, ethers.parseEther("1")]);
+        const calldata = encodeRouterExecute([CMD.UNWRAP_WETH], [input]);
+
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: unwrap recipient must be vault");
       });
 
       it("should reject unknown command (0x10 V4_SWAP)", async function() {
@@ -2214,8 +2253,8 @@ describe("PositionVault - 1.3.0", function() {
         const input = abiCoder.encode(["bytes", "bytes[]"], ["0x", []]);
         const calldata = encodeRouterExecute([0x10], [input]);
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: command not allowed");
       });
     });
 
@@ -2238,7 +2277,7 @@ describe("PositionVault - 1.3.0", function() {
           [permitInput, swapInput]
         );
 
-        await expect(vault.swap([routerAddress], [calldata]))
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
           .to.not.be.revertedWith("PositionVault:");
       });
 
@@ -2256,8 +2295,8 @@ describe("PositionVault - 1.3.0", function() {
           [validSwap, invalidSwap]
         );
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
 
       it("should reject if any command is blocked", async function() {
@@ -2275,8 +2314,8 @@ describe("PositionVault - 1.3.0", function() {
           [validSwap, blockedCmd]
         );
 
-        await expect(vault.swap([routerAddress], [calldata]))
-          .to.be.revertedWith("PositionVault: command not allowed");
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.be.revertedWith("UniversalRouterValidator: command not allowed");
       });
 
       it("should execute multiple swap transactions in one call", async function() {
@@ -2293,8 +2332,8 @@ describe("PositionVault - 1.3.0", function() {
         const swap2Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap2Input]);
 
         // Should pass validation for both (router will fail but that's ok)
-        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata]))
-          .to.not.be.revertedWith("PositionVault: swap recipient must be vault");
+        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata], [0n, 0n]))
+          .to.not.be.revertedWith("UniversalRouterValidator: swap recipient must be vault");
       });
 
       it("should reject batched swaps if any has invalid recipient", async function() {
@@ -2310,8 +2349,8 @@ describe("PositionVault - 1.3.0", function() {
         const swap2Input = encodeV3SwapInput(vaultAddress, 2000, 1800, path, true);
         const swap2Calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [swap2Input]);
 
-        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata]))
-          .to.be.revertedWith("PositionVault: swap recipient must be vault or router");
+        await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata], [0n, 0n]))
+          .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
       });
     });
 

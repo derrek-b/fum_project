@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "./interfaces/IVaultFactory.sol";
 
 /**
  * @dev Interface for WETH deposit/withdraw functions
@@ -20,7 +21,8 @@ interface IWETH {
 /**
  * @title PositionVault
  * @notice User-controlled vault for managing DeFi positions across platforms
- * @dev Holds tokens and NFT positions, executing transactions approved by the owner
+ * @dev Holds tokens and NFT positions, executing transactions approved by the owner.
+ *      Validates transactions via factory's centralized validator registry.
  */
 contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     using SafeERC20 for IERC20;
@@ -28,10 +30,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
 
     // EIP-1271 magic value for valid signatures
     bytes4 constant internal MAGICVALUE = 0x1626ba7e;
-
-    // Universal Router special address for "keep tokens in router" (used in multi-hop swaps)
-    // See: https://docs.uniswap.org/contracts/universal-router/technical-reference
-    address constant internal ADDRESS_THIS = address(2);
 
     // Vault owner with full control
     address public owner;
@@ -42,55 +40,42 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     // Wallet authorized to execute transactions
     address public executor;
 
-    // Uniswap Universal Router address (chain-specific, immutable)
-    // Used for validating swap recipient in swap()
-    address public immutable universalRouter;
-
     // Permit2 contract address (chain-specific, immutable)
-    // Used for gasless token approvals in swaps
     address public immutable permit2;
 
-    // Uniswap NonfungiblePositionManager address (chain-specific, immutable)
-    // Used for liquidity operations
-    address public immutable nonfungiblePositionManager;
+    // Factory that created this vault (used for validator lookups)
+    address public immutable factory;
 
     // Target tokens and platforms
     string[] private targetTokens;
     string[] private targetPlatforms;
 
     // Events
-    // txType: "any" (execute), "swap", "approval", "mint", "addliq", "subliq", "collect", "burn"
     event TransactionExecuted(address indexed target, bytes data, bool success, string txType);
     event TokensWithdrawn(address indexed token, address indexed to, uint256 amount);
     event PositionWithdrawn(uint256 indexed tokenId, address indexed nftContract, address indexed to);
     event StrategyChanged(address indexed strategy);
     event ExecutorChanged(address indexed executor, bool indexed isAuthorized);
-
-    // Events for token and platform updates
     event TargetTokensUpdated(string[] tokens);
     event TargetPlatformsUpdated(string[] platforms);
 
     /**
      * @notice Constructor
      * @param _owner Address of the vault owner
-     * @param _universalRouter Address of Uniswap Universal Router for this chain
      * @param _permit2 Address of Permit2 contract for this chain
-     * @param _nonfungiblePositionManager Address of Uniswap NonfungiblePositionManager for this chain
+     * @param _factory Address of the VaultFactory (for validator lookups)
      */
     constructor(
         address _owner,
-        address _universalRouter,
         address _permit2,
-        address _nonfungiblePositionManager
+        address _factory
     ) {
         require(_owner != address(0), "PositionVault: zero owner address");
-        require(_universalRouter != address(0), "PositionVault: zero router address");
         require(_permit2 != address(0), "PositionVault: zero permit2 address");
-        require(_nonfungiblePositionManager != address(0), "PositionVault: zero position manager address");
+        require(_factory != address(0), "PositionVault: zero factory address");
         owner = _owner;
-        universalRouter = _universalRouter;
         permit2 = _permit2;
-        nonfungiblePositionManager = _nonfungiblePositionManager;
+        factory = _factory;
         strategy = address(0);
         executor = address(0);
     }
@@ -116,8 +101,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
 
     /**
      * @notice Executes a batch of arbitrary transactions (owner only)
-     * @dev Used for owner-initiated actions like strategy configuration
-     *      Executor cannot use this function - use specific functions instead
      * @param targets Array of contract addresses to call
      * @param data Array of calldata to send to each target
      * @return results Array of execution success flags
@@ -138,8 +121,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "any");
-
-            // If any transaction fails, revert the entire batch
             require(success, "PositionVault: transaction failed");
         }
 
@@ -147,118 +128,49 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Executes swaps via supported routers with security validation
-     * @dev Validates swap commands and recipients based on the target router
+     * @notice Executes swaps via registered routers with security validation
      * @param targets Array of router addresses to call
      * @param data Array of calldata to send to each router
+     * @param values Array of ETH values to send with each call
      * @return results Array of success flags for each swap
-     *
-     * Supported routers:
-     * - Universal Router: V2/V3 swaps with recipient validation
-     *
-     * Unknown routers will revert.
      */
-    function swap(address[] calldata targets, bytes[] calldata data)
+    function swap(
+        address[] calldata targets,
+        bytes[] calldata data,
+        uint256[] calldata values
+    )
         external
+        payable
         onlyAuthorized
         nonReentrant
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(values.length == targets.length, "PositionVault: values length mismatch");
         require(targets.length > 0, "PositionVault: empty batch");
+
+        // Validate total value matches msg.value
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < values.length; i++) {
+            totalValue += values[i];
+        }
+        require(totalValue == msg.value, "PositionVault: value mismatch");
 
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            // Validate based on router type
-            if (targets[i] == universalRouter) {
-                _validateUniversalRouterSwap(data[i]);
-            } else {
-                revert("PositionVault: unsupported router");
-            }
+            // Validate via factory (reverts if no validator or validation fails)
+            IVaultFactory(factory).validateSwap(targets[i], data[i], address(this));
 
-            (bool success, ) = targets[i].call(data[i]);
+            // Execute with value
+            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "swap");
-
             require(success, "PositionVault: swap failed");
         }
 
         return results;
-    }
-
-    /**
-     * @notice Validates Universal Router swap commands
-     * @dev Only allows V2/V3 swap commands, SWEEP, and PERMIT2_PERMIT; blocks everything else
-     * @param data The calldata being sent to the Universal Router
-     *
-     * Allowed commands:
-     * - V3_SWAP_EXACT_IN (0x00): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
-     * - V3_SWAP_EXACT_OUT (0x01): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
-     * - SWEEP (0x04): Validate recipient = vault (ensures tokens end up in vault)
-     * - V2_SWAP_EXACT_IN (0x08): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
-     * - V2_SWAP_EXACT_OUT (0x09): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
-     * - PERMIT2_PERMIT (0x0a): Allowed (no recipient concern)
-     * All other commands are blocked.
-     *
-     * Multi-hop swaps use ADDRESS_THIS as intermediate recipient (tokens stay in router),
-     * then SWEEP sends the final output to the vault.
-     */
-    function _validateUniversalRouterSwap(bytes calldata data) internal view {
-        require(data.length >= 4, "PositionVault: invalid calldata");
-
-        // Decode the calldata (skip 4-byte selector)
-        (bytes memory commands, bytes[] memory inputs, ) = abi.decode(
-            data[4:],
-            (bytes, bytes[], uint256)
-        );
-
-        for (uint256 i = 0; i < commands.length; i++) {
-            uint8 command = uint8(commands[i]);
-
-            // V3_SWAP_EXACT_IN (0x00) or V3_SWAP_EXACT_OUT (0x01)
-            if (command == 0x00 || command == 0x01) {
-                (address recipient, , , , ) = abi.decode(
-                    inputs[i],
-                    (address, uint256, uint256, bytes, bool)
-                );
-                require(
-                    recipient == address(this) || recipient == ADDRESS_THIS,
-                    "PositionVault: swap recipient must be vault or router"
-                );
-            }
-            // SWEEP (0x04) - sends tokens from router to recipient, must be vault
-            else if (command == 0x04) {
-                (, address recipient, ) = abi.decode(
-                    inputs[i],
-                    (address, address, uint256)
-                );
-                require(
-                    recipient == address(this),
-                    "PositionVault: sweep recipient must be vault"
-                );
-            }
-            // V2_SWAP_EXACT_IN (0x08) or V2_SWAP_EXACT_OUT (0x09)
-            else if (command == 0x08 || command == 0x09) {
-                (address recipient, , , , ) = abi.decode(
-                    inputs[i],
-                    (address, uint256, uint256, address[], bool)
-                );
-                require(
-                    recipient == address(this) || recipient == ADDRESS_THIS,
-                    "PositionVault: swap recipient must be vault or router"
-                );
-            }
-            // PERMIT2_PERMIT (0x0a) - allowed, no recipient validation needed
-            else if (command == 0x0a) {
-                // Allowed - gasless approval
-            }
-            // All other commands are blocked
-            else {
-                revert("PositionVault: command not allowed");
-            }
-        }
     }
 
     /**
@@ -280,7 +192,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Authorizes a executor
+     * @notice Authorizes an executor
      * @param _executor Address of the executor
      */
     function setExecutor(address _executor) external onlyOwner {
@@ -290,7 +202,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice De-authorises a executor
+     * @notice De-authorises an executor
      */
     function removeExecutor() external onlyOwner {
         emit ExecutorChanged(executor, false);
@@ -304,9 +216,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function withdrawTokens(address token, uint256 amount) external onlyAuthorized nonReentrant {
         require(token != address(0), "PositionVault: zero token address");
-
         IERC20(token).safeTransfer(owner, amount);
-
         emit TokensWithdrawn(token, owner, amount);
     }
 
@@ -316,10 +226,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function withdrawETH(uint256 amount) external onlyAuthorized nonReentrant {
         require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");
-
         (bool success, ) = owner.call{value: amount}("");
         require(success, "PositionVault: ETH transfer failed");
-
         emit TokensWithdrawn(address(0), owner, amount);
     }
 
@@ -330,51 +238,37 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function unwrapAndWithdrawETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
         require(weth != address(0), "PositionVault: zero WETH address");
-
-        // Unwrap WETH to ETH (WETH.withdraw sends ETH to this contract)
         IWETH(weth).withdraw(amount);
-
-        // Send ETH to owner
         (bool success, ) = owner.call{value: amount}("");
         require(success, "PositionVault: ETH transfer failed");
-
         emit TokensWithdrawn(address(0), owner, amount);
     }
 
     /**
      * @notice Wraps native ETH to WETH (keeps WETH in vault)
-     * @dev Used to prepare native ETH for Uniswap V3 operations which require WETH
      * @param weth Address of the WETH contract
      * @param amount Amount of ETH to wrap
      */
     function wrapETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
         require(weth != address(0), "PositionVault: zero WETH address");
         require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");
-
-        // Deposit ETH to get WETH (WETH stays in vault)
         IWETH(weth).deposit{value: amount}();
-
         emit TransactionExecuted(weth, abi.encodeWithSelector(IWETH.deposit.selector), true, "wrap");
     }
 
     /**
      * @notice Unwraps WETH to native ETH (keeps ETH in vault)
-     * @dev Used to prepare WETH for Uniswap V4 operations which use native ETH
      * @param weth Address of the WETH contract
      * @param amount Amount of WETH to unwrap
      */
     function unwrapETH(address weth, uint256 amount) external onlyAuthorized nonReentrant {
         require(weth != address(0), "PositionVault: zero WETH address");
-
-        // Withdraw WETH to get ETH (ETH stays in vault)
         IWETH(weth).withdraw(amount);
-
         emit TransactionExecuted(weth, abi.encodeWithSelector(IWETH.withdraw.selector, amount), true, "unwrap");
     }
 
     /**
      * @notice Approves spenders to spend vault tokens
-     * @dev Validates that the call is an ERC20.approve(address,uint256) call.
      * @param targets Array of token addresses to approve
      * @param data Array of encoded ERC20.approve(spender, amount) calls
      * @return results Array of success flags for each approval
@@ -394,7 +288,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             require(targets[i] != address(0), "PositionVault: zero token address");
             require(data[i].length >= 68, "PositionVault: invalid approval data");
 
-            // Validate selector is approve(address,uint256) = 0x095ea7b3
             bytes4 selector = bytes4(data[i][:4]);
             require(selector == 0x095ea7b3, "PositionVault: not an approve call");
 
@@ -402,7 +295,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "approval");
-
             require(success, "PositionVault: approval failed");
         }
 
@@ -410,14 +302,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Mints new liquidity positions via NonfungiblePositionManager
-     * @dev Only allows mint calls to the hardcoded NonfungiblePositionManager address
-     *      Validates that the recipient of the minted NFT is the vault
-     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @notice Mints new liquidity positions via registered position managers
+     * @param targets Array of position manager addresses to call
      * @param data Array of encoded mint calls
      * @return results Array of success flags for each operation
-     *
-     * MintParams recipient is at offset 292 (4-byte selector + 9 * 32-byte params)
      */
     function mint(address[] calldata targets, bytes[] calldata data)
         external
@@ -431,23 +319,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            require(
-                targets[i] == nonfungiblePositionManager,
-                "PositionVault: invalid target"
-            );
-
-            // Validate mint call: selector 0x88316456, recipient at offset 292
-            require(data[i].length >= 356, "PositionVault: invalid mint data");
-            bytes4 selector = bytes4(data[i][:4]);
-            require(selector == 0x88316456, "PositionVault: not a mint call");
-            address recipient = abi.decode(data[i][292:324], (address));
-            require(recipient == address(this), "PositionVault: mint recipient must be vault");
+            // Validate via factory
+            IVaultFactory(factory).validateMint(targets[i], data[i], address(this));
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "mint");
-
             require(success, "PositionVault: mint failed");
         }
 
@@ -455,9 +333,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Increases liquidity in existing positions via NonfungiblePositionManager
-     * @dev Only allows increaseLiquidity calls to the hardcoded NonfungiblePositionManager address
-     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @notice Increases liquidity in existing positions
+     * @param targets Array of position manager addresses to call
      * @param data Array of encoded increaseLiquidity calls
      * @return results Array of success flags for each operation
      */
@@ -473,21 +350,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            require(
-                targets[i] == nonfungiblePositionManager,
-                "PositionVault: invalid target"
-            );
-
-            // Validate selector is increaseLiquidity(IncreaseLiquidityParams) = 0x219f5d17
-            require(data[i].length >= 4, "PositionVault: invalid calldata");
-            bytes4 selector = bytes4(data[i][:4]);
-            require(selector == 0x219f5d17, "PositionVault: not an increaseLiquidity call");
+            // Validate via factory
+            IVaultFactory(factory).validateIncreaseLiquidity(targets[i], data[i], address(this));
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "addliq");
-
             require(success, "PositionVault: increaseLiquidity failed");
         }
 
@@ -495,16 +364,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Decreases liquidity and collects tokens from positions via NonfungiblePositionManager
-     * @dev Only allows multicall to the hardcoded NonfungiblePositionManager address
-     *      Validates that inner collect() calls have the vault as recipient
-     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @notice Decreases liquidity and collects tokens from positions
+     * @param targets Array of position manager addresses to call
      * @param data Array of encoded multicall data (batching decreaseLiquidity + collect)
      * @return results Array of success flags for each operation
-     *
-     * Only allows multicall (0xac9650d8) containing:
-     * - decreaseLiquidity (0x0c49ccbe): No recipient validation needed
-     * - collect (0xfc6f7865): Validates recipient = vault (offset 36)
      */
     function decreaseLiquidity(address[] calldata targets, bytes[] calldata data)
         external
@@ -518,50 +381,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            require(
-                targets[i] == nonfungiblePositionManager,
-                "PositionVault: invalid target"
-            );
-
-            // Validate multicall selector (0xac9650d8)
-            require(data[i].length >= 4, "PositionVault: invalid calldata");
-            bytes4 selector = bytes4(data[i][:4]);
-            require(selector == 0xac9650d8, "PositionVault: must be multicall");
-
-            // Validate each inner call
-            bytes[] memory innerCalls = abi.decode(data[i][4:], (bytes[]));
-            for (uint256 j = 0; j < innerCalls.length; j++) {
-                bytes memory innerCall = innerCalls[j];
-                require(innerCall.length >= 4, "PositionVault: invalid inner calldata");
-
-                bytes4 innerSelector;
-                assembly {
-                    innerSelector := mload(add(innerCall, 32))
-                }
-
-                // decreaseLiquidity (0x0c49ccbe) - allowed
-                if (innerSelector == 0x0c49ccbe) {
-                    continue;
-                }
-                // collect (0xfc6f7865) - validate recipient
-                if (innerSelector == 0xfc6f7865) {
-                    require(innerCall.length >= 68, "PositionVault: invalid collect data");
-                    address recipient;
-                    assembly {
-                        recipient := mload(add(innerCall, 68))
-                    }
-                    require(recipient == address(this), "PositionVault: collect recipient must be vault");
-                    continue;
-                }
-                // All other selectors blocked
-                revert("PositionVault: function not allowed in multicall");
-            }
+            // Validate via factory
+            IVaultFactory(factory).validateDecreaseLiquidity(targets[i], data[i], address(this));
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "subliq");
-
             require(success, "PositionVault: decreaseLiquidity failed");
         }
 
@@ -569,14 +395,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Collects fees from positions via NonfungiblePositionManager
-     * @dev Only allows collect calls to the hardcoded NonfungiblePositionManager address
-     *      Validates that collect recipient is the vault
-     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @notice Collects fees from positions
+     * @param targets Array of position manager addresses to call
      * @param data Array of encoded collect calls
      * @return results Array of success flags for each operation
-     *
-     * CollectParams recipient is at offset 36 (4-byte selector + 32-byte tokenId)
      */
     function collect(address[] calldata targets, bytes[] calldata data)
         external
@@ -590,23 +412,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            require(
-                targets[i] == nonfungiblePositionManager,
-                "PositionVault: invalid target"
-            );
-
-            // Validate collect call: selector 0xfc6f7865, recipient at offset 36
-            require(data[i].length >= 68, "PositionVault: invalid collect data");
-            bytes4 selector = bytes4(data[i][:4]);
-            require(selector == 0xfc6f7865, "PositionVault: not a collect call");
-            address recipient = abi.decode(data[i][36:68], (address));
-            require(recipient == address(this), "PositionVault: collect recipient must be vault");
+            // Validate via factory
+            IVaultFactory(factory).validateCollect(targets[i], data[i], address(this));
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "collect");
-
             require(success, "PositionVault: collect failed");
         }
 
@@ -614,10 +426,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Burns empty position NFTs via NonfungiblePositionManager
-     * @dev Only allows burn(uint256) calls to the hardcoded NonfungiblePositionManager address
-     *      Position must have 0 liquidity and 0 owed tokens to burn
-     * @param targets Array of target addresses (must all be nonfungiblePositionManager)
+     * @notice Burns empty position NFTs
+     * @param targets Array of position manager addresses to call
      * @param data Array of encoded burn calls
      * @return results Array of success flags for each operation
      */
@@ -633,22 +443,13 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         results = new bool[](targets.length);
 
         for (uint256 i = 0; i < targets.length; i++) {
-            require(
-                targets[i] == nonfungiblePositionManager,
-                "PositionVault: invalid target"
-            );
-
-            // Validate that this is actually a burn call
-            require(data[i].length >= 4, "PositionVault: invalid calldata");
-            bytes4 selector = bytes4(data[i][:4]);
-            // burn(uint256) selector = 0x42966c68
-            require(selector == 0x42966c68, "PositionVault: not a burn call");
+            // Validate via factory
+            IVaultFactory(factory).validateBurn(targets[i], data[i], address(this));
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "burn");
-
             require(success, "PositionVault: burn failed");
         }
 
@@ -662,16 +463,12 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function withdrawPosition(address nftContract, uint256 tokenId) external onlyAuthorized nonReentrant {
         require(nftContract != address(0), "PositionVault: zero NFT contract address");
-
-        // Transfer the NFT to owner
         IERC721(nftContract).safeTransferFrom(address(this), owner, tokenId);
-
         emit PositionWithdrawn(tokenId, nftContract, owner);
     }
 
     /**
      * @notice Handles the receipt of an NFT
-     * @dev Required for safeTransferFrom compatibility
      */
     function onERC721Received(
         address /*operator*/,
@@ -688,11 +485,9 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function setTargetTokens(string[] calldata tokens) external onlyOwner {
         delete targetTokens;
-
         for (uint i = 0; i < tokens.length; i++) {
             targetTokens.push(tokens[i]);
         }
-
         emit TargetTokensUpdated(tokens);
     }
 
@@ -710,11 +505,9 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      */
     function setTargetPlatforms(string[] calldata platforms) external onlyOwner {
         delete targetPlatforms;
-
         for (uint i = 0; i < platforms.length; i++) {
             targetPlatforms.push(platforms[i]);
         }
-
         emit TargetPlatformsUpdated(platforms);
     }
 
@@ -728,7 +521,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
 
     /**
      * @notice Validates signatures for Permit2 and other protocols (EIP-1271)
-     * @dev Allows owner or executor to sign on behalf of the vault
      * @param hash Hash of the data that was signed
      * @param signature Signature to validate
      * @return magicValue Returns 0x1626ba7e if valid, reverts otherwise
@@ -737,15 +529,11 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         bytes32 hash,
         bytes calldata signature
     ) external view override returns (bytes4 magicValue) {
-        // Recover the signer from the signature
         address signer = hash.recover(signature);
-
-        // Accept signatures from owner or executor
         require(
             signer == owner || signer == executor,
             "PositionVault: invalid signer"
         );
-
         return MAGICVALUE;
     }
 
@@ -755,6 +543,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     receive() external payable {}
 
     function getVersion() external pure returns (string memory) {
-        return "1.3.0";
+        return "2.0.0";
     }
 }
