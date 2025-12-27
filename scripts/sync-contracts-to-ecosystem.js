@@ -22,10 +22,23 @@ const CORE_CONTRACTS = [
   'PositionVault'
 ];
 
+// Validator contracts (from validators/ subdirectory)
+const VALIDATOR_CONTRACTS = [
+  'UniversalRouterValidator',
+  'UniswapV3PositionValidator'
+];
+
 // Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)
 const TESTING_ONLY_CONTRACTS = [
   'StrategyBase',
   'ParrisIslandStrategy'
+];
+
+// Subdirectories to sync entirely to fum_testing (interfaces, validators, etc.)
+// These are synced as complete directories, preserving structure
+const TESTING_SUBDIRECTORIES = [
+  'interfaces',
+  'validators'
 ];
 
 // Project paths
@@ -73,11 +86,12 @@ async function syncContractsToEcosystem() {
     await copyBytecodeToAutomation();
     console.log('✅ Bytecode distributed to fum_automation\n');
 
+    const totalBytecode = CORE_CONTRACTS.length + VALIDATOR_CONTRACTS.length;
     console.log('✨ Contract sync completed successfully!');
     console.log('\n📊 Distribution Summary:');
     console.log(`   • fum_testing: Production contracts synced (${CORE_CONTRACTS.length} contracts)`);
-    console.log(`   • fum_library: Core ABIs + core bytecode (${CORE_CONTRACTS.length} contracts)`);
-    console.log(`   • fum_automation: Core bytecode only (${CORE_CONTRACTS.length} contracts)`);
+    console.log(`   • fum_library: Core ABIs + bytecode (${totalBytecode} contracts: ${CORE_CONTRACTS.length} core + ${VALIDATOR_CONTRACTS.length} validators)`);
+    console.log(`   • fum_automation: Bytecode only (${totalBytecode} contracts: ${CORE_CONTRACTS.length} core + ${VALIDATOR_CONTRACTS.length} validators)`);
 
   } catch (error) {
     console.error('❌ Contract sync failed:', error.message);
@@ -98,7 +112,9 @@ async function copyBytecodeToLibrary() {
   }
 
   let successCount = 0;
-  for (const contract of CORE_CONTRACTS) {
+  const allContracts = [...CORE_CONTRACTS, ...VALIDATOR_CONTRACTS];
+
+  for (const contract of allContracts) {
     const sourceFile = path.join(sourceBytecodeDir, `${contract}.bin`);
     const destFile = path.join(destBytecodeDir, `${contract}.bin`);
 
@@ -111,7 +127,7 @@ async function copyBytecodeToLibrary() {
     }
   }
 
-  console.log(`  📦 Copied ${successCount}/${CORE_CONTRACTS.length} bytecode files to fum_library`);
+  console.log(`  📦 Copied ${successCount}/${allContracts.length} bytecode files to fum_library`);
 }
 
 /**
@@ -127,7 +143,9 @@ async function copyBytecodeToAutomation() {
   }
 
   let successCount = 0;
-  for (const contract of CORE_CONTRACTS) {
+  const allContracts = [...CORE_CONTRACTS, ...VALIDATOR_CONTRACTS];
+
+  for (const contract of allContracts) {
     const sourceFile = path.join(sourceBytecodeDir, `${contract}.bin`);
     const destFile = path.join(destBytecodeDir, `${contract}.bin`);
 
@@ -140,7 +158,7 @@ async function copyBytecodeToAutomation() {
     }
   }
 
-  console.log(`  📦 Copied ${successCount}/${CORE_CONTRACTS.length} bytecode files to fum_automation`);
+  console.log(`  📦 Copied ${successCount}/${allContracts.length} bytecode files to fum_automation`);
 }
 
 
@@ -200,6 +218,35 @@ async function syncSourceFilesToTesting() {
     }
   }
   console.log(`  📦 Synced ${contractCount}/${allContractsToSync.length} contracts (${CORE_CONTRACTS.length} production + ${TESTING_ONLY_CONTRACTS.length} testing-only)`);
+
+  // Sync subdirectories (interfaces, validators, etc.)
+  console.log('  Copying contract subdirectories...');
+  let subdirFileCount = 0;
+
+  for (const subdir of TESTING_SUBDIRECTORIES) {
+    const sourceSubdir = path.join(sourceDir, 'contracts', subdir);
+    const targetSubdir = path.join(contractsTargetDir, subdir);
+
+    if (fs.existsSync(sourceSubdir)) {
+      // Create target subdirectory
+      if (!fs.existsSync(targetSubdir)) {
+        fs.mkdirSync(targetSubdir, { recursive: true });
+      }
+
+      // Copy all .sol files in the subdirectory
+      const files = fs.readdirSync(sourceSubdir).filter(f => f.endsWith('.sol'));
+      for (const file of files) {
+        const sourceFile = path.join(sourceSubdir, file);
+        const targetFile = path.join(targetSubdir, file);
+        fs.copyFileSync(sourceFile, targetFile);
+        console.log(`  ✅ ${subdir}/${file}`);
+        subdirFileCount++;
+      }
+    } else {
+      console.warn(`  ⚠️ Warning: ${sourceSubdir} not found`);
+    }
+  }
+  console.log(`  📦 Synced ${subdirFileCount} files from ${TESTING_SUBDIRECTORIES.length} subdirectories`);
 }
 
 /**

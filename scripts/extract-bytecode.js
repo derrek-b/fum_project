@@ -20,6 +20,12 @@ const CONTRACTS_TO_EXTRACT = [
   'BabyStepsStrategy'
 ];
 
+// Validators to extract (in validators/ subdirectory)
+const VALIDATORS_TO_EXTRACT = [
+  'UniversalRouterValidator',
+  'UniswapV3PositionValidator'
+];
+
 // Debug logging
 console.log(`Script directory: ${__dirname}`);
 console.log(`Test project directory: ${TEST_PROJECT_DIR}`);
@@ -41,6 +47,43 @@ let errorCount = 0;
 
 for (const contractName of CONTRACTS_TO_EXTRACT) {
   const CONTRACT_PATH = path.join(TEST_PROJECT_DIR, 'artifacts/contracts',
+                                `${contractName}.sol`, `${contractName}.json`);
+
+  console.log(`\nExtracting bytecode from: ${CONTRACT_PATH}`);
+
+  // Check if the specific contract file exists
+  if (!fs.existsSync(CONTRACT_PATH)) {
+    console.error(`Error: Contract artifact not found at ${CONTRACT_PATH}`);
+    errorCount++;
+    continue;
+  }
+
+  try {
+    // Read the artifact
+    const artifact = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'));
+
+    // Extract bytecode (without 0x prefix)
+    const bytecode = artifact.bytecode.startsWith('0x')
+      ? artifact.bytecode.substring(2)
+      : artifact.bytecode;
+
+    // Save bytecode to file
+    const outputPath = path.join(OUTPUT_DIR, `${contractName}.bin`);
+    fs.writeFileSync(outputPath, bytecode);
+
+    console.log(`Bytecode extracted to: ${outputPath}`);
+    console.log(`Bytecode size: ${bytecode.length / 2} bytes`);
+    successCount++;
+
+  } catch (error) {
+    console.error(`Error extracting bytecode for ${contractName}: ${error.message}`);
+    errorCount++;
+  }
+}
+
+// Process each validator (from validators/ subdirectory)
+for (const contractName of VALIDATORS_TO_EXTRACT) {
+  const CONTRACT_PATH = path.join(TEST_PROJECT_DIR, 'artifacts/contracts/validators',
                                 `${contractName}.sol`, `${contractName}.json`);
 
   console.log(`\nExtracting bytecode from: ${CONTRACT_PATH}`);

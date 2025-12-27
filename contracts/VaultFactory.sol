@@ -2,22 +2,24 @@
 pragma solidity ^0.8.0;
 
 import "./PositionVault.sol";
+import "./interfaces/ISwapValidator.sol";
+import "./interfaces/ILiquidityValidator.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title VaultFactory
- * @notice Factory contract for creating and tracking user position vaults
- * @dev Deploys new PositionVault contracts and maintains a registry of them
+ * @notice Factory contract for creating vaults and managing the validator registry
+ * @dev Deploys PositionVault contracts and provides centralized validator management.
+ *      All vaults query this factory for validators, so adding a new platform
+ *      (e.g., Uniswap V4) only requires updating the factory once.
  */
 contract VaultFactory is Ownable {
-    // Uniswap Universal Router address for this chain (passed to new vaults)
-    address public immutable universalRouter;
-
     // Permit2 contract address for this chain (passed to new vaults)
     address public immutable permit2;
 
-    // Uniswap NonfungiblePositionManager address for this chain (passed to new vaults)
-    address public immutable nonfungiblePositionManager;
+    // Validator registries - shared by all vaults created by this factory
+    mapping(address => ISwapValidator) public swapValidators;
+    mapping(address => ILiquidityValidator) public liquidityValidators;
 
     // Mapping of user address to their vault addresses
     mapping(address => address[]) public userVaults;
@@ -36,27 +38,119 @@ contract VaultFactory is Ownable {
     // Events
     event VaultCreated(address indexed user, address indexed vault, string name, uint256 userVaultCount);
     event VaultNameUpdated(address indexed vault, string name);
+    event SwapValidatorUpdated(address indexed router, address indexed validator);
+    event LiquidityValidatorUpdated(address indexed positionManager, address indexed validator);
 
     /**
      * @notice Constructor
      * @param initialOwner The factory owner address
-     * @param _universalRouter Uniswap Universal Router address for this chain
      * @param _permit2 Permit2 contract address for this chain
-     * @param _nonfungiblePositionManager Uniswap NonfungiblePositionManager address for this chain
      */
     constructor(
         address initialOwner,
-        address _universalRouter,
-        address _permit2,
-        address _nonfungiblePositionManager
+        address _permit2
     ) Ownable(initialOwner) {
-        require(_universalRouter != address(0), "VaultFactory: zero router address");
         require(_permit2 != address(0), "VaultFactory: zero permit2 address");
-        require(_nonfungiblePositionManager != address(0), "VaultFactory: zero position manager address");
-        universalRouter = _universalRouter;
         permit2 = _permit2;
-        nonfungiblePositionManager = _nonfungiblePositionManager;
     }
+
+    // ============ Validator Registry Management ============
+
+    /**
+     * @notice Sets or updates a swap router's validator
+     * @param router The router address
+     * @param validator The validator contract (address(0) to remove)
+     */
+    function setSwapValidator(address router, ISwapValidator validator) external onlyOwner {
+        swapValidators[router] = validator;
+        emit SwapValidatorUpdated(router, address(validator));
+    }
+
+    /**
+     * @notice Sets or updates a position manager's validator
+     * @param positionManager The position manager address
+     * @param validator The validator contract (address(0) to remove)
+     */
+    function setLiquidityValidator(address positionManager, ILiquidityValidator validator) external onlyOwner {
+        liquidityValidators[positionManager] = validator;
+        emit LiquidityValidatorUpdated(positionManager, address(validator));
+    }
+
+    // ============ Validation Functions (called by vaults) ============
+
+    /**
+     * @notice Validates swap calldata via the registered validator
+     * @param router The router address being called
+     * @param data The calldata being sent to the router
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateSwap(address router, bytes calldata data, address vault) external view {
+        ISwapValidator validator = swapValidators[router];
+        require(address(validator) != address(0), "VaultFactory: no validator for router");
+        validator.validateSwap(data, vault);
+    }
+
+    /**
+     * @notice Validates mint calldata via the registered validator
+     * @param positionManager The position manager address being called
+     * @param data The calldata being sent to the position manager
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateMint(address positionManager, bytes calldata data, address vault) external view {
+        ILiquidityValidator validator = liquidityValidators[positionManager];
+        require(address(validator) != address(0), "VaultFactory: no validator for position manager");
+        validator.validateMint(data, vault);
+    }
+
+    /**
+     * @notice Validates increaseLiquidity calldata via the registered validator
+     * @param positionManager The position manager address being called
+     * @param data The calldata being sent to the position manager
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateIncreaseLiquidity(address positionManager, bytes calldata data, address vault) external view {
+        ILiquidityValidator validator = liquidityValidators[positionManager];
+        require(address(validator) != address(0), "VaultFactory: no validator for position manager");
+        validator.validateIncreaseLiquidity(data, vault);
+    }
+
+    /**
+     * @notice Validates decreaseLiquidity calldata via the registered validator
+     * @param positionManager The position manager address being called
+     * @param data The calldata being sent to the position manager
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateDecreaseLiquidity(address positionManager, bytes calldata data, address vault) external view {
+        ILiquidityValidator validator = liquidityValidators[positionManager];
+        require(address(validator) != address(0), "VaultFactory: no validator for position manager");
+        validator.validateDecreaseLiquidity(data, vault);
+    }
+
+    /**
+     * @notice Validates collect calldata via the registered validator
+     * @param positionManager The position manager address being called
+     * @param data The calldata being sent to the position manager
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateCollect(address positionManager, bytes calldata data, address vault) external view {
+        ILiquidityValidator validator = liquidityValidators[positionManager];
+        require(address(validator) != address(0), "VaultFactory: no validator for position manager");
+        validator.validateCollect(data, vault);
+    }
+
+    /**
+     * @notice Validates burn calldata via the registered validator
+     * @param positionManager The position manager address being called
+     * @param data The calldata being sent to the position manager
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateBurn(address positionManager, bytes calldata data, address vault) external view {
+        ILiquidityValidator validator = liquidityValidators[positionManager];
+        require(address(validator) != address(0), "VaultFactory: no validator for position manager");
+        validator.validateBurn(data, vault);
+    }
+
+    // ============ Vault Creation ============
 
     /**
      * @notice Creates a new vault for the caller with a required name
@@ -66,12 +160,11 @@ contract VaultFactory is Ownable {
     function createVault(string calldata name) external returns (address vault) {
         require(bytes(name).length > 0, "VaultFactory: vault name cannot be empty");
 
-        // Create new vault with the caller as owner and chain's protocol addresses
+        // Create new vault with the caller as owner
         vault = address(new PositionVault(
-            msg.sender,
-            universalRouter,
-            permit2,
-            nonfungiblePositionManager
+            msg.sender,      // owner
+            permit2,         // permit2
+            address(this)    // factory (for validator lookups)
         ));
 
         // Register vault in mappings
@@ -91,6 +184,8 @@ contract VaultFactory is Ownable {
 
         return vault;
     }
+
+    // ============ Vault Registry Functions ============
 
     /**
      * @notice Updates the name of an existing vault
@@ -160,6 +255,6 @@ contract VaultFactory is Ownable {
     }
 
     function getVersion() external pure returns (string memory) {
-        return "1.0.0";
+        return "2.0.0";
     }
 }

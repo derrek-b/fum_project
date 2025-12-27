@@ -13,10 +13,13 @@ const LIBRARY_PATH = path.resolve(__dirname, '../../fum_library');
 const contractsDir = path.resolve(__dirname, '../contracts');
 
 // Define contract mapping to handle special naming cases
+// Key format: 'path/ContractName.sol' for contracts in subdirectories
 const contractMapping = {
   'BabyStepsStrategy.sol': 'bob',
   'PositionVault.sol': 'PositionVault',
-  'VaultFactory.sol': 'VaultFactory'
+  'VaultFactory.sol': 'VaultFactory',
+  'validators/UniversalRouterValidator.sol': 'UniversalRouterValidator',
+  'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator'
 };
 
 // List of contracts to extract ABIs from
@@ -43,17 +46,34 @@ const input = {
 };
 
 // Function to handle imports (e.g., OpenZeppelin contracts)
+// Note: Since solc doesn't tell us which file is importing, we need to try multiple resolution strategies
 function findImports(importPath) {
   try {
     if (importPath.startsWith('@openzeppelin/')) {
       const fullPath = path.resolve(__dirname, '../node_modules', importPath);
       return { contents: fs.readFileSync(fullPath, 'utf8') };
     } else {
-      const fullPath = path.resolve(contractsDir, importPath);
-      return { contents: fs.readFileSync(fullPath, 'utf8') };
+      // Try resolving relative to contractsDir first
+      let fullPath = path.resolve(contractsDir, importPath);
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf8') };
+      }
+
+      // For imports like "../interfaces/X.sol" from validators/, the actual path is "interfaces/X.sol"
+      // Handle relative paths that go up from subdirectories
+      if (importPath.startsWith('../')) {
+        // Remove the leading "../" and try from contractsDir
+        const cleanPath = importPath.replace(/^\.\.\//, '');
+        fullPath = path.resolve(contractsDir, cleanPath);
+        if (fs.existsSync(fullPath)) {
+          return { contents: fs.readFileSync(fullPath, 'utf8') };
+        }
+      }
+
+      return { error: `File not found: ${importPath}` };
     }
   } catch (err) {
-    return { error: 'File not found' };
+    return { error: `Import error: ${err.message}` };
   }
 }
 
@@ -141,14 +161,16 @@ if (output.errors) {
 // Extract ABIs from the compilation output
 const contractsAbi = {};
 contractFiles.forEach(file => {
+  // Get just the filename (without subdirectory path) for the contract name lookup
   const originalContractName = path.basename(file, '.sol');
   const mappedContractName = contractMapping[file];
 
   const contractOutput = output.contracts[file][originalContractName];
   if (contractOutput) {
     contractsAbi[mappedContractName] = { abi: contractOutput.abi };
+    console.log(`  ✅ Extracted ABI for ${mappedContractName}`);
   } else {
-    console.error(`Contract ${originalContractName} not found in compilation output`);
+    console.error(`Contract ${originalContractName} not found in compilation output for ${file}`);
     process.exit(1);
   }
 });
