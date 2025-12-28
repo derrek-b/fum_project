@@ -418,3 +418,45 @@ export function getMinBufferSwapValue(chainId) {
 
   return config.minBufferSwapValue;
 }
+
+/**
+ * Get transaction deadline in minutes for a specific chain
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number} Transaction deadline in minutes - how long before a pending tx expires
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no transaction deadline is configured for the chain
+ * @example
+ * // Get deadline for Arbitrum (fast L2)
+ * const deadline = getTransactionDeadlineMinutes(42161);
+ * // Returns: 5
+ *
+ * @example
+ * // Get deadline for Ethereum mainnet (slower blocks)
+ * const deadline = getTransactionDeadlineMinutes(1);
+ * // Returns: 20
+ *
+ * @example
+ * // Use in liquidity operations
+ * const deadlineMinutes = getTransactionDeadlineMinutes(chainId);
+ * const txData = await adapter.generateRemoveLiquidityData({
+ *   ...params,
+ *   deadlineMinutes
+ * });
+ * @since 1.0.0
+ */
+export function getTransactionDeadlineMinutes(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (typeof config.transactionDeadlineMinutes !== 'number' || !Number.isFinite(config.transactionDeadlineMinutes) || config.transactionDeadlineMinutes <= 0) {
+    throw new Error(`No transaction deadline configured for chain ${chainId}`);
+  }
+
+  return config.transactionDeadlineMinutes;
+}

@@ -6845,6 +6845,201 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   });
 
+  describe('parseClosureReceipt', () => {
+    describe('Success Cases', () => {
+      it('should parse principal and fees from a position closure receipt', async () => {
+        // 1. Get pool data and position data
+        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const { tickLower, tickUpper } = env.testPosition;
+        const positionId = env.positionTokenId.toString();
+
+        // 2. Execute a swap through the pool to generate fees for the position
+        const swapper = env.signers[1];
+        const wethABI = ['function deposit() payable', 'function approve(address,uint256) returns (bool)'];
+        const wethContract = new ethers.Contract(env.wethAddress, wethABI, swapper);
+        const swapRouter = new ethers.Contract(adapter.addresses.routerAddress, adapter.swapRouterABI, swapper);
+
+        // Wrap 1 ETH to WETH
+        const wrapAmount = ethers.utils.parseEther('1');
+        await (await wethContract.deposit({ value: wrapAmount })).wait();
+
+        // Approve router
+        await (await wethContract.approve(adapter.addresses.routerAddress, wrapAmount)).wait();
+
+        // Swap WETH -> USDC through the same pool as our position
+        const swapParams = {
+          tokenIn: env.wethAddress,
+          tokenOut: env.usdcAddress,
+          fee: 500, // Same fee tier as test position
+          recipient: swapper.address,
+          deadline: Math.floor(Date.now() / 1000) + 1200,
+          amountIn: wrapAmount,
+          amountOutMinimum: 0,
+          sqrtPriceLimitX96: 0
+        };
+        await (await swapRouter.exactInputSingle(swapParams)).wait();
+
+        // 3. Refresh pool data after swap
+        const updatedPoolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+
+        // 4. Generate remove liquidity data (100% removal triggers DecreaseLiquidity + Collect)
+        const removeLiquidityData = await adapter.generateRemoveLiquidityData({
+          position: {
+            id: positionId,
+            tickLower: tickLower,
+            tickUpper: tickUpper
+          },
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: env.testVault.address,
+          poolData: updatedPoolData,
+          token0Data: {
+            address: env.usdcAddress,
+            decimals: 6
+          },
+          token1Data: {
+            address: env.wethAddress,
+            decimals: 18
+          },
+          slippageTolerance: 1,
+          deadlineMinutes: 30
+        });
+
+        // 5. Execute the transaction via the vault and get the receipt
+        const owner = env.signers[0];
+        const vaultWithSigner = env.testVault.connect(owner);
+        const tx = await vaultWithSigner.execute(
+          [removeLiquidityData.to],
+          [removeLiquidityData.data]
+        );
+        const receipt = await tx.wait();
+
+        // 6. Build positionMetadata structure (as the strategy would)
+        const positionMetadata = {
+          [positionId]: {
+            position: {
+              id: positionId,
+              tickLower: tickLower,
+              tickUpper: tickUpper
+            },
+            poolMetadata: {
+              token0Symbol: 'USDC',
+              token1Symbol: 'WETH',
+              platform: 'uniswapV3'
+            },
+            token0Data: {
+              address: env.usdcAddress,
+              decimals: 6,
+              symbol: 'USDC'
+            },
+            token1Data: {
+              address: env.wethAddress,
+              decimals: 18,
+              symbol: 'WETH'
+            },
+            adapter: adapter
+          }
+        };
+
+        // 7. Call parseClosureReceipt
+        const result = adapter.parseClosureReceipt(receipt, positionMetadata);
+
+        // 8. Verify structure
+        expect(result).toBeDefined();
+        expect(result.principalByPosition).toBeDefined();
+        expect(result.feesByPosition).toBeDefined();
+
+        // 9. Verify principal was parsed
+        expect(result.principalByPosition[positionId]).toBeDefined();
+        expect(result.principalByPosition[positionId].amount0).toBeDefined();
+        expect(result.principalByPosition[positionId].amount1).toBeDefined();
+
+        // 10. Verify fees were calculated
+        expect(result.feesByPosition[positionId]).toBeDefined();
+        expect(result.feesByPosition[positionId].token0).toBeDefined();
+        expect(result.feesByPosition[positionId].token1).toBeDefined();
+        expect(result.feesByPosition[positionId].metadata).toBeDefined();
+
+        // 11. Principal amounts should be BigNumbers with gte 0
+        expect(result.principalByPosition[positionId].amount0.gte(0)).toBe(true);
+        expect(result.principalByPosition[positionId].amount1.gte(0)).toBe(true);
+
+        // 12. At least one fee should be > 0 (we did a swap to generate fees)
+        const token0Fees = result.feesByPosition[positionId].token0;
+        const token1Fees = result.feesByPosition[positionId].token1;
+        expect(token0Fees.gt(0) || token1Fees.gt(0)).toBe(true);
+
+        // 13. Metadata should be passed through
+        expect(result.feesByPosition[positionId].metadata.token0Data.symbol).toBe('USDC');
+        expect(result.feesByPosition[positionId].metadata.token1Data.symbol).toBe('WETH');
+      }, 90000);
+
+      it('should return empty objects when no matching positions in metadata', () => {
+        // Create a mock receipt with DecreaseLiquidity and Collect events for tokenId "12345"
+        // but pass metadata for a DIFFERENT tokenId "999999999"
+        const decreaseLiquidityTopic = adapter.positionManagerInterface.getEventTopic('DecreaseLiquidity');
+        const collectTopic = adapter.positionManagerInterface.getEventTopic('Collect');
+
+        // Encode a fake DecreaseLiquidity event (tokenId=12345, liquidity=1000, amount0=100, amount1=200)
+        const decreaseLiquidityData = ethers.utils.defaultAbiCoder.encode(
+          ['uint128', 'uint256', 'uint256'],
+          [1000, 100, 200]
+        );
+        const tokenIdTopic = ethers.utils.hexZeroPad(ethers.BigNumber.from('12345').toHexString(), 32);
+
+        // Encode a fake Collect event (tokenId=12345, recipient=0x..., amount0=150, amount1=250)
+        const collectData = ethers.utils.defaultAbiCoder.encode(
+          ['address', 'uint256', 'uint256'],
+          ['0x0000000000000000000000000000000000000001', 150, 250]
+        );
+
+        const mockReceipt = {
+          logs: [
+            {
+              topics: [decreaseLiquidityTopic, tokenIdTopic],
+              data: decreaseLiquidityData
+            },
+            {
+              topics: [collectTopic, tokenIdTopic],
+              data: collectData
+            }
+          ]
+        };
+
+        // Pass metadata with a DIFFERENT position ID (non-matching)
+        const positionMetadata = {
+          '999999999': {  // Different from "12345" in the events
+            position: { id: '999999999' },
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        // Parse - should return empty since no matching IDs
+        const result = adapter.parseClosureReceipt(mockReceipt, positionMetadata);
+
+        expect(result.principalByPosition).toEqual({});
+        expect(result.feesByPosition).toEqual({});
+      });
+
+      it('should handle empty receipt logs', () => {
+        const emptyReceipt = { logs: [] };
+        const positionMetadata = {
+          '12345': {
+            position: { id: '12345' },
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        const result = adapter.parseClosureReceipt(emptyReceipt, positionMetadata);
+
+        expect(result.principalByPosition).toEqual({});
+        expect(result.feesByPosition).toEqual({});
+      });
+    });
+  });
+
   describe('getAddLiquidityQuote', () => {
 
     describe('Success Cases', () => {

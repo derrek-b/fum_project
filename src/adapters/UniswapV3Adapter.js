@@ -2566,6 +2566,75 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Parse position closure receipt to extract principal and fees
+   *
+   * When positions are closed via decreaseLiquidity + collect, this method parses
+   * the transaction receipt to extract:
+   * - Principal amounts (from DecreaseLiquidity events)
+   * - Fee amounts (Collect amounts minus principal)
+   *
+   * @param {Object} receipt - Transaction receipt from closing positions
+   * @param {Object} positionMetadata - Metadata for closed positions
+   *   { [tokenId]: { position, poolMetadata, token0Data, token1Data, adapter } }
+   * @returns {Object} Parsed closure data
+   *   { principalByPosition: { [tokenId]: { amount0, amount1 } },
+   *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
+   */
+  parseClosureReceipt(receipt, positionMetadata) {
+    const principalByPosition = {};
+    const feesByPosition = {};
+
+    // Get event topic hashes from the pre-compiled interface
+    const decreaseLiquidityTopic = this.positionManagerInterface.getEventTopic('DecreaseLiquidity');
+    const collectTopic = this.positionManagerInterface.getEventTopic('Collect');
+
+    // First pass: collect DecreaseLiquidity events (principal amounts)
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics[0] === decreaseLiquidityTopic) {
+          const decoded = this.positionManagerInterface.parseLog(log);
+          const tokenId = decoded.args.tokenId.toString();
+
+          if (positionMetadata[tokenId]) {
+            principalByPosition[tokenId] = {
+              amount0: decoded.args.amount0,
+              amount1: decoded.args.amount1
+            };
+          }
+        }
+      } catch (e) {
+        // Not a DecreaseLiquidity event from this interface, continue
+      }
+    }
+
+    // Second pass: collect Collect events and calculate fees
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics[0] === collectTopic) {
+          const decoded = this.positionManagerInterface.parseLog(log);
+          const tokenId = decoded.args.tokenId.toString();
+
+          if (positionMetadata[tokenId] && principalByPosition[tokenId]) {
+            // Fees = Collect amounts - DecreaseLiquidity amounts (principal)
+            const token0Fees = decoded.args.amount0.sub(principalByPosition[tokenId].amount0);
+            const token1Fees = decoded.args.amount1.sub(principalByPosition[tokenId].amount1);
+
+            feesByPosition[tokenId] = {
+              token0: token0Fees,
+              token1: token1Fees,
+              metadata: positionMetadata[tokenId]
+            };
+          }
+        }
+      } catch (e) {
+        // Not a Collect event from this interface, continue
+      }
+    }
+
+    return { principalByPosition, feesByPosition };
+  }
+
+  /**
    * Generate transaction data for adding liquidity to an existing position
    * @param {Object} params - Parameters for generating add liquidity data
    * @param {Object} params.position - Position object with ID and tick range

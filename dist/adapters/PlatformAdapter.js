@@ -20,6 +20,8 @@
  * | getApprovalTarget(opType)    | Strategy.ensureApprovals   | CONFIRMED |
  * | discoverAvailablePools       | Strategy.selectBestPool    | CONFIRMED |
  * | sortTokens                   | Strategy.selectBestPool    | CONFIRMED |
+ * | parseClosureReceipt          | Strategy.closePositions    | CONFIRMED |
+ * | generateRemoveLiquidityData  | Strategy.closePositions    | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -29,7 +31,6 @@
  * | calculateUncollectedFees     | Likely interface - hides fee logic  |
  * | generateSwapData             | Likely interface - tx generation    |
  * | generateAddLiquidityData     | Likely interface - tx generation    |
- * | generateRemoveLiquidityData  | Likely interface - tx generation    |
  * | generateCreatePositionData   | Likely interface - tx generation    |
  * | generateClaimFeesData        | Likely interface - tx generation    |
  *
@@ -275,6 +276,25 @@ export default class PlatformAdapter {
    */
   async generateSwapData(params) {
     throw new Error("generateSwapData must be implemented by subclasses");
+  }
+
+  /**
+   * Parse position closure receipt to extract principal and fees
+   *
+   * When positions are closed (decreaseLiquidity + collect), this method parses
+   * the transaction receipt to extract:
+   * - Principal amounts (from DecreaseLiquidity events or equivalent)
+   * - Fee amounts (Collect amounts minus principal)
+   *
+   * @param {Object} receipt - Transaction receipt from closing positions
+   * @param {Object} positionMetadata - Metadata for closed positions
+   *   { [tokenId]: { position, poolMetadata, token0Data, token1Data, adapter } }
+   * @returns {Object} Parsed closure data
+   *   { principalByPosition: { [tokenId]: { amount0, amount1 } },
+   *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
+   */
+  parseClosureReceipt(receipt, positionMetadata) {
+    throw new Error("parseClosureReceipt must be implemented by subclasses");
   }
 
   /**

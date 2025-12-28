@@ -17,6 +17,7 @@ import {
   lookupChainPlatformIds,
   getMinDeploymentForGas,
   getMinBufferSwapValue,
+  getTransactionDeadlineMinutes,
   configureChainHelpers
 } from '../../../src/helpers/chainHelpers.js';
 
@@ -676,6 +677,62 @@ describe('Chain Helpers', () => {
         expect(() => getMinBufferSwapValue('1')).toThrow('chainId must be a number');
         expect(() => getMinBufferSwapValue(0)).toThrow('chainId must be greater than 0');
         expect(() => getMinBufferSwapValue(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getTransactionDeadlineMinutes', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getTransactionDeadlineMinutes(1)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(42161)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(1337)).toBe('number');
+      });
+
+      it('should return expected values for each chain', () => {
+        expect(getTransactionDeadlineMinutes(42161)).toBe(5);   // Arbitrum - fast L2
+        expect(getTransactionDeadlineMinutes(1337)).toBe(5);    // Local fork (Arbitrum)
+        expect(getTransactionDeadlineMinutes(1)).toBe(20);      // Ethereum mainnet
+      });
+
+      it('should return values > 0', () => {
+        expect(getTransactionDeadlineMinutes(1)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(42161)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(1337)).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getTransactionDeadlineMinutes(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when transactionDeadlineMinutes is not configured', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              rpcUrl: 'http://localhost:8545',
+              // transactionDeadlineMinutes intentionally missing
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getTransactionDeadlineMinutes(777)).toThrow('No transaction deadline configured for chain 777');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getTransactionDeadlineMinutes(null)).toThrow('chainId parameter is required');
+        expect(() => getTransactionDeadlineMinutes(undefined)).toThrow('chainId parameter is required');
+        expect(() => getTransactionDeadlineMinutes('1')).toThrow('chainId must be a number');
+        expect(() => getTransactionDeadlineMinutes(0)).toThrow('chainId must be greater than 0');
+        expect(() => getTransactionDeadlineMinutes(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

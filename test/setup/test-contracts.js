@@ -145,20 +145,35 @@ export async function deployFUMContracts(deployer, config = {}) {
   const contracts = {};
 
   try {
-    // Get protocol addresses for the test chain (1337 is a fork of Arbitrum)
-    const chainConfig = getChainConfig(1337);
-    const universalRouterAddress = chainConfig.platformAddresses.uniswapV3.universalRouterAddress;
-    const positionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-    // Permit2 canonical address - same on all chains
+    // Canonical addresses - same on all chains
     const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+    const universalRouterAddress = '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD';
+    const nonfungiblePositionManagerAddress = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
 
-    // Deploy VaultFactory with owner address and protocol addresses
+    // Deploy VaultFactory with owner and permit2 (v2.0.0)
+    // Validators are registered separately after deployment
     contracts.vaultFactory = await deployContract(deployer, 'VaultFactory', [
       deployer.address,
-      universalRouterAddress,
-      permit2Address,
-      positionManagerAddress
+      permit2Address
     ]);
+
+    // Deploy validators (no constructor args)
+    contracts.universalRouterValidator = await deployContract(deployer, 'UniversalRouterValidator');
+    contracts.v3PositionValidator = await deployContract(deployer, 'UniswapV3PositionValidator');
+
+    // Register validators with factory
+    console.log('Registering validators with factory...');
+    await contracts.vaultFactory.setSwapValidator(
+      universalRouterAddress,
+      contracts.universalRouterValidator.address
+    );
+    console.log(`  ✅ UniversalRouterValidator registered for ${universalRouterAddress}`);
+
+    await contracts.vaultFactory.setLiquidityValidator(
+      nonfungiblePositionManagerAddress,
+      contracts.v3PositionValidator.address
+    );
+    console.log(`  ✅ UniswapV3PositionValidator registered for ${nonfungiblePositionManagerAddress}`);
 
     // Deploy strategies (no constructor args)
     contracts.babySteps = await deployContract(deployer, 'BabyStepsStrategy');
@@ -251,7 +266,9 @@ function mapContractName(contractName) {
   const nameMap = {
     'VaultFactory': 'VaultFactory',
     'BabyStepsStrategy': 'bob',
-    'PositionVault': 'PositionVault'
+    'PositionVault': 'PositionVault',
+    'UniversalRouterValidator': 'UniversalRouterValidator',
+    'UniswapV3PositionValidator': 'UniswapV3PositionValidator'
   };
 
   return nameMap[contractName] || contractName;
@@ -266,26 +283,10 @@ function mapContractName(contractName) {
 export async function deployTestVault(vaultFactory, params) {
   const {
     name = 'Test Vault',
-    symbol = 'TEST-V',
-    depositor,
-    executor,
-    strategist,
-    feeRecipient,
-    performanceFee = 1000, // 10%
-    managementFee = 200,   // 2%
   } = params;
 
-  const tx = await vaultFactory.createVault(
-    name,
-    symbol,
-    depositor,
-    executor,
-    strategist,
-    feeRecipient,
-    performanceFee,
-    managementFee
-  );
-
+  // v2.0.0: createVault just takes a name string
+  const tx = await vaultFactory.createVault(name);
   const receipt = await tx.wait();
 
   // Find VaultCreated event
@@ -300,8 +301,8 @@ export async function deployTestVault(vaultFactory, params) {
   const decodedEvent = vaultFactory.interface.parseLog(event);
   const vaultAddress = decodedEvent.args.vault;
 
-  // Load vault ABI (you'll need to have this)
-  const { abi } = loadContractBytecode('PositionVault');
+  // Load vault ABI
+  const { abi } = await loadContractBytecode('PositionVault');
   return getContract(vaultAddress, abi, vaultFactory.runner);
 }
 
