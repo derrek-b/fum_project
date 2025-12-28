@@ -940,7 +940,7 @@ class AutomationService {
         throw new Error('Strategy initialization failed');
       }
 
-      // TODO: Step 6 - Monitoring setup (future)
+      // TODO: Step 4 - Monitoring setup (future)
       step = 'monitoring_setup';
 
       this.eventManager.emit('VaultSetupComplete', {

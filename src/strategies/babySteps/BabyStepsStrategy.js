@@ -4,7 +4,7 @@
  */
 
 import { StrategyBase } from '../base/index.js';
-import { getStrategyDetails } from 'fum_library';
+import { getStrategyDetails, getTransactionDeadlineMinutes } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
 import PlatformUtilsFactory from '../../platformUtils/PlatformUtilsFactory.js';
 
@@ -63,17 +63,17 @@ export default class BabyStepsStrategy extends StrategyBase {
     //   - Highest liquidity pool wins (better execution, more depth)
     //   - Target pool determines ETH vs WETH requirement
     //
-    // Step 3: Prepare tokens for target pool (ETH/WETH handling)
-    //   - Check target pool's token0/token1 to see if it uses ETH or WETH
-    //   - If pool uses WETH and vault has ETH → wrapETH
-    //   - If pool uses ETH and vault has WETH → unwrapETH
-    //   - This is POOL-SPECIFIC, not platform-specific (V4 has both ETH and WETH pools)
-    //
-    // Step 4: Close non-aligned positions
+    // Step 3: Close non-aligned positions
     //   - Batch close all non-aligned positions
     //   - Collect fees during closure
     //   - Distribute fees to owner
     //   - JIT approval: adapter.getApprovalTarget('liquidity') before close
+    //
+    // Step 4: Prepare tokens for target pool (ETH/WETH handling)
+    //   - Check target pool's token0/token1 to see if it uses ETH or WETH
+    //   - If pool uses WETH and vault has ETH → wrapETH
+    //   - If pool uses ETH and vault has WETH → unwrapETH
+    //   - This is POOL-SPECIFIC, not platform-specific (V4 has both ETH and WETH pools)
     //
     // Step 5: Refresh token balances
     //   - Fetch updated balances after closures and ETH conversion
@@ -137,7 +137,20 @@ export default class BabyStepsStrategy extends StrategyBase {
     const targetPool = await this.selectBestPool(targetToken0, targetToken1, adapter, vault.address);
     this.log(`Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
 
-    // TODO: Steps 3-7
+    // Step 3: Close non-aligned positions
+    let collectedFees = {};
+    if (Object.keys(evaluation.nonAlignedPositions).length > 0) {
+      this.log(`Closing ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned position(s)`);
+      const { feesByPosition } = await this.closePositions(vault, evaluation.nonAlignedPositions);
+      collectedFees = feesByPosition;
+
+      // TODO: Distribute fees to owner
+      if (Object.keys(collectedFees).length > 0) {
+        this.log(`Fees collected from ${Object.keys(collectedFees).length} position(s) - distribution pending`);
+      }
+    }
+
+    // TODO: Steps 4-7
 
     return true;
   }
@@ -359,6 +372,159 @@ export default class BabyStepsStrategy extends StrategyBase {
       ...bestPool,
       token0: sortedToken0,
       token1: sortedToken1
+    };
+  }
+
+  // ===========================================================================
+  // Position Management
+  // ===========================================================================
+
+  /**
+   * Close positions and collect fees
+   *
+   * Batch closes multiple positions, parses the receipt to extract principal
+   * and fees, and emits events for tracking.
+   *
+   * @param {Object} vault - Vault data object
+   * @param {Object} positions - Positions to close, keyed by position ID
+   * @returns {Promise<{receipt: Object, feesByPosition: Object}>}
+   *          Transaction receipt and parsed fees per position
+   * @throws {Error} If pool metadata, adapter, or token data is missing
+   */
+  async closePositions(vault, positions) {
+    const transactions = [];
+    const positionMetadata = {};
+
+    // Generate transaction data for each position to close
+    for (const [positionId, position] of Object.entries(positions)) {
+      // Get pool metadata from cache
+      const poolMetadata = this.poolData[position.pool];
+      if (!poolMetadata) {
+        throw new Error(`Missing pool metadata for position ${positionId} pool ${position.pool}`);
+      }
+
+      // Get adapter for this platform
+      const adapter = this.adapters.get(poolMetadata.platform);
+      if (!adapter) {
+        throw new Error(`No adapter available for platform ${poolMetadata.platform}`);
+      }
+
+      // Get token data
+      const token0Data = this.tokens[poolMetadata.token0Symbol];
+      const token1Data = this.tokens[poolMetadata.token1Symbol];
+      if (!token0Data || !token1Data) {
+        throw new Error(`Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
+      }
+
+      // Fetch fresh pool data
+      const poolData = await retryRpcCall(
+        () => adapter.getPoolData(position.pool, {}, this.provider),
+        'getPoolData',
+        { log: (msg) => this.log(msg) }
+      );
+
+      this.log(`Adding position ${positionId} to close batch: ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol} on ${poolMetadata.platform}`);
+
+      // Store metadata for event parsing
+      positionMetadata[positionId] = {
+        position,
+        poolMetadata,
+        token0Data,
+        token1Data,
+        adapter
+      };
+
+      // Generate close position transaction data (100% removal)
+      const closeData = await retryRpcCall(
+        () => adapter.generateRemoveLiquidityData({
+          position,
+          percentage: 100,
+          provider: this.provider,
+          walletAddress: vault.address,
+          poolData,
+          token0Data,
+          token1Data,
+          slippageTolerance: vault.strategy.parameters.maxSlippage,
+          deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
+        }),
+        'generateRemoveLiquidityData',
+        { log: (msg) => this.log(msg) }
+      );
+
+      transactions.push({
+        to: closeData.to,
+        data: closeData.data,
+        value: closeData.value || 0
+      });
+    }
+
+    // Execute batch transactions via vault's decreaseLiquidity function
+    const txResult = await this.executeBatchTransactions(vault, transactions, 'position closes', 'subliq');
+
+    // Remove closed positions from vault.positions
+    for (const position of Object.values(positions)) {
+      delete vault.positions[position.id];
+    }
+
+    // Group positionMetadata by adapter (platform) for receipt parsing
+    const metadataByAdapter = new Map();
+    for (const [positionId, metadata] of Object.entries(positionMetadata)) {
+      const adapter = metadata.adapter;
+      if (!metadataByAdapter.has(adapter)) {
+        metadataByAdapter.set(adapter, {});
+      }
+      metadataByAdapter.get(adapter)[positionId] = metadata;
+    }
+
+    // Each adapter parses only its positions from the receipt
+    const principalByPosition = {};
+    const feesByPosition = {};
+
+    for (const [adapter, platformMetadata] of metadataByAdapter) {
+      const result = adapter.parseClosureReceipt(txResult.receipt, platformMetadata);
+      Object.assign(principalByPosition, result.principalByPosition);
+      Object.assign(feesByPosition, result.feesByPosition);
+    }
+
+    // Build detailed closure data for event
+    const closedPositions = Object.entries(positions).map(([positionId, position]) => {
+      const metadata = positionMetadata[positionId];
+      const principal = principalByPosition[positionId] || { amount0: '0', amount1: '0' };
+
+      return {
+        positionId,
+        pool: position.pool,
+        token0Symbol: metadata.poolMetadata.token0Symbol,
+        token1Symbol: metadata.poolMetadata.token1Symbol,
+        platform: metadata.poolMetadata.platform,
+        principalAmount0: principal.amount0.toString(),
+        principalAmount1: principal.amount1.toString(),
+        tickLower: position.tickLower,
+        tickUpper: position.tickUpper
+      };
+    });
+
+    // Emit event for successful position closures
+    this.eventManager.emit('PositionsClosed', {
+      vaultAddress: vault.address,
+      closedCount: closedPositions.length,
+      closedPositions,
+      gasUsed: txResult.receipt.gasUsed.toString(),
+      gasEstimated: txResult.gasEstimated,
+      effectiveGasPrice: txResult.receipt.effectiveGasPrice.toString(),
+      transactionHash: txResult.receipt.transactionHash,
+      success: true,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Successfully closed ${closedPositions.length} positions`
+      }
+    });
+
+    // Return receipt and fees for caller (e.g., fee distribution)
+    return {
+      receipt: txResult.receipt,
+      feesByPosition
     };
   }
 }

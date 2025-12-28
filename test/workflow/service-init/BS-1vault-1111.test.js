@@ -31,6 +31,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let poolDataFetchedEvents = [];
   let initialPositionsEvaluatedEvents = [];
   let bestPoolSelectedEvents = [];
+  let positionsClosedEvents = [];
+  let batchTransactionExecutedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -137,6 +139,14 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         bestPoolSelectedEvents.push(data);
       });
 
+      service.eventManager.subscribe('PositionsClosed', (data) => {
+        positionsClosedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('BatchTransactionExecuted', (data) => {
+        batchTransactionExecutedEvents.push(data);
+      });
+
       // Start the service
       await service.start();
 
@@ -177,9 +187,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     it('should cache positions correctly', () => {
       const vault = service.vaultDataService.getAllVaults()[0];
 
-      // Verify positions
+      // Verify positions - after initialization, only aligned position remains
+      // (non-aligned positions are closed during strategy initialization)
       expect(vault.positions).toBeDefined();
-      expect(Object.keys(vault.positions).length).toBe(2);
+      expect(Object.keys(vault.positions).length).toBe(1);
 
       // Verify each position has required fields
       for (const [positionId, position] of Object.entries(vault.positions)) {
@@ -347,10 +358,12 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(event.alignedPositionIds).toHaveLength(1);
         expect(event.nonAlignedPositionIds).toHaveLength(1);
 
-        // All position IDs should be valid (exist in vault.positions)
-        const allPositionIds = Object.keys(vault.positions);
-        expect(allPositionIds).toContain(event.alignedPositionIds[0]);
-        expect(allPositionIds).toContain(event.nonAlignedPositionIds[0]);
+        // Aligned position should still exist in vault.positions (not closed)
+        const remainingPositionIds = Object.keys(vault.positions);
+        expect(remainingPositionIds).toContain(event.alignedPositionIds[0]);
+
+        // Non-aligned position should have been closed and removed
+        expect(remainingPositionIds).not.toContain(event.nonAlignedPositionIds[0]);
       });
 
       it('should classify USDC/WETH position as aligned (correct tokens, platform, in range)', () => {
@@ -371,17 +384,20 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const event = initialPositionsEvaluatedEvents[0];
         const vault = service.vaultDataService.getAllVaults()[0];
 
-        // Find the WBTC/WETH position by checking pool metadata
-        const nonAlignedPositionId = event.nonAlignedPositionIds[0];
-        const nonAlignedPosition = vault.positions[nonAlignedPositionId];
-        const poolMetadata = service.poolData[nonAlignedPosition.pool];
-
-        // Verify it's the WBTC/WETH position
-        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
-        expect(tokens).toEqual(['WBTC', 'WETH']);
-
-        // Confirm WBTC is not in target tokens
+        // Verify WBTC is not in target tokens (reason for non-alignment)
         expect(vault.targetTokens).not.toContain('WBTC');
+
+        // The non-aligned position was closed and removed
+        const nonAlignedPositionId = event.nonAlignedPositionIds[0];
+        expect(vault.positions[nonAlignedPositionId]).toBeUndefined();
+
+        // Verify via PositionsClosed event that a WBTC/WETH position was closed
+        // (if event was emitted - event emission is tested separately)
+        if (positionsClosedEvents.length > 0) {
+          const closedPosition = positionsClosedEvents[0].closedPositions[0];
+          const closedTokens = [closedPosition.token0Symbol, closedPosition.token1Symbol].sort();
+          expect(closedTokens).toEqual(['WBTC', 'WETH']);
+        }
       });
     });
 
@@ -464,6 +480,182 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(event.poolsActive).toBeLessThanOrEqual(event.poolsDiscovered);
       });
     });
+
+    describe('Position Closing', () => {
+      // Uniswap V3 constants for validation
+      const V3_MIN_TICK = -887272;
+      const V3_MAX_TICK = 887272;
+
+      it('should emit PositionsClosed event', () => {
+        expect(positionsClosedEvents.length).toBe(1);
+      });
+
+      it('should have correct event structure', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(event).toHaveProperty('vaultAddress');
+        expect(event).toHaveProperty('closedCount');
+        expect(event).toHaveProperty('closedPositions');
+        expect(event).toHaveProperty('gasUsed');
+        expect(event).toHaveProperty('gasEstimated');
+        expect(event).toHaveProperty('effectiveGasPrice');
+        expect(event).toHaveProperty('transactionHash');
+        expect(event).toHaveProperty('success');
+        expect(event).toHaveProperty('timestamp');
+        expect(event).toHaveProperty('log');
+      });
+
+      it('should close exactly 1 position (the non-aligned one)', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(event.closedCount).toBe(1);
+        expect(event.closedPositions).toHaveLength(1);
+      });
+
+      it('should close the WBTC/WETH position (non-aligned)', () => {
+        const event = positionsClosedEvents[0];
+        const closedPosition = event.closedPositions[0];
+
+        // Token order depends on address sorting, but one should be WBTC, one WETH
+        const symbols = [closedPosition.token0Symbol, closedPosition.token1Symbol].sort();
+        expect(symbols).toEqual(['WBTC', 'WETH']);
+      });
+
+      it('should NOT close the USDC/WETH position (aligned)', () => {
+        const event = positionsClosedEvents[0];
+
+        // Verify no USDC position was closed
+        for (const closedPosition of event.closedPositions) {
+          const symbols = [closedPosition.token0Symbol, closedPosition.token1Symbol];
+          expect(symbols).not.toContain('USDC');
+        }
+      });
+
+      it('should have correct token symbols in closed position', () => {
+        const event = positionsClosedEvents[0];
+        const closedPosition = event.closedPositions[0];
+
+        expect(closedPosition).toHaveProperty('token0Symbol');
+        expect(closedPosition).toHaveProperty('token1Symbol');
+        expect(typeof closedPosition.token0Symbol).toBe('string');
+        expect(typeof closedPosition.token1Symbol).toBe('string');
+        expect(closedPosition.token0Symbol.length).toBeGreaterThan(0);
+        expect(closedPosition.token1Symbol.length).toBeGreaterThan(0);
+      });
+
+      it('should have correct platform in closed position', () => {
+        const event = positionsClosedEvents[0];
+        const closedPosition = event.closedPositions[0];
+
+        expect(closedPosition.platform).toBe('uniswapV3');
+      });
+
+      it('should have valid tick range in closed position', () => {
+        const event = positionsClosedEvents[0];
+        const closedPosition = event.closedPositions[0];
+
+        expect(closedPosition).toHaveProperty('tickLower');
+        expect(closedPosition).toHaveProperty('tickUpper');
+        expect(typeof closedPosition.tickLower).toBe('number');
+        expect(typeof closedPosition.tickUpper).toBe('number');
+        expect(closedPosition.tickLower).toBeLessThan(closedPosition.tickUpper);
+        expect(closedPosition.tickLower).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(closedPosition.tickUpper).toBeLessThanOrEqual(V3_MAX_TICK);
+      });
+
+      it('should have principal amounts as numeric strings', () => {
+        const event = positionsClosedEvents[0];
+        const closedPosition = event.closedPositions[0];
+
+        expect(closedPosition).toHaveProperty('principalAmount0');
+        expect(closedPosition).toHaveProperty('principalAmount1');
+        expect(typeof closedPosition.principalAmount0).toBe('string');
+        expect(typeof closedPosition.principalAmount1).toBe('string');
+        // Should be parseable as numbers
+        expect(() => BigInt(closedPosition.principalAmount0)).not.toThrow();
+        expect(() => BigInt(closedPosition.principalAmount1)).not.toThrow();
+      });
+
+      it('should have valid transaction hash', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(event.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      });
+
+      it('should have gas used > 0', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(typeof event.gasUsed).toBe('string');
+        expect(BigInt(event.gasUsed)).toBeGreaterThan(0n);
+      });
+
+      it('should have gas estimated > 0', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(typeof event.gasEstimated).toBe('string');
+        expect(BigInt(event.gasEstimated)).toBeGreaterThan(0n);
+      });
+
+      it('should have effective gas price > 0', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(typeof event.effectiveGasPrice).toBe('string');
+        expect(BigInt(event.effectiveGasPrice)).toBeGreaterThan(0n);
+      });
+
+      it('should remove closed position from vault.positions', () => {
+        const vault = service.vaultDataService.getAllVaults()[0];
+        const remainingPositions = Object.keys(vault.positions);
+
+        // Should have only 1 position remaining (the aligned one)
+        expect(remainingPositions.length).toBe(1);
+      });
+
+      it('should keep aligned position in vault.positions', () => {
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // The remaining position should be USDC/WETH (aligned)
+        const remainingPosition = Object.values(vault.positions)[0];
+        const poolMetadata = service.poolData[remainingPosition.pool];
+        const remainingSymbols = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
+
+        expect(remainingSymbols).toEqual(['USDC', 'WETH']);
+      });
+
+      it('should emit BatchTransactionExecuted for position closes', () => {
+        // Find BatchTransactionExecuted events for this vault
+        const closeEvents = batchTransactionExecutedEvents.filter(
+          e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase() &&
+               e.operationType.toLowerCase().includes('close')
+        );
+
+        expect(closeEvents.length).toBeGreaterThanOrEqual(1);
+
+        // Verify structure of the batch transaction event
+        const closeEvent = closeEvents[0];
+        expect(closeEvent).toHaveProperty('transactionCount');
+        expect(closeEvent).toHaveProperty('transactionHash');
+        expect(closeEvent).toHaveProperty('gasUsed');
+        expect(closeEvent).toHaveProperty('gasEstimated');
+        expect(closeEvent.transactionCount).toBeGreaterThanOrEqual(1);
+      });
+
+      it('should have success flag true on PositionsClosed event', () => {
+        const event = positionsClosedEvents[0];
+
+        expect(event.success).toBe(true);
+      });
+
+      it('should have positionId matching a non-aligned position from evaluation', () => {
+        const positionsClosedEvent = positionsClosedEvents[0];
+        const evaluationEvent = initialPositionsEvaluatedEvents[0];
+
+        const closedPositionId = positionsClosedEvent.closedPositions[0].positionId;
+
+        // The closed position ID should match one from non-aligned evaluation
+        expect(evaluationEvent.nonAlignedPositionIds).toContain(closedPositionId);
+      });
+    });
   });
 
   describe('Setup Completion', () => {
@@ -473,7 +665,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       const event = vaultSetupCompleteEvents[0];
       expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
       expect(event.strategyId).toBe('bob');
-      expect(event.positionCount).toBe(2);
+      // After closing non-aligned position, only 1 position remains
+      expect(event.positionCount).toBe(1);
       expect(event.tokenCount).toBeGreaterThan(0);
       expect(event.baselineCaptured).toBe(true);
       expect(typeof event.timestamp).toBe('number');

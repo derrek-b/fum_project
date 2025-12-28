@@ -27,6 +27,7 @@
  * -----------------------------------------------------------------------------
  * | Method                       | Notes                               |
  * |------------------------------|-------------------------------------|
+ * | executeBatchTransactions     | Execute tx batch through vault      |
  * | ensureApprovals              | Check & approve tokens as needed    |
  * | wrapETH                      | Wrap native ETH to WETH             |
  * | log                          | Debug logging with strategy prefix  |
@@ -35,7 +36,7 @@
 
 import { ethers } from 'ethers';
 import { getVaultContract } from 'fum_library';
-import { retryRpcCall } from '../../utils/RetryHelper.js';
+import { retryRpcCall, retryWithBackoff } from '../../utils/RetryHelper.js';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 
 const ERC20_ABI = ERC20ARTIFACT.abi;
@@ -194,4 +195,196 @@ export default class StrategyBase {
       log: { level: 'info', message: `Approved ${tokenAddress} for ${spender}` }
     });
   }
+
+  // ===========================================================================
+  // Transaction Execution
+  // ===========================================================================
+
+  /**
+   * Execute batch transactions through vault contract
+   *
+   * Handles gas estimation, execution, retry logic, and event emission.
+   * Uses vault's role-specific functions for proper access control.
+   *
+   * Vault function signatures:
+   * - swap(targets, data, values) - payable, requires values array
+   * - approve/mint/increaseLiquidity/decreaseLiquidity/collect/burn(targets, data) - not payable
+   *
+   * @param {Object} vault - Vault data object
+   * @param {Array<Object>} transactions - Array of { to, data, value? } objects (value only used for swaps)
+   * @param {string} operationType - Human-readable description for logging
+   * @param {string} type - Vault function type: 'swap' | 'approval' | 'mint' | 'addliq' | 'subliq' | 'collect' | 'burn'
+   * @returns {Promise<{receipt: Object, gasEstimated: string}>} Transaction receipt and gas estimate
+   * @throws {Error} If gas estimation or execution fails
+   */
+  async executeBatchTransactions(vault, transactions, operationType, type) {
+    const targets = [];
+    const calldatas = [];
+    const values = []; // Only used for swap
+
+    // Extract transaction data
+    for (const txn of transactions) {
+      targets.push(txn.to);
+      calldatas.push(txn.data);
+      values.push(txn.value || 0);
+    }
+
+    // Calculate total value for payable calls (only swap uses this)
+    const totalValue = values.reduce((sum, v) => sum.add(ethers.BigNumber.from(v)), ethers.BigNumber.from(0));
+
+    // Get vault contract for execution
+    const vaultContract = getVaultContract(vault.address, this.provider);
+
+    // Create signer for transaction execution
+    const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
+    if (!automationPrivateKey) {
+      throw new Error('AUTOMATION_PRIVATE_KEY not found in environment variables');
+    }
+    const signer = new ethers.Wallet(automationPrivateKey, this.provider);
+    const vaultContractWithSigner = vaultContract.connect(signer);
+
+    // Estimate gas before execution
+    let gasEstimated = '0';
+    try {
+      const gasEstimate = await this._estimateGasForType(vaultContractWithSigner, type, targets, calldatas, values, totalValue);
+      gasEstimated = gasEstimate.toString();
+      this.log(`Gas estimate for ${operationType}: ${gasEstimated}`);
+    } catch (gasError) {
+      this._logGasEstimationError(gasError);
+      throw new Error(`Gas estimation failed for ${operationType} - transaction data may be invalid: ${gasError.message}`);
+    }
+
+    // Execute batch transaction with retry on network errors
+    const { receipt } = await retryWithBackoff(
+      async () => {
+        this.log(`Executing batch of ${targets.length} ${operationType}`);
+        const tx = await this._executeForType(vaultContractWithSigner, type, targets, calldatas, values, totalValue);
+        return { receipt: await tx.wait() };
+      },
+      {
+        maxRetries: 1,           // 2 total attempts (1 retry)
+        baseDelay: 500,          // Short delay appropriate for tx execution
+        exponential: false,      // Linear delay for tx retries
+        context: operationType,
+        logger: { log: (msg) => this.log(msg) }
+      }
+    );
+
+    this.log(`Successfully executed ${targets.length} ${operationType}, tx: ${receipt.transactionHash}`);
+
+    // Emit batch transaction execution event
+    this.eventManager.emit('BatchTransactionExecuted', {
+      vaultAddress: vault.address,
+      strategyId: vault.strategy?.strategyId,
+      operationType: operationType,
+      transactionCount: transactions.length,
+      transactionHash: receipt.transactionHash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      gasEstimated: gasEstimated,
+      gasEfficiency: gasEstimated !== '0' ? ((Number(receipt.gasUsed) / Number(gasEstimated)) * 100).toFixed(1) : 'N/A',
+      targets: targets,
+      executor: receipt.from,
+      status: receipt.status,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Executed ${transactions.length} ${operationType} in tx ${receipt.transactionHash}`,
+        includeData: false
+      }
+    });
+
+    return { receipt, gasEstimated };
+  }
+
+  /**
+   * Estimate gas for the given transaction type
+   * @param {Object} vaultContract - Vault contract with signer
+   * @param {string} type - Transaction type
+   * @param {string[]} targets - Target addresses
+   * @param {string[]} calldatas - Encoded calldata
+   * @param {Array<number|string>} values - Values for each transaction (swap only)
+   * @param {BigNumber} totalValue - Total ETH value to send (swap only)
+   * @returns {Promise<BigNumber>} Gas estimate
+   * @private
+   */
+  async _estimateGasForType(vaultContract, type, targets, calldatas, values, totalValue) {
+    switch (type) {
+      case 'swap':
+        // swap(targets, data, values) - payable
+        return vaultContract.estimateGas.swap(targets, calldatas, values, { value: totalValue });
+      case 'approval':
+        return vaultContract.estimateGas.approve(targets, calldatas);
+      case 'mint':
+        return vaultContract.estimateGas.mint(targets, calldatas);
+      case 'addliq':
+        return vaultContract.estimateGas.increaseLiquidity(targets, calldatas);
+      case 'subliq':
+        return vaultContract.estimateGas.decreaseLiquidity(targets, calldatas);
+      case 'collect':
+        return vaultContract.estimateGas.collect(targets, calldatas);
+      case 'burn':
+        return vaultContract.estimateGas.burn(targets, calldatas);
+      default:
+        throw new Error(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+    }
+  }
+
+  /**
+   * Execute transaction for the given type
+   * @param {Object} vaultContract - Vault contract with signer
+   * @param {string} type - Transaction type
+   * @param {string[]} targets - Target addresses
+   * @param {string[]} calldatas - Encoded calldata
+   * @param {Array<number|string>} values - Values for each transaction (swap only)
+   * @param {BigNumber} totalValue - Total ETH value to send (swap only)
+   * @returns {Promise<Object>} Transaction response
+   * @private
+   */
+  async _executeForType(vaultContract, type, targets, calldatas, values, totalValue) {
+    switch (type) {
+      case 'swap':
+        // swap(targets, data, values) - payable
+        return vaultContract.swap(targets, calldatas, values, { value: totalValue });
+      case 'approval':
+        return vaultContract.approve(targets, calldatas);
+      case 'mint':
+        return vaultContract.mint(targets, calldatas);
+      case 'addliq':
+        return vaultContract.increaseLiquidity(targets, calldatas);
+      case 'subliq':
+        return vaultContract.decreaseLiquidity(targets, calldatas);
+      case 'collect':
+        return vaultContract.collect(targets, calldatas);
+      case 'burn':
+        return vaultContract.burn(targets, calldatas);
+      default:
+        throw new Error(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+    }
+  }
+
+  /**
+   * Log detailed gas estimation error information
+   * @param {Error} gasError - Gas estimation error
+   * @private
+   */
+  _logGasEstimationError(gasError) {
+    if (gasError.data) {
+      try {
+        const decodedError = ethers.utils.toUtf8String('0x' + gasError.data.slice(138));
+        console.log(`   Decoded revert reason: ${decodedError}`);
+      } catch {
+        console.log(`   Could not decode error data as string`);
+      }
+    }
+
+    if (gasError.error) {
+      console.log(`   Nested error:`, JSON.stringify(gasError.error, null, 2));
+    }
+
+    if (gasError.transaction) {
+      console.log(`   Transaction that failed:`, JSON.stringify(gasError.transaction, null, 2));
+    }
+  }
+
 }
