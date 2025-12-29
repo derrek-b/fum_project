@@ -10,6 +10,7 @@ import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
 import { addPositionToVault, removePositionFromVault } from "../../redux/vaultsSlice";
 import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
+import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
 import TransactionProgressModal from '../common/TransactionProgressModal';
@@ -88,6 +89,27 @@ export default function PositionSelectionModal({
       }
     });
   }, [positions, mode, vault.address]);
+
+  // Check if a position has supported tokens (only for 'add' mode)
+  const isPositionSupported = (position) => {
+    const poolData = pools[position.poolAddress];
+    if (!poolData) {
+      return { supported: false, reason: 'Pool data not loaded' };
+    }
+
+    try {
+      // Check if both token addresses are in our config
+      getTokenByAddress(poolData.token0, chainId);
+      getTokenByAddress(poolData.token1, chainId);
+      return { supported: true };
+    } catch (error) {
+      // getTokenByAddress throws if token not found
+      return {
+        supported: false,
+        reason: 'Contains unsupported token(s)'
+      };
+    }
+  };
 
   // Reset selection when modal opens/closes or mode changes
   useEffect(() => {
@@ -427,7 +449,9 @@ export default function PositionSelectionModal({
         ) : (
           <ListGroup className="mb-3">
             {filteredPositions.map(position => {
-              const details =  getPositionDetails(position);
+              const details = getPositionDetails(position);
+              // Only check token support in 'add' mode - removal should always work
+              const supportStatus = mode === 'add' ? isPositionSupported(position) : { supported: true };
 
               return (
                 <ListGroup.Item
@@ -441,11 +465,14 @@ export default function PositionSelectionModal({
                       <div className="ms-2">
                         <div><strong>{details.pair}</strong> - Position #{position.id}</div>
                         <div className="text-muted small">Fee: {details.feeTier}</div>
+                        {!supportStatus.supported && (
+                          <div className="text-danger small">⚠️ {supportStatus.reason}</div>
+                        )}
                       </div>
                     }
                     checked={selectedPositions.includes(position.id)}
                     onChange={() => handlePositionToggle(position.id)}
-                    disabled={isProcessing}
+                    disabled={isProcessing || !supportStatus.supported}
                   />
                   {/* Conditional display of either logo or badge */}
                   {position.protocol && (
