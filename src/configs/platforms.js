@@ -11,7 +11,6 @@ const platforms = {
     logo: "/Platform_Logos/uniswap.svg",
     color: "#FF007A", // Uniswap pink
     description: "Uniswap V3 concentrated liquidity positions",
-    minLiquidityAmount: 10,
     // Platform-specific features
     features: {
       concentratedLiquidity: true,

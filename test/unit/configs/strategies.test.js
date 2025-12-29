@@ -871,7 +871,7 @@ describe('Strategy Configuration Validation', () => {
     expect(typeof babyStepsConfig.strategyProperties).toBe('object');
 
     // Test that all required pool properties exist and are valid numbers
-    const requiredPoolProperties = ['minTVL', 'minPoolAge', 'tvlAveragingPeriod', 'minDeploymentMultiplier'];
+    const requiredPoolProperties = ['minTVL', 'minPoolAge', 'tvlAveragingPeriod'];
 
     requiredPoolProperties.forEach(prop => {
       expect(babyStepsConfig.strategyProperties[prop]).toBeDefined();
@@ -884,6 +884,5 @@ describe('Strategy Configuration Validation', () => {
     expect(babyStepsConfig.strategyProperties.minTVL).toBe(1000000);
     expect(babyStepsConfig.strategyProperties.minPoolAge).toBe(90);
     expect(babyStepsConfig.strategyProperties.tvlAveragingPeriod).toBe(14);
-    expect(babyStepsConfig.strategyProperties.minDeploymentMultiplier).toBe(1.0);
   });
 });

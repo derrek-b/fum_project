@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2025-12-28T15:50:56.504Z
+Generated on: 2025-12-29T20:47:05.188Z
 
 ## Table of Contents
 
@@ -297,7 +297,6 @@ Permit2 Helper Functions
 - `getPlatformColor` (function)
 - `getPlatformLogo` (function)
 - `lookupSupportedPlatformIds` (function)
-- `getMinLiquidityAmount` (function)
 - `getPlatformFeeTiers` (function)
 - `getPlatformTickSpacing` (function)
 - `getPlatformTickBounds` (function)
@@ -336,7 +335,6 @@ Permit2 Helper Functions
 - `validateTokensForStrategy` (function)
 - `validatePositionsForStrategy` (function)
 - `mapStrategyParameters` (function)
-- `getMinDeploymentMultiplier` (function)
 
 ---
 

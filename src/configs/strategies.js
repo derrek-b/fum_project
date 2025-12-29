@@ -82,8 +82,7 @@ const strategies = {
       minTVL: 1000000,
       minPoolAge: 90,
       tvlAveragingPeriod: 14,
-      transactionDeadlineSeconds: 60,
-      minDeploymentMultiplier: 1.0
+      transactionDeadlineSeconds: 60
     },
     // Templates for Basic Strategy
     templateEnumMap: {
@@ -312,9 +311,7 @@ const strategies = {
     maxPlatforms: 2,
     minPositions: 1,
     maxPositions: 1,
-    strategyProperties: {
-      minDeploymentMultiplier: 2.0
-    },
+    strategyProperties: {},
     // Templates for Parris Island (fixed with correct range values)
     templateEnumMap: {
       'custom': 0,
@@ -885,9 +882,7 @@ const strategies = {
     maxPlatforms: 1,
     minPositions: 1,
     maxPositions: 1,
-    strategyProperties: {
-      minDeploymentMultiplier: 1.5
-    },
+    strategyProperties: {},
     templateEnumMap: {
       'custom': 0,
       'stability': 1,
