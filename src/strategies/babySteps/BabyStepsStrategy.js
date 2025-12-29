@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
-import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS } from 'fum_library';
+import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
 import PlatformUtilsFactory from '../../platformUtils/PlatformUtilsFactory.js';
 
@@ -54,34 +54,33 @@ export default class BabyStepsStrategy extends StrategyBase {
     // INITIALIZATION WORKFLOW
     // ==========================================================================
     //
-    // Step 1: Evaluate positions
-    //   - Check which existing positions are aligned with strategy
-    //   - Aligned = correct tokens, platform, and in acceptable range
-    //   - Returns { alignedPositions, nonAlignedPositions }
-    //
-    // Step 2: Select best pool
+    // Step 1: Select best pool
     //   - Always select best pool based on on-chain liquidity (regardless of aligned positions)
     //   - Highest liquidity pool wins (better execution, more depth)
     //   - Target pool determines ETH vs WETH requirement
+    //
+    // Step 2: Evaluate positions
+    //   - Check which existing positions are aligned with strategy
+    //   - Aligned = correct tokens, platform, and in acceptable range
+    //   - Returns { alignedPositions, nonAlignedPositions }
     //
     // Step 3: Close non-aligned positions
     //   - Batch close all non-aligned positions
     //   - Collect fees during closure
     //   - Distribute fees to owner
-    //   - JIT approval: adapter.getApprovalTarget('liquidity') before close
     //
-    // Step 4: Prepare tokens for target pool (ETH/WETH handling)
+    // Step 4: Refresh token balances
+    //   - Fetch updated balances after closures and ETH conversion
+    //
+    // Step 5: Calculate available deployment
+    //   - Use maxUtilization from strategy params
+    //   - Account for existing position value (if aligned position exists)
+    //
+    // Step 6: Prepare tokens for target pool (ETH/WETH handling)
     //   - Check target pool's token0/token1 to see if it uses ETH or WETH
     //   - If pool uses WETH and vault has ETH → wrapETH
     //   - If pool uses ETH and vault has WETH → unwrapETH
     //   - This is POOL-SPECIFIC, not platform-specific (V4 has both ETH and WETH pools)
-    //
-    // Step 5: Refresh token balances
-    //   - Fetch updated balances after closures and ETH conversion
-    //
-    // Step 6: Calculate available deployment
-    //   - Use maxUtilization from strategy params
-    //   - Account for existing position value (if aligned position exists)
     //
     // Step 7: Deploy capital
     //   - If aligned position exists → addToPosition (increaseLiquidity)
@@ -123,11 +122,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     //
     // ==========================================================================
 
-    // Step 1: Evaluate positions
-    const evaluation = await this.evaluateInitialPositions(vault);
-    this.log(`Evaluation complete: ${Object.keys(evaluation.alignedPositions).length} aligned, ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned`);
-
-    // Step 2: Select best pool
+    // Step 1: Select best pool (must happen before position evaluation)
     const [targetToken0, targetToken1] = vault.targetTokens;
     const adapter = this.adapters.get(vault.targetPlatforms[0]);
 
@@ -138,30 +133,39 @@ export default class BabyStepsStrategy extends StrategyBase {
     const targetPool = await this.selectBestPool(targetToken0, targetToken1, adapter, vault.address);
     this.log(`Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
 
+    // Step 2: Evaluate positions against targetPool
+    const evaluation = await this.evaluateInitialPositions(vault, targetPool);
+    this.log(`Evaluation complete: ${Object.keys(evaluation.alignedPositions).length} aligned, ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned`);
+
     // Step 3: Close non-aligned positions
-    let collectedFees = {};
-    let closureReceipt = null;
     if (Object.keys(evaluation.nonAlignedPositions).length > 0) {
       this.log(`Closing ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned position(s)`);
       const { receipt, feesByPosition } = await this.closePositions(vault, evaluation.nonAlignedPositions);
-      collectedFees = feesByPosition;
-      closureReceipt = receipt;
 
       // Aggregate fees, emit FeesCollected, and distribute to owner
-      if (Object.keys(collectedFees).length > 0) {
-        const aggregatedFees = this.aggregateFeesFromPositions(collectedFees);
+      if (Object.keys(feesByPosition).length > 0) {
+        const aggregatedFees = this.aggregateFeesFromPositions(feesByPosition);
         await this.emitFeesCollected(
           vault,
           aggregatedFees,
           'initialization',
-          Object.keys(collectedFees),
-          closureReceipt.transactionHash
+          Object.keys(feesByPosition),
+          receipt.transactionHash
         );
         await this.distributeFees(vault, aggregatedFees);
       }
     }
 
-    // TODO: Steps 4-7
+    // Step 4: Refresh token balances after position closures and fee distribution
+    vault.tokens = await this.vaultDataService.fetchTokenBalances(
+      vault.address,
+      Object.keys(this.tokens)
+    );
+
+    // Step 5: Calculate available deployment
+    const { availableDeployment, assetValues } = await this.calculateAvailableDeployment(vault);
+
+    // TODO: Steps 6-7
 
     return true;
   }
@@ -176,7 +180,9 @@ export default class BabyStepsStrategy extends StrategyBase {
    * Alignment criteria:
    * 1. Token alignment: both position tokens must be in vault.targetTokens
    * 2. Platform alignment: position platform must be in vault.targetPlatforms
-   * 3. Range alignment: position must be in range (current tick within position bounds)
+   * 3. Pool alignment: position must be in the targetPool (same pool address)
+   * 4. Range alignment: position must be in range (current tick within position bounds)
+   * 5. maxPositions limit: if more aligned positions than allowed, keep most centered
    *
    * @param {Object} vault - Vault data object
    * @param {Object} vault.positions - Positions keyed by position ID
@@ -184,11 +190,13 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @param {string[]} vault.targetPlatforms - Target platform IDs
    * @param {Object} vault.strategy - Strategy configuration
    * @param {string} vault.address - Vault address
+   * @param {Object} targetPool - Selected target pool from selectBestPool()
+   * @param {string} targetPool.address - Pool address to match against
    * @returns {Promise<Object>} Evaluation result
    * @returns {Object} result.alignedPositions - Positions aligned with strategy
    * @returns {Object} result.nonAlignedPositions - Positions not aligned with strategy
    */
-  async evaluateInitialPositions(vault) {
+  async evaluateInitialPositions(vault, targetPool) {
     const { positions, targetTokens, targetPlatforms, address } = vault;
 
     const alignedPositions = {};
@@ -243,7 +251,15 @@ export default class BabyStepsStrategy extends StrategyBase {
         continue;
       }
 
-      // 4. Range alignment check via platform utils
+      // 4. Pool alignment check: position must be in the same pool as targetPool
+      const poolAligned = position.pool.toLowerCase() === targetPool.address.toLowerCase();
+      if (!poolAligned) {
+        this.log(`Position ${positionId} pool not aligned: ${position.pool} !== targetPool ${targetPool.address}`);
+        nonAlignedPositions[positionId] = position;
+        continue;
+      }
+
+      // 5. Range alignment check via platform utils
       const util = PlatformUtilsFactory.getUtils(positionPlatform);
       const adapter = this.adapters.get(positionPlatform);
 
@@ -260,13 +276,46 @@ export default class BabyStepsStrategy extends StrategyBase {
         { log: (msg) => this.log(msg) }
       );
 
-      // 5. Check range alignment result - position must be in range
+      // 6. Check range alignment result - position must be in range
       if (!rangeStatus.inRange) {
         this.log(`Position ${positionId} out of range: currentTick=${rangeStatus.currentTick}, range=${position.tickLower}-${position.tickUpper}`);
         nonAlignedPositions[positionId] = position;
       } else {
         this.log(`Position ${positionId} aligned: ${token0Symbol}/${token1Symbol} on ${positionPlatform}, centeredness=${rangeStatus.centeredness.toFixed(4)}`);
-        alignedPositions[positionId] = position;
+        // Store position with centeredness for maxPositions sorting
+        alignedPositions[positionId] = {
+          ...position,
+          _centeredness: rangeStatus.centeredness
+        };
+      }
+    }
+
+    // 7. Apply maxPositions limit - if too many aligned, keep most centered
+    const { maxPositions } = getStrategyDetails(vault.strategy.strategyId);
+    const alignedKeys = Object.keys(alignedPositions);
+
+    if (alignedKeys.length > maxPositions) {
+      this.log(`Found ${alignedKeys.length} aligned positions, but strategy only allows ${maxPositions}`);
+
+      // Sort by how close to perfectly centered (0.5) - ascending distance from center
+      const sortedByCenter = alignedKeys.sort((a, b) => {
+        const distA = Math.abs(alignedPositions[a]._centeredness - 0.5);
+        const distB = Math.abs(alignedPositions[b]._centeredness - 0.5);
+        return distA - distB;
+      });
+
+      // Keep top N, demote the rest
+      const positionsToKeep = sortedByCenter.slice(0, maxPositions);
+      const positionsToDemote = sortedByCenter.slice(maxPositions);
+
+      this.log(`Keeping ${positionsToKeep.length} most centered positions, demoting ${positionsToDemote.length}`);
+
+      // Move demoted positions to nonAligned
+      for (const posId of positionsToDemote) {
+        const pos = alignedPositions[posId];
+        this.log(`Demoting position ${posId}: centeredness=${pos._centeredness.toFixed(4)} (excess beyond maxPositions)`);
+        nonAlignedPositions[posId] = pos;
+        delete alignedPositions[posId];
       }
     }
 
@@ -771,5 +820,59 @@ export default class BabyStepsStrategy extends StrategyBase {
       totalDistributed: distributions.length,
       totalFailed: failures.length
     };
+  }
+
+  // ===========================================================================
+  // Deployment Calculation
+  // ===========================================================================
+
+  /**
+   * Calculate available capital for deployment based on utilization limits
+   *
+   * Formula: availableDeployment = (totalValue * maxUtilization) - positionValue
+   *
+   * Applies chain minimum threshold to avoid wasting gas on tiny deployments.
+   * If raw deployment < chainMinimum, returns 0 (not worth the gas)
+   *
+   * @param {Object} vault - Vault object
+   * @returns {Promise<Object>} { availableDeployment: number, assetValues: Object }
+   */
+  async calculateAvailableDeployment(vault) {
+    const assetValues = await this.vaultDataService.fetchAssetValues(vault);
+    const totalValue = assetValues.totalVaultValue;
+    const positionValue = assetValues.totalPositionValue;
+    const tokenValue = assetValues.totalTokenValue;
+    const maxUtilization = vault.strategy.parameters.maxUtilization / 100;
+    const currentUtilization = totalValue > 0 ? positionValue / totalValue : 0;
+    const rawAvailableDeployment = totalValue * maxUtilization - positionValue;
+
+    // Chain minimum prevents wasting gas on tiny deployments
+    const minDeployment = getMinDeploymentForGas(this.chainId);
+
+    // Apply minimum threshold - if below, not worth the gas
+    const availableDeployment = rawAvailableDeployment > minDeployment ? rawAvailableDeployment : 0;
+
+    // Emit utilization metrics
+    this.eventManager.emit('UtilizationCalculated', {
+      vaultAddress: vault.address,
+      totalVaultValue: totalValue,
+      positionValue: positionValue,
+      tokenValue: tokenValue,
+      currentUtilization: currentUtilization,
+      maxUtilization: maxUtilization,
+      availableDeployment: availableDeployment,
+      rawAvailableDeployment: rawAvailableDeployment,
+      minDeployment: minDeployment,
+      utilizationPercentage: currentUtilization * 100,
+      timestamp: Date.now(),
+      strategyId: vault.strategy.strategyId,
+      log: {
+        level: 'info',
+        message: `Vault value: $${totalValue.toFixed(2)}, Current utilization: ${(currentUtilization * 100).toFixed(1)}%, Available deployment: $${availableDeployment.toFixed(2)}`,
+        includeData: false
+      }
+    });
+
+    return { availableDeployment, assetValues };
   }
 }

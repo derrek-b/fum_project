@@ -33,8 +33,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let bestPoolSelectedEvents = [];
   let positionsClosedEvents = [];
   let batchTransactionExecutedEvents = [];
+  let tokenBalancesFetchedEvents = [];
   let feesCollectedEvents = [];
   let feesDistributedEvents = [];
+  let utilizationEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -68,7 +70,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
             token0: 'USDC',
             token1: 'WETH',
             fee: 500,
-            percentOfAssets: 20,
+            percentOfAssets: 15,
             tickRange: { type: 'centered', spacing: 10 }
           },
           {
@@ -77,6 +79,14 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
             fee: 500,
             percentOfAssets: 30,
             tickRange: { type: 'centered', spacing: 5 }
+          },
+          {
+            // Same tokens as aligned, but wrong pool (3000bp vs 500bp targetPool)
+            token0: 'USDC',
+            token1: 'WETH',
+            fee: 3000,
+            percentOfAssets: 15,
+            tickRange: { type: 'centered', spacing: 10 }
           }
         ],
         feeGeneratingSwaps: [
@@ -167,12 +177,20 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         batchTransactionExecutedEvents.push(data);
       });
 
+      service.eventManager.subscribe('TokenBalancesFetched', (data) => {
+        tokenBalancesFetchedEvents.push(data);
+      });
+
       service.eventManager.subscribe('FeesCollected', (data) => {
         feesCollectedEvents.push(data);
       });
 
       service.eventManager.subscribe('FeesDistributed', (data) => {
         feesDistributedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('UtilizationCalculated', (data) => {
+        utilizationEvents.push(data);
       });
 
       // Start the service
@@ -237,14 +255,22 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     it('should cache token balances correctly', () => {
       const vault = service.vaultDataService.getAllVaults()[0];
 
-      // Verify tokens
+      // Verify vault.tokens exists and has valid structure
       expect(vault.tokens).toBeDefined();
+      expect(typeof vault.tokens).toBe('object');
       expect(vault.tokens.USDC).toBeDefined();
       expect(vault.tokens.WBTC).toBeDefined();
+      expect(typeof vault.tokens.USDC).toBe('string');
+      expect(typeof vault.tokens.WBTC).toBe('string');
 
-      // Verify token balances match what was transferred
-      expect(vault.tokens.USDC).toBe(testVault.tokenBalances.USDC);
-      expect(vault.tokens.WBTC).toBe(testVault.tokenBalances.WBTC);
+      // Use TokenBalancesFetched events to verify initial load was correct
+      // First event is from initial vault load (Step 1)
+      expect(tokenBalancesFetchedEvents.length).toBeGreaterThan(0);
+      const initialBalances = tokenBalancesFetchedEvents[0].balances;
+
+      // Initial balances should match what was transferred to vault
+      expect(initialBalances.USDC).toBe(testVault.tokenBalances.USDC);
+      expect(initialBalances.WBTC).toBe(testVault.tokenBalances.WBTC);
     });
 
     it('should emit vaultLoaded event with correct data', () => {
@@ -253,8 +279,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       const event = vaultLoadedEvents[0];
       expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
       expect(event.strategyId).toBe('bob');
-      expect(event.positionCount).toBe(2);
-      expect(event.positionIds).toHaveLength(2);
+      expect(event.positionCount).toBe(3);
+      expect(event.positionIds).toHaveLength(3);
       expect(event.targetTokens).toEqual(['USDC', 'WETH']);
       expect(event.targetPlatforms).toEqual(['uniswapV3']);
     });
@@ -339,7 +365,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       expect(event.positions).toBeDefined();
       expect(typeof event.positions).toBe('object');
-      expect(Object.keys(event.positions).length).toBe(2);
+      expect(Object.keys(event.positions).length).toBe(3);
 
       // Each position should have USD values for both tokens
       for (const positionData of Object.values(event.positions)) {
@@ -361,74 +387,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   });
 
   describe('setupVault() Step 3: Strategy Initialization', () => {
-    describe('Position Evaluation', () => {
-      it('should emit InitialPositionsEvaluated event', () => {
-        expect(initialPositionsEvaluatedEvents.length).toBe(1);
-
-        const event = initialPositionsEvaluatedEvents[0];
-        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
-        expect(event.success).toBe(true);
-        expect(typeof event.timestamp).toBe('number');
-      });
-
-      it('should identify 1 aligned and 1 non-aligned position', () => {
-        const event = initialPositionsEvaluatedEvents[0];
-
-        expect(event.alignedCount).toBe(1);
-        expect(event.nonAlignedCount).toBe(1);
-      });
-
-      it('should return correct position IDs in aligned/non-aligned arrays', () => {
-        const event = initialPositionsEvaluatedEvents[0];
-        const vault = service.vaultDataService.getAllVaults()[0];
-
-        // Should have exactly 1 position in each array
-        expect(event.alignedPositionIds).toHaveLength(1);
-        expect(event.nonAlignedPositionIds).toHaveLength(1);
-
-        // Aligned position should still exist in vault.positions (not closed)
-        const remainingPositionIds = Object.keys(vault.positions);
-        expect(remainingPositionIds).toContain(event.alignedPositionIds[0]);
-
-        // Non-aligned position should have been closed and removed
-        expect(remainingPositionIds).not.toContain(event.nonAlignedPositionIds[0]);
-      });
-
-      it('should classify USDC/WETH position as aligned (correct tokens, platform, in range)', () => {
-        const event = initialPositionsEvaluatedEvents[0];
-        const vault = service.vaultDataService.getAllVaults()[0];
-
-        // Find the USDC/WETH position by checking pool metadata
-        const alignedPositionId = event.alignedPositionIds[0];
-        const alignedPosition = vault.positions[alignedPositionId];
-        const poolMetadata = service.poolData[alignedPosition.pool];
-
-        // Verify it's the USDC/WETH position
-        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
-        expect(tokens).toEqual(['USDC', 'WETH']);
-      });
-
-      it('should classify WBTC/WETH position as non-aligned (WBTC not in target tokens)', () => {
-        const event = initialPositionsEvaluatedEvents[0];
-        const vault = service.vaultDataService.getAllVaults()[0];
-
-        // Verify WBTC is not in target tokens (reason for non-alignment)
-        expect(vault.targetTokens).not.toContain('WBTC');
-
-        // The non-aligned position was closed and removed
-        const nonAlignedPositionId = event.nonAlignedPositionIds[0];
-        expect(vault.positions[nonAlignedPositionId]).toBeUndefined();
-
-        // Verify via PositionsClosed event that a WBTC/WETH position was closed
-        // (if event was emitted - event emission is tested separately)
-        if (positionsClosedEvents.length > 0) {
-          const closedPosition = positionsClosedEvents[0].closedPositions[0];
-          const closedTokens = [closedPosition.token0Symbol, closedPosition.token1Symbol].sort();
-          expect(closedTokens).toEqual(['WBTC', 'WETH']);
-        }
-      });
-    });
-
     describe('Pool Selection', () => {
       // Uniswap V3 constants for validation
       const VALID_V3_FEE_TIERS = [100, 500, 3000, 10000];
@@ -509,6 +467,117 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       });
     });
 
+    describe('Position Evaluation', () => {
+      it('should emit InitialPositionsEvaluated event', () => {
+        expect(initialPositionsEvaluatedEvents.length).toBe(1);
+
+        const event = initialPositionsEvaluatedEvents[0];
+        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(event.success).toBe(true);
+        expect(typeof event.timestamp).toBe('number');
+      });
+
+      it('should identify 1 aligned and 2 non-aligned positions', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+
+        expect(event.alignedCount).toBe(1);
+        expect(event.nonAlignedCount).toBe(2);
+      });
+
+      it('should return correct position IDs in aligned/non-aligned arrays', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Should have 1 aligned, 2 non-aligned
+        expect(event.alignedPositionIds).toHaveLength(1);
+        expect(event.nonAlignedPositionIds).toHaveLength(2);
+
+        // Aligned position should still exist in vault.positions (not closed)
+        const remainingPositionIds = Object.keys(vault.positions);
+        expect(remainingPositionIds).toContain(event.alignedPositionIds[0]);
+
+        // Non-aligned positions should have been closed and removed
+        for (const nonAlignedId of event.nonAlignedPositionIds) {
+          expect(remainingPositionIds).not.toContain(nonAlignedId);
+        }
+      });
+
+      it('should classify USDC/WETH position as aligned (correct tokens, platform, in range)', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Find the USDC/WETH position by checking pool metadata
+        const alignedPositionId = event.alignedPositionIds[0];
+        const alignedPosition = vault.positions[alignedPositionId];
+        const poolMetadata = service.poolData[alignedPosition.pool];
+
+        // Verify it's the USDC/WETH position
+        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
+        expect(tokens).toEqual(['USDC', 'WETH']);
+      });
+
+      it('should classify WBTC/WETH position as non-aligned (WBTC not in target tokens)', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Verify WBTC is not in target tokens (reason for non-alignment)
+        expect(vault.targetTokens).not.toContain('WBTC');
+
+        // All non-aligned positions should have been closed and removed
+        for (const nonAlignedPositionId of event.nonAlignedPositionIds) {
+          expect(vault.positions[nonAlignedPositionId]).toBeUndefined();
+        }
+
+        // Verify via PositionsClosed event that a WBTC/WETH position was closed
+        if (positionsClosedEvents.length > 0) {
+          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p =>
+            [p.token0Symbol, p.token1Symbol].sort().join('/')
+          );
+          expect(closedTokenPairs).toContain('WBTC/WETH');
+        }
+      });
+
+      it('should classify USDC/WETH 3000bp position as non-aligned (wrong pool)', () => {
+        // The 3000bp USDC/WETH position has correct tokens but wrong pool
+        // (targetPool is 500bp based on liquidity)
+        const event = initialPositionsEvaluatedEvents[0];
+
+        // We should have 2 non-aligned positions
+        expect(event.nonAlignedPositionIds).toHaveLength(2);
+
+        // Verify via PositionsClosed event that a USDC/WETH position was also closed
+        if (positionsClosedEvents.length > 0) {
+          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p =>
+            [p.token0Symbol, p.token1Symbol].sort().join('/')
+          );
+          // Both WBTC/WETH (wrong tokens) and USDC/WETH (wrong pool) should be closed
+          expect(closedTokenPairs).toContain('USDC/WETH');
+          expect(closedTokenPairs).toContain('WBTC/WETH');
+        }
+      });
+
+      it('should have exactly 2 non-aligned positions (not mark all as aligned)', () => {
+        const event = initialPositionsEvaluatedEvents[0];
+
+        // Scenario has 3 positions - verify counts add up correctly
+        const totalEvaluated = event.alignedCount + event.nonAlignedCount;
+        expect(totalEvaluated).toBe(3);
+
+        // Explicitly verify we have exactly 2 non-aligned (not 0 or 1)
+        expect(event.nonAlignedCount).toBe(2);
+        expect(event.nonAlignedPositionIds).toHaveLength(2);
+
+        // And exactly 1 aligned (not 2 or 3)
+        expect(event.alignedCount).toBe(1);
+        expect(event.alignedPositionIds).toHaveLength(1);
+
+        // No overlap between aligned and non-aligned
+        for (const nonAlignedId of event.nonAlignedPositionIds) {
+          expect(event.alignedPositionIds).not.toContain(nonAlignedId);
+        }
+      });
+    });
+
     describe('Position Closing', () => {
       // Uniswap V3 constants for validation
       const V3_MIN_TICK = -887272;
@@ -533,30 +602,45 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(event).toHaveProperty('log');
       });
 
-      it('should close exactly 1 position (the non-aligned one)', () => {
+      it('should close exactly 2 positions (the non-aligned ones)', () => {
         const event = positionsClosedEvents[0];
 
-        expect(event.closedCount).toBe(1);
-        expect(event.closedPositions).toHaveLength(1);
+        expect(event.closedCount).toBe(2);
+        expect(event.closedPositions).toHaveLength(2);
       });
 
-      it('should close the WBTC/WETH position (non-aligned)', () => {
+      it('should close the WBTC/WETH position (non-aligned - wrong tokens)', () => {
         const event = positionsClosedEvents[0];
-        const closedPosition = event.closedPositions[0];
 
-        // Token order depends on address sorting, but one should be WBTC, one WETH
-        const symbols = [closedPosition.token0Symbol, closedPosition.token1Symbol].sort();
-        expect(symbols).toEqual(['WBTC', 'WETH']);
+        const closedTokenPairs = event.closedPositions.map(p =>
+          [p.token0Symbol, p.token1Symbol].sort().join('/')
+        );
+        expect(closedTokenPairs).toContain('WBTC/WETH');
       });
 
-      it('should NOT close the USDC/WETH position (aligned)', () => {
+      it('should close the USDC/WETH 3000bp position (non-aligned - wrong pool)', () => {
         const event = positionsClosedEvents[0];
 
-        // Verify no USDC position was closed
-        for (const closedPosition of event.closedPositions) {
-          const symbols = [closedPosition.token0Symbol, closedPosition.token1Symbol];
-          expect(symbols).not.toContain('USDC');
-        }
+        // One of the closed positions should be USDC/WETH (the one in wrong pool)
+        const closedTokenPairs = event.closedPositions.map(p =>
+          [p.token0Symbol, p.token1Symbol].sort().join('/')
+        );
+        expect(closedTokenPairs).toContain('USDC/WETH');
+      });
+
+      it('should NOT close the aligned USDC/WETH 500bp position', () => {
+        // The aligned position (USDC/WETH in 500bp pool) should still exist
+        const vault = service.vaultDataService.getAllVaults()[0];
+        const event = initialPositionsEvaluatedEvents[0];
+
+        // The aligned position should still be in vault.positions
+        const alignedPositionId = event.alignedPositionIds[0];
+        expect(vault.positions[alignedPositionId]).toBeDefined();
+
+        // Verify it's the USDC/WETH position in the correct pool
+        const poolMetadata = service.poolData[vault.positions[alignedPositionId].pool];
+        const tokens = [poolMetadata.token0Symbol, poolMetadata.token1Symbol].sort();
+        expect(tokens).toEqual(['USDC', 'WETH']);
       });
 
       it('should have correct token symbols in closed position', () => {
@@ -693,7 +777,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
         expect(event.source).toBe('initialization');
         expect(Array.isArray(event.positionIds)).toBe(true);
-        expect(event.positionIds.length).toBe(1); // One non-aligned position closed
+        expect(event.positionIds.length).toBe(2); // Two non-aligned positions closed
         expect(Array.isArray(event.fees)).toBe(true);
         expect(event.totalUSD).toBeGreaterThan(0);
         expect(event.reinvestmentRatio).toBe(50);
@@ -814,11 +898,18 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(event.totalTokensFailed).toBe(0);
       });
 
-      it('should distribute 2 tokens total (WBTC and WETH)', () => {
+      it('should distribute fees for tokens from closed positions', () => {
         const event = feesDistributedEvents[0];
 
-        expect(event.distributions).toHaveLength(2);
-        expect(event.totalTokensDistributed).toBe(2);
+        // With 2 non-aligned positions closed (WBTC/WETH and USDC/WETH 3000bp),
+        // we should have distributions for WBTC and WETH (WETH from both positions)
+        expect(event.distributions.length).toBeGreaterThanOrEqual(2);
+        expect(event.totalTokensDistributed).toBeGreaterThanOrEqual(2);
+
+        // Should have WBTC and WETH distributions at minimum
+        const tokenSymbols = event.distributions.map(d => d.token);
+        expect(tokenSymbols).toContain('WBTC');
+        expect(tokenSymbols).toContain('WETH');
       });
 
       it('should use correct reinvestment ratio from strategy parameters', () => {
@@ -829,6 +920,105 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const expectedRatio = vault.strategy.parameters.reinvestmentRatio || 0;
         expect(event.reinvestmentRatio).toBe(expectedRatio);
       });
+    });
+  });
+
+  describe('setupVault() Step 4: Token Balance Refresh', () => {
+    it('should emit TokenBalancesFetched event after position closures', () => {
+      // Should have at least 2 events: initial load (Step 1) + post-closure refresh (Step 4)
+      expect(tokenBalancesFetchedEvents.length).toBeGreaterThanOrEqual(2);
+
+      const postClosureEvent = tokenBalancesFetchedEvents[1];
+      expect(postClosureEvent.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+      expect(postClosureEvent.balances).toBeDefined();
+    });
+
+    it('should have increased WBTC balance after closing WBTC/WETH position', () => {
+      const initialBalances = tokenBalancesFetchedEvents[0].balances;
+      const postClosureBalances = tokenBalancesFetchedEvents[1].balances;
+
+      // WBTC balance should be greater than initial because:
+      // - Position principal was returned
+      // - 50% of fees were kept (reinvested)
+      // - Only 50% of fees were distributed to owner
+      expect(BigInt(postClosureBalances.WBTC)).toBeGreaterThan(BigInt(initialBalances.WBTC));
+    });
+
+    it('should have increased WETH balance after closing WBTC/WETH position', () => {
+      const initialBalances = tokenBalancesFetchedEvents[0].balances;
+      const postClosureBalances = tokenBalancesFetchedEvents[1].balances;
+
+      // WETH balance should be greater than initial because:
+      // - Position principal was returned
+      // - 50% of fees were kept (reinvested)
+      // - Owner's 50% was unwrapped and sent as native ETH
+      expect(BigInt(postClosureBalances.WETH)).toBeGreaterThan(BigInt(initialBalances.WETH));
+    });
+
+    it('should have increased USDC balance after closing USDC/WETH 3000bp position', () => {
+      const initialBalances = tokenBalancesFetchedEvents[0].balances;
+      const postClosureBalances = tokenBalancesFetchedEvents[1].balances;
+
+      // USDC balance should increase because the USDC/WETH 3000bp position was closed
+      // and its principal was returned to the vault
+      expect(BigInt(postClosureBalances.USDC)).toBeGreaterThan(BigInt(initialBalances.USDC));
+    });
+  });
+
+  describe('setupVault() Step 5: Calculate Available Deployment', () => {
+    it('should emit UtilizationCalculated event', () => {
+      expect(utilizationEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should have correct event structure', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+      expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+      expect(event.totalVaultValue).toBeDefined();
+      expect(event.positionValue).toBeDefined();
+      expect(event.tokenValue).toBeDefined();
+      expect(event.currentUtilization).toBeDefined();
+      expect(event.maxUtilization).toBeDefined();
+      expect(event.availableDeployment).toBeDefined();
+    });
+
+    it('should calculate utilization correctly', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+
+      // Verify maxUtilization matches strategy param (90% = 0.9)
+      expect(event.maxUtilization).toBe(0.9);
+
+      // Verify currentUtilization formula: positionValue / totalVaultValue
+      const expectedCurrentUtil = event.totalVaultValue > 0
+        ? event.positionValue / event.totalVaultValue
+        : 0;
+      expect(event.currentUtilization).toBeCloseTo(expectedCurrentUtil, 10);
+    });
+
+    it('should calculate availableDeployment correctly', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+
+      // Formula: (totalValue * maxUtilization) - positionValue
+      const rawExpected = event.totalVaultValue * event.maxUtilization - event.positionValue;
+
+      // availableDeployment is either rawExpected or 0 (if below threshold)
+      expect(event.availableDeployment).toBeGreaterThanOrEqual(0);
+      expect(event.rawAvailableDeployment).toBeCloseTo(rawExpected, 2);
+    });
+
+    it('should have position value (1111 scenario has aligned position)', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+      expect(event.positionValue).toBeGreaterThan(0);
+    });
+
+    it('should have token value (1111 scenario has token balances)', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+      expect(event.tokenValue).toBeGreaterThan(0);
+    });
+
+    it('should include minimum deployment threshold', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+      expect(event.minDeployment).toBeDefined();
+      expect(event.minDeployment).toBeGreaterThan(0);
     });
   });
 
