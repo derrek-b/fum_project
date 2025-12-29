@@ -3,8 +3,9 @@
  * @description Baby Steps strategy implementation for conservative position management
  */
 
+import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
-import { getStrategyDetails, getTransactionDeadlineMinutes } from 'fum_library';
+import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
 import PlatformUtilsFactory from '../../platformUtils/PlatformUtilsFactory.js';
 
@@ -139,14 +140,24 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 3: Close non-aligned positions
     let collectedFees = {};
+    let closureReceipt = null;
     if (Object.keys(evaluation.nonAlignedPositions).length > 0) {
       this.log(`Closing ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned position(s)`);
-      const { feesByPosition } = await this.closePositions(vault, evaluation.nonAlignedPositions);
+      const { receipt, feesByPosition } = await this.closePositions(vault, evaluation.nonAlignedPositions);
       collectedFees = feesByPosition;
+      closureReceipt = receipt;
 
-      // TODO: Distribute fees to owner
+      // Aggregate fees, emit FeesCollected, and distribute to owner
       if (Object.keys(collectedFees).length > 0) {
-        this.log(`Fees collected from ${Object.keys(collectedFees).length} position(s) - distribution pending`);
+        const aggregatedFees = this.aggregateFeesFromPositions(collectedFees);
+        await this.emitFeesCollected(
+          vault,
+          aggregatedFees,
+          'initialization',
+          Object.keys(collectedFees),
+          closureReceipt.transactionHash
+        );
+        await this.distributeFees(vault, aggregatedFees);
       }
     }
 
@@ -314,8 +325,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     const { sortedToken0, sortedToken1 } = adapter.sortTokens(tokenAData, tokenBData);
-
-    this.log(`🔍 Selecting best pool for ${sortedToken0.symbol}/${sortedToken1.symbol} on ${adapter.platformName}`);
 
     // Discover all pools for this pair
     const pools = await retryRpcCall(
@@ -525,6 +534,242 @@ export default class BabyStepsStrategy extends StrategyBase {
     return {
       receipt: txResult.receipt,
       feesByPosition
+    };
+  }
+
+  // ===========================================================================
+  // Fee Distribution
+  // ===========================================================================
+
+  /**
+   * Build and emit FeesCollected event
+   *
+   * Emits event with USD values and owner/reinvested breakdown for each token.
+   * Used during initialization, rebalance, and explicit fee collection.
+   *
+   * @param {Object} vault - Vault object
+   * @param {Object} aggregatedFees - Fees keyed by token address
+   *   { [address]: { amount: BigNumber, symbol, decimals, address } }
+   * @param {string} source - 'initialization' | 'rebalance' | 'explicit_collection'
+   * @param {string[]} positionIds - Position IDs fees were collected from
+   * @param {string} transactionHash - Transaction hash
+   */
+  async emitFeesCollected(vault, aggregatedFees, source, positionIds, transactionHash) {
+    if (Object.keys(aggregatedFees).length === 0) {
+      return;
+    }
+
+    // Get prices for USD calculation
+    const prices = await fetchTokenPrices(
+      Object.values(aggregatedFees).map(f => f.symbol),
+      CACHE_DURATIONS['30-SECONDS']
+    );
+
+    const reinvestmentRatio = vault.strategy.parameters.reinvestmentRatio || 0;
+    const ownerBasisPoints = ethers.BigNumber.from((100 - reinvestmentRatio) * 100);
+
+    const fees = Object.values(aggregatedFees).map(f => {
+      const amountFormatted = parseFloat(ethers.utils.formatUnits(f.amount, f.decimals));
+      const ownerAmount = f.amount.mul(ownerBasisPoints).div(10000);
+      const reinvestedAmount = f.amount.sub(ownerAmount);
+
+      return {
+        token: f.symbol,
+        address: f.address,
+        amount: f.amount.toString(),
+        amountFormatted,
+        decimals: f.decimals,
+        usd: amountFormatted * (prices[f.symbol.toUpperCase()] || 0),
+        toOwner: parseFloat(ethers.utils.formatUnits(ownerAmount, f.decimals)),
+        reinvested: parseFloat(ethers.utils.formatUnits(reinvestedAmount, f.decimals))
+      };
+    });
+
+    const totalUSD = fees.reduce((sum, f) => sum + f.usd, 0);
+
+    this.eventManager.emit('FeesCollected', {
+      vaultAddress: vault.address,
+      source,
+      positionIds,
+      fees,
+      totalUSD,
+      reinvestmentRatio,
+      transactionHash,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Collected $${totalUSD.toFixed(2)} in fees from ${positionIds.length} position(s)`
+      }
+    });
+  }
+
+  /**
+   * Aggregate fees from feesByPosition into a token-address-keyed format
+   *
+   * Converts position-keyed fee data (from parseClosureReceipt) into
+   * a token-address-keyed format suitable for distribution.
+   *
+   * @param {Object} feesByPosition - Fees keyed by position ID
+   * @returns {Object} Aggregated fees keyed by token address (lowercase)
+   *   { [tokenAddress]: { amount: BigNumber, symbol, decimals, address } }
+   */
+  aggregateFeesFromPositions(feesByPosition) {
+    const aggregatedFees = {};
+
+    for (const [_positionId, feeData] of Object.entries(feesByPosition)) {
+      const { token0, token1, metadata } = feeData;
+      const { token0Data, token1Data } = metadata;
+
+      // Add token0 fees
+      if (token0.gt(0)) {
+        const addr = token0Data.address.toLowerCase();
+        if (!aggregatedFees[addr]) {
+          aggregatedFees[addr] = {
+            amount: ethers.BigNumber.from(0),
+            symbol: token0Data.symbol,
+            decimals: token0Data.decimals,
+            address: token0Data.address
+          };
+        }
+        aggregatedFees[addr].amount = aggregatedFees[addr].amount.add(token0);
+      }
+
+      // Add token1 fees
+      if (token1.gt(0)) {
+        const addr = token1Data.address.toLowerCase();
+        if (!aggregatedFees[addr]) {
+          aggregatedFees[addr] = {
+            amount: ethers.BigNumber.from(0),
+            symbol: token1Data.symbol,
+            decimals: token1Data.decimals,
+            address: token1Data.address
+          };
+        }
+        aggregatedFees[addr].amount = aggregatedFees[addr].amount.add(token1);
+      }
+    }
+
+    return aggregatedFees;
+  }
+
+  /**
+   * Distribute collected fees to vault owner based on reinvestment ratio
+   *
+   * Takes aggregated fees (keyed by token address), calculates the owner's
+   * portion based on reinvestmentRatio, and transfers to owner.
+   * WETH is unwrapped to native ETH before transfer.
+   *
+   * Individual token withdrawals are wrapped in try/catch - failures for one
+   * token won't prevent distribution of other tokens.
+   *
+   * @param {Object} vault - Vault data object
+   * @param {Object} aggregatedFees - Fees keyed by token address (lowercase)
+   *   { [tokenAddress]: { amount: BigNumber, symbol, decimals, address } }
+   * @returns {Promise<Object>} Distribution results
+   *   { distributions: Array, failures: Array, reinvestmentRatio, totalDistributed, totalFailed }
+   */
+  async distributeFees(vault, aggregatedFees) {
+    // Skip if no fees to distribute
+    if (Object.keys(aggregatedFees).length === 0) {
+      return { distributions: [], failures: [], reinvestmentRatio: 0, totalDistributed: 0, totalFailed: 0 };
+    }
+
+    // Skip if 100% reinvestment (owner gets nothing)
+    const reinvestmentRatio = vault.strategy.parameters.reinvestmentRatio;
+    if (reinvestmentRatio >= 100) {
+      this.log('Reinvestment ratio is 100%, skipping fee distribution to owner');
+      return { distributions: [], failures: [], reinvestmentRatio, totalDistributed: 0, totalFailed: 0 };
+    }
+
+    // Calculate owner portion using basis points for precision
+    const ownerBasisPoints = ethers.BigNumber.from((100 - reinvestmentRatio) * 100);
+
+    const ownerAmounts = {};
+    for (const [addr, tokenData] of Object.entries(aggregatedFees)) {
+      const ownerAmount = tokenData.amount.mul(ownerBasisPoints).div(10000);
+      if (ownerAmount.gt(0)) {
+        ownerAmounts[addr] = { ...tokenData, amount: ownerAmount };
+      }
+    }
+
+    // Skip if all owner amounts rounded to zero
+    if (Object.keys(ownerAmounts).length === 0) {
+      this.log('All fee amounts rounded to zero after reinvestment calculation');
+      return { distributions: [], failures: [], reinvestmentRatio, totalDistributed: 0, totalFailed: 0 };
+    }
+
+    // Execute withdrawals
+    const wethAddress = getWethAddress(this.chainId);
+    const vaultContract = getVaultContract(vault.address, this.provider);
+    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const vaultWithSigner = vaultContract.connect(signer);
+
+    const distributions = [];
+    const failures = [];
+
+    for (const [addr, tokenData] of Object.entries(ownerAmounts)) {
+      const isWeth = addr.toLowerCase() === wethAddress.toLowerCase();
+
+      try {
+        const receipt = await retryRpcCall(async () => {
+          let tx;
+          if (isWeth) {
+            tx = await vaultWithSigner.unwrapAndWithdrawETH(wethAddress, tokenData.amount);
+          } else {
+            tx = await vaultWithSigner.withdrawTokens(tokenData.address, tokenData.amount);
+          }
+          return tx.wait();
+        }, 'fee distribution', { log: (msg) => this.log(msg) });
+
+        distributions.push({
+          token: tokenData.symbol,
+          address: tokenData.address,
+          amount: tokenData.amount.toString(),
+          amountFormatted: ethers.utils.formatUnits(tokenData.amount, tokenData.decimals),
+          asNativeEth: isWeth,
+          transactionHash: receipt.transactionHash
+        });
+
+        this.log(`Distributed ${ethers.utils.formatUnits(tokenData.amount, tokenData.decimals)} ${tokenData.symbol} to owner`);
+      } catch (error) {
+        // Log failure but continue with other tokens
+        this.log(`⚠️ Failed to distribute ${tokenData.symbol} fees: ${error.message}`);
+        failures.push({
+          token: tokenData.symbol,
+          address: tokenData.address,
+          amount: tokenData.amount.toString(),
+          amountFormatted: ethers.utils.formatUnits(tokenData.amount, tokenData.decimals),
+          error: error.message
+        });
+      }
+    }
+
+    // Emit event (only if at least one distribution succeeded or failed)
+    if (distributions.length > 0 || failures.length > 0) {
+      this.eventManager.emit('FeesDistributed', {
+        vaultAddress: vault.address,
+        owner: vault.owner,
+        reinvestmentRatio,
+        distributions,
+        failures,
+        totalTokensDistributed: distributions.length,
+        totalTokensFailed: failures.length,
+        timestamp: Date.now(),
+        log: {
+          level: failures.length > 0 ? 'warn' : 'info',
+          message: failures.length > 0
+            ? `Distributed fees for ${distributions.length} token(s) to owner, ${failures.length} failed`
+            : `Distributed fees for ${distributions.length} token(s) to owner`
+        }
+      });
+    }
+
+    return {
+      distributions,
+      failures,
+      reinvestmentRatio,
+      totalDistributed: distributions.length,
+      totalFailed: failures.length
     };
   }
 }

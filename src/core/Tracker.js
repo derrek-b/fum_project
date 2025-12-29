@@ -196,7 +196,7 @@ export default class Tracker {
    * @private
    */
   async handleFeesCollected(data) {
-    const { vaultAddress, totalUSD, txHash, timestamp } = data;
+    const { vaultAddress, totalUSD, transactionHash, timestamp } = data;
 
     if (!this.vaultMetadata.has(vaultAddress)) {
       this.log(`Vault ${vaultAddress} not tracked yet, skipping fee event`);
@@ -208,21 +208,12 @@ export default class Tracker {
     await this.appendTransaction(vaultAddress, {
       type: 'FeesCollected',
       vaultAddress,
-      positionId: data.positionId,
+      positionIds: data.positionIds,
       source: data.source,
-      token0Collected: data.token0Collected,
-      token1Collected: data.token1Collected,
-      token0Symbol: data.token0Symbol,
-      token1Symbol: data.token1Symbol,
-      token0USD: data.token0USD,
-      token1USD: data.token1USD,
+      fees: data.fees,
       totalUSD,
-      token0ToOwner: data.token0ToOwner,
-      token1ToOwner: data.token1ToOwner,
-      token0Reinvested: data.token0Reinvested,
-      token1Reinvested: data.token1Reinvested,
       reinvestmentRatio: data.reinvestmentRatio,
-      txHash,
+      txHash: transactionHash,
       timestamp
     });
 
@@ -230,8 +221,8 @@ export default class Tracker {
     metadata.aggregates.cumulativeFeesUSD += totalUSD;
 
     const reinvestmentRatio = data.reinvestmentRatio ?? 0;
-    metadata.aggregates.cumulativeFeesReinvestedUSD += totalUSD * reinvestmentRatio;
-    metadata.aggregates.cumulativeFeesWithdrawnUSD += totalUSD * (1 - reinvestmentRatio);
+    metadata.aggregates.cumulativeFeesReinvestedUSD += totalUSD * (reinvestmentRatio / 100);
+    metadata.aggregates.cumulativeFeesWithdrawnUSD += totalUSD * ((100 - reinvestmentRatio) / 100);
 
     if (data.source === 'explicit_collection') {
       metadata.aggregates.feeCollectionCount += 1;

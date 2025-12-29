@@ -26,7 +26,8 @@
         "fee": 500,
         "percentOfAssets": 20,
         "tickRange": {
-          "type": "above"
+          "type": "centered",
+          "spacing": 10
         }
       }
     ],
@@ -40,8 +41,12 @@
       {
         "pool": { "token0": "WBTC", "token1": "WETH", "fee": 500 },
         "swaps": [
-          { "from": "WETH", "to": "WBTC", "amount": "1" },
-          { "from": "WBTC", "to": "WETH", "amount": "0.05" }
+          { "from": "WETH", "to": "WBTC", "amount": "0.5" },
+          { "from": "WBTC", "to": "WETH", "amount": "0.015" },
+          { "from": "WETH", "to": "WBTC", "amount": "0.5" },
+          { "from": "WBTC", "to": "WETH", "amount": "0.015" },
+          { "from": "WETH", "to": "WBTC", "amount": "0.5" },
+          { "from": "WBTC", "to": "WETH", "amount": "0.015" }
         ]
       }
     ]

@@ -33,6 +33,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let bestPoolSelectedEvents = [];
   let positionsClosedEvents = [];
   let batchTransactionExecutedEvents = [];
+  let feesCollectedEvents = [];
+  let feesDistributedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -73,8 +75,26 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
             token0: 'WBTC',
             token1: 'WETH',
             fee: 500,
-            percentOfAssets: 20,
-            tickRange: { type: 'above' }
+            percentOfAssets: 30,
+            tickRange: { type: 'centered', spacing: 5 }
+          }
+        ],
+        feeGeneratingSwaps: [
+          {
+            pool: { token0: 'WBTC', token1: 'WETH', fee: 500 },
+            swaps: [
+              // Multiple back-and-forth swaps to generate fees in both tokens
+              // WBTC needs more fee volume because integer division with 50% reinvestment
+              // rounds small amounts to zero (1 satoshi * 5000 / 10000 = 0)
+              { from: 'WETH', to: 'WBTC', amount: '0.3' },
+              { from: 'WBTC', to: 'WETH', amount: '0.01' },
+              { from: 'WETH', to: 'WBTC', amount: '0.3' },
+              { from: 'WBTC', to: 'WETH', amount: '0.01' },
+              { from: 'WETH', to: 'WBTC', amount: '0.3' },
+              { from: 'WBTC', to: 'WETH', amount: '0.01' },
+              { from: 'WETH', to: 'WBTC', amount: '0.3' },
+              { from: 'WBTC', to: 'WETH', amount: '0.01' }
+            ]
           }
         ],
         tokenTransfers: {
@@ -145,6 +165,14 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('BatchTransactionExecuted', (data) => {
         batchTransactionExecutedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('FeesCollected', (data) => {
+        feesCollectedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('FeesDistributed', (data) => {
+        feesDistributedEvents.push(data);
       });
 
       // Start the service
@@ -654,6 +682,152 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
         // The closed position ID should match one from non-aligned evaluation
         expect(evaluationEvent.nonAlignedPositionIds).toContain(closedPositionId);
+      });
+    });
+
+    describe('Fee Collection', () => {
+      it('should emit FeesCollected event with new multi-token structure', () => {
+        expect(feesCollectedEvents.length).toBe(1);
+
+        const event = feesCollectedEvents[0];
+        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(event.source).toBe('initialization');
+        expect(Array.isArray(event.positionIds)).toBe(true);
+        expect(event.positionIds.length).toBe(1); // One non-aligned position closed
+        expect(Array.isArray(event.fees)).toBe(true);
+        expect(event.totalUSD).toBeGreaterThan(0);
+        expect(event.reinvestmentRatio).toBe(50);
+        expect(event.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+        expect(typeof event.timestamp).toBe('number');
+      });
+
+      it('should have correct fee structure for each token', () => {
+        const event = feesCollectedEvents[0];
+
+        for (const fee of event.fees) {
+          expect(fee).toHaveProperty('token');
+          expect(fee).toHaveProperty('address');
+          expect(fee).toHaveProperty('amount');
+          expect(fee).toHaveProperty('amountFormatted');
+          expect(fee).toHaveProperty('decimals');
+          expect(fee).toHaveProperty('usd');
+          expect(fee).toHaveProperty('toOwner');
+          expect(fee).toHaveProperty('reinvested');
+          expect(fee.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        }
+      });
+
+      it('should have WBTC fees collected from non-aligned position', () => {
+        const event = feesCollectedEvents[0];
+
+        const wbtcFee = event.fees.find(f => f.token === 'WBTC');
+        expect(wbtcFee).toBeDefined();
+        expect(wbtcFee.amountFormatted).toBeGreaterThan(0);
+        expect(wbtcFee.toOwner).toBeGreaterThan(0);
+      });
+
+      it('should have WETH fees collected from non-aligned position', () => {
+        const event = feesCollectedEvents[0];
+
+        const wethFee = event.fees.find(f => f.token === 'WETH');
+        expect(wethFee).toBeDefined();
+        expect(wethFee.amountFormatted).toBeGreaterThan(0);
+        expect(wethFee.toOwner).toBeGreaterThan(0);
+      });
+
+      it('should correctly calculate owner vs reinvested amounts', () => {
+        const event = feesCollectedEvents[0];
+
+        // With 50% reinvestment ratio, toOwner + reinvested should equal total
+        // Note: Integer division with small amounts causes rounding - that's expected
+        for (const fee of event.fees) {
+          const total = fee.toOwner + fee.reinvested;
+          // Total should be close to amountFormatted (slight float precision differences allowed)
+          expect(total).toBeCloseTo(fee.amountFormatted, 5);
+          // Both should be non-negative
+          expect(fee.toOwner).toBeGreaterThanOrEqual(0);
+          expect(fee.reinvested).toBeGreaterThanOrEqual(0);
+        }
+      });
+    });
+
+    describe('Fee Distribution', () => {
+      it('should emit FeesDistributed event after closing positions with fees', () => {
+        expect(feesDistributedEvents.length).toBe(1);
+
+        const event = feesDistributedEvents[0];
+        expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(typeof event.timestamp).toBe('number');
+      });
+
+      it('should have correct event structure', () => {
+        const event = feesDistributedEvents[0];
+
+        expect(event).toHaveProperty('vaultAddress');
+        expect(event).toHaveProperty('owner');
+        expect(event).toHaveProperty('reinvestmentRatio');
+        expect(event).toHaveProperty('distributions');
+        expect(event).toHaveProperty('failures');
+        expect(event).toHaveProperty('totalTokensDistributed');
+        expect(event).toHaveProperty('totalTokensFailed');
+        expect(event).toHaveProperty('timestamp');
+      });
+
+      it('should distribute WBTC fees (non-WETH token via withdrawTokens)', () => {
+        const event = feesDistributedEvents[0];
+
+        const wbtcDistribution = event.distributions.find(d => d.token === 'WBTC');
+        expect(wbtcDistribution).toBeDefined();
+        expect(BigInt(wbtcDistribution.amount)).toBeGreaterThan(0n);
+        expect(wbtcDistribution.asNativeEth).toBe(false);
+        expect(wbtcDistribution.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      });
+
+      it('should distribute WETH fees as native ETH (unwrapped via unwrapAndWithdrawETH)', () => {
+        const event = feesDistributedEvents[0];
+
+        const wethDistribution = event.distributions.find(d => d.token === 'WETH');
+        expect(wethDistribution).toBeDefined();
+        expect(BigInt(wethDistribution.amount)).toBeGreaterThan(0n);
+        expect(wethDistribution.asNativeEth).toBe(true);
+        expect(wethDistribution.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      });
+
+      it('should have correct distribution fields for each token', () => {
+        const event = feesDistributedEvents[0];
+
+        for (const dist of event.distributions) {
+          expect(dist).toHaveProperty('token');
+          expect(dist).toHaveProperty('address');
+          expect(dist).toHaveProperty('amount');
+          expect(dist).toHaveProperty('amountFormatted');
+          expect(dist).toHaveProperty('asNativeEth');
+          expect(dist).toHaveProperty('transactionHash');
+          expect(dist.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+        }
+      });
+
+      it('should have no failures in fee distribution', () => {
+        const event = feesDistributedEvents[0];
+
+        expect(event.failures).toHaveLength(0);
+        expect(event.totalTokensFailed).toBe(0);
+      });
+
+      it('should distribute 2 tokens total (WBTC and WETH)', () => {
+        const event = feesDistributedEvents[0];
+
+        expect(event.distributions).toHaveLength(2);
+        expect(event.totalTokensDistributed).toBe(2);
+      });
+
+      it('should use correct reinvestment ratio from strategy parameters', () => {
+        const event = feesDistributedEvents[0];
+        const vault = service.vaultDataService.getAllVaults()[0];
+
+        // Default reinvestmentRatio from strategy is stored in parameters
+        const expectedRatio = vault.strategy.parameters.reinvestmentRatio || 0;
+        expect(event.reinvestmentRatio).toBe(expectedRatio);
       });
     });
   });
