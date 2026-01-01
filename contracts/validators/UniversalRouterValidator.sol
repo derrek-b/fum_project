@@ -17,6 +17,14 @@ import "../interfaces/ISwapValidator.sol";
  * - PERMIT2_PERMIT (0x0a): Allowed (gasless approval, no recipient concern)
  * - WRAP_ETH (0x0b): Validate recipient = vault OR ADDRESS_THIS (for multi-hop)
  * - UNWRAP_WETH (0x0c): Validate recipient = vault (ETH must go to vault)
+ * - V4_SWAP (0x10): Parse actions array, validate TAKE/SWEEP recipients
+ *
+ * V4 Actions validated within V4_SWAP:
+ * - TAKE (0x0e): Validate recipient = vault OR ADDRESS_THIS
+ * - TAKE_ALL (0x0f): Safe - uses msgSender (vault)
+ * - TAKE_PORTION (0x10): Validate recipient = vault OR ADDRESS_THIS
+ * - TAKE_PAIR (0x11): Validate recipient = vault OR ADDRESS_THIS
+ * - SWEEP (0x14): Validate recipient = vault
  *
  * Multi-hop swaps use ADDRESS_THIS as intermediate recipient (tokens stay in router),
  * then SWEEP sends the final output to the vault.
@@ -97,6 +105,63 @@ contract UniversalRouterValidator is ISwapValidator {
                     recipient == vault,
                     "UniversalRouterValidator: unwrap recipient must be vault"
                 );
+            }
+            // V4_SWAP (0x10) - V4 swap with actions array
+            else if (command == 0x10) {
+                (bytes memory actions, bytes[] memory params) = abi.decode(
+                    inputs[i],
+                    (bytes, bytes[])
+                );
+
+                for (uint256 j = 0; j < actions.length; j++) {
+                    uint8 action = uint8(actions[j]);
+
+                    // TAKE (0x0e) - has explicit recipient
+                    if (action == 0x0e) {
+                        (, address recipient, ) = abi.decode(
+                            params[j],
+                            (address, address, uint256)
+                        );
+                        require(
+                            recipient == vault || recipient == ADDRESS_THIS,
+                            "UniversalRouterValidator: V4 take recipient must be vault or router"
+                        );
+                    }
+                    // TAKE_PORTION (0x10) - has explicit recipient
+                    else if (action == 0x10) {
+                        (, address recipient, ) = abi.decode(
+                            params[j],
+                            (address, address, uint256)
+                        );
+                        require(
+                            recipient == vault || recipient == ADDRESS_THIS,
+                            "UniversalRouterValidator: V4 take recipient must be vault or router"
+                        );
+                    }
+                    // TAKE_PAIR (0x11) - has explicit recipient (currency0, currency1, recipient)
+                    else if (action == 0x11) {
+                        (,, address recipient) = abi.decode(
+                            params[j],
+                            (address, address, address)
+                        );
+                        require(
+                            recipient == vault || recipient == ADDRESS_THIS,
+                            "UniversalRouterValidator: V4 take recipient must be vault or router"
+                        );
+                    }
+                    // SWEEP (0x14) - has explicit recipient
+                    else if (action == 0x14) {
+                        (, address recipient, ) = abi.decode(
+                            params[j],
+                            (address, address, uint256)
+                        );
+                        require(
+                            recipient == vault,
+                            "UniversalRouterValidator: V4 sweep recipient must be vault"
+                        );
+                    }
+                    // TAKE_ALL (0x0f) - Safe, uses msgSender() which is the vault
+                }
             }
             // All other commands are blocked
             else {

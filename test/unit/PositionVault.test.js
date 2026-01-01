@@ -2247,11 +2247,11 @@ describe("PositionVault - 2.0.0", function() {
           .to.be.revertedWith("UniversalRouterValidator: unwrap recipient must be vault");
       });
 
-      it("should reject unknown command (0x10 V4_SWAP)", async function() {
+      it("should reject unknown command (0x20)", async function() {
         const routerAddress = await router.getAddress();
         const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-        const input = abiCoder.encode(["bytes", "bytes[]"], ["0x", []]);
-        const calldata = encodeRouterExecute([0x10], [input]);
+        const input = abiCoder.encode(["bytes"], ["0x"]);
+        const calldata = encodeRouterExecute([0x20], [input]);
 
         await expect(vault.swap([routerAddress], [calldata], [0n]))
           .to.be.revertedWith("UniversalRouterValidator: command not allowed");
@@ -2351,6 +2351,148 @@ describe("PositionVault - 2.0.0", function() {
 
         await expect(vault.swap([routerAddress, routerAddress], [swap1Calldata, swap2Calldata], [0n, 0n]))
           .to.be.revertedWith("UniversalRouterValidator: swap recipient must be vault or router");
+      });
+    });
+
+    describe("Native ETH Value Swaps", function() {
+      it("should allow swap with ETH value using vault's own balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Fund vault with native ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        // Verify vault has ETH
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(ethers.parseEther("1.0"));
+
+        // Create swap calldata (WRAP_ETH command wraps ETH in the router)
+        const wrapInput = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("0.5")]
+        );
+        const swapInput = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput, swapInput]);
+
+        // Swap with 0.5 ETH value - vault uses its own balance
+        await expect(vault.swap([routerAddress], [calldata], [ethers.parseEther("0.5")]))
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(routerAddress, calldata, true, "swap");
+      });
+
+      it("should revert if vault has insufficient ETH balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Vault has no ETH initially
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(0n);
+
+        const wrapInput = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("1.0")]
+        );
+        const swapInput = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput, swapInput]);
+
+        // Try to swap with 1 ETH value but vault has no ETH
+        await expect(vault.swap([routerAddress], [calldata], [ethers.parseEther("1.0")]))
+          .to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should allow batched swaps with mixed ETH values", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Fund vault with 2 ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("2.0")
+        });
+
+        // First swap with 0.5 ETH
+        const wrapInput1 = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("0.5")]
+        );
+        const swapInput1 = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata1 = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput1, swapInput1]);
+
+        // Second swap with 1.0 ETH
+        const wrapInput2 = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("1.0")]
+        );
+        const swapInput2 = encodeV3SwapInput(vaultAddress, 2000, 1800, path, true);
+        const calldata2 = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput2, swapInput2]);
+
+        // Execute batch with total 1.5 ETH (within vault's 2 ETH balance)
+        await expect(vault.swap(
+          [routerAddress, routerAddress],
+          [calldata1, calldata2],
+          [ethers.parseEther("0.5"), ethers.parseEther("1.0")]
+        )).to.emit(vault, "TransactionExecuted");
+      });
+
+      it("should revert batched swaps if total ETH exceeds vault balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Fund vault with only 1 ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        // First swap wants 0.8 ETH
+        const wrapInput1 = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("0.8")]
+        );
+        const swapInput1 = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata1 = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput1, swapInput1]);
+
+        // Second swap wants 0.8 ETH (total 1.6 ETH, but vault only has 1 ETH)
+        const wrapInput2 = ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256"],
+          [vaultAddress, ethers.parseEther("0.8")]
+        );
+        const swapInput2 = encodeV3SwapInput(vaultAddress, 2000, 1800, path, true);
+        const calldata2 = encodeRouterExecute([CMD.WRAP_ETH, CMD.V3_SWAP_EXACT_IN], [wrapInput2, swapInput2]);
+
+        // Should revert because total (1.6 ETH) > vault balance (1 ETH)
+        await expect(vault.swap(
+          [routerAddress, routerAddress],
+          [calldata1, calldata2],
+          [ethers.parseEther("0.8"), ethers.parseEther("0.8")]
+        )).to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should allow swap with zero ETH value (no native ETH used)", async function() {
+        const vaultAddress = await vault.getAddress();
+        const routerAddress = await router.getAddress();
+        const tokenAddress = await token.getAddress();
+        const path = createMockPath(tokenAddress, tokenAddress);
+
+        // Vault has no ETH, but swap doesn't need any
+        const input = encodeV3SwapInput(vaultAddress, 1000, 900, path, true);
+        const calldata = encodeRouterExecute([CMD.V3_SWAP_EXACT_IN], [input]);
+
+        // Swap with 0 ETH value should work (uses ERC20 tokens only)
+        await expect(vault.swap([routerAddress], [calldata], [0n]))
+          .to.emit(vault, "TransactionExecuted")
+          .withArgs(routerAddress, calldata, true, "swap");
       });
     });
 
