@@ -35,4 +35,30 @@ export default class PlatformUtilsBase {
   static async evaluatePositionRange(position, options) {
     throw new Error(`evaluatePositionRange must be implemented by ${this.name}`);
   }
+
+  /**
+   * Generate multiple swap transactions with proper state management
+   *
+   * Implementations should handle any platform-specific batching requirements
+   * (e.g., nonce tracking for Permit2). Platform-specific auth is handled
+   * internally - callers do not need to provide signers.
+   *
+   * @param {Array<Object>} swapInstructions - Array of swap instructions
+   * @param {Object} swapInstructions[].tokenIn - Input token { address, symbol, decimals }
+   * @param {Object} swapInstructions[].tokenOut - Output token { address, symbol, decimals }
+   * @param {string} swapInstructions[].amount - Raw amount to swap
+   * @param {boolean} swapInstructions[].isAmountIn - true=EXACT_INPUT, false=EXACT_OUTPUT
+   * @param {Object} options - Common options for all swaps
+   * @param {string} options.recipient - Address to receive outputs
+   * @param {number} options.slippageTolerance - Slippage tolerance percentage
+   * @param {Object} options.adapter - Platform adapter instance
+   * @param {Object} options.provider - Ethers provider
+   * @param {number} options.chainId - Chain ID
+   * @returns {Promise<Object>} Batch result
+   * @returns {Array<Object>} result.transactions - Array of { to, data, value }
+   * @returns {Array<Object>} result.metadata - Array of swap metadata
+   */
+  static async batchSwapTransactions(swapInstructions, options) {
+    throw new Error(`batchSwapTransactions must be implemented by ${this.name}`);
+  }
 }

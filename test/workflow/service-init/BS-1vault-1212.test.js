@@ -37,6 +37,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let feesCollectedEvents = [];
   let feesDistributedEvents = [];
   let utilizationEvents = [];
+  let tokenPreparationCompletedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -52,15 +53,16 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;
 
-    // Create test vault with 1AP/1NP/1AT/1NT configuration (same as legacy test)
+    // Create test vault with 1AP/1NP/1AT/2NT configuration
     testVault = await setupTestVault(
       testEnv.hardhatServer,
       testEnv.contracts,
       testEnv.deployedContracts,
       {
-        vaultName: '1AP/1NP/1AT/1NT Test Vault',
+        vaultName: '1AP/2NP/1AT/2NT Test Vault',
         automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '10',
+        nativeEthAmount: '2',  // Send 2 ETH directly to vault (non-aligned, will need wrapping)
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '2' },
           { from: 'WETH', to: 'WBTC', amount: '2' }
@@ -111,7 +113,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
           'USDC': 60,
           'WBTC': 40
         },
-        targetTokens: ['USDC', 'WETH'],
+        targetTokens: ['USDC', 'ETH'],
         targetPlatforms: ['uniswapV3'],
         strategy: 'bob'
       }
@@ -193,6 +195,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         utilizationEvents.push(data);
       });
 
+      service.eventManager.subscribe('TokenPreparationCompleted', (data) => {
+        tokenPreparationCompletedEvents.push(data);
+      });
+
       // Start the service
       await service.start();
 
@@ -224,7 +230,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(vault.strategyAddress).toBeDefined();
       expect(vault.strategy).toBeDefined();
       expect(vault.strategy.strategyId).toBe('bob');
-      expect(vault.targetTokens).toEqual(['USDC', 'WETH']);
+      expect(vault.targetTokens).toEqual(['USDC', 'ETH']);
       expect(vault.targetPlatforms).toEqual(['uniswapV3']);
       expect(vault.lastUpdated).toBeDefined();
       expect(vault.lastUpdated).toBeGreaterThan(Date.now() - 60000);
@@ -281,7 +287,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.strategyId).toBe('bob');
       expect(event.positionCount).toBe(3);
       expect(event.positionIds).toHaveLength(3);
-      expect(event.targetTokens).toEqual(['USDC', 'WETH']);
+      expect(event.targetTokens).toEqual(['USDC', 'ETH']);
       expect(event.targetPlatforms).toEqual(['uniswapV3']);
     });
 
@@ -1015,10 +1021,154 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.tokenValue).toBeGreaterThan(0);
     });
 
-    it('should include minimum deployment threshold', () => {
+    it('should include minimum deployment threshold details', () => {
       const event = utilizationEvents[utilizationEvents.length - 1];
+      // minDeployment = max(chainMinimum, vaultRelativeMinimum)
       expect(event.minDeployment).toBeDefined();
       expect(event.minDeployment).toBeGreaterThan(0);
+      expect(event.chainMinimum).toBeDefined();
+      expect(event.vaultRelativeMinimum).toBeDefined();
+      expect(event.minDeployment).toBe(Math.max(event.chainMinimum, event.vaultRelativeMinimum));
+    });
+
+    it('should include utilization gap', () => {
+      const event = utilizationEvents[utilizationEvents.length - 1];
+      expect(event.utilizationGap).toBeDefined();
+      expect(event.utilizationGapPercent).toBeDefined();
+      // gap = maxUtil - currentUtil
+      expect(event.utilizationGap).toBeCloseTo(event.maxUtilization - event.currentUtilization, 10);
+      expect(event.utilizationGapPercent).toBeCloseTo(event.utilizationGap * 100, 10);
+    });
+  });
+
+  describe('Token Preparation (prepareTokensForPosition)', () => {
+    // Token preparation happens during addToPosition which runs as part of initializeVault
+    // The TokenPreparationCompleted event is captured by the subscription set up in Phase 3
+
+    it('should emit TokenPreparationCompleted event during initialization', () => {
+      expect(tokenPreparationCompletedEvents.length).toBeGreaterThan(0);
+    });
+
+    it('should have correct event structure', () => {
+      const event = tokenPreparationCompletedEvents[0];
+      const vault = service.vaultDataService.getAllVaults()[0];
+
+      expect(event.vaultAddress.toLowerCase()).toBe(vault.address.toLowerCase());
+      expect(event.strategyId).toBe(vault.strategy.strategyId);
+      expect(event.platformId).toBeDefined();
+      expect(event.targetTokens).toBeDefined();
+      expect(event.preparationResult).toBeDefined();
+      expect(event.swapTransactions).toBeDefined();
+      expect(event.nonAlignedTokensUsed).toBeDefined();
+      expect(event.wrapUnwrap).toBeDefined();
+    });
+
+    it('should have ETH wrap amount > 0 - native ETH is used for WETH deficit', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      // This test has nativeEthAmount: '2' and target tokens are USDC/WETH
+      // ETH should be wrapped to cover WETH deficit
+      expect(event.wrapUnwrap).toBeDefined();
+      expect(event.wrapUnwrap.wrapAmount).toBeDefined();
+      expect(event.wrapUnwrap.unwrapAmount).toBeDefined();
+
+      // wrapAmount should be > 0 (ETH → WETH to cover WETH deficit)
+      const wrapAmount = BigInt(event.wrapUnwrap.wrapAmount);
+      expect(wrapAmount).toBeGreaterThan(0n);
+
+      // unwrapAmount should be 0 (no WETH → ETH needed)
+      const unwrapAmount = BigInt(event.wrapUnwrap.unwrapAmount);
+      expect(unwrapAmount).toBe(0n);
+    });
+
+    it('should have correct targetTokens structure', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      expect(event.targetTokens.token0).toBeDefined();
+      expect(event.targetTokens.token1).toBeDefined();
+      expect(event.targetTokens.token0.symbol).toBeDefined();
+      expect(event.targetTokens.token0.required).toBeDefined();
+      expect(event.targetTokens.token0.available).toBeDefined();
+      expect(event.targetTokens.token0.deficit).toBeDefined();
+    });
+
+    it('should calculate deficits correctly using verified balances', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      // Get independently verified balances from post-closure TokenBalancesFetched event
+      const postClosureBalances = tokenBalancesFetchedEvents[1].balances;
+
+      for (const tokenData of Object.values(event.targetTokens)) {
+        const symbol = tokenData.symbol;
+        const eventRequired = BigInt(tokenData.required);
+        const eventAvailable = BigInt(tokenData.available);
+        const eventDeficit = BigInt(tokenData.deficit);
+
+        // Verify available matches independently verified balance
+        const verifiedAvailable = BigInt(postClosureBalances[symbol]);
+        expect(eventAvailable).toBe(verifiedAvailable);
+
+        // Verify deficit = max(0, required - available)
+        const expectedDeficit = eventRequired > verifiedAvailable ? eventRequired - verifiedAvailable : 0n;
+        expect(eventDeficit).toBe(expectedDeficit);
+      }
+    });
+
+    it('should route swap transactions to correct UniversalRouter', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      if (event.swapTransactions.length > 0) {
+        const adapter = service.strategies.get('bob').adapters.get('uniswapV3');
+        const expectedRouterAddress = adapter.addresses.universalRouterAddress;
+
+        for (const tx of event.swapTransactions) {
+          expect(tx.to.toLowerCase()).toBe(expectedRouterAddress.toLowerCase());
+          expect(tx.data).toBeDefined();
+          expect(tx.data).not.toBe('');
+          // value is '0x00' for ERC20 swaps, or non-zero hex for native ETH swaps
+          expect(tx.value).toBeDefined();
+          expect(tx.value).toMatch(/^0x[0-9a-fA-F]+$/);
+        }
+      }
+    });
+
+    it('should use WBTC as non-aligned token for deficit coverage (1212 scenario)', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      // 1212 scenario has WBTC as non-aligned token (not in targetTokens: ['USDC', 'WETH'])
+      if (event.preparationResult === 'swaps_generated') {
+        expect(event.nonAlignedTokensUsed).toContain('WBTC');
+        expect(event.swapTransactions.length).toBeGreaterThan(0);
+      } else if (event.preparationResult === 'sufficient_tokens') {
+        expect(event.swapTransactions).toHaveLength(0);
+      }
+    });
+
+    it('should have consistent swap counts and metadata', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      // swapTransactions.length should equal deficitSwapCount + bufferSwapCount
+      expect(event.swapTransactions.length).toBe(
+        event.deficitSwapCount + event.bufferSwapCount
+      );
+
+      // Metadata counts should match swap counts
+      expect(event.swapMetadata.deficit.length).toBe(event.deficitSwapCount);
+      expect(event.swapMetadata.buffer.length).toBe(event.bufferSwapCount);
+    });
+
+    it('should have correct phasesUsed for 1212 scenario with native ETH', () => {
+      const event = tokenPreparationCompletedEvents[0];
+
+      // 1212 scenario: native ETH + WBTC non-aligned, target USDC/WETH
+      // - wrapUnwrap: true (ETH wraps to WETH)
+      // - nonAlignedForDeficit: true (ETH and WBTC used for deficits)
+      // - bufferSwaps: true (remaining non-aligned tokens split to both targets)
+      // - excessTargetTokens: false (no excess, we have deficits)
+      expect(event.phasesUsed.wrapUnwrap).toBe(true);
+      expect(event.phasesUsed.nonAlignedForDeficit).toBe(true);
+      expect(event.phasesUsed.bufferSwaps).toBe(true);
+      expect(event.phasesUsed.excessTargetTokens).toBe(false);
     });
   });
 

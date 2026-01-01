@@ -78,7 +78,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
           swapTokens: [],
           positions: [],
           tokenTransfers: {},
-          targetTokens: ['WETH'],
+          targetTokens: ['ETH'],
           targetPlatforms: ['uniswapV3'],
           strategy: 'bob' // Valid strategy ID
         }
@@ -136,7 +136,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
           swapTokens: [],
           positions: [],
           tokenTransfers: {},
-          targetTokens: ['WETH', 'USDC'],
+          targetTokens: ['ETH', 'USDC'],
           targetPlatforms: ['uniswapV3'],
           strategy: 'bob'
         }
@@ -271,7 +271,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
           swapTokens: [],
           positions: [],
           tokenTransfers: {},
-          targetTokens: ['WETH'],
+          targetTokens: ['ETH'],
           targetPlatforms: ['uniswapV3'],
           strategy: 'bob'
         }

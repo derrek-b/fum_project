@@ -5,7 +5,10 @@
  * providing strategy-specific calculations using platform-specific data.
  */
 
+import { ethers } from 'ethers';
 import PlatformUtilsBase from '../PlatformUtilsBase.js';
+import { getPermit2Nonce, generatePermit2Signature } from 'fum_library/helpers/Permit2Helper';
+import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 
 /**
  * Uniswap V3 platform utilities
@@ -66,5 +69,159 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
       distanceToLower: Math.max(0, Math.min(1, distanceToLower)),
       currentTick
     };
+  }
+
+  /**
+   * Generate a single swap transaction using AlphaRouter + Permit2
+   *
+   * Internal method - called by batchSwapTransactions.
+   * Handles all Uniswap V3-specific details:
+   * - AlphaRouter route finding
+   * - Permit2 nonce management
+   * - Permit2 signature generation
+   * - Universal Router calldata wrapping
+   *
+   * @param {Object} params - Swap parameters
+   * @param {Map} [params._nonceTracker] - Internal: nonce tracker for batched swaps
+   * @returns {Promise<Object>} Swap result with transaction and metadata
+   * @private
+   */
+  static async _generateSwapTransaction(params) {
+    const {
+      tokenIn,
+      tokenOut,
+      amount,
+      isAmountIn,
+      recipient,
+      slippageTolerance,
+      adapter,
+      provider,
+      chainId,
+      _nonceTracker // Internal: passed by batchSwapTransactions
+    } = params;
+
+    // 1. Get route from adapter using AlphaRouter
+    // For native ETH, address is not required - adapter uses Ether.onChain() internally
+    const routeResult = await adapter.getSwapRoute({
+      tokenInAddress: tokenIn.isNative ? undefined : tokenIn.address,
+      tokenOutAddress: tokenOut.isNative ? undefined : tokenOut.address,
+      amount,
+      isAmountIn,
+      recipient,
+      slippageTolerance,
+      deadlineMinutes: 30,
+      tokenInIsNative: tokenIn.isNative || false,
+      tokenOutIsNative: tokenOut.isNative || false
+    });
+
+    // 2. Branch: native ETH input skips Permit2
+    if (tokenIn.isNative) {
+      // Native ETH - use route directly, no Permit2 needed
+      const swapData = await adapter.generateAlphaSwapData({
+        route: routeResult.route,
+        recipient,
+        tokenInAddress: undefined,
+        amountIn: routeResult.amountIn,
+        tokenInIsNative: true
+      });
+
+      return {
+        transaction: swapData,
+        quotedAmountIn: routeResult.amountIn,
+        quotedAmountOut: routeResult.amountOut,
+        isAmountIn
+      };
+    }
+
+    // ERC20 flow - get signer for Permit2 signature generation
+    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, provider);
+
+    // 3. Get/track Permit2 nonce (Uniswap-specific detail)
+    const addresses = getPlatformAddresses(chainId, 'uniswapV3');
+    let nonce;
+
+    if (_nonceTracker?.has(tokenIn.address)) {
+      // Use tracked nonce for batched swaps
+      nonce = _nonceTracker.get(tokenIn.address);
+    } else {
+      // Fetch current nonce from Permit2 contract
+      nonce = await getPermit2Nonce(
+        provider,
+        recipient,
+        tokenIn.address,
+        addresses.universalRouterAddress
+      );
+    }
+
+    // Update tracker for next swap with same token
+    _nonceTracker?.set(tokenIn.address, nonce + 1);
+
+    // 4. Generate Permit2 signature
+    const deadline = Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+    const { signature } = await generatePermit2Signature(
+      signer,
+      chainId,
+      tokenIn.address,
+      routeResult.amountIn,
+      addresses.universalRouterAddress,
+      nonce,
+      deadline
+    );
+
+    // 5. Generate wrapped swap calldata via adapter
+    const swapData = await adapter.generateAlphaSwapData({
+      route: routeResult.route,
+      recipient,
+      tokenInAddress: tokenIn.address,
+      amountIn: routeResult.amountIn,
+      permit2Signature: signature,
+      permit2Nonce: nonce,
+      permit2Deadline: deadline
+    });
+
+    return {
+      transaction: swapData,
+      quotedAmountIn: routeResult.amountIn,
+      quotedAmountOut: routeResult.amountOut,
+      isAmountIn
+    };
+  }
+
+  /**
+   * Generate multiple swap transactions with Permit2 nonce tracking
+   *
+   * Creates an internal nonce tracker to handle batched swaps that
+   * use the same input token (would otherwise have nonce collisions).
+   *
+   * @param {Array<Object>} swapInstructions - Array of swap instructions
+   * @param {Object} options - Common options for all swaps
+   * @returns {Promise<Object>} { transactions: [], metadata: [] }
+   */
+  static async batchSwapTransactions(swapInstructions, options) {
+    const transactions = [];
+    const metadata = [];
+
+    // Create internal nonce tracker for this batch
+    // This handles the Permit2-specific requirement that nonces increment
+    const _nonceTracker = new Map();
+
+    for (const instruction of swapInstructions) {
+      const result = await this._generateSwapTransaction({
+        ...instruction,
+        ...options,
+        _nonceTracker
+      });
+
+      transactions.push(result.transaction);
+      metadata.push({
+        tokenInSymbol: instruction.tokenIn.symbol,
+        tokenOutSymbol: instruction.tokenOut.symbol,
+        quotedAmountIn: result.quotedAmountIn,
+        quotedAmountOut: result.quotedAmountOut,
+        isAmountIn: result.isAmountIn
+      });
+    }
+
+    return { transactions, metadata };
   }
 }

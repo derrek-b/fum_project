@@ -387,4 +387,94 @@ export default class StrategyBase {
     }
   }
 
+  // ===========================================================================
+  // ETH/WETH Wrap/Unwrap Helpers
+  // ===========================================================================
+
+  /**
+   * Check if token pair is ETH <-> WETH (wrap/unwrap, not swap)
+   * @param {Object} tokenIn - Input token data with isNative and symbol
+   * @param {Object} tokenOut - Output token data with isNative and symbol
+   * @returns {{ isWrap: boolean, isUnwrap: boolean, isWrapOrUnwrap: boolean }}
+   */
+  isWrapUnwrapPair(tokenIn, tokenOut) {
+    const isWrap = tokenIn.isNative === true && tokenOut.symbol === 'WETH';
+    const isUnwrap = tokenIn.symbol === 'WETH' && tokenOut.isNative === true;
+    return { isWrap, isUnwrap, isWrapOrUnwrap: isWrap || isUnwrap };
+  }
+
+  /**
+   * Execute ETH → WETH wrap via vault
+   * @param {Object} vault - Vault data with address
+   * @param {string} amount - Amount in wei (as string)
+   * @returns {Promise<Object>} Transaction receipt
+   */
+  async executeWrap(vault, amount) {
+    const wethAddress = this.tokens['WETH'].address;
+    const vaultContract = getVaultContract(vault.address, this.provider);
+    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const vaultWithSigner = vaultContract.connect(signer);
+
+    this.log(`Wrapping ${ethers.utils.formatEther(amount)} ETH to WETH`);
+
+    const receipt = await retryRpcCall(
+      async () => {
+        const tx = await vaultWithSigner.wrapETH(wethAddress, amount);
+        return tx.wait();
+      },
+      'wrapETH',
+      { log: (msg) => this.log(msg) }
+    );
+
+    this.log(`Wrap complete: ${receipt.transactionHash}`);
+
+    this.eventManager.emit('ETHWrapped', {
+      vaultAddress: vault.address,
+      amount: amount.toString(),
+      amountFormatted: ethers.utils.formatEther(amount),
+      transactionHash: receipt.transactionHash,
+      timestamp: Date.now(),
+      log: { level: 'info', message: `Wrapped ${ethers.utils.formatEther(amount)} ETH to WETH` }
+    });
+
+    return receipt;
+  }
+
+  /**
+   * Execute WETH → ETH unwrap via vault
+   * @param {Object} vault - Vault data with address
+   * @param {string} amount - Amount in wei (as string)
+   * @returns {Promise<Object>} Transaction receipt
+   */
+  async executeUnwrap(vault, amount) {
+    const wethAddress = this.tokens['WETH'].address;
+    const vaultContract = getVaultContract(vault.address, this.provider);
+    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const vaultWithSigner = vaultContract.connect(signer);
+
+    this.log(`Unwrapping ${ethers.utils.formatEther(amount)} WETH to ETH`);
+
+    const receipt = await retryRpcCall(
+      async () => {
+        const tx = await vaultWithSigner.unwrapETH(wethAddress, amount);
+        return tx.wait();
+      },
+      'unwrapETH',
+      { log: (msg) => this.log(msg) }
+    );
+
+    this.log(`Unwrap complete: ${receipt.transactionHash}`);
+
+    this.eventManager.emit('ETHUnwrapped', {
+      vaultAddress: vault.address,
+      amount: amount.toString(),
+      amountFormatted: ethers.utils.formatEther(amount),
+      transactionHash: receipt.transactionHash,
+      timestamp: Date.now(),
+      log: { level: 'info', message: `Unwrapped ${ethers.utils.formatEther(amount)} WETH to ETH` }
+    });
+
+    return receipt;
+  }
+
 }

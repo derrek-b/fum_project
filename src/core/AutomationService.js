@@ -384,11 +384,12 @@ class AutomationService {
     const allTokens = getAllTokens(); // Returns object keyed by symbol
 
     // Filter tokens available on this chain and index by symbol
+    // Note: Native ETH has address: null, so check for key existence, not truthiness
     for (const [symbol, token] of Object.entries(allTokens)) {
-      if (token.addresses && token.addresses[this.chainId]) {
+      if (token.addresses && this.chainId in token.addresses) {
         this.tokens[symbol] = {
           ...token,
-          address: token.addresses[this.chainId]
+          address: token.addresses[this.chainId]  // null for native ETH
         };
       }
     }
@@ -644,8 +645,15 @@ class AutomationService {
         continue;
       }
 
-      // TODO: Implement retry logic for failed vaults
-      // This will be implemented when we add vault initialization logic
+      // Attempt to re-setup the vault
+      try {
+        await this.setupVault(vaultAddress);
+        this.failedVaults.delete(vaultAddress);
+        this.log(`Vault ${vaultAddress} retry successful`);
+      } catch (error) {
+        // trackFailedVault updates attempt count and lastError
+        this.trackFailedVault(vaultAddress, error.message);
+      }
     }
   }
 

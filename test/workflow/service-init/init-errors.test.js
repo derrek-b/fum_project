@@ -173,7 +173,7 @@ describe('Service Initialization Error Scenarios', () => {
           swapTokens: [],
           positions: [],
           tokenTransfers: {},
-          targetTokens: ['WETH'],
+          targetTokens: ['ETH'],
           targetPlatforms: ['uniswapV3']
         }
       );

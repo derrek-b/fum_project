@@ -276,7 +276,7 @@ describe('VaultDataService', () => {
         chainId: 1337,
         strategyAddress: '0xStrategy',
         strategy: { strategyId: 'bob' },
-        targetTokens: ['USDC', 'WETH'],
+        targetTokens: ['USDC', 'ETH'],
         targetPlatforms: ['uniswapV3'],
         tokens: { USDC: '1000000' },
         positions: { '123': { tickLower: -100 } }
@@ -289,7 +289,7 @@ describe('VaultDataService', () => {
       expect(result.chainId).toBe(1337);
       expect(result.strategyAddress).toBe('0xStrategy');
       expect(result.strategy).toEqual({ strategyId: 'bob' });
-      expect(result.targetTokens).toEqual(['USDC', 'WETH']);
+      expect(result.targetTokens).toEqual(['USDC', 'ETH']);
       expect(result.targetPlatforms).toEqual(['uniswapV3']);
       expect(result.tokens).toEqual({ USDC: '1000000' });
       expect(result.positions).toEqual({ '123': { tickLower: -100 } });
@@ -355,10 +355,10 @@ describe('VaultDataService', () => {
       };
       vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
 
-      const result = await vaultDataService.updateTargetTokens(VAULT_ADDRESS_1, ['USDC', 'WETH', 'ARB']);
+      const result = await vaultDataService.updateTargetTokens(VAULT_ADDRESS_1, ['USDC', 'ETH', 'ARB']);
 
       expect(result).toBe(true);
-      expect(vaultDataService.vaults.get(VAULT_ADDRESS_CHECKSUM).targetTokens).toEqual(['USDC', 'WETH', 'ARB']);
+      expect(vaultDataService.vaults.get(VAULT_ADDRESS_CHECKSUM).targetTokens).toEqual(['USDC', 'ETH', 'ARB']);
     });
 
     it('should update lastUpdated timestamp', async () => {
