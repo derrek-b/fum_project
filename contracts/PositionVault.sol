@@ -140,7 +140,6 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         uint256[] calldata values
     )
         external
-        payable
         onlyAuthorized
         nonReentrant
         returns (bool[] memory results)
@@ -149,12 +148,12 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
         require(values.length == targets.length, "PositionVault: values length mismatch");
         require(targets.length > 0, "PositionVault: empty batch");
 
-        // Validate total value matches msg.value
+        // Validate vault has sufficient ETH balance for native ETH swaps
         uint256 totalValue = 0;
         for (uint256 i = 0; i < values.length; i++) {
             totalValue += values[i];
         }
-        require(totalValue == msg.value, "PositionVault: value mismatch");
+        require(address(this).balance >= totalValue, "PositionVault: insufficient ETH balance");
 
         results = new bool[](targets.length);
 
