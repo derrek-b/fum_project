@@ -22,6 +22,7 @@
  * | sortTokens                   | Strategy.selectBestPool    | CONFIRMED |
  * | parseClosureReceipt          | Strategy.closePositions    | CONFIRMED |
  * | generateRemoveLiquidityData  | Strategy.closePositions    | CONFIRMED |
+ * | getAddLiquidityAmounts       | Strategy.addToPosition     | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -257,6 +258,40 @@ export default class PlatformAdapter {
     throw new Error("generateAddLiquidityData must be implemented by subclasses");
   }
 
+  /**
+   * Get the token amounts required to add liquidity to a position
+   *
+   * Returns amounts in the CALLER's token order (not SDK-sorted order).
+   * Each platform implements this using their native calculation method.
+   *
+   * @param {Object} params - Parameters for calculating amounts
+   * @param {Object} params.position - Position range definition
+   * @param {number} params.position.tickLower - Lower tick of position range
+   * @param {number} params.position.tickUpper - Upper tick of position range
+   * @param {string} params.token0Amount - Desired amount of caller's token0 (wei string, can be "0")
+   * @param {string} params.token1Amount - Desired amount of caller's token1 (wei string, can be "0")
+   * @param {Object} params.poolData - Pool state data
+   * @param {number} params.poolData.fee - Pool fee tier
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool sqrt price
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
+   * @param {Object} params.token0Data - Caller's token0 data
+   * @param {string} params.token0Data.address - Token contract address
+   * @param {number} params.token0Data.decimals - Token decimals
+   * @param {Object} params.token1Data - Caller's token1 data
+   * @param {string} params.token1Data.address - Token contract address
+   * @param {number} params.token1Data.decimals - Token decimals
+   * @param {Object} params.provider - Ethers provider instance
+   * @returns {Promise<Object>} Calculated amounts in caller's token order
+   * @returns {string} result.token0Amount - Amount of caller's token0 required (wei string)
+   * @returns {string} result.token1Amount - Amount of caller's token1 required (wei string)
+   * @returns {string} result.liquidity - Resulting position liquidity (wei string)
+   * @throws {Error} If parameters are invalid or calculation fails
+   */
+  async getAddLiquidityAmounts(params) {
+    throw new Error("getAddLiquidityAmounts must be implemented by subclasses");
+  }
+
 
   /**
    * Generate transaction data for creating a new position
@@ -335,12 +370,14 @@ export default class PlatformAdapter {
 
   /**
    * Discover available pools for a token pair across all fee tiers
-   * @param {string} token0Address - Address of first token
-   * @param {string} token1Address - Address of second token
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<Array>} Array of pool information objects with { address, fee, liquidity, sqrtPriceX96, tick }
+   * Adapter handles platform-specific token resolution (e.g., V3 translates ETH → WETH)
+   * @param {string} token0Symbol - Symbol of first token (e.g., 'ETH', 'USDC')
+   * @param {string} token1Symbol - Symbol of second token
+   * @param {Object} provider - Ethers provider instance
+   * @param {number} chainId - Chain ID for address lookups
+   * @returns {Promise<Array>} Array of pool information objects with { address, fee, liquidity, sqrtPriceX96, tick, token0, token1 }
    */
-  async discoverAvailablePools(token0Address, token1Address, chainId) {
+  async discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
     throw new Error("discoverAvailablePools must be implemented by subclasses");
   }
 

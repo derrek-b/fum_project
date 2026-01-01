@@ -24,7 +24,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
-        universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+        universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3", // V2.0 (V4 support)
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
       },
     },
@@ -49,7 +49,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88", // Same as Arbitrum since it's a fork
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Same as Arbitrum since it's a fork
-        universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD", // Same as Arbitrum since it's a fork
+        universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3", // V2.0 (V4 support) - Same as Arbitrum
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // Same as Arbitrum since it's a fork
       },
     },
@@ -74,7 +74,7 @@ const chains = {
         factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
-        universalRouterAddress: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+        universalRouterAddress: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", // V2.0 (V4 support)
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
       },
     },

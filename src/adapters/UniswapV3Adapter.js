@@ -14,7 +14,7 @@ import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
-import { getTokenByAddress } from "../helpers/tokenHelpers.js";
+import { getTokenByAddress, getTokenBySymbol, isNativeToken, getWethAddress } from "../helpers/tokenHelpers.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2 } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
@@ -1983,7 +1983,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     try {
-
       // Create Token objects - use chainId from instance
       const token0 = new Token(
         this.chainId,
@@ -2031,31 +2030,55 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
   /**
    * Discover available pools for a token pair across all fee tiers
-   * @param {string} token0Address - Address of first token
-   * @param {string} token1Address - Address of second token
+   * V3 adapter translates ETH → WETH internally (V3 only uses WETH, not native ETH)
+   * @param {string} token0Symbol - Symbol of first token (e.g., 'ETH', 'USDC')
+   * @param {string} token1Symbol - Symbol of second token
    * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<Array>} Array of pool information objects
+   * @param {number} chainId - Chain ID for address lookups
+   * @returns {Promise<Array>} Array of pool information objects with token metadata
    */
-  async discoverAvailablePools(token0Address, token1Address, provider) {
-    // Validate token0 address
-    if (!token0Address) {
-      throw new Error("Token0 address parameter is required");
+  async discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
+    // Validate symbols
+    if (!token0Symbol || typeof token0Symbol !== 'string') {
+      throw new Error("Token0 symbol parameter is required");
     }
-    try {
-      ethers.utils.getAddress(token0Address);
-    } catch (error) {
-      throw new Error(`Invalid token0 address: ${token0Address}`);
+    if (!token1Symbol || typeof token1Symbol !== 'string') {
+      throw new Error("Token1 symbol parameter is required");
     }
 
-    // Validate token1 address
-    if (!token1Address) {
-      throw new Error("Token1 address parameter is required");
+    // Validate chainId
+    if (!chainId || typeof chainId !== 'number') {
+      throw new Error("Chain ID parameter is required");
     }
-    try {
-      ethers.utils.getAddress(token1Address);
-    } catch (error) {
-      throw new Error(`Invalid token1 address: ${token1Address}`);
-    }
+
+    // V3 only uses WETH for ETH pairs - resolve addresses accordingly
+    const resolveTokenData = (symbol) => {
+      if (isNativeToken(symbol) || symbol === 'WETH') {
+        // For native ETH or WETH, use WETH address - V3 only uses WETH
+        const wethAddress = getWethAddress(chainId);
+        return {
+          address: wethAddress,
+          symbol: 'WETH',  // Pool actually uses WETH
+          inputWasNative: isNativeToken(symbol)
+        };
+      }
+      const token = getTokenBySymbol(symbol);
+      if (!token) {
+        throw new Error(`Token ${symbol} not found`);
+      }
+      const address = token.addresses[chainId];
+      if (!address) {
+        throw new Error(`Token ${symbol} not available on chain ${chainId}`);
+      }
+      return {
+        address,
+        symbol,
+        inputWasNative: false
+      };
+    };
+
+    const token0Data = resolveTokenData(token0Symbol);
+    const token1Data = resolveTokenData(token1Symbol);
 
     // Validate provider
     await this._validateProviderChain(provider);
@@ -2064,7 +2087,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const pools = [];
 
     for (const fee of feeTiers) {
-      const poolAddress = await this.getPoolAddress(token0Address, token1Address, fee, provider);
+      const poolAddress = await this.getPoolAddress(token0Data.address, token1Data.address, fee, provider);
 
       if (poolAddress === ethers.constants.AddressZero) {
         continue; // Expected - no pool for this fee tier
@@ -2096,12 +2119,30 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
       const [slot0, liquidity] = poolData;
 
+      // Sort tokens to match pool's actual order (lower address = token0)
+      const sortedAddresses = [token0Data.address, token1Data.address].sort((a, b) =>
+        a.toLowerCase() < b.toLowerCase() ? -1 : 1
+      );
+      const poolToken0 = sortedAddresses[0] === token0Data.address.toLowerCase() ||
+                         sortedAddresses[0].toLowerCase() === token0Data.address.toLowerCase()
+        ? token0Data : token1Data;
+      const poolToken1 = poolToken0 === token0Data ? token1Data : token0Data;
+
       pools.push({
         address: poolAddress,
         fee,
         liquidity: liquidity.toString(),
         sqrtPriceX96: slot0.sqrtPriceX96.toString(),
-        tick: slot0.tick
+        tick: slot0.tick,
+        // Include token metadata so callers know what the pool actually uses
+        token0: {
+          symbol: poolToken0.symbol,
+          address: poolToken0.address
+        },
+        token1: {
+          symbol: poolToken1.symbol,
+          address: poolToken1.address
+        }
       });
     }
 
@@ -3144,6 +3185,222 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get the token amounts required to add liquidity to a position
+   *
+   * Returns amounts in the CALLER's token order (not SDK-sorted order).
+   * Internally uses getAddLiquidityQuote and maps amounts back to caller's order.
+   *
+   * @param {Object} params - Parameters for calculating amounts
+   * @param {Object} params.position - Position range definition
+   * @param {number} params.position.tickLower - Lower tick of position range
+   * @param {number} params.position.tickUpper - Upper tick of position range
+   * @param {string} params.token0Amount - Desired amount of caller's token0 (wei string, can be "0")
+   * @param {string} params.token1Amount - Desired amount of caller's token1 (wei string, can be "0")
+   * @param {Object} params.poolData - Pool state data
+   * @param {number} params.poolData.fee - Pool fee tier
+   * @param {string} params.poolData.sqrtPriceX96 - Current pool sqrt price
+   * @param {string} params.poolData.liquidity - Current pool liquidity
+   * @param {number} params.poolData.tick - Current pool tick
+   * @param {Object} params.token0Data - Caller's token0 data
+   * @param {string} params.token0Data.address - Token contract address
+   * @param {number} params.token0Data.decimals - Token decimals
+   * @param {Object} params.token1Data - Caller's token1 data
+   * @param {string} params.token1Data.address - Token contract address
+   * @param {number} params.token1Data.decimals - Token decimals
+   * @param {Object} params.provider - Ethers provider instance
+   * @returns {Promise<Object>} Calculated amounts in caller's token order
+   * @returns {string} result.token0Amount - Amount of caller's token0 required (wei string)
+   * @returns {string} result.token1Amount - Amount of caller's token1 required (wei string)
+   * @returns {string} result.liquidity - Resulting position liquidity (wei string)
+   * @throws {Error} If parameters are invalid or calculation fails
+   */
+  async getAddLiquidityAmounts(params) {
+    const {
+      position,
+      token0Amount,
+      token1Amount,
+      poolData,
+      token0Data,
+      token1Data,
+      provider
+    } = params;
+
+    // Position validation
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.tickLower === null || position.tickLower === undefined) {
+      throw new Error("Position tickLower is required");
+    }
+    if (!Number.isFinite(position.tickLower)) {
+      throw new Error("Position tickLower must be a finite number");
+    }
+    if (position.tickUpper === null || position.tickUpper === undefined) {
+      throw new Error("Position tickUpper is required");
+    }
+    if (!Number.isFinite(position.tickUpper)) {
+      throw new Error("Position tickUpper must be a finite number");
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error("Position tickLower must be less than tickUpper");
+    }
+
+    // Token0Amount validation
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+
+    // Token1Amount validation
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+
+    // At least one amount must be non-zero
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    // Provider validation
+    await this._validateProviderChain(provider);
+
+    // PoolData validation
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
+
+    // Token0Data validation
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
+      throw new Error("Token0 data must be an object");
+    }
+    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
+      throw new Error("Token0 address is required");
+    }
+    if (typeof token0Data.address !== 'string') {
+      throw new Error("Token0 address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(token0Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token0 address: ${token0Data.address}`);
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
+      throw new Error("Token0 decimals must be a finite number between 0 and 255");
+    }
+
+    // Token1Data validation
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
+      throw new Error("Token1 data must be an object");
+    }
+    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
+      throw new Error("Token1 address is required");
+    }
+    if (typeof token1Data.address !== 'string') {
+      throw new Error("Token1 address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(token1Data.address);
+    } catch (error) {
+      throw new Error(`Invalid token1 address: ${token1Data.address}`);
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
+      throw new Error("Token1 decimals must be a finite number between 0 and 255");
+    }
+
+    // Tokens must be different
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    try {
+      // Use internal getAddLiquidityQuote for SDK calculations
+      const quote = await this.getAddLiquidityQuote({
+        position,
+        token0Amount,
+        token1Amount,
+        provider,
+        poolData,
+        token0Data,
+        token1Data
+      });
+
+      // Extract amounts from SDK Position object
+      const sdkAmount0 = quote.position.amount0.quotient.toString();
+      const sdkAmount1 = quote.position.amount1.quotient.toString();
+      const liquidity = quote.position.liquidity.toString();
+
+      // Map SDK amounts back to caller's token order
+      // tokensSwapped=true means caller's token0 became SDK's token1 (and vice versa)
+      return {
+        token0Amount: quote.tokensSwapped ? sdkAmount1 : sdkAmount0,
+        token1Amount: quote.tokensSwapped ? sdkAmount0 : sdkAmount1,
+        liquidity
+      };
+    } catch (error) {
+      throw new Error(`Failed to calculate add liquidity amounts: ${error.message}`);
+    }
+  }
+
+  /**
    * Get expected output amount for a swap using Quoter contract
    * @param {Object} params - Parameters for getting swap quote
    * @param {string} params.tokenInAddress - Address of input token
@@ -3234,33 +3491,39 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Get best swap quote using AlphaRouter for optimal routing
    * @param {Object} params - Parameters for getting best swap quote
-   * @param {string} params.tokenInAddress - Address of input token
-   * @param {string} params.tokenOutAddress - Address of output token
+   * @param {string} [params.tokenInAddress] - Address of input token (not required if tokenInIsNative=true)
+   * @param {string} [params.tokenOutAddress] - Address of output token (not required if tokenOutIsNative=true)
    * @param {string} params.amount - Amount to trade (interpretation depends on isAmountIn)
    * @param {boolean} params.isAmountIn - True if amount is input (EXACT_INPUT), false if amount is output (EXACT_OUTPUT)
+   * @param {boolean} [params.tokenInIsNative=false] - True if input token is native ETH (skips address validation)
+   * @param {boolean} [params.tokenOutIsNative=false] - True if output token is native ETH (skips address validation)
    * @returns {Promise<Object>} Quote with { amountIn: string, amountOut: string, route: SwapRoute, methodParameters?: MethodParameters }
    * @throws {Error} If no valid route can be found
    */
   async getBestSwapQuote(params) {
-    const { tokenInAddress, tokenOutAddress, amount, isAmountIn } = params;
+    const { tokenInAddress, tokenOutAddress, amount, isAmountIn, tokenInIsNative = false, tokenOutIsNative = false } = params;
 
-    // Validate parameters
-    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
-      throw new Error("TokenIn address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(tokenInAddress);
-    } catch (error) {
-      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    // Validate parameters - skip address validation for native ETH (address not used)
+    if (!tokenInIsNative) {
+      if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+        throw new Error("TokenIn address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenInAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+      }
     }
 
-    if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
-      throw new Error("TokenOut address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(tokenOutAddress);
-    } catch (error) {
-      throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+    if (!tokenOutIsNative) {
+      if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+        throw new Error("TokenOut address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenOutAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+      }
     }
 
     if (!amount) {
@@ -3280,9 +3543,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("isAmountIn parameter is required and must be a boolean");
     }
 
-    // Create Token instances
-    const tokenIn = this._createTokenInstance(tokenInAddress);
-    const tokenOut = this._createTokenInstance(tokenOutAddress);
+    // Create Currency instances - use Ether for native ETH, Token for ERC20
+    const tokenIn = tokenInIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenInAddress);
+    const tokenOut = tokenOutIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenOutAddress);
 
     // Create CurrencyAmount and call AlphaRouter based on amount type
     let currencyAmount, quoteCurrency, route;
@@ -3343,13 +3610,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Get swap route with execution-ready transaction data using AlphaRouter
    * @param {Object} params - Parameters for getting swap route
-   * @param {string} params.tokenInAddress - Address of input token
-   * @param {string} params.tokenOutAddress - Address of output token
+   * @param {string} [params.tokenInAddress] - Address of input token (not required if tokenInIsNative=true)
+   * @param {string} [params.tokenOutAddress] - Address of output token (not required if tokenOutIsNative=true)
    * @param {string} params.amount - Amount to trade (interpretation depends on isAmountIn)
    * @param {boolean} params.isAmountIn - True if amount is input (EXACT_INPUT), false if amount is output (EXACT_OUTPUT)
    * @param {string} params.recipient - Address to receive output tokens
    * @param {number} [params.slippageTolerance=0.5] - Slippage tolerance percentage (e.g., 0.5 for 0.5%)
    * @param {number} [params.deadlineMinutes=30] - Transaction deadline in minutes from now
+   * @param {boolean} [params.tokenInIsNative=false] - True if input token is native ETH (skips address validation)
+   * @param {boolean} [params.tokenOutIsNative=false] - True if output token is native ETH (skips address validation)
    * @returns {Promise<Object>} Route with { amountIn: string, amountOut: string, route: SwapRoute, methodParameters: MethodParameters }
    * @throws {Error} If no valid route can be found or if parameters are invalid
    */
@@ -3361,26 +3630,32 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       isAmountIn,
       recipient,
       slippageTolerance = 0.5,
-      deadlineMinutes = 30
+      deadlineMinutes = 30,
+      tokenInIsNative = false,
+      tokenOutIsNative = false
     } = params;
 
-    // Validate parameters
-    if (!tokenInAddress || typeof tokenInAddress !== 'string') {
-      throw new Error("TokenIn address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(tokenInAddress);
-    } catch (error) {
-      throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+    // Validate parameters - skip address validation for native ETH (address not used)
+    if (!tokenInIsNative) {
+      if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+        throw new Error("TokenIn address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenInAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+      }
     }
 
-    if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
-      throw new Error("TokenOut address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(tokenOutAddress);
-    } catch (error) {
-      throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+    if (!tokenOutIsNative) {
+      if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+        throw new Error("TokenOut address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenOutAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+      }
     }
 
     if (!amount) {
@@ -3425,14 +3700,18 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Deadline must be greater than 0");
     }
 
-    // Create Token instances
-    const tokenIn = this._createTokenInstance(tokenInAddress);
-    const tokenOut = this._createTokenInstance(tokenOutAddress);
+    // Create Currency instances - use Ether for native ETH, Token for ERC20
+    const tokenIn = tokenInIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenInAddress);
+    const tokenOut = tokenOutIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenOutAddress);
 
     // Build swapConfig for execution-ready transaction data using Universal Router
     const swapConfig = {
       type: SwapType.UNIVERSAL_ROUTER,
-      version: UniversalRouterVersion.V1_2,
+      version: UniversalRouterVersion.V2_0,
       recipient,
       slippageTolerance: new Percent(Math.floor(slippageTolerance * 100), 10_000),
       deadline: Math.floor(Date.now() / 1000 + deadlineMinutes * 60)
@@ -3497,25 +3776,33 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Generate swap transaction data using AlphaRouter route + Universal Router + Permit2
    *
-   * This method wraps the swap calldata with a pre-generated Permit2 signature.
+   * For ERC20 swaps, this method wraps the swap calldata with a pre-generated Permit2 signature.
    * The caller is responsible for:
    * 1. Fetching/tracking the nonce (use getPermit2Nonce from Permit2Helper)
    * 2. Generating the signature (use generatePermit2Signature from Permit2Helper)
    * 3. Setting an appropriate deadline
    *
+   * For native ETH swaps (tokenInIsNative=true), Permit2 is skipped and the route's
+   * methodParameters are returned directly (no approval needed for native ETH).
+   *
    * @param {Object} params - Parameters for swap
    * @param {Object} params.route - Route object from getSwapRoute() with methodParameters
    * @param {string} params.recipient - Address to receive output tokens (also the token owner)
-   * @param {string} params.tokenInAddress - Address of input token
+   * @param {string} params.tokenInAddress - Address of input token (WETH address for native ETH routing)
    * @param {string} params.amountIn - Amount of input tokens (as string)
-   * @param {string} params.permit2Signature - Pre-generated EIP-712 signature for PermitSingle
-   * @param {number} params.permit2Nonce - Current nonce for this token/owner/spender combination
-   * @param {number} params.permit2Deadline - Unix timestamp when signature expires
+   * @param {string} [params.permit2Signature] - Pre-generated EIP-712 signature (not needed for native ETH)
+   * @param {number} [params.permit2Nonce] - Current nonce for this token/owner/spender (not needed for native ETH)
+   * @param {number} [params.permit2Deadline] - Unix timestamp when signature expires (not needed for native ETH)
+   * @param {boolean} [params.tokenInIsNative=false] - True if input is native ETH (skips Permit2 wrapping)
    * @returns {Promise<Object>} Transaction data with {to, data, value}
    * @throws {Error} If parameters are invalid
    */
   async generateAlphaSwapData(params) {
-    const { route, recipient, tokenInAddress, amountIn, permit2Signature, permit2Nonce, permit2Deadline } = params;
+    const {
+      route, recipient, tokenInAddress, amountIn,
+      permit2Signature, permit2Nonce, permit2Deadline,
+      tokenInIsNative = false
+    } = params;
 
     // Validate route object
     if (!route || typeof route !== 'object' || Array.isArray(route)) {
@@ -3528,7 +3815,21 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Route methodParameters must include calldata');
     }
 
-    // Validate recipient
+    // Validate Universal Router address (needed for both native and ERC20)
+    if (!this.addresses?.universalRouterAddress) {
+      throw new Error(`No Universal Router address found for chainId: ${this.chainId}`);
+    }
+
+    // Native ETH input - skip Permit2 wrapping, use route directly
+    if (tokenInIsNative) {
+      return {
+        to: this.addresses.universalRouterAddress,
+        data: route.methodParameters.calldata,
+        value: route.methodParameters.value
+      };
+    }
+
+    // ERC20 flow - validate recipient
     if (!recipient || typeof recipient !== 'string') {
       throw new Error('Recipient address parameter is required');
     }
@@ -3562,11 +3863,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
     if (typeof permit2Deadline !== 'number' || permit2Deadline <= 0) {
       throw new Error('permit2Deadline parameter is required and must be a positive number');
-    }
-
-    // Validate Universal Router address
-    if (!this.addresses?.universalRouterAddress) {
-      throw new Error(`No Universal Router address found for chainId: ${this.chainId}`);
     }
 
     // Construct permitData from provided parameters
