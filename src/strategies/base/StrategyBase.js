@@ -417,6 +417,18 @@ export default class StrategyBase {
 
     this.log(`Wrapping ${ethers.utils.formatEther(amount)} ETH to WETH`);
 
+    // Estimate gas before execution
+    let gasEstimated = '0';
+    try {
+      const estimate = await retryRpcCall(
+        () => vaultWithSigner.estimateGas.wrapETH(wethAddress, amount),
+        'estimateGas.wrapETH'
+      );
+      gasEstimated = estimate.toString();
+    } catch (e) {
+      this.log(`⚠️ Gas estimation failed for wrap: ${e.message}`);
+    }
+
     const receipt = await retryRpcCall(
       async () => {
         const tx = await vaultWithSigner.wrapETH(wethAddress, amount);
@@ -433,6 +445,10 @@ export default class StrategyBase {
       amount: amount.toString(),
       amountFormatted: ethers.utils.formatEther(amount),
       transactionHash: receipt.transactionHash,
+      gasUsed: receipt.gasUsed.toString(),
+      gasEstimated,
+      effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+      success: receipt.status === 1,
       timestamp: Date.now(),
       log: { level: 'info', message: `Wrapped ${ethers.utils.formatEther(amount)} ETH to WETH` }
     });
@@ -454,6 +470,18 @@ export default class StrategyBase {
 
     this.log(`Unwrapping ${ethers.utils.formatEther(amount)} WETH to ETH`);
 
+    // Estimate gas before execution
+    let gasEstimated = '0';
+    try {
+      const estimate = await retryRpcCall(
+        () => vaultWithSigner.estimateGas.unwrapETH(wethAddress, amount),
+        'estimateGas.unwrapETH'
+      );
+      gasEstimated = estimate.toString();
+    } catch (e) {
+      this.log(`⚠️ Gas estimation failed for unwrap: ${e.message}`);
+    }
+
     const receipt = await retryRpcCall(
       async () => {
         const tx = await vaultWithSigner.unwrapETH(wethAddress, amount);
@@ -470,6 +498,10 @@ export default class StrategyBase {
       amount: amount.toString(),
       amountFormatted: ethers.utils.formatEther(amount),
       transactionHash: receipt.transactionHash,
+      gasUsed: receipt.gasUsed.toString(),
+      gasEstimated,
+      effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+      success: receipt.status === 1,
       timestamp: Date.now(),
       log: { level: 'info', message: `Unwrapped ${ethers.utils.formatEther(amount)} WETH to ETH` }
     });

@@ -408,12 +408,9 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
     };
 
     beforeEach(() => {
-      // Mock batch swap transaction generation - empty deficit swaps first, then buffer swaps
+      // Mock batch swap transaction generation - single call with all swaps combined
+      // (code combines deficit + buffer instructions into one batchSwapTransactions call)
       mockPlatformUtils.batchSwapTransactions
-        .mockResolvedValueOnce({
-          transactions: [],
-          metadata: []
-        })
         .mockResolvedValueOnce({
           transactions: [
             { to: '0xRouter', data: '0xbuffer1', value: '0x00' },
@@ -496,24 +493,23 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
         return Promise.resolve({ amountIn: '1000000000', amountOut: '500000000000000000' });
       });
 
-      // Two calls to batchSwapTransactions - deficit and buffer
+      // Single call to batchSwapTransactions with all swaps combined (deficit + buffer)
+      // Code combines all swap instructions into one batch call
       mockPlatformUtils.batchSwapTransactions
         .mockResolvedValueOnce({
           transactions: [
+            // Deficit swaps (first 2)
             { to: '0xRouter', data: '0xdeficit1', value: '0x00' },
-            { to: '0xRouter', data: '0xdeficit2', value: '0x00' }
-          ],
-          metadata: [
-            { tokenInSymbol: 'WBTC', tokenOutSymbol: 'WETH', quotedAmountIn: '5000000', quotedAmountOut: '500000000000000000', isAmountIn: true },
-            { tokenInSymbol: 'USDC', tokenOutSymbol: 'WETH', quotedAmountIn: '1000000000', quotedAmountOut: '500000000000000000', isAmountIn: true }
-          ]
-        })
-        .mockResolvedValueOnce({
-          transactions: [
+            { to: '0xRouter', data: '0xdeficit2', value: '0x00' },
+            // Buffer swaps (last 2)
             { to: '0xRouter', data: '0xbuffer1', value: '0x00' },
             { to: '0xRouter', data: '0xbuffer2', value: '0x00' }
           ],
           metadata: [
+            // Deficit swap metadata (first 2)
+            { tokenInSymbol: 'WBTC', tokenOutSymbol: 'WETH', quotedAmountIn: '5000000', quotedAmountOut: '500000000000000000', isAmountIn: true },
+            { tokenInSymbol: 'USDC', tokenOutSymbol: 'WETH', quotedAmountIn: '1000000000', quotedAmountOut: '500000000000000000', isAmountIn: true },
+            // Buffer swap metadata (last 2)
             { tokenInSymbol: 'LINK', tokenOutSymbol: 'WETH', quotedAmountIn: '2500000000000000000', quotedAmountOut: '50000000000000000', isAmountIn: true },
             { tokenInSymbol: 'LINK', tokenOutSymbol: 'USDC', quotedAmountIn: '2500000000000000000', quotedAmountOut: '250000000', isAmountIn: true }
           ]

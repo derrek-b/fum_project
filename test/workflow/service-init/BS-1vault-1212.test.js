@@ -38,6 +38,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let feesDistributedEvents = [];
   let utilizationEvents = [];
   let tokenPreparationCompletedEvents = [];
+  let tokensSwappedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -192,6 +193,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('TokenPreparationCompleted', (data) => {
         tokenPreparationCompletedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('TokensSwapped', (data) => {
+        tokensSwappedEvents.push(data);
       });
 
       // Start the service
@@ -1164,6 +1169,153 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.phasesUsed.nonAlignedForDeficit).toBe(true);
       expect(event.phasesUsed.bufferSwaps).toBe(true);
       expect(event.phasesUsed.excessTargetTokens).toBe(false);
+    });
+  });
+
+  describe('Token Swap Execution (TokensSwapped event)', () => {
+    it('should emit TokensSwapped event for deficit swaps', () => {
+      // TokensSwapped events are emitted after successful swap execution
+      const deficitEvent = tokensSwappedEvents.find(e => e.swapType === 'deficit_coverage');
+
+      // Only expect deficit event if swaps were generated
+      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
+      if (tokenPrepEvent.preparationResult === 'swaps_generated' && tokenPrepEvent.deficitSwapCount > 0) {
+        expect(deficitEvent).toBeDefined();
+        expect(deficitEvent.success).toBe(true);
+        expect(deficitEvent.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+        expect(deficitEvent.swapCount).toBeGreaterThan(0);
+        expect(deficitEvent.transactionHash).toBeDefined();
+        expect(deficitEvent.gasUsed).toBeDefined();
+        expect(deficitEvent.effectiveGasPrice).toBeDefined();
+      }
+    });
+
+    it('should emit TokensSwapped event for buffer swaps', () => {
+      const bufferEvent = tokensSwappedEvents.find(e => e.swapType === 'buffer');
+
+      // Only expect buffer event if buffer swaps were generated
+      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
+      if (tokenPrepEvent.preparationResult === 'swaps_generated' && tokenPrepEvent.bufferSwapCount > 0) {
+        expect(bufferEvent).toBeDefined();
+        expect(bufferEvent.success).toBe(true);
+        expect(bufferEvent.swapCount).toBeGreaterThan(0);
+      }
+    });
+
+    it('should have actual amounts in swap details', () => {
+      // Get any TokensSwapped event
+      if (tokensSwappedEvents.length > 0) {
+        const event = tokensSwappedEvents[0];
+
+        for (const swap of event.swaps) {
+          // Must have all required fields
+          expect(swap.tokenInSymbol).toBeDefined();
+          expect(swap.tokenOutSymbol).toBeDefined();
+          expect(swap.quotedAmountIn).toBeDefined();
+          expect(swap.quotedAmountOut).toBeDefined();
+          expect(swap.actualAmountIn).toBeDefined();
+          expect(swap.actualAmountOut).toBeDefined();
+          expect(typeof swap.isAmountIn).toBe('boolean');
+
+          // Actual amounts should be > 0 for successful swaps
+          expect(BigInt(swap.actualAmountOut)).toBeGreaterThan(0n);
+        }
+      }
+    });
+
+    it('should have slippage within tolerance', () => {
+      // Check that actual amounts are within slippage tolerance of quoted amounts
+      if (tokensSwappedEvents.length > 0) {
+        const event = tokensSwappedEvents[0];
+        const maxSlippageBps = 50; // 0.5% default
+
+        for (const swap of event.swaps) {
+          const quoted = BigInt(swap.quotedAmountOut);
+          const actual = BigInt(swap.actualAmountOut);
+
+          if (quoted > 0n) {
+            // Calculate slippage in basis points: (quoted - actual) * 10000 / quoted
+            const slippageBps = (quoted - actual) * 10000n / quoted;
+
+            // Slippage should be less than max tolerance
+            // Note: negative slippage (got more than quoted) is fine
+            expect(slippageBps).toBeLessThanOrEqual(BigInt(maxSlippageBps));
+          }
+        }
+      }
+    });
+
+    it('should have consistent swap counts with TokenPreparationCompleted', () => {
+      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
+
+      if (tokenPrepEvent.preparationResult === 'swaps_generated') {
+        // Count total swaps from TokensSwapped events
+        const totalSwapsExecuted = tokensSwappedEvents.reduce((sum, e) => sum + e.swapCount, 0);
+
+        // Should match what was prepared
+        const expectedTotal = tokenPrepEvent.deficitSwapCount + tokenPrepEvent.bufferSwapCount;
+        expect(totalSwapsExecuted).toBe(expectedTotal);
+      }
+    });
+
+    it('should have actualAmountIn > 0 (validates receipt parsing)', () => {
+      // If actualAmountIn is 0, our extractSwapAmountsFromReceipt parsing is broken
+      if (tokensSwappedEvents.length > 0) {
+        for (const event of tokensSwappedEvents) {
+          for (const swap of event.swaps) {
+            expect(BigInt(swap.actualAmountIn)).toBeGreaterThan(0n);
+          }
+        }
+      }
+    });
+
+    it('should use WBTC as input token for deficit swaps (1212 scenario)', () => {
+      // Validates our token selection logic in prepareTokensForPosition
+      // 1212 scenario: WBTC is non-aligned, should be used for deficit coverage
+      const deficitEvent = tokensSwappedEvents.find(e => e.swapType === 'deficit_coverage');
+
+      if (deficitEvent) {
+        // At least one deficit swap should have WBTC as input
+        const wbtcSwaps = deficitEvent.swaps.filter(s => s.tokenInSymbol === 'WBTC');
+        expect(wbtcSwaps.length).toBeGreaterThan(0);
+
+        // Output should be target tokens (USDC or WETH)
+        for (const swap of deficitEvent.swaps) {
+          expect(['USDC', 'WETH']).toContain(swap.tokenOutSymbol);
+        }
+      }
+    });
+
+    it('should reflect balance changes after swap execution', () => {
+      // End-to-end verification: swaps actually moved tokens on-chain
+      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
+
+      if (tokenPrepEvent.preparationResult === 'swaps_generated' && tokensSwappedEvents.length > 0) {
+        // Get balances: post-closure (before swaps) vs final (after swaps)
+        // tokenBalancesFetchedEvents[1] = after position closure, before swaps
+        // tokenBalancesFetchedEvents[2] = after swaps (final refresh)
+        const preSwapBalances = tokenBalancesFetchedEvents[1]?.balances;
+        const postSwapBalances = tokenBalancesFetchedEvents[2]?.balances;
+
+        if (preSwapBalances && postSwapBalances) {
+          // WBTC (non-aligned, used as swap input) should decrease
+          const wbtcBefore = BigInt(preSwapBalances.WBTC || '0');
+          const wbtcAfter = BigInt(postSwapBalances.WBTC || '0');
+          expect(wbtcAfter).toBeLessThan(wbtcBefore);
+
+          // At least one target token should increase from swaps
+          // (USDC or WETH depending on which had deficit)
+          const usdcBefore = BigInt(preSwapBalances.USDC || '0');
+          const usdcAfter = BigInt(postSwapBalances.USDC || '0');
+          const wethBefore = BigInt(preSwapBalances.WETH || '0');
+          const wethAfter = BigInt(postSwapBalances.WETH || '0');
+
+          // Either USDC or WETH (or both) should have increased
+          const usdcIncreased = usdcAfter > usdcBefore;
+          const wethIncreased = wethAfter > wethBefore;
+          expect(usdcIncreased || wethIncreased).toBe(true);
+        }
+      }
     });
   });
 

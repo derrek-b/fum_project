@@ -53,6 +53,8 @@ export default class SSEBroadcaster {
       'LiquidityAddedToPosition',
       'FeesCollected',
       'TokensSwapped',
+      'ETHWrapped',
+      'ETHUnwrapped',
       'VaultBaselineCaptured',
       'MonitoringStarted',
       'VaultLoadFailed',

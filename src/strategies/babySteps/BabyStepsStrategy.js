@@ -1019,6 +1019,8 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
     let currentDeficitSwaps = deficitSwaps;
     let currentBufferSwaps = bufferSwaps;
+    let currentDeficitMetadata = metadata.deficit;
+    let currentBufferMetadata = metadata.buffer;
     const maxRetries = 1;
     let retryCount = 0;
 
@@ -1029,7 +1031,24 @@ export default class BabyStepsStrategy extends StrategyBase {
     while (currentDeficitSwaps.length > 0) {
       try {
         this.log(`Executing ${currentDeficitSwaps.length} deficit swaps (critical)${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
-        await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
+        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
+
+        // Extract actual amounts from receipt and emit TokensSwapped event
+        const actualSwaps = this.extractSwapAmountsFromReceipt(receipt, currentDeficitMetadata);
+        const swapDetails = this.buildSwapDetails(currentDeficitMetadata, actualSwaps);
+        this.eventManager.emit('TokensSwapped', {
+          vaultAddress: vault.address,
+          swapCount: swapDetails.length,
+          swapType: 'deficit_coverage',
+          swaps: swapDetails,
+          gasUsed: receipt.gasUsed.toString(),
+          gasEstimated: gasEstimated,
+          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+          transactionHash: receipt.transactionHash,
+          success: receipt.status === 1,
+          timestamp: Date.now()
+        });
+
         break; // Success - exit retry loop
       } catch (error) {
         retryCount++;
@@ -1069,9 +1088,11 @@ export default class BabyStepsStrategy extends StrategyBase {
           await this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount);
         }
 
-        // Update swaps for next iteration
+        // Update swaps and metadata for next iteration
         currentDeficitSwaps = freshResult.deficitSwaps;
         currentBufferSwaps = freshResult.bufferSwaps;
+        currentDeficitMetadata = freshResult.metadata.deficit;
+        currentBufferMetadata = freshResult.metadata.buffer;
 
         // If no deficit swaps needed after refresh, we're done
         if (currentDeficitSwaps.length === 0) {
@@ -1085,22 +1106,38 @@ export default class BabyStepsStrategy extends StrategyBase {
     if (currentBufferSwaps.length > 0) {
       try {
         this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
-        await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
+        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
+
+        // Extract actual amounts from receipt and emit TokensSwapped event
+        const actualSwaps = this.extractSwapAmountsFromReceipt(receipt, currentBufferMetadata);
+        const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
+        this.eventManager.emit('TokensSwapped', {
+          vaultAddress: vault.address,
+          swapCount: swapDetails.length,
+          swapType: 'buffer',
+          swaps: swapDetails,
+          gasUsed: receipt.gasUsed.toString(),
+          gasEstimated: gasEstimated,
+          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+          transactionHash: receipt.transactionHash,
+          success: receipt.status === 1,
+          timestamp: Date.now()
+        });
       } catch (error) {
         this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
         // Continue - buffer swaps are nice-to-have, not required
       }
     }
 
+    // Step 6: Refresh token balances after swaps are completed
+    vault.tokens = await this.vaultDataService.fetchTokenBalances(
+      vault.address,
+      Object.keys(this.tokens)
+    );
+
     // Validate against original requirements (ONLY if deficit swaps failed)
     // If deficit swaps succeeded, we got what we needed - no extra validation
     if (deficitSwapsFailed) {
-      // Refresh token balances to see what we actually have
-      vault.tokens = await this.vaultDataService.fetchTokenBalances(
-        vault.address,
-        Object.keys(this.tokens)
-      );
-
       const available0 = BigInt(vault.tokens[token0Data.symbol] || '0');
       const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
 
@@ -1133,8 +1170,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
     }
 
-    // TODO: Steps 6-8
-    // 6. JIT approval: adapter.getApprovalTarget('liquidity')
+    // TODO: Steps 7-9
     // 7. Get fresh quote
     // 8. Execute increaseLiquidity transaction
     // 9. Emit LiquidityAddedToPosition event
@@ -1583,5 +1619,164 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`⚠️ Failed to get swap quote ${tokenInData.symbol} → ${tokenOutData.symbol}: ${error.message}`);
       return null;
     }
+  }
+
+  // ===========================================================================
+  // Swap Receipt Parsing
+  // ===========================================================================
+
+  /**
+   * Extract actual swap amounts from swap receipt
+   * @param {Object} receipt - Transaction receipt from swap execution
+   * @param {Array} swapMetadata - Array of swap metadata in execution order
+   * @returns {Array} Actual swap amounts matching metadata order
+   */
+  extractSwapAmountsFromReceipt(receipt, swapMetadata) {
+    const actualSwaps = [];
+
+    // Uniswap V3 Pool Swap event
+    const swapInterface = new ethers.utils.Interface([
+      'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+    ]);
+    const swapTopicHash = swapInterface.getEventTopic('Swap');
+
+    // Collect all swap events from the receipt
+    const swapEvents = [];
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics[0] === swapTopicHash) {
+          const decoded = swapInterface.parseLog(log);
+          swapEvents.push({
+            poolAddress: log.address,  // Pool that emitted this event
+            amount0: decoded.args.amount0,
+            amount1: decoded.args.amount1
+          });
+        }
+      } catch (e) {
+        // Not a Swap event, continue
+      }
+    }
+
+    // Match swap events to metadata in order (swaps execute sequentially)
+    // Handle split routes by consuming multiple events per metadata entry
+    let eventIndex = 0;
+
+    for (const metadata of swapMetadata) {
+      const numEvents = metadata.expectedSwapEvents || 1; // Default to 1 for backwards compatibility
+
+      // Get token addresses for this swap
+      // Native tokens (isNative: true) have address: null, use AddressZero for ordering comparison
+      const tokenInData = this.tokens[metadata.tokenInSymbol];
+      const tokenOutData = this.tokens[metadata.tokenOutSymbol];
+      const tokenInAddress = (tokenInData?.isNative ? ethers.constants.AddressZero : tokenInData?.address).toLowerCase();
+      const tokenOutAddress = (tokenOutData?.isNative ? ethers.constants.AddressZero : tokenOutData?.address).toLowerCase();
+
+      let totalAmountIn = BigInt(0);
+      let totalAmountOut = BigInt(0);
+
+      // MULTI-HOP/SPLIT ROUTE: Use tokenPath to intelligently parse events
+      if (metadata.routes && metadata.routes.length > 0) {
+        // Process each sub-route
+        for (let routeIdx = 0; routeIdx < metadata.routes.length; routeIdx++) {
+          const route = metadata.routes[routeIdx];
+          const { tokenPath, poolCount } = route;
+
+          // For this route, we consume poolCount events
+          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
+            if (eventIndex >= swapEvents.length) {
+              break;
+            }
+
+            const event = swapEvents[eventIndex];
+            const isFirstHop = (hopIdx === 0);
+            const isLastHop = (hopIdx === poolCount - 1);
+
+            // For first hop: extract amountIn using tokenPath[0]
+            if (isFirstHop) {
+              const firstToken = tokenPath[0].toLowerCase();
+              const secondToken = tokenPath[1].toLowerCase();
+              const isToken0 = firstToken < secondToken;
+
+              const amountIn = isToken0
+                ? BigInt(event.amount0.abs().toString())
+                : BigInt(event.amount1.abs().toString());
+
+              totalAmountIn += amountIn;
+            }
+
+            // For last hop: extract amountOut using tokenPath[poolCount]
+            if (isLastHop) {
+              const secondToLastToken = tokenPath[poolCount - 1].toLowerCase();
+              const lastToken = tokenPath[poolCount].toLowerCase();
+              const isToken0 = secondToLastToken < lastToken;
+
+              const amountOut = isToken0
+                ? BigInt(event.amount1.abs().toString())
+                : BigInt(event.amount0.abs().toString());
+
+              totalAmountOut += amountOut;
+            }
+
+            eventIndex++;
+          }
+        }
+
+      } else {
+        // SIMPLE ROUTE: Single event, use basic token ordering
+        const isTokenInToken0 = tokenInAddress < tokenOutAddress;
+
+        // Consume exactly numEvents events for this metadata entry
+        for (let i = 0; i < numEvents; i++) {
+          if (eventIndex < swapEvents.length) {
+            const event = swapEvents[eventIndex];
+
+            const actualIn = isTokenInToken0
+              ? BigInt(event.amount0.abs().toString())
+              : BigInt(event.amount1.abs().toString());
+
+            const actualOut = isTokenInToken0
+              ? BigInt(event.amount1.abs().toString())
+              : BigInt(event.amount0.abs().toString());
+
+            totalAmountIn += actualIn;
+            totalAmountOut += actualOut;
+            eventIndex++;
+          } else {
+            // Not enough events - swap may have failed
+            break;
+          }
+        }
+      }
+
+      actualSwaps.push({
+        actualAmountIn: totalAmountIn.toString(),
+        actualAmountOut: totalAmountOut.toString()
+      });
+    }
+
+    return actualSwaps;
+  }
+
+  /**
+   * Build swap details by combining metadata with actual amounts
+   * @param {Array} swapMetadata - Array of swap metadata with quoted amounts
+   * @param {Array} actualSwaps - Array of actual amounts from receipt
+   * @returns {Array} Combined swap details with both quoted and actual amounts
+   */
+  buildSwapDetails(swapMetadata, actualSwaps) {
+    return swapMetadata.map((metadata, index) => {
+      const actual = actualSwaps[index] || { actualAmountIn: '0', actualAmountOut: '0' };
+      return {
+        tokenInSymbol: metadata.tokenInSymbol,
+        tokenOutSymbol: metadata.tokenOutSymbol,
+        quotedAmountIn: metadata.quotedAmountIn,
+        quotedAmountOut: metadata.quotedAmountOut,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut,
+        isAmountIn: metadata.isAmountIn,
+        expectedSwapEvents: metadata.expectedSwapEvents
+      };
+    });
   }
 }
