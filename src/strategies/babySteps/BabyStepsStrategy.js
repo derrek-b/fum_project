@@ -977,17 +977,26 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Get add liquidity amounts - platform-agnostic interface returns amounts in caller's token order
-    const quote = await adapter.getAddLiquidityAmounts({
-      position,
-      token0Amount: token0InputAmount.toString(),
-      token1Amount: "0",
-      provider: this.provider,
-      poolData: targetPool,
-      token0Data,
-      token1Data
-    });
+    const quote = await retryRpcCall(
+      () => adapter.getAddLiquidityAmounts({
+        position,
+        token0Amount: token0InputAmount.toString(),
+        token1Amount: "0",
+        provider: this.provider,
+        poolData: targetPool,
+        token0Data,
+        token1Data
+      }),
+      'adapter.getAddLiquidityAmounts'
+    );
 
     this.log(`Quote amounts received - need: ${ethers.utils.formatUnits(quote.token0Amount, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(quote.token1Amount, token1Data.decimals)} ${token1Data.symbol}`);
+
+    // Capture original requirements for post-swap validation (if deficit swaps fail)
+    const originalRequirements = {
+      token0Amount: BigInt(quote.token0Amount),
+      token1Amount: BigInt(quote.token1Amount)
+    };
 
     // Step 5: Prepare tokens (swap/wrap if needed to cover deficits)
     const { deficitSwaps, bufferSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
@@ -997,32 +1006,132 @@ export default class BabyStepsStrategy extends StrategyBase {
       token1Data
     );
 
-    // // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
-    // if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
-    //   this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
-    //   await this.executeWrap(vault, wrapUnwrap.wrapAmount);
-    // }
-    // if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
-    //   this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
-    //   await this.executeUnwrap(vault, wrapUnwrap.unwrapAmount);
-    // }
+    // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
+    if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
+      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
+      await this.executeWrap(vault, wrapUnwrap.wrapAmount);
+    }
+    if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
+      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
+      await this.executeUnwrap(vault, wrapUnwrap.unwrapAmount);
+    }
 
-    // // Execute deficit swaps (CRITICAL - must succeed)
-    // if (deficitSwaps.length > 0) {
-    //   this.log(`Executing ${deficitSwaps.length} deficit swaps (critical)`);
-    //   await this.executeBatchTransactions(vault, deficitSwaps, 'deficit swaps', 'swap');
-    // }
+    // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
+    let currentDeficitSwaps = deficitSwaps;
+    let currentBufferSwaps = bufferSwaps;
+    const maxRetries = 1;
+    let retryCount = 0;
 
-    // // Execute buffer swaps (OPTIONAL - failure is logged but doesn't block)
-    // if (bufferSwaps.length > 0) {
-    //   try {
-    //     this.log(`Executing ${bufferSwaps.length} buffer swaps (optional)`);
-    //     await this.executeBatchTransactions(vault, bufferSwaps, 'buffer swaps', 'swap');
-    //   } catch (error) {
-    //     this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
-    //     // Continue - buffer swaps are nice-to-have, not required
-    //   }
-    // }
+    // Track if deficit swaps failed - we'll still try buffer swaps
+    let deficitSwapsFailed = false;
+    let deficitSwapError = null;
+
+    while (currentDeficitSwaps.length > 0) {
+      try {
+        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps (critical)${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
+        await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
+        break; // Success - exit retry loop
+      } catch (error) {
+        retryCount++;
+        if (retryCount > maxRetries) {
+          // Don't throw yet - try buffer swaps first, then validate
+          deficitSwapsFailed = true;
+          deficitSwapError = error.message;
+          this.log(`⚠️ Deficit swaps failed after ${maxRetries} retry(s), continuing to buffer swaps...`);
+          break;
+        }
+
+        this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);
+        this.log(`   Failure reason: ${error.message}`);
+
+        // Refresh token balances to get current on-chain state
+        vault.tokens = await this.vaultDataService.fetchTokenBalances(
+          vault.address,
+          Object.keys(this.tokens)
+        );
+
+        // Regenerate swap transactions with fresh quotes and Permit2 nonces
+        const freshResult = await this.prepareTokensForPosition(
+          vault,
+          quote,
+          token0Data,
+          token1Data
+        );
+
+        // Note: wrap/unwrap already executed, so freshResult.wrapUnwrap should be 0
+        // But check just in case balances changed unexpectedly
+        if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
+          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
+          await this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount);
+        }
+        if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
+          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
+          await this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount);
+        }
+
+        // Update swaps for next iteration
+        currentDeficitSwaps = freshResult.deficitSwaps;
+        currentBufferSwaps = freshResult.bufferSwaps;
+
+        // If no deficit swaps needed after refresh, we're done
+        if (currentDeficitSwaps.length === 0) {
+          this.log('No deficit swaps needed after balance refresh');
+          break;
+        }
+      }
+    }
+
+    // Execute buffer swaps (OPTIONAL - failure is logged but doesn't block)
+    if (currentBufferSwaps.length > 0) {
+      try {
+        this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
+        await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
+      } catch (error) {
+        this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
+        // Continue - buffer swaps are nice-to-have, not required
+      }
+    }
+
+    // Validate against original requirements (ONLY if deficit swaps failed)
+    // If deficit swaps succeeded, we got what we needed - no extra validation
+    if (deficitSwapsFailed) {
+      // Refresh token balances to see what we actually have
+      vault.tokens = await this.vaultDataService.fetchTokenBalances(
+        vault.address,
+        Object.keys(this.tokens)
+      );
+
+      const available0 = BigInt(vault.tokens[token0Data.symbol] || '0');
+      const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
+
+      // Use maxSlippage as tolerance (user's configured acceptable variance)
+      const maxSlippage = vault.params?.maxSlippage || 0.5; // default 0.5%
+      const toleranceMultiplier = (100 - maxSlippage) / 100; // e.g., 0.995 for 0.5% slippage
+
+      const minRequired0 = BigInt(Math.floor(Number(originalRequirements.token0Amount) * toleranceMultiplier));
+      const minRequired1 = BigInt(Math.floor(Number(originalRequirements.token1Amount) * toleranceMultiplier));
+
+      const hasEnoughToken0 = available0 >= minRequired0;
+      const hasEnoughToken1 = available1 >= minRequired1;
+
+      if (!hasEnoughToken0 || !hasEnoughToken1) {
+        const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
+        const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
+
+        throw new Error(
+          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+          `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
+          `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
+          `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
+          `${token1Data.symbol}: need ${ethers.utils.formatUnits(minRequired1, token1Data.decimals)}, ` +
+          `have ${ethers.utils.formatUnits(available1, token1Data.decimals)} ` +
+          `(short ${ethers.utils.formatUnits(shortfall1, token1Data.decimals)}). ` +
+          `Original error: ${deficitSwapError}`
+        );
+      }
+
+      this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
+    }
 
     // TODO: Steps 6-8
     // 6. JIT approval: adapter.getApprovalTarget('liquidity')
@@ -1366,6 +1475,8 @@ export default class BabyStepsStrategy extends StrategyBase {
     await this.ensureApprovals(vault, tokenInAddresses, swapTarget);
 
     // Generate swap transactions - platformUtils handles platform-specific auth internally
+    // IMPORTANT: Generate ALL swaps in a single batch to share Permit2 nonce tracker
+    // (separate batches would create nonce collisions when executed sequentially)
     const platformUtils = PlatformUtilsFactory.getUtils(platformId);
     const swapOptions = {
       recipient: vault.address,
@@ -1375,11 +1486,14 @@ export default class BabyStepsStrategy extends StrategyBase {
       chainId: this.chainId
     };
 
-    const { transactions: deficitSwaps, metadata: deficitMetadata } =
-      await platformUtils.batchSwapTransactions(deficitSwapInstructions, swapOptions);
+    const { transactions: allSwapTransactions, metadata: allSwapMetadata } =
+      await platformUtils.batchSwapTransactions(allSwapInstructions, swapOptions);
 
-    const { transactions: bufferSwaps, metadata: bufferMetadata } =
-      await platformUtils.batchSwapTransactions(bufferSwapInstructions, swapOptions);
+    // Split transactions back into deficit and buffer swaps for separate execution
+    const deficitSwaps = allSwapTransactions.slice(0, deficitSwapInstructions.length);
+    const bufferSwaps = allSwapTransactions.slice(deficitSwapInstructions.length);
+    const deficitMetadata = allSwapMetadata.slice(0, deficitSwapInstructions.length);
+    const bufferMetadata = allSwapMetadata.slice(deficitSwapInstructions.length);
 
     // Build wrap/unwrap result
     const wrapUnwrapResult = {

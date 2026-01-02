@@ -9,6 +9,7 @@ import { ethers } from 'ethers';
 import PlatformUtilsBase from '../PlatformUtilsBase.js';
 import { getPermit2Nonce, generatePermit2Signature } from 'fum_library/helpers/Permit2Helper';
 import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
+import { retryRpcCall } from '../../utils/RetryHelper.js';
 
 /**
  * Uniswap V3 platform utilities
@@ -49,7 +50,10 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
     }
 
     // Get current tick from adapter (reuse existing code)
-    const currentTick = await adapter.getCurrentTick(position.pool, provider);
+    const currentTick = await retryRpcCall(
+      () => adapter.getCurrentTick(position.pool, provider),
+      'adapter.getCurrentTick'
+    );
 
     // Calculate range metrics
     const rangeSize = position.tickUpper - position.tickLower;
@@ -102,28 +106,34 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
 
     // 1. Get route from adapter using AlphaRouter
     // For native ETH, address is not required - adapter uses Ether.onChain() internally
-    const routeResult = await adapter.getSwapRoute({
-      tokenInAddress: tokenIn.isNative ? undefined : tokenIn.address,
-      tokenOutAddress: tokenOut.isNative ? undefined : tokenOut.address,
-      amount,
-      isAmountIn,
-      recipient,
-      slippageTolerance,
-      deadlineMinutes: 30,
-      tokenInIsNative: tokenIn.isNative || false,
-      tokenOutIsNative: tokenOut.isNative || false
-    });
+    const routeResult = await retryRpcCall(
+      () => adapter.getSwapRoute({
+        tokenInAddress: tokenIn.isNative ? undefined : tokenIn.address,
+        tokenOutAddress: tokenOut.isNative ? undefined : tokenOut.address,
+        amount,
+        isAmountIn,
+        recipient,
+        slippageTolerance,
+        deadlineMinutes: 30,
+        tokenInIsNative: tokenIn.isNative || false,
+        tokenOutIsNative: tokenOut.isNative || false
+      }),
+      'adapter.getSwapRoute'
+    );
 
     // 2. Branch: native ETH input skips Permit2
     if (tokenIn.isNative) {
       // Native ETH - use route directly, no Permit2 needed
-      const swapData = await adapter.generateAlphaSwapData({
-        route: routeResult.route,
-        recipient,
-        tokenInAddress: undefined,
-        amountIn: routeResult.amountIn,
-        tokenInIsNative: true
-      });
+      const swapData = await retryRpcCall(
+        () => adapter.generateAlphaSwapData({
+          route: routeResult.route,
+          recipient,
+          tokenInAddress: undefined,
+          amountIn: routeResult.amountIn,
+          tokenInIsNative: true
+        }),
+        'adapter.generateAlphaSwapData(native)'
+      );
 
       return {
         transaction: swapData,
@@ -145,11 +155,14 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
       nonce = _nonceTracker.get(tokenIn.address);
     } else {
       // Fetch current nonce from Permit2 contract
-      nonce = await getPermit2Nonce(
-        provider,
-        recipient,
-        tokenIn.address,
-        addresses.universalRouterAddress
+      nonce = await retryRpcCall(
+        () => getPermit2Nonce(
+          provider,
+          recipient,
+          tokenIn.address,
+          addresses.universalRouterAddress
+        ),
+        'getPermit2Nonce'
       );
     }
 
@@ -169,15 +182,18 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
     );
 
     // 5. Generate wrapped swap calldata via adapter
-    const swapData = await adapter.generateAlphaSwapData({
-      route: routeResult.route,
-      recipient,
-      tokenInAddress: tokenIn.address,
-      amountIn: routeResult.amountIn,
-      permit2Signature: signature,
-      permit2Nonce: nonce,
-      permit2Deadline: deadline
-    });
+    const swapData = await retryRpcCall(
+      () => adapter.generateAlphaSwapData({
+        route: routeResult.route,
+        recipient,
+        tokenInAddress: tokenIn.address,
+        amountIn: routeResult.amountIn,
+        permit2Signature: signature,
+        permit2Nonce: nonce,
+        permit2Deadline: deadline
+      }),
+      'adapter.generateAlphaSwapData(erc20)'
+    );
 
     return {
       transaction: swapData,

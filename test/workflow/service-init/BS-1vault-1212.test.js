@@ -61,7 +61,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       {
         vaultName: '1AP/2NP/1AT/2NT Test Vault',
         automationServiceAddress: testConfig.automationServiceAddress,
-        wrapEthAmount: '10',
+        wrapEthAmount: '20',  // Increased to fund larger fee-generating swaps
         nativeEthAmount: '2',  // Send 2 ETH directly to vault (non-aligned, will need wrapping)
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '2' },
@@ -95,17 +95,12 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
           {
             pool: { token0: 'WBTC', token1: 'WETH', fee: 500 },
             swaps: [
-              // Multiple back-and-forth swaps to generate fees in both tokens
-              // WBTC needs more fee volume because integer division with 50% reinvestment
-              // rounds small amounts to zero (1 satoshi * 5000 / 10000 = 0)
-              { from: 'WETH', to: 'WBTC', amount: '0.3' },
-              { from: 'WBTC', to: 'WETH', amount: '0.01' },
-              { from: 'WETH', to: 'WBTC', amount: '0.3' },
-              { from: 'WBTC', to: 'WETH', amount: '0.01' },
-              { from: 'WETH', to: 'WBTC', amount: '0.3' },
-              { from: 'WBTC', to: 'WETH', amount: '0.01' },
-              { from: 'WETH', to: 'WBTC', amount: '0.3' },
-              { from: 'WBTC', to: 'WETH', amount: '0.01' }
+              // Larger swaps to generate enough WBTC fees (>1 satoshi)
+              // so 50% reinvestment doesn't round to 0
+              { from: 'WETH', to: 'WBTC', amount: '5.0' },
+              { from: 'WBTC', to: 'WETH', amount: '0.15' },
+              { from: 'WETH', to: 'WBTC', amount: '5.0' },
+              { from: 'WBTC', to: 'WETH', amount: '0.15' }
             ]
           }
         ],

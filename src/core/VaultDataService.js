@@ -7,7 +7,7 @@
 
 import { ethers } from 'ethers';
 import { fetchTokenPrices, CACHE_DURATIONS } from 'fum_library/services/coingecko';
-import { retryWithBackoff } from '../utils/RetryHelper.js';
+import { retryWithBackoff, retryRpcCall } from '../utils/RetryHelper.js';
 import {
   getVaultContract,
   getVaultInfo,
@@ -143,10 +143,10 @@ class VaultDataService {
         targetTokens,
         targetPlatforms
       ] = await Promise.all([
-        getVaultInfo(normalizedAddress, this.provider),
-        vaultContract.strategy(),
-        vaultContract.getTargetTokens(),
-        vaultContract.getTargetPlatforms()
+        retryRpcCall(() => getVaultInfo(normalizedAddress, this.provider), 'getVaultInfo'),
+        retryRpcCall(() => vaultContract.strategy(), 'vault.strategy'),
+        retryRpcCall(() => vaultContract.getTargetTokens(), 'vault.getTargetTokens'),
+        retryRpcCall(() => vaultContract.getTargetPlatforms(), 'vault.getTargetPlatforms')
       ]);
 
       if (!strategyAddress || strategyAddress === ethers.constants.AddressZero) {
@@ -157,7 +157,10 @@ class VaultDataService {
       try {
         const contractInfo = getContractInfoByAddress(strategyAddress);
         const strategyContract = await getContract(contractInfo.contractName, this.provider);
-        const rawParams = await strategyContract.getAllParameters(normalizedAddress);
+        const rawParams = await retryRpcCall(
+          () => strategyContract.getAllParameters(normalizedAddress),
+          'strategy.getAllParameters'
+        );
         const mappedParams = mapStrategyParameters(contractInfo.contractName, rawParams);
 
         strategyData = {
@@ -221,7 +224,10 @@ class VaultDataService {
       const balancePromises = tokenSymbols.map(async (symbol) => {
         try {
           if (isNativeToken(symbol)) {
-            const balance = await this.provider.getBalance(vaultAddress);
+            const balance = await retryRpcCall(
+              () => this.provider.getBalance(vaultAddress),
+              `getBalance(${symbol})`
+            );
             return { symbol, balance: balance.toString() };
           }
 
@@ -232,7 +238,10 @@ class VaultDataService {
             tokenAddress = getTokenAddress(symbol, this.chainId);
           }
           const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
-          const balance = await tokenContract.balanceOf(vaultAddress);
+          const balance = await retryRpcCall(
+            () => tokenContract.balanceOf(vaultAddress),
+            `balanceOf(${symbol})`
+          );
 
           return { symbol, balance: balance.toString() };
         } catch (error) {
@@ -279,7 +288,10 @@ class VaultDataService {
         throw new Error(`Adapter ${adapter.platformName} does not implement getPositionsForVDS method`);
       }
 
-      const result = await adapter.getPositionsForVDS(vaultAddress, this.provider);
+      const result = await retryRpcCall(
+        () => adapter.getPositionsForVDS(vaultAddress, this.provider),
+        `getPositionsForVDS(${adapter.platformName})`
+      );
 
       if (result.positions && Object.keys(result.positions).length > 0) {
         Object.assign(vaultPositions, result.positions);
@@ -495,7 +507,10 @@ class VaultDataService {
 
         let freshPoolData;
         if (!poolData[position.pool]) {
-          freshPoolData = await adapter.getPoolData(position.pool, {}, this.provider);
+          freshPoolData = await retryRpcCall(
+            () => adapter.getPoolData(position.pool, {}, this.provider),
+            `getPoolData(${position.pool.slice(0, 10)})`
+          );
           poolData[position.pool] = freshPoolData;
         } else {
           freshPoolData = poolData[position.pool];
@@ -506,8 +521,9 @@ class VaultDataService {
 
         if (!token0Data || !token1Data) continue;
 
-        const tokenAmounts = await adapter.calculateTokenAmounts(
-          position, freshPoolData, token0Data, token1Data
+        const tokenAmounts = await retryRpcCall(
+          () => adapter.calculateTokenAmounts(position, freshPoolData, token0Data, token1Data),
+          `calculateTokenAmounts(${positionId})`
         );
 
         const token0Formatted = ethers.utils.formatUnits(tokenAmounts[0], token0Data.decimals);

@@ -311,20 +311,20 @@ export default class StrategyBase {
   async _estimateGasForType(vaultContract, type, targets, calldatas, values, totalValue) {
     switch (type) {
       case 'swap':
-        // swap(targets, data, values) - payable
-        return vaultContract.estimateGas.swap(targets, calldatas, values, { value: totalValue });
+        // swap(targets, data, values) - NOT payable, vault uses its internal ETH balance
+        return retryRpcCall(() => vaultContract.estimateGas.swap(targets, calldatas, values), 'estimateGas.swap');
       case 'approval':
-        return vaultContract.estimateGas.approve(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.approve(targets, calldatas), 'estimateGas.approve');
       case 'mint':
-        return vaultContract.estimateGas.mint(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.mint(targets, calldatas), 'estimateGas.mint');
       case 'addliq':
-        return vaultContract.estimateGas.increaseLiquidity(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.increaseLiquidity(targets, calldatas), 'estimateGas.increaseLiquidity');
       case 'subliq':
-        return vaultContract.estimateGas.decreaseLiquidity(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.decreaseLiquidity(targets, calldatas), 'estimateGas.decreaseLiquidity');
       case 'collect':
-        return vaultContract.estimateGas.collect(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.collect(targets, calldatas), 'estimateGas.collect');
       case 'burn':
-        return vaultContract.estimateGas.burn(targets, calldatas);
+        return retryRpcCall(() => vaultContract.estimateGas.burn(targets, calldatas), 'estimateGas.burn');
       default:
         throw new Error(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
     }
@@ -344,8 +344,8 @@ export default class StrategyBase {
   async _executeForType(vaultContract, type, targets, calldatas, values, totalValue) {
     switch (type) {
       case 'swap':
-        // swap(targets, data, values) - payable
-        return vaultContract.swap(targets, calldatas, values, { value: totalValue });
+        // swap(targets, data, values) - NOT payable, vault uses its internal ETH balance
+        return vaultContract.swap(targets, calldatas, values);
       case 'approval':
         return vaultContract.approve(targets, calldatas);
       case 'mint':
