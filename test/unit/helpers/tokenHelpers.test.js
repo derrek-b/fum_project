@@ -22,8 +22,7 @@ import {
   isStablecoin,
   detectStablePair,
   isNativeToken,
-  getWethAddress,
-  getTokenAddressForProtocol
+  getWethAddress
 } from '../../../src/helpers/tokenHelpers.js';
 import tokens from '../../../src/configs/tokens.js';
 
@@ -1125,72 +1124,6 @@ describe('Token Helpers', () => {
 
       it('should throw error for unsupported chain', () => {
         expect(() => getWethAddress(999999)).toThrow('WETH not available on chain 999999');
-      });
-    });
-  });
-
-  describe('getTokenAddressForProtocol', () => {
-    describe('Success Cases', () => {
-      it('should return WETH address for ETH on V3', () => {
-        const result = getTokenAddressForProtocol('ETH', 1, 'v3');
-        expect(result).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
-      });
-
-      it('should return AddressZero for ETH on V4', () => {
-        const result = getTokenAddressForProtocol('ETH', 1, 'v4');
-        expect(result).toBe('0x0000000000000000000000000000000000000000');
-      });
-
-      it('should return same address for USDC on both V3 and V4', () => {
-        const v3Result = getTokenAddressForProtocol('USDC', 1, 'v3');
-        const v4Result = getTokenAddressForProtocol('USDC', 1, 'v4');
-
-        expect(v3Result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(v4Result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(v3Result).toBe(v4Result);
-      });
-
-      it('should work on Arbitrum for ETH', () => {
-        const v3Result = getTokenAddressForProtocol('ETH', 42161, 'v3');
-        const v4Result = getTokenAddressForProtocol('ETH', 42161, 'v4');
-
-        expect(v3Result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
-        expect(v4Result).toBe('0x0000000000000000000000000000000000000000');
-      });
-
-      it('should return ERC20 address for non-native tokens', () => {
-        const result = getTokenAddressForProtocol('WBTC', 1, 'v3');
-        expect(result).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
-      });
-    });
-
-    describe('Error Cases', () => {
-      it('should throw error for invalid symbol', () => {
-        expect(() => getTokenAddressForProtocol(null, 1, 'v3')).toThrow('Token symbol parameter is required');
-        expect(() => getTokenAddressForProtocol('', 1, 'v3')).toThrow('Token symbol cannot be empty');
-      });
-
-      it('should throw error for invalid chainId', () => {
-        expect(() => getTokenAddressForProtocol('ETH', null, 'v3')).toThrow('Chain ID parameter is required');
-        expect(() => getTokenAddressForProtocol('ETH', 'invalid', 'v3')).toThrow('Chain ID must be a positive integer');
-      });
-
-      it('should throw error for invalid protocol', () => {
-        expect(() => getTokenAddressForProtocol('ETH', 1, null)).toThrow('Protocol must be "v3" or "v4"');
-        expect(() => getTokenAddressForProtocol('ETH', 1, 'v2')).toThrow('Protocol must be "v3" or "v4"');
-        expect(() => getTokenAddressForProtocol('ETH', 1, 'V3')).toThrow('Protocol must be "v3" or "v4"');
-      });
-
-      it('should throw error for unknown token', () => {
-        expect(() => getTokenAddressForProtocol('UNKNOWN', 1, 'v3')).toThrow('Token UNKNOWN not found');
-      });
-
-      it('should throw error for token not available on chain', () => {
-        expect(() => getTokenAddressForProtocol('USDC', 999999, 'v3')).toThrow('Token USDC not available on chain 999999');
-      });
-
-      it('should throw error for ETH not available on unsupported chain', () => {
-        expect(() => getTokenAddressForProtocol('ETH', 999999, 'v3')).toThrow('WETH address not available for ETH on chain 999999');
       });
     });
   });

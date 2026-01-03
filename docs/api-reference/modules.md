@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-03T03:29:35.174Z
+Generated on: 2026-01-03T15:03:19.884Z
 
 ## Table of Contents
 
@@ -365,7 +365,6 @@ Permit2 Helper Functions
 - `getCoingeckoId` (function)
 - `isNativeToken` (function)
 - `getWethAddress` (function)
-- `getTokenAddressForProtocol` (function)
 
 ---
 

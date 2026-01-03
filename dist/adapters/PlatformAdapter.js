@@ -23,6 +23,10 @@
  * | parseClosureReceipt          | Strategy.closePositions    | CONFIRMED |
  * | generateRemoveLiquidityData  | Strategy.closePositions    | CONFIRMED |
  * | getAddLiquidityAmounts       | Strategy.addToPosition     | CONFIRMED |
+ * | generateAddLiquidityData     | Strategy.addToPosition     | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.addToPosition     | CONFIRMED |
+ * | parseIncreaseLiquidityReceipt| Strategy.addToPosition     | CONFIRMED |
+ * | getBestSwapQuote             | Strategy.addToPosition     | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -31,7 +35,6 @@
  * | isPositionInRange            | Likely interface - hides tick logic |
  * | calculateUncollectedFees     | Likely interface - hides fee logic  |
  * | generateSwapData             | Likely interface - tx generation    |
- * | generateAddLiquidityData     | Likely interface - tx generation    |
  * | generateCreatePositionData   | Likely interface - tx generation    |
  * | generateClaimFeesData        | Likely interface - tx generation    |
  *
@@ -330,6 +333,66 @@ export default class PlatformAdapter {
    */
   parseClosureReceipt(receipt, positionMetadata) {
     throw new Error("parseClosureReceipt must be implemented by subclasses");
+  }
+
+  /**
+   * Parse swap transaction receipt to extract actual swap amounts
+   *
+   * When swaps are executed, this method parses the transaction receipt to extract
+   * the actual amounts swapped from platform-specific Swap events.
+   *
+   * @param {Object} receipt - Transaction receipt from swap execution
+   * @param {Object} receipt.logs - Array of transaction logs
+   * @param {Array} swapMetadata - Array of swap metadata in execution order
+   * @param {string} swapMetadata[].tokenInAddress - Input token address
+   * @param {string} swapMetadata[].tokenOutAddress - Output token address
+   * @param {number} [swapMetadata[].expectedSwapEvents=1] - Number of swap events for this swap
+   * @param {Array} [swapMetadata[].routes] - Multi-hop route info for split routes
+   * @returns {Array<{actualAmountIn: string, actualAmountOut: string}>} Actual amounts per swap
+   * @throws {Error} If receipt or swapMetadata is null/undefined
+   */
+  parseSwapReceipt(receipt, swapMetadata) {
+    throw new Error("parseSwapReceipt must be implemented by subclasses");
+  }
+
+  /**
+   * Parse increaseLiquidity transaction receipt to extract actual amounts
+   *
+   * When liquidity is added to an existing position or a new position is created,
+   * this method parses the transaction receipt to extract the actual token amounts
+   * consumed and liquidity added.
+   *
+   * @param {Object} receipt - Transaction receipt from increaseLiquidity/mint
+   * @param {Object} receipt.logs - Array of transaction logs
+   * @returns {Object} Parsed position data
+   * @returns {string} result.tokenId - Position NFT token ID
+   * @returns {string} result.liquidity - Liquidity added
+   * @returns {string} result.amount0 - Actual token0 amount consumed
+   * @returns {string} result.amount1 - Actual token1 amount consumed
+   * @returns {number|null} result.tickLower - Lower tick (only for new positions)
+   * @returns {number|null} result.tickUpper - Upper tick (only for new positions)
+   * @returns {string|null} result.poolAddress - Pool address (only for new positions)
+   * @throws {Error} If receipt is null/undefined or IncreaseLiquidity event not found
+   */
+  parseIncreaseLiquidityReceipt(receipt) {
+    throw new Error("parseIncreaseLiquidityReceipt must be implemented by subclasses");
+  }
+
+  /**
+   * Get best swap quote using platform's routing mechanism
+   *
+   * @param {Object} params - Parameters for getting best swap quote
+   * @param {string} [params.tokenInAddress] - Address of input token (not required if tokenInIsNative=true)
+   * @param {string} [params.tokenOutAddress] - Address of output token (not required if tokenOutIsNative=true)
+   * @param {string} params.amount - Amount to trade (interpretation depends on isAmountIn)
+   * @param {boolean} params.isAmountIn - True if amount is input (EXACT_INPUT), false if amount is output (EXACT_OUTPUT)
+   * @param {boolean} [params.tokenInIsNative=false] - True if input token is native ETH
+   * @param {boolean} [params.tokenOutIsNative=false] - True if output token is native ETH
+   * @returns {Promise<Object>} Quote with { amountIn: string, amountOut: string, route: Object, methodParameters?: Object }
+   * @throws {Error} If no valid route can be found
+   */
+  async getBestSwapQuote(params) {
+    throw new Error("getBestSwapQuote must be implemented by subclasses");
   }
 
   /**
