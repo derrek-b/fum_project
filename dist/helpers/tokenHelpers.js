@@ -515,13 +515,12 @@ export function getTokenAddress(symbol, chainId) {
     throw new Error(`Token ${symbol} not found`);
   }
 
-  // For native tokens, addresses[chainId] is null - return null instead of throwing
+  // For native tokens, verify chain support via wethAddresses
   if (token.isNative) {
-    // Verify the chain is supported by checking wethAddresses
     if (!token.wethAddresses || !token.wethAddresses[chainId]) {
       throw new Error(`Token ${symbol} not available on chain ${chainId}`);
     }
-    return null;
+    // Native ETH returns AddressZero (set in config)
   }
 
   const address = token.addresses[chainId];
@@ -559,7 +558,7 @@ export function getTokenAddresses(symbols, chainId) {
 
   const addresses = {};
   symbols.forEach(symbol => {
-    // getTokenAddress returns null for native tokens, which is valid
+    // getTokenAddress returns AddressZero for native tokens
     addresses[symbol] = getTokenAddress(symbol, chainId);
   });
 
@@ -783,7 +782,7 @@ export function getTokenAddressForProtocol(symbol, chainId, protocol) {
     throw new Error(`Token ${symbol} not found`);
   }
 
-  // For native tokens (like ETH), return WETH for V3, null for V4
+  // For native tokens (like ETH), return WETH for V3, AddressZero for V4
   if (token.isNative) {
     if (protocol === 'v3') {
       if (!token.wethAddresses || !token.wethAddresses[chainId]) {
@@ -791,8 +790,8 @@ export function getTokenAddressForProtocol(symbol, chainId, protocol) {
       }
       return token.wethAddresses[chainId];
     } else {
-      // V4 uses native ETH
-      return null;
+      // V4 uses native ETH (AddressZero)
+      return token.addresses[chainId];
     }
   }
 

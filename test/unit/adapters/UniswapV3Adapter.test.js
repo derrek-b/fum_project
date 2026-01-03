@@ -11511,4 +11511,305 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
     });
   });
+
+  describe('parseSwapReceipt', () => {
+    // Mock Swap event log for testing
+    const createMockSwapLog = (poolAddress, amount0, amount1) => {
+      const swapInterface = new ethers.utils.Interface([
+        'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+      ]);
+      const eventFragment = swapInterface.getEvent('Swap');
+      const eventTopic = swapInterface.getEventTopic(eventFragment);
+
+      // Encode the non-indexed parameters
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['int256', 'int256', 'uint160', 'uint128', 'int24'],
+        [amount0, amount1, '79228162514264337593543950336', '1000000000', 0]
+      );
+
+      // Create indexed topics for sender and recipient
+      const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+      const recipientTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+
+      return {
+        address: poolAddress,
+        topics: [eventTopic, senderTopic, recipientTopic],
+        data: encodedData
+      };
+    };
+
+    describe('Success Cases', () => {
+      it('should parse single swap event correctly', () => {
+        const tokenInAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC (lower)
+        const tokenOutAddress = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'; // WETH (higher)
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+
+        // amount0 negative (USDC out from pool perspective), amount1 positive (WETH in)
+        // When user swaps USDC for WETH: they give USDC (amount0 positive) get WETH (amount1 negative)
+        const mockLog = createMockSwapLog(poolAddress, '1000000', '-500000000000000000');
+
+        const receipt = { logs: [mockLog] };
+        const metadata = [{
+          tokenInAddress,
+          tokenOutAddress,
+          expectedSwapEvents: 1
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000');
+        expect(result[0].actualAmountOut).toBe('500000000000000000');
+      });
+
+      it('should parse multiple swap events in order', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+
+        const mockLog1 = createMockSwapLog(poolAddress, '1000000', '-500000000000000000');
+        const mockLog2 = createMockSwapLog(poolAddress, '2000000', '-1000000000000000000');
+
+        const receipt = { logs: [mockLog1, mockLog2] };
+        const metadata = [
+          {
+            tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+            tokenOutAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+            expectedSwapEvents: 1
+          },
+          {
+            tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+            tokenOutAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+            expectedSwapEvents: 1
+          }
+        ];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(2);
+        expect(result[0].actualAmountIn).toBe('1000000');
+        expect(result[1].actualAmountIn).toBe('2000000');
+      });
+
+      it('should return empty array for empty metadata', () => {
+        const receipt = { logs: [] };
+        const result = adapter.parseSwapReceipt(receipt, []);
+
+        expect(result).toEqual([]);
+      });
+
+      it('should handle receipt with no matching swap events', () => {
+        const receipt = { logs: [] };
+        const metadata = [{
+          tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+          tokenOutAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+          expectedSwapEvents: 1
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('0');
+        expect(result[0].actualAmountOut).toBe('0');
+      });
+
+      it('should handle multi-hop routes with tokenPath', () => {
+        const poolAddress1 = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const poolAddress2 = '0x4585FE77225b41b697C938B018E2Ac67Ac5a20c0';
+
+        // First hop: USDC -> WETH (USDC is token0, WETH is token1)
+        // User sends USDC (amount0 positive), receives WETH (amount1 negative)
+        const mockLog1 = createMockSwapLog(poolAddress1, '1000000000', '-500000000000000000');
+        // Second hop: WETH -> WBTC (WBTC is token0, WETH is token1)
+        // User sends WETH (amount1 positive), receives WBTC (amount0 negative)
+        const mockLog2 = createMockSwapLog(poolAddress2, '-2500000', '500000000000000000');
+
+        const receipt = { logs: [mockLog1, mockLog2] };
+        const metadata = [{
+          tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+          tokenOutAddress: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC
+          expectedSwapEvents: 2,
+          routes: [{
+            tokenPath: [
+              '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+              '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+              '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'  // WBTC
+            ],
+            poolCount: 2
+          }]
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000');
+        expect(result[0].actualAmountOut).toBe('2500000');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw for null receipt', () => {
+        expect(() => adapter.parseSwapReceipt(null, [])).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', () => {
+        expect(() => adapter.parseSwapReceipt(undefined, [])).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs', () => {
+        expect(() => adapter.parseSwapReceipt({}, [])).toThrow('Receipt must have logs property');
+      });
+
+      it('should throw for null swapMetadata', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, null)).toThrow('Swap metadata parameter is required');
+      });
+
+      it('should throw for non-array swapMetadata', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, {})).toThrow('Swap metadata must be an array');
+      });
+
+      it('should throw for metadata missing tokenInAddress', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, [{ tokenOutAddress: '0x123' }]))
+          .toThrow('Swap metadata must have tokenInAddress');
+      });
+
+      it('should throw for metadata missing tokenOutAddress', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, [{ tokenInAddress: '0x123' }]))
+          .toThrow('Swap metadata must have tokenOutAddress');
+      });
+    });
+  });
+
+  describe('parseIncreaseLiquidityReceipt', () => {
+    // Helper to create mock IncreaseLiquidity log
+    const createMockIncreaseLiquidityLog = (tokenId, liquidity, amount0, amount1) => {
+      const pmInterface = new ethers.utils.Interface([
+        'event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)'
+      ]);
+      const eventTopic = pmInterface.getEventTopic('IncreaseLiquidity');
+
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['uint128', 'uint256', 'uint256'],
+        [liquidity, amount0, amount1]
+      );
+
+      const tokenIdTopic = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
+
+      return {
+        address: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // NFT PM address
+        topics: [eventTopic, tokenIdTopic],
+        data: encodedData
+      };
+    };
+
+    // Helper to create mock Mint log (pool event for new positions)
+    const createMockMintLog = (poolAddress, tickLower, tickUpper, amount0, amount1) => {
+      const mintInterface = new ethers.utils.Interface([
+        'event Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)'
+      ]);
+      const eventTopic = mintInterface.getEventTopic('Mint');
+
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['address', 'uint128', 'uint256', 'uint256'],
+        ['0xC36442b4a4522E871399CD717aBDD847Ab11FE88', '1000000000', amount0, amount1]
+      );
+
+      // Owner is indexed, tickLower and tickUpper are indexed
+      const ownerTopic = ethers.utils.hexZeroPad('0xC36442b4a4522E871399CD717aBDD847Ab11FE88', 32);
+      const tickLowerTopic = ethers.utils.hexZeroPad(
+        ethers.BigNumber.from(tickLower).toTwos(24).toHexString(), 32
+      );
+      const tickUpperTopic = ethers.utils.hexZeroPad(
+        ethers.BigNumber.from(tickUpper).toTwos(24).toHexString(), 32
+      );
+
+      return {
+        address: poolAddress,
+        topics: [eventTopic, ownerTopic, tickLowerTopic, tickUpperTopic],
+        data: encodedData
+      };
+    };
+
+    describe('Success Cases', () => {
+      it('should parse IncreaseLiquidity event for existing position', () => {
+        const mockLog = createMockIncreaseLiquidityLog('12345', '1000000000000', '500000000', '250000000000000000');
+
+        const receipt = { logs: [mockLog] };
+        const result = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+        expect(result.tokenId).toBe('12345');
+        expect(result.liquidity).toBe('1000000000000');
+        expect(result.amount0).toBe('500000000');
+        expect(result.amount1).toBe('250000000000000000');
+        expect(result.tickLower).toBeNull();
+        expect(result.tickUpper).toBeNull();
+        expect(result.poolAddress).toBeNull();
+      });
+
+      it('should parse Mint event data for new positions', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const increaseLiqLog = createMockIncreaseLiquidityLog('12345', '1000000000000', '500000000', '250000000000000000');
+        const mintLog = createMockMintLog(poolAddress, -887220, 887220, '500000000', '250000000000000000');
+
+        const receipt = { logs: [increaseLiqLog, mintLog] };
+        const result = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+        expect(result.tokenId).toBe('12345');
+        expect(result.liquidity).toBe('1000000000000');
+        expect(result.amount0).toBe('500000000');
+        expect(result.amount1).toBe('250000000000000000');
+        expect(result.tickLower).toBe(-887220);
+        expect(result.tickUpper).toBe(887220);
+        expect(result.poolAddress).toBe(poolAddress);
+      });
+
+      it('should return correct token amounts and liquidity', () => {
+        const mockLog = createMockIncreaseLiquidityLog('99999', '5000000000000000', '1000000000000', '2000000000000000000');
+
+        const receipt = { logs: [mockLog] };
+        const result = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+        expect(result.tokenId).toBe('99999');
+        expect(result.liquidity).toBe('5000000000000000');
+        expect(result.amount0).toBe('1000000000000');
+        expect(result.amount1).toBe('2000000000000000000');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw if no IncreaseLiquidity event found', () => {
+        const receipt = { logs: [] };
+
+        expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
+          .toThrow('IncreaseLiquidity event not found in receipt');
+      });
+
+      it('should throw for null receipt', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt(null))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt(undefined))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs property', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt({}))
+          .toThrow('Receipt must have logs property');
+      });
+
+      it('should handle logs that are not IncreaseLiquidity events', () => {
+        // Random log that won't match
+        const randomLog = {
+          address: '0x1234567890123456789012345678901234567890',
+          topics: ['0x1234'],
+          data: '0x'
+        };
+
+        const receipt = { logs: [randomLog] };
+
+        expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
+          .toThrow('IncreaseLiquidity event not found in receipt');
+      });
+    });
+  });
 });

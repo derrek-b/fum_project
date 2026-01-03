@@ -70,11 +70,12 @@ function validateTokenAddresses(tokenKey, token, expectedChainIds) {
   });
 
   // Validate each address format
+  const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000';
   Object.entries(addresses).forEach(([chainId, address]) => {
-    // Native tokens (like ETH) have null addresses - that's valid
+    // Native tokens (like ETH) use AddressZero
     if (isNativeToken) {
-      if (address !== null) {
-        throw new Error(`Native token ${tokenKey} address for chain ${chainId} must be null, got: ${address}`);
+      if (address !== ADDRESS_ZERO) {
+        throw new Error(`Native token ${tokenKey} address for chain ${chainId} must be AddressZero, got: ${address}`);
       }
     } else {
       if (!validateEthereumAddress(address)) {

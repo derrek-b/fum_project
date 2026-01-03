@@ -14,7 +14,7 @@ import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
-import { getTokenByAddress, getTokenBySymbol, isNativeToken, getWethAddress } from "../helpers/tokenHelpers.js";
+import { getTokenByAddress, getTokenBySymbol, getTokenAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2 } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
@@ -2673,6 +2673,257 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     return { principalByPosition, feesByPosition };
+  }
+
+  /**
+   * Parse swap transaction receipt to extract actual swap amounts
+   *
+   * When swaps are executed, this method parses the transaction receipt to extract
+   * the actual amounts swapped from Uniswap V3 Swap events.
+   *
+   * @param {Object} receipt - Transaction receipt from swap execution
+   * @param {Object} receipt.logs - Array of transaction logs
+   * @param {Array} swapMetadata - Array of swap metadata in execution order
+   * @param {string} swapMetadata[].tokenInAddress - Input token address
+   * @param {string} swapMetadata[].tokenOutAddress - Output token address
+   * @param {number} [swapMetadata[].expectedSwapEvents=1] - Number of swap events for this swap
+   * @param {Array} [swapMetadata[].routes] - Multi-hop route info for split routes
+   * @param {Array} swapMetadata[].routes[].tokenPath - Array of token addresses in route
+   * @param {number} swapMetadata[].routes[].poolCount - Number of pools in route
+   * @returns {Array<{actualAmountIn: string, actualAmountOut: string}>} Actual amounts per swap
+   * @throws {Error} If receipt or swapMetadata is null/undefined
+   */
+  parseSwapReceipt(receipt, swapMetadata) {
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Validate swapMetadata
+    if (swapMetadata === null || swapMetadata === undefined) {
+      throw new Error("Swap metadata parameter is required");
+    }
+    if (!Array.isArray(swapMetadata)) {
+      throw new Error("Swap metadata must be an array");
+    }
+
+    // Return empty array for empty metadata
+    if (swapMetadata.length === 0) {
+      return [];
+    }
+
+    const actualSwaps = [];
+
+    // Get Swap event topic from pool interface
+    const swapTopicHash = this.poolInterface.getEventTopic('Swap');
+
+    // Collect all swap events from the receipt
+    const swapEvents = [];
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics[0] === swapTopicHash) {
+          const decoded = this.poolInterface.parseLog(log);
+          swapEvents.push({
+            poolAddress: log.address,
+            amount0: decoded.args.amount0,
+            amount1: decoded.args.amount1
+          });
+        }
+      } catch (e) {
+        // Not a Swap event from this interface, continue
+      }
+    }
+
+    // Match swap events to metadata in order (swaps execute sequentially)
+    let eventIndex = 0;
+
+    for (const metadata of swapMetadata) {
+      // Validate required metadata fields
+      if (!metadata.tokenInAddress) {
+        throw new Error("Swap metadata must have tokenInAddress");
+      }
+      if (!metadata.tokenOutAddress) {
+        throw new Error("Swap metadata must have tokenOutAddress");
+      }
+
+      const numEvents = metadata.expectedSwapEvents || 1;
+      const tokenInAddress = metadata.tokenInAddress.toLowerCase();
+      const tokenOutAddress = metadata.tokenOutAddress.toLowerCase();
+
+      let totalAmountIn = BigInt(0);
+      let totalAmountOut = BigInt(0);
+
+      // MULTI-HOP/SPLIT ROUTE: Use tokenPath to intelligently parse events
+      if (metadata.routes && metadata.routes.length > 0) {
+        for (let routeIdx = 0; routeIdx < metadata.routes.length; routeIdx++) {
+          const route = metadata.routes[routeIdx];
+          const { tokenPath, poolCount } = route;
+
+          // For this route, we consume poolCount events
+          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
+            if (eventIndex >= swapEvents.length) {
+              break;
+            }
+
+            const event = swapEvents[eventIndex];
+            const isFirstHop = (hopIdx === 0);
+            const isLastHop = (hopIdx === poolCount - 1);
+
+            // For first hop: extract amountIn using tokenPath[0]
+            if (isFirstHop) {
+              const firstToken = tokenPath[0].toLowerCase();
+              const secondToken = tokenPath[1].toLowerCase();
+              const isToken0 = firstToken < secondToken;
+
+              const amountIn = isToken0
+                ? BigInt(event.amount0.abs().toString())
+                : BigInt(event.amount1.abs().toString());
+
+              totalAmountIn += amountIn;
+            }
+
+            // For last hop: extract amountOut using tokenPath[poolCount]
+            if (isLastHop) {
+              const secondToLastToken = tokenPath[poolCount - 1].toLowerCase();
+              const lastToken = tokenPath[poolCount].toLowerCase();
+              const isToken0 = secondToLastToken < lastToken;
+
+              const amountOut = isToken0
+                ? BigInt(event.amount1.abs().toString())
+                : BigInt(event.amount0.abs().toString());
+
+              totalAmountOut += amountOut;
+            }
+
+            eventIndex++;
+          }
+        }
+      } else {
+        // SIMPLE ROUTE: Single event, use basic token ordering
+        const isTokenInToken0 = tokenInAddress < tokenOutAddress;
+
+        // Consume exactly numEvents events for this metadata entry
+        for (let i = 0; i < numEvents; i++) {
+          if (eventIndex < swapEvents.length) {
+            const event = swapEvents[eventIndex];
+
+            const actualIn = isTokenInToken0
+              ? BigInt(event.amount0.abs().toString())
+              : BigInt(event.amount1.abs().toString());
+
+            const actualOut = isTokenInToken0
+              ? BigInt(event.amount1.abs().toString())
+              : BigInt(event.amount0.abs().toString());
+
+            totalAmountIn += actualIn;
+            totalAmountOut += actualOut;
+            eventIndex++;
+          } else {
+            // Not enough events - swap may have failed partially
+            break;
+          }
+        }
+      }
+
+      actualSwaps.push({
+        actualAmountIn: totalAmountIn.toString(),
+        actualAmountOut: totalAmountOut.toString()
+      });
+    }
+
+    return actualSwaps;
+  }
+
+  /**
+   * Parse increaseLiquidity transaction receipt to extract actual amounts
+   *
+   * When liquidity is added to an existing position or a new position is created,
+   * this method parses the transaction receipt to extract the actual token amounts
+   * consumed and liquidity added.
+   *
+   * @param {Object} receipt - Transaction receipt from increaseLiquidity/mint
+   * @param {Object} receipt.logs - Array of transaction logs
+   * @returns {Object} Parsed position data
+   * @returns {string} result.tokenId - Position NFT token ID
+   * @returns {string} result.liquidity - Liquidity added
+   * @returns {string} result.amount0 - Actual token0 amount consumed
+   * @returns {string} result.amount1 - Actual token1 amount consumed
+   * @returns {number|null} result.tickLower - Lower tick (only for new positions)
+   * @returns {number|null} result.tickUpper - Upper tick (only for new positions)
+   * @returns {string|null} result.poolAddress - Pool address (only for new positions)
+   * @throws {Error} If receipt is null/undefined or IncreaseLiquidity event not found
+   */
+  parseIncreaseLiquidityReceipt(receipt) {
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Get event topic hashes from pre-compiled interface
+    const increaseLiquidityTopic = this.positionManagerInterface.getEventTopic('IncreaseLiquidity');
+
+    // Mint event from pool (for new positions)
+    const mintInterface = new ethers.utils.Interface([
+      'event Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)'
+    ]);
+    const mintTopicHash = mintInterface.getEventTopic('Mint');
+
+    let increaseLiqEvent = null;
+    let mintEvent = null;
+
+    // Parse all logs to find the events we need
+    for (const log of receipt.logs) {
+      try {
+        // Try to parse as IncreaseLiquidity event
+        if (log.topics[0] === increaseLiquidityTopic) {
+          const decoded = this.positionManagerInterface.parseLog(log);
+          increaseLiqEvent = {
+            tokenId: decoded.args.tokenId.toString(),
+            liquidity: decoded.args.liquidity.toString(),
+            amount0: decoded.args.amount0.toString(),
+            amount1: decoded.args.amount1.toString()
+          };
+        }
+
+        // Try to parse as Mint event (only present for new position creation)
+        if (log.topics[0] === mintTopicHash) {
+          const decoded = mintInterface.parseLog(log);
+          mintEvent = {
+            poolAddress: log.address,
+            tickLower: Number(decoded.args.tickLower),
+            tickUpper: Number(decoded.args.tickUpper),
+            amount0: decoded.args.amount0.toString(),
+            amount1: decoded.args.amount1.toString()
+          };
+        }
+      } catch (e) {
+        // Not an event we're looking for, continue
+      }
+    }
+
+    if (!increaseLiqEvent) {
+      throw new Error('IncreaseLiquidity event not found in receipt');
+    }
+
+    // Return combined data from both events
+    return {
+      // From IncreaseLiquidity event (always present)
+      tokenId: increaseLiqEvent.tokenId,
+      liquidity: increaseLiqEvent.liquidity,
+      amount0: increaseLiqEvent.amount0,
+      amount1: increaseLiqEvent.amount1,
+
+      // From Mint event (only for new positions)
+      tickLower: mintEvent?.tickLower ?? null,
+      tickUpper: mintEvent?.tickUpper ?? null,
+      poolAddress: mintEvent?.poolAddress ?? null
+    };
   }
 
   /**

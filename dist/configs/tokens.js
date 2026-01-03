@@ -2,6 +2,11 @@
 /**
  * Token configuration with addresses on multiple chains
  */
+
+// Native ETH uses AddressZero as its canonical address
+// This allows consistent address-based logic instead of null checks
+const ADDRESS_ZERO = "0x0000000000000000000000000000000000000000";
+
 const tokens = {
   // USDC
   "USDC": {
@@ -44,9 +49,9 @@ const tokens = {
     coingeckoId: "ethereum",
     isNative: true,
     addresses: {
-      1: null,      // Native ETH represented as null
-      42161: null,
-      1337: null
+      1: ADDRESS_ZERO,      // Native ETH uses AddressZero
+      42161: ADDRESS_ZERO,
+      1337: ADDRESS_ZERO
     },
     wethAddresses: {
       1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",      // Ethereum

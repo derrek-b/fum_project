@@ -163,16 +163,16 @@ describe('Token Helpers', () => {
         expect(result).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
       });
 
-      it('should return null for native ETH token', () => {
+      it('should return AddressZero for native ETH token', () => {
         const result = getTokenAddress('ETH', 1);
-        expect(result).toBeNull();
+        expect(result).toBe('0x0000000000000000000000000000000000000000');
       });
 
-      it('should return null for ETH on all supported chains', () => {
+      it('should return AddressZero for ETH on all supported chains', () => {
         const chainIds = [1, 42161, 1337];
         chainIds.forEach(chainId => {
           const result = getTokenAddress('ETH', chainId);
-          expect(result).toBeNull();
+          expect(result).toBe('0x0000000000000000000000000000000000000000');
         });
       });
 
@@ -720,7 +720,7 @@ describe('Token Helpers', () => {
 
         expect(ethToken).toBeDefined();
         expect(ethToken.isNative).toBe(true);
-        expect(ethToken.addresses[1]).toBeNull();
+        expect(ethToken.addresses[1]).toBe('0x0000000000000000000000000000000000000000');
         expect(ethToken.wethAddresses[1]).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
       });
     });
@@ -892,11 +892,11 @@ describe('Token Helpers', () => {
         expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
       });
 
-      it('should return null for native ETH token', () => {
+      it('should return AddressZero for native ETH token', () => {
         const result = getTokenAddresses(['USDC', 'ETH'], 1);
 
         expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(result.ETH).toBeNull();
+        expect(result.ETH).toBe('0x0000000000000000000000000000000000000000');
       });
 
       it('should return addresses for Arbitrum chain', () => {
@@ -1136,9 +1136,9 @@ describe('Token Helpers', () => {
         expect(result).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
       });
 
-      it('should return null for ETH on V4', () => {
+      it('should return AddressZero for ETH on V4', () => {
         const result = getTokenAddressForProtocol('ETH', 1, 'v4');
-        expect(result).toBeNull();
+        expect(result).toBe('0x0000000000000000000000000000000000000000');
       });
 
       it('should return same address for USDC on both V3 and V4', () => {
@@ -1155,7 +1155,7 @@ describe('Token Helpers', () => {
         const v4Result = getTokenAddressForProtocol('ETH', 42161, 'v4');
 
         expect(v3Result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
-        expect(v4Result).toBeNull();
+        expect(v4Result).toBe('0x0000000000000000000000000000000000000000');
       });
 
       it('should return ERC20 address for non-native tokens', () => {

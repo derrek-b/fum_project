@@ -11,7 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getContract } from './hardhat-config.js';
 import contractsData from '../../dist/artifacts/contracts.js';
-import { getChainConfig } from '../../dist/helpers/chainHelpers.js';
+import { getChainConfig, getPlatformAddresses } from '../../dist/helpers/chainHelpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -145,10 +145,21 @@ export async function deployFUMContracts(deployer, config = {}) {
   const contracts = {};
 
   try {
-    // Canonical addresses - same on all chains
+    // Get chainId to look up correct platform addresses
+    const network = await deployer.provider.getNetwork();
+    const chainId = network.chainId;
+
+    // Get platform-specific addresses from chain config (handles Arbitrum fork correctly)
+    const uniswapAddresses = getPlatformAddresses(chainId, 'uniswapV3');
+    const universalRouterAddress = uniswapAddresses.universalRouterAddress;
+    const nonfungiblePositionManagerAddress = uniswapAddresses.positionManagerAddress;
+
+    // Permit2 is canonical across all chains
     const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
-    const universalRouterAddress = '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD';
-    const nonfungiblePositionManagerAddress = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
+
+    console.log(`Deploying for chainId ${chainId}:`);
+    console.log(`  Universal Router: ${universalRouterAddress}`);
+    console.log(`  Position Manager: ${nonfungiblePositionManagerAddress}`);
 
     // Deploy VaultFactory with owner and permit2 (v2.0.0)
     // Validators are registered separately after deployment
