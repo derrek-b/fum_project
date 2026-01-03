@@ -108,15 +108,15 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
     // For native ETH, address is not required - adapter uses Ether.onChain() internally
     const routeResult = await retryRpcCall(
       () => adapter.getSwapRoute({
-        tokenInAddress: tokenIn.isNative ? undefined : tokenIn.address,
-        tokenOutAddress: tokenOut.isNative ? undefined : tokenOut.address,
+        tokenInAddress: tokenIn.address,
+        tokenOutAddress: tokenOut.address,
         amount,
         isAmountIn,
         recipient,
         slippageTolerance,
         deadlineMinutes: 30,
-        tokenInIsNative: tokenIn.isNative || false,
-        tokenOutIsNative: tokenOut.isNative || false
+        tokenInIsNative: tokenIn.isNative,
+        tokenOutIsNative: tokenOut.isNative
       }),
       'adapter.getSwapRoute'
     );
@@ -232,6 +232,8 @@ export default class UniswapV3Utils extends PlatformUtilsBase {
       metadata.push({
         tokenInSymbol: instruction.tokenIn.symbol,
         tokenOutSymbol: instruction.tokenOut.symbol,
+        tokenInAddress: instruction.tokenIn.address,
+        tokenOutAddress: instruction.tokenOut.address,
         quotedAmountIn: result.quotedAmountIn,
         quotedAmountOut: result.quotedAmountOut,
         isAmountIn: result.isAmountIn

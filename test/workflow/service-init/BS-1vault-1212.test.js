@@ -39,6 +39,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let utilizationEvents = [];
   let tokenPreparationCompletedEvents = [];
   let tokensSwappedEvents = [];
+  let liquidityAddedToPositionEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -197,6 +198,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('TokensSwapped', (data) => {
         tokensSwappedEvents.push(data);
+      });
+
+      service.eventManager.subscribe('LiquidityAddedToPosition', (data) => {
+        liquidityAddedToPositionEvents.push(data);
       });
 
       // Start the service
@@ -1319,6 +1324,82 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     });
   });
 
+  describe('LiquidityAddedToPosition event', () => {
+    it('should emit exactly one LiquidityAddedToPosition event', () => {
+      expect(liquidityAddedToPositionEvents.length).toBe(1);
+    });
+
+    it('should have correct vault and position identifiers', () => {
+      const event = liquidityAddedToPositionEvents[0];
+      const vault = service.vaultDataService.getAllVaults()[0];
+
+      expect(event.vaultAddress.toLowerCase()).toBe(vault.address.toLowerCase());
+      expect(event.positionId).toBeDefined();
+      expect(event.poolAddress).toBeDefined();
+      expect(event.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+    });
+
+    it('should have valid quoted amounts (capped by original quote)', () => {
+      const event = liquidityAddedToPositionEvents[0];
+
+      expect(event.quotedToken0).toBeDefined();
+      expect(event.quotedToken1).toBeDefined();
+
+      // Quoted amounts should be positive
+      expect(BigInt(event.quotedToken0)).toBeGreaterThan(0n);
+      expect(BigInt(event.quotedToken1)).toBeGreaterThan(0n);
+    });
+
+    it('should have actual amounts from receipt parsing', () => {
+      const event = liquidityAddedToPositionEvents[0];
+
+      expect(event.actualToken0).toBeDefined();
+      expect(event.actualToken1).toBeDefined();
+
+      // Actual amounts should be positive (liquidity was added)
+      expect(BigInt(event.actualToken0)).toBeGreaterThan(0n);
+      expect(BigInt(event.actualToken1)).toBeGreaterThan(0n);
+    });
+
+    it('should have valid transaction details', () => {
+      const event = liquidityAddedToPositionEvents[0];
+
+      expect(event.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(event.blockNumber).toBeGreaterThan(0);
+      expect(BigInt(event.gasUsed)).toBeGreaterThan(0n);
+      expect(BigInt(event.effectiveGasPrice)).toBeGreaterThan(0n);
+      expect(event.gasEstimated).toBeDefined();
+    });
+
+    it('should have correct tick range matching position', () => {
+      const event = liquidityAddedToPositionEvents[0];
+      const vault = service.vaultDataService.getAllVaults()[0];
+      const position = vault.positions[event.positionId];
+
+      expect(event.tickLower).toBe(position.tickLower);
+      expect(event.tickUpper).toBe(position.tickUpper);
+      expect(typeof event.currentTick).toBe('number');
+    });
+
+    it('should have liquidity > 0', () => {
+      const event = liquidityAddedToPositionEvents[0];
+
+      expect(event.liquidity).toBeDefined();
+      expect(BigInt(event.liquidity)).toBeGreaterThan(0n);
+    });
+
+    it('should have correct context metadata', () => {
+      const event = liquidityAddedToPositionEvents[0];
+
+      expect(event.tokenSymbols).toBeDefined();
+      expect(Array.isArray(event.tokenSymbols)).toBe(true);
+      expect(event.tokenSymbols).toHaveLength(2);
+      expect(event.platform).toBe('uniswapV3');
+      expect(event.deploymentAmount).toBeGreaterThan(0);
+      expect(typeof event.timestamp).toBe('number');
+    });
+  });
+
   describe('Setup Completion', () => {
     it('should emit VaultSetupComplete event', () => {
       expect(vaultSetupCompleteEvents.length).toBe(1);
@@ -1339,6 +1420,52 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
     it('should return correct strategy ID for vault', () => {
       expect(service.vaultDataService.getVaultStrategyId(testVault.vaultAddress)).toBe('bob');
+    });
+
+    it('should have non-aligned tokens depleted to dust after swaps', () => {
+      const vault = service.vaultDataService.getAllVaults()[0];
+      const wbtcBalance = BigInt(vault.tokens.WBTC || '0');
+      // WBTC is not a target token and was used for deficit/buffer swaps
+      // Should be depleted to dust (less than 1000 satoshis = 0.00001 BTC)
+      expect(wbtcBalance).toBeLessThan(1000n);
+    });
+
+    it('should have used aligned tokens for liquidity addition', () => {
+      // Verify tokens were consumed for liquidity by checking the event
+      expect(liquidityAddedToPositionEvents.length).toBe(1);
+      const event = liquidityAddedToPositionEvents[0];
+
+      // Actual amounts should be > 0 (tokens were used)
+      expect(BigInt(event.actualToken0)).toBeGreaterThan(0n);
+      expect(BigInt(event.actualToken1)).toBeGreaterThan(0n);
+    });
+
+    it('should have remaining position with non-zero liquidity', () => {
+      const vault = service.vaultDataService.getAllVaults()[0];
+      // Should have exactly 1 position after setup
+      expect(Object.keys(vault.positions).length).toBe(1);
+
+      const position = Object.values(vault.positions)[0];
+      // Position should have liquidity from addToPosition
+      expect(BigInt(position.liquidity)).toBeGreaterThan(0n);
+    });
+
+    it('should have all token balances non-negative', () => {
+      const vault = service.vaultDataService.getAllVaults()[0];
+      // Sanity check: no balance should be negative
+      for (const [, balance] of Object.entries(vault.tokens)) {
+        expect(BigInt(balance)).toBeGreaterThanOrEqual(0n);
+      }
+    });
+
+    it('should have ETH balance reduced from gas costs', () => {
+      // Initial ETH funding was 100 ETH
+      const vault = service.vaultDataService.getAllVaults()[0];
+      const finalEthBalance = BigInt(vault.tokens.ETH || '0');
+      const initialEthFunding = BigInt('100000000000000000000'); // 100 ETH in wei
+
+      // ETH balance should be less than initial due to gas costs
+      expect(finalEthBalance).toBeLessThan(initialEthFunding);
     });
   });
 });

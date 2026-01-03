@@ -1034,7 +1034,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
-        const actualSwaps = this.extractSwapAmountsFromReceipt(receipt, currentDeficitMetadata);
+        const actualSwaps = adapter.parseSwapReceipt(receipt, currentDeficitMetadata);
         const swapDetails = this.buildSwapDetails(currentDeficitMetadata, actualSwaps);
         this.eventManager.emit('TokensSwapped', {
           vaultAddress: vault.address,
@@ -1109,7 +1109,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
-        const actualSwaps = this.extractSwapAmountsFromReceipt(receipt, currentBufferMetadata);
+        const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
         const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
         this.eventManager.emit('TokensSwapped', {
           vaultAddress: vault.address,
@@ -1142,7 +1142,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
 
       // Use maxSlippage as tolerance (user's configured acceptable variance)
-      const maxSlippage = vault.params?.maxSlippage || 0.5; // default 0.5%
+      const maxSlippage = vault.strategy.parameters.maxSlippage;
       const toleranceMultiplier = (100 - maxSlippage) / 100; // e.g., 0.995 for 0.5% slippage
 
       const minRequired0 = BigInt(Math.floor(Number(originalRequirements.token0Amount) * toleranceMultiplier));
@@ -1170,11 +1170,88 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
     }
 
-    // TODO: Steps 7-9
-    // 7. Get fresh quote
-    // 8. Execute increaseLiquidity transaction
-    // 9. Emit LiquidityAddedToPosition event
-    this.log('⚠️ addToPosition steps 6-8 not yet implemented - token preparation complete, skipping liquidity add');
+    // Step 7: Calculate final amounts - cap at original quote (respects maxUtilization) but don't exceed actual balance
+    const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
+    const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+    const originalToken0 = BigInt(quote.token0Amount);
+    const originalToken1 = BigInt(quote.token1Amount);
+
+    const token0ForLiquidity = finalToken0Balance < originalToken0
+      ? finalToken0Balance.toString()
+      : quote.token0Amount;
+    const token1ForLiquidity = finalToken1Balance < originalToken1
+      ? finalToken1Balance.toString()
+      : quote.token1Amount;
+
+    this.log(`🔧 Final amounts for liquidity: ${ethers.utils.formatUnits(token0ForLiquidity, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(token1ForLiquidity, token1Data.decimals)} ${token1Data.symbol}`);
+
+    // Step 8: Execute increaseLiquidity transaction
+    // 8a. Ensure token approvals for position manager
+    const liquidityTarget = adapter.getApprovalTarget('liquidity');
+    await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
+
+    // 8b. Generate add liquidity transaction data
+    const addLiquidityData = await retryRpcCall(
+      () => adapter.generateAddLiquidityData({
+        position,
+        token0Amount: token0ForLiquidity,
+        token1Amount: token1ForLiquidity,
+        provider: this.provider,
+        poolData: targetPool,
+        token0Data,
+        token1Data,
+        slippageTolerance: vault.strategy.parameters.maxSlippage,
+        deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
+      }),
+      'generateAddLiquidityData'
+    );
+
+    // 8c. Execute add liquidity transaction
+    this.log(`Executing increaseLiquidity for position ${position.id}`);
+    const { receipt, gasEstimated } = await this.executeBatchTransactions(
+      vault,
+      [addLiquidityData],
+      'add liquidity',
+      'addliq'
+    );
+
+    // 8d. Parse receipt for actual amounts consumed
+    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+    this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
+
+    // Step 9: Emit LiquidityAddedToPosition event
+    this.eventManager.emit('LiquidityAddedToPosition', {
+      // Identity
+      vaultAddress: vault.address,
+      positionId: position.id,
+      poolAddress: position.pool,
+
+      // Amounts (quoted vs actual for slippage tracking)
+      quotedToken0: token0ForLiquidity,
+      quotedToken1: token1ForLiquidity,
+      actualToken0: receiptData.amount0,
+      actualToken1: receiptData.amount1,
+
+      // Position state
+      tickLower: position.tickLower,
+      tickUpper: position.tickUpper,
+      currentTick: targetPool.tick,
+      liquidity: receiptData.liquidity,
+
+      // Transaction
+      transactionHash: receipt.transactionHash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      gasEstimated,
+      effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+
+      // Context
+      tokenSymbols: [token0Data.symbol, token1Data.symbol],
+      platform: platformId,
+      deploymentAmount: availableDeployment,
+      timestamp: Date.now()
+    });
   }
 
   /**
@@ -1500,7 +1577,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Ensure on-chain approvals for swap tokens (Permit2 for V3, router for traditional)
-    // Skip native ETH - it doesn't need ERC20 approvals (address is null)
+    // Skip native ETH - it doesn't need ERC20 approvals
     const allSwapInstructions = [...deficitSwapInstructions, ...bufferSwapInstructions];
     const tokenInAddresses = [...new Set(
       allSwapInstructions
@@ -1622,141 +1699,8 @@ export default class BabyStepsStrategy extends StrategyBase {
   }
 
   // ===========================================================================
-  // Swap Receipt Parsing
+  // Swap Details Building
   // ===========================================================================
-
-  /**
-   * Extract actual swap amounts from swap receipt
-   * @param {Object} receipt - Transaction receipt from swap execution
-   * @param {Array} swapMetadata - Array of swap metadata in execution order
-   * @returns {Array} Actual swap amounts matching metadata order
-   */
-  extractSwapAmountsFromReceipt(receipt, swapMetadata) {
-    const actualSwaps = [];
-
-    // Uniswap V3 Pool Swap event
-    const swapInterface = new ethers.utils.Interface([
-      'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
-    ]);
-    const swapTopicHash = swapInterface.getEventTopic('Swap');
-
-    // Collect all swap events from the receipt
-    const swapEvents = [];
-
-    for (const log of receipt.logs) {
-      try {
-        if (log.topics[0] === swapTopicHash) {
-          const decoded = swapInterface.parseLog(log);
-          swapEvents.push({
-            poolAddress: log.address,  // Pool that emitted this event
-            amount0: decoded.args.amount0,
-            amount1: decoded.args.amount1
-          });
-        }
-      } catch (e) {
-        // Not a Swap event, continue
-      }
-    }
-
-    // Match swap events to metadata in order (swaps execute sequentially)
-    // Handle split routes by consuming multiple events per metadata entry
-    let eventIndex = 0;
-
-    for (const metadata of swapMetadata) {
-      const numEvents = metadata.expectedSwapEvents || 1; // Default to 1 for backwards compatibility
-
-      // Get token addresses for this swap
-      // Native tokens (isNative: true) have address: null, use AddressZero for ordering comparison
-      const tokenInData = this.tokens[metadata.tokenInSymbol];
-      const tokenOutData = this.tokens[metadata.tokenOutSymbol];
-      const tokenInAddress = (tokenInData?.isNative ? ethers.constants.AddressZero : tokenInData?.address).toLowerCase();
-      const tokenOutAddress = (tokenOutData?.isNative ? ethers.constants.AddressZero : tokenOutData?.address).toLowerCase();
-
-      let totalAmountIn = BigInt(0);
-      let totalAmountOut = BigInt(0);
-
-      // MULTI-HOP/SPLIT ROUTE: Use tokenPath to intelligently parse events
-      if (metadata.routes && metadata.routes.length > 0) {
-        // Process each sub-route
-        for (let routeIdx = 0; routeIdx < metadata.routes.length; routeIdx++) {
-          const route = metadata.routes[routeIdx];
-          const { tokenPath, poolCount } = route;
-
-          // For this route, we consume poolCount events
-          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
-            if (eventIndex >= swapEvents.length) {
-              break;
-            }
-
-            const event = swapEvents[eventIndex];
-            const isFirstHop = (hopIdx === 0);
-            const isLastHop = (hopIdx === poolCount - 1);
-
-            // For first hop: extract amountIn using tokenPath[0]
-            if (isFirstHop) {
-              const firstToken = tokenPath[0].toLowerCase();
-              const secondToken = tokenPath[1].toLowerCase();
-              const isToken0 = firstToken < secondToken;
-
-              const amountIn = isToken0
-                ? BigInt(event.amount0.abs().toString())
-                : BigInt(event.amount1.abs().toString());
-
-              totalAmountIn += amountIn;
-            }
-
-            // For last hop: extract amountOut using tokenPath[poolCount]
-            if (isLastHop) {
-              const secondToLastToken = tokenPath[poolCount - 1].toLowerCase();
-              const lastToken = tokenPath[poolCount].toLowerCase();
-              const isToken0 = secondToLastToken < lastToken;
-
-              const amountOut = isToken0
-                ? BigInt(event.amount1.abs().toString())
-                : BigInt(event.amount0.abs().toString());
-
-              totalAmountOut += amountOut;
-            }
-
-            eventIndex++;
-          }
-        }
-
-      } else {
-        // SIMPLE ROUTE: Single event, use basic token ordering
-        const isTokenInToken0 = tokenInAddress < tokenOutAddress;
-
-        // Consume exactly numEvents events for this metadata entry
-        for (let i = 0; i < numEvents; i++) {
-          if (eventIndex < swapEvents.length) {
-            const event = swapEvents[eventIndex];
-
-            const actualIn = isTokenInToken0
-              ? BigInt(event.amount0.abs().toString())
-              : BigInt(event.amount1.abs().toString());
-
-            const actualOut = isTokenInToken0
-              ? BigInt(event.amount1.abs().toString())
-              : BigInt(event.amount0.abs().toString());
-
-            totalAmountIn += actualIn;
-            totalAmountOut += actualOut;
-            eventIndex++;
-          } else {
-            // Not enough events - swap may have failed
-            break;
-          }
-        }
-      }
-
-      actualSwaps.push({
-        actualAmountIn: totalAmountIn.toString(),
-        actualAmountOut: totalAmountOut.toString()
-      });
-    }
-
-    return actualSwaps;
-  }
 
   /**
    * Build swap details by combining metadata with actual amounts
@@ -1766,7 +1710,7 @@ export default class BabyStepsStrategy extends StrategyBase {
    */
   buildSwapDetails(swapMetadata, actualSwaps) {
     return swapMetadata.map((metadata, index) => {
-      const actual = actualSwaps[index] || { actualAmountIn: '0', actualAmountOut: '0' };
+      const actual = actualSwaps[index]; // || { actualAmountIn: '0', actualAmountOut: '0' };
       return {
         tokenInSymbol: metadata.tokenInSymbol,
         tokenOutSymbol: metadata.tokenOutSymbol,
