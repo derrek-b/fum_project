@@ -212,6 +212,7 @@ class BabyStepsStrategy extends StrategyBase {
       throw error;
     }
   }
+
   /**
    * Evaluate which positions are aligned with the strategy based on tokens and platforms
    * @memberof module:BabyStepsStrategy.BabyStepsStrategy

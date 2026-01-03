@@ -49,73 +49,6 @@ export default class BabyStepsStrategy extends StrategyBase {
    */
   async initializeVault(vault) {
     this.log(`Initializing vault ${vault.address} for Baby Steps strategy`);
-
-    // ==========================================================================
-    // INITIALIZATION WORKFLOW
-    // ==========================================================================
-    //
-    // Step 1: Select best pool
-    //   - Always select best pool based on on-chain liquidity (regardless of aligned positions)
-    //   - Highest liquidity pool wins (better execution, more depth)
-    //   - Target pool determines ETH vs WETH requirement
-    //
-    // Step 2: Evaluate positions
-    //   - Check which existing positions are aligned with strategy
-    //   - Aligned = correct tokens, platform, and in acceptable range
-    //   - Returns { alignedPositions, nonAlignedPositions }
-    //
-    // Step 3: Close non-aligned positions
-    //   - Batch close all non-aligned positions
-    //   - Collect fees during closure
-    //   - Distribute fees to owner
-    //
-    // Step 4: Refresh token balances
-    //   - Fetch updated balances after closures and ETH conversion
-    //
-    // Step 5: Calculate available deployment
-    //   - Use maxUtilization from strategy params
-    //   - Account for existing position value (if aligned position exists)
-    //
-    // Step 6: Deploy capital
-    //   - If aligned position exists → addToPosition (increaseLiquidity)
-    //   - If no aligned position → createNewPosition (mint)
-    //   - JIT approval: adapter.getApprovalTarget('liquidity') before operation
-    //   - If availableDeployment <= 0 and totalVaultValue == 0 → error (empty vault)
-    //   - If availableDeployment <= 0 but has value → OK (at max utilization)
-    //
-    // ==========================================================================
-    // APPROVAL PATTERN (JIT - Just In Time)
-    // ==========================================================================
-    //
-    // Approvals happen right BEFORE each operation, not upfront:
-    //
-    //   const adapter = this.adapters.get(vault.targetPlatforms[0]);
-    //
-    //   // Before liquidity operations (mint, increase, decrease, collect):
-    //   const liquidityTarget = adapter.getApprovalTarget('liquidity');
-    //   await this.ensureApprovals(vault, [token0, token1], liquidityTarget);
-    //
-    //   // Before swaps:
-    //   const swapTarget = adapter.getApprovalTarget('swap');
-    //   await this.ensureApprovals(vault, [tokenIn], swapTarget);
-    //
-    // ==========================================================================
-    // ETH/WETH PATTERN
-    // ==========================================================================
-    //
-    // For LIQUIDITY: Pool decides (check pool.token0/token1)
-    //   const wethAddress = getWethAddress(this.chainId);
-    //   const poolUsesWETH = targetPool.token0 === wethAddress || targetPool.token1 === wethAddress;
-    //   if (poolUsesWETH && vaultHasETH) → wrapETH
-    //   if (!poolUsesWETH && vaultHasWETH) → unwrapETH
-    //
-    // For SWAPS: Route decides (adapter returns flag from getSwapRoute)
-    //   const routeInfo = await adapter.getSwapRoute(tokenIn, tokenOut, amount);
-    //   if (routeInfo.inputToken === 'WETH' && vaultHasETH) → wrapETH
-    //   (strategy decides amount based on vault balances)
-    //
-    // ==========================================================================
-
     // Step 1: Select best pool (must happen before position evaluation)
     const [targetToken0, targetToken1] = vault.targetTokens;
     const adapter = this.adapters.get(vault.targetPlatforms[0]);
@@ -1696,31 +1629,5 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`⚠️ Failed to get swap quote ${tokenInData.symbol} → ${tokenOutData.symbol}: ${error.message}`);
       return null;
     }
-  }
-
-  // ===========================================================================
-  // Swap Details Building
-  // ===========================================================================
-
-  /**
-   * Build swap details by combining metadata with actual amounts
-   * @param {Array} swapMetadata - Array of swap metadata with quoted amounts
-   * @param {Array} actualSwaps - Array of actual amounts from receipt
-   * @returns {Array} Combined swap details with both quoted and actual amounts
-   */
-  buildSwapDetails(swapMetadata, actualSwaps) {
-    return swapMetadata.map((metadata, index) => {
-      const actual = actualSwaps[index]; // || { actualAmountIn: '0', actualAmountOut: '0' };
-      return {
-        tokenInSymbol: metadata.tokenInSymbol,
-        tokenOutSymbol: metadata.tokenOutSymbol,
-        quotedAmountIn: metadata.quotedAmountIn,
-        quotedAmountOut: metadata.quotedAmountOut,
-        actualAmountIn: actual.actualAmountIn,
-        actualAmountOut: actual.actualAmountOut,
-        isAmountIn: metadata.isAmountIn,
-        expectedSwapEvents: metadata.expectedSwapEvents
-      };
-    });
   }
 }

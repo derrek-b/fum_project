@@ -509,4 +509,26 @@ export default class StrategyBase {
     return receipt;
   }
 
+  /**
+   * Build combined swap details from metadata and actual results
+   * @param {Array} swapMetadata - Array of swap metadata with quoted amounts
+   * @param {Array} actualSwaps - Array of actual amounts from receipt
+   * @returns {Array} Combined swap details with both quoted and actual amounts
+   */
+  buildSwapDetails(swapMetadata, actualSwaps) {
+    return swapMetadata.map((metadata, index) => {
+      const actual = actualSwaps[index];
+      return {
+        tokenInSymbol: metadata.tokenInSymbol,
+        tokenOutSymbol: metadata.tokenOutSymbol,
+        quotedAmountIn: metadata.quotedAmountIn,
+        quotedAmountOut: metadata.quotedAmountOut,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut,
+        isAmountIn: metadata.isAmountIn,
+        expectedSwapEvents: metadata.expectedSwapEvents
+      };
+    });
+  }
+
 }
