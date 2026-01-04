@@ -5795,13 +5795,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('discoverAvailablePools', () => {
+  describe('_discoverAvailablePools (internal)', () => {
     const chainId = 1337; // Hardhat fork chainId
 
     describe('Success Cases', () => {
       it('should discover all available USDC/ETH pools using symbols', async () => {
         // Users select ETH in frontend, vault stores ETH - adapter translates to WETH internally
-        const pools = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
 
         expect(Array.isArray(pools)).toBe(true);
         expect(pools.length).toBe(4); // 0.01%, 0.05%, 0.3%, 1% pools
@@ -5818,8 +5818,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should also accept WETH directly for backwards compatibility', async () => {
         // Some code paths may pass WETH directly - adapter should handle both
-        const poolsFromWeth = await adapter.discoverAvailablePools('WETH', 'USDC', env.provider, chainId);
-        const poolsFromEth = await adapter.discoverAvailablePools('ETH', 'USDC', env.provider, chainId);
+        const poolsFromWeth = await adapter._discoverAvailablePools('WETH', 'USDC', env.provider, chainId);
+        const poolsFromEth = await adapter._discoverAvailablePools('ETH', 'USDC', env.provider, chainId);
 
         // Both should return the same pools
         expect(poolsFromWeth.length).toBe(poolsFromEth.length);
@@ -5835,7 +5835,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return pools with correct structure including token metadata', async () => {
-        const pools = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
 
         expect(pools.length).toBeGreaterThan(0);
 
@@ -5867,8 +5867,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return same pools regardless of token input order', async () => {
-        const pools1 = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
-        const pools2 = await adapter.discoverAvailablePools('ETH', 'USDC', env.provider, chainId);
+        const pools1 = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools2 = await adapter._discoverAvailablePools('ETH', 'USDC', env.provider, chainId);
 
         expect(pools1.length).toBe(pools2.length);
         expect(pools1.length).toBe(4);
@@ -5885,7 +5885,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return consistent pool addresses matching getPoolAddress', async () => {
-        const pools = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
 
         expect(pools.length).toBeGreaterThan(0);
 
@@ -5896,8 +5896,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should be deterministic and return same results on multiple calls', async () => {
-        const pools1 = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
-        const pools2 = await adapter.discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools1 = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const pools2 = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
 
         expect(pools1.length).toBe(pools2.length);
 
@@ -5917,61 +5917,61 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Error Cases', () => {
       it('should throw error for missing token0 symbol', async () => {
         await expect(
-          adapter.discoverAvailablePools(null, 'USDC', env.provider, chainId)
+          adapter._discoverAvailablePools(null, 'USDC', env.provider, chainId)
         ).rejects.toThrow('Token0 symbol parameter is required');
 
         await expect(
-          adapter.discoverAvailablePools(undefined, 'USDC', env.provider, chainId)
+          adapter._discoverAvailablePools(undefined, 'USDC', env.provider, chainId)
         ).rejects.toThrow('Token0 symbol parameter is required');
 
         await expect(
-          adapter.discoverAvailablePools('', 'USDC', env.provider, chainId)
+          adapter._discoverAvailablePools('', 'USDC', env.provider, chainId)
         ).rejects.toThrow('Token0 symbol parameter is required');
       });
 
       it('should throw error for unknown token0 symbol', async () => {
         await expect(
-          adapter.discoverAvailablePools('FAKE_TOKEN', 'USDC', env.provider, chainId)
+          adapter._discoverAvailablePools('FAKE_TOKEN', 'USDC', env.provider, chainId)
         ).rejects.toThrow('Token FAKE_TOKEN not found');
       });
 
       it('should throw error for missing token1 symbol', async () => {
         await expect(
-          adapter.discoverAvailablePools('ETH', null, env.provider, chainId)
+          adapter._discoverAvailablePools('ETH', null, env.provider, chainId)
         ).rejects.toThrow('Token1 symbol parameter is required');
 
         await expect(
-          adapter.discoverAvailablePools('ETH', undefined, env.provider, chainId)
+          adapter._discoverAvailablePools('ETH', undefined, env.provider, chainId)
         ).rejects.toThrow('Token1 symbol parameter is required');
 
         await expect(
-          adapter.discoverAvailablePools('ETH', '', env.provider, chainId)
+          adapter._discoverAvailablePools('ETH', '', env.provider, chainId)
         ).rejects.toThrow('Token1 symbol parameter is required');
       });
 
       it('should throw error for unknown token1 symbol', async () => {
         await expect(
-          adapter.discoverAvailablePools('ETH', 'FAKE_TOKEN', env.provider, chainId)
+          adapter._discoverAvailablePools('ETH', 'FAKE_TOKEN', env.provider, chainId)
         ).rejects.toThrow('Token FAKE_TOKEN not found');
       });
 
       it('should throw error for missing chainId', async () => {
         await expect(
-          adapter.discoverAvailablePools('ETH', 'USDC', env.provider, null)
+          adapter._discoverAvailablePools('ETH', 'USDC', env.provider, null)
         ).rejects.toThrow('Chain ID parameter is required');
 
         await expect(
-          adapter.discoverAvailablePools('ETH', 'USDC', env.provider, undefined)
+          adapter._discoverAvailablePools('ETH', 'USDC', env.provider, undefined)
         ).rejects.toThrow('Chain ID parameter is required');
       });
 
       it('should throw error for invalid provider', async () => {
         await expect(
-          adapter.discoverAvailablePools('ETH', 'USDC', null, chainId)
+          adapter._discoverAvailablePools('ETH', 'USDC', null, chainId)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
-          adapter.discoverAvailablePools('ETH', 'USDC', {}, chainId)
+          adapter._discoverAvailablePools('ETH', 'USDC', {}, chainId)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
@@ -5985,8 +5985,229 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         })();
 
         await expect(
-          brokenAdapter.discoverAvailablePools('ETH', 'USDC', env.provider, chainId)
+          brokenAdapter._discoverAvailablePools('ETH', 'USDC', env.provider, chainId)
         ).rejects.toThrow('No Uniswap V3 factory address found for chainId: 1337');
+      });
+    });
+  });
+
+  describe('selectBestPool', () => {
+    const chainId = 1337; // Hardhat fork chainId
+
+    describe('Success Cases', () => {
+      it('should return result with bestPool, poolsDiscovered, and poolsActive', async () => {
+        const result = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+
+        expect(result).toHaveProperty('bestPool');
+        expect(result).toHaveProperty('poolsDiscovered');
+        expect(result).toHaveProperty('poolsActive');
+        expect(typeof result.poolsDiscovered).toBe('number');
+        expect(typeof result.poolsActive).toBe('number');
+      });
+
+      it('should return bestPool with correct structure', async () => {
+        const result = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+
+        expect(result.bestPool).toHaveProperty('address');
+        expect(result.bestPool).toHaveProperty('fee');
+        expect(result.bestPool).toHaveProperty('liquidity');
+        expect(result.bestPool).toHaveProperty('tick');
+        expect(result.bestPool).toHaveProperty('sqrtPriceX96');
+        expect(result.bestPool).toHaveProperty('token0');
+        expect(result.bestPool).toHaveProperty('token1');
+
+        // Token metadata
+        expect(result.bestPool.token0).toHaveProperty('symbol');
+        expect(result.bestPool.token0).toHaveProperty('address');
+        expect(result.bestPool.token1).toHaveProperty('symbol');
+        expect(result.bestPool.token1).toHaveProperty('address');
+      });
+
+      it('should return poolsActive less than or equal to poolsDiscovered', async () => {
+        const result = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+
+        expect(result.poolsDiscovered).toBeGreaterThanOrEqual(result.poolsActive);
+        expect(result.poolsActive).toBeGreaterThan(0);
+      });
+
+      it('should select pool with highest liquidity among active pools', async () => {
+        const result = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+
+        // Get all pools to verify selection
+        const allPools = await adapter._discoverAvailablePools('USDC', 'ETH', env.provider, chainId);
+        const activePools = allPools.filter(p => BigInt(p.liquidity) > 0n);
+
+        // Best pool should have highest liquidity among active pools
+        const bestLiquidity = BigInt(result.bestPool.liquidity);
+        for (const pool of activePools) {
+          expect(bestLiquidity).toBeGreaterThanOrEqual(BigInt(pool.liquidity));
+        }
+      });
+
+      it('should return same result regardless of token input order', async () => {
+        const result1 = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+        const result2 = await adapter.selectBestPool('ETH', 'USDC', env.provider, chainId);
+
+        // Same best pool should be selected
+        expect(result1.bestPool.address).toBe(result2.bestPool.address);
+        expect(result1.poolsDiscovered).toBe(result2.poolsDiscovered);
+        expect(result1.poolsActive).toBe(result2.poolsActive);
+      });
+
+      it('should accept both ETH and WETH (V3 uses WETH internally)', async () => {
+        const resultEth = await adapter.selectBestPool('ETH', 'USDC', env.provider, chainId);
+        const resultWeth = await adapter.selectBestPool('WETH', 'USDC', env.provider, chainId);
+
+        expect(resultEth.bestPool.address).toBe(resultWeth.bestPool.address);
+        expect(resultEth.poolsDiscovered).toBe(resultWeth.poolsDiscovered);
+      });
+
+      it('should be deterministic and return same results on multiple calls', async () => {
+        const result1 = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+        const result2 = await adapter.selectBestPool('USDC', 'ETH', env.provider, chainId);
+
+        expect(result1.bestPool.address).toBe(result2.bestPool.address);
+        expect(result1.bestPool.fee).toBe(result2.bestPool.fee);
+        expect(result1.poolsDiscovered).toBe(result2.poolsDiscovered);
+        expect(result1.poolsActive).toBe(result2.poolsActive);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      describe('tokenASymbol validation', () => {
+        it('should throw error for null tokenASymbol', async () => {
+          await expect(
+            adapter.selectBestPool(null, 'USDC', env.provider, chainId)
+          ).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for undefined tokenASymbol', async () => {
+          await expect(
+            adapter.selectBestPool(undefined, 'USDC', env.provider, chainId)
+          ).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for empty string tokenASymbol', async () => {
+          await expect(
+            adapter.selectBestPool('', 'USDC', env.provider, chainId)
+          ).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for non-string tokenASymbol', async () => {
+          await expect(
+            adapter.selectBestPool(123, 'USDC', env.provider, chainId)
+          ).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+
+          await expect(
+            adapter.selectBestPool({}, 'USDC', env.provider, chainId)
+          ).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for unknown tokenASymbol', async () => {
+          await expect(
+            adapter.selectBestPool('FAKE_TOKEN', 'USDC', env.provider, chainId)
+          ).rejects.toThrow('Token FAKE_TOKEN not found');
+        });
+      });
+
+      describe('tokenBSymbol validation', () => {
+        it('should throw error for null tokenBSymbol', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', null, env.provider, chainId)
+          ).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for undefined tokenBSymbol', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', undefined, env.provider, chainId)
+          ).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for empty string tokenBSymbol', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', '', env.provider, chainId)
+          ).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for non-string tokenBSymbol', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 123, env.provider, chainId)
+          ).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+
+          await expect(
+            adapter.selectBestPool('ETH', [], env.provider, chainId)
+          ).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+        });
+
+        it('should throw error for unknown tokenBSymbol', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'FAKE_TOKEN', env.provider, chainId)
+          ).rejects.toThrow('Token FAKE_TOKEN not found');
+        });
+      });
+
+      describe('provider validation', () => {
+        it('should throw error for null provider', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', null, chainId)
+          ).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+        });
+
+        it('should throw error for undefined provider', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', undefined, chainId)
+          ).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+        });
+
+        it('should throw error for invalid provider object', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', {}, chainId)
+          ).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', { foo: 'bar' }, chainId)
+          ).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+        });
+      });
+
+      describe('chainId validation', () => {
+        it('should throw error for null chainId', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', env.provider, null)
+          ).rejects.toThrow('chainId parameter is required and must be a number');
+        });
+
+        it('should throw error for undefined chainId', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', env.provider, undefined)
+          ).rejects.toThrow('chainId parameter is required and must be a number');
+        });
+
+        it('should throw error for non-number chainId', async () => {
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', env.provider, '1337')
+          ).rejects.toThrow('chainId parameter is required and must be a number');
+
+          await expect(
+            adapter.selectBestPool('ETH', 'USDC', env.provider, {})
+          ).rejects.toThrow('chainId parameter is required and must be a number');
+        });
+      });
+    });
+
+    describe('Business Logic Error Cases', () => {
+      it('should throw error when token symbol does not exist', async () => {
+        // Use a completely fake token symbol that won't be in any config
+        await expect(
+          adapter.selectBestPool('FAKE_TOKEN_XYZ', 'USDC', env.provider, chainId)
+        ).rejects.toThrow('Token FAKE_TOKEN_XYZ not found');
+      });
+
+      it('should throw error when token not available on specified chain', async () => {
+        // Use valid token symbols but invalid chainId - token resolution will fail
+        await expect(
+          adapter.selectBestPool('ETH', 'USDC', env.provider, 999999)
+        ).rejects.toThrow(/not available on chain/);
       });
     });
   });
@@ -11947,6 +12168,63 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         expect(bounds.lower).toBe(positionRange.tickLower);
         expect(bounds.upper).toBe(positionRange.tickUpper);
+      });
+    });
+  });
+
+  describe('getPoolCurrent', () => {
+    let adapter;
+
+    beforeEach(() => {
+      adapter = new UniswapV3Adapter(1);
+    });
+
+    describe('success cases', () => {
+      it('should return tick from poolData', () => {
+        const poolData = { tick: 201400, fee: 500, liquidity: '1000000' };
+        expect(adapter.getPoolCurrent(poolData)).toBe(201400);
+      });
+
+      it('should work with negative ticks', () => {
+        const poolData = { tick: -50000 };
+        expect(adapter.getPoolCurrent(poolData)).toBe(-50000);
+      });
+
+      it('should work with zero tick', () => {
+        const poolData = { tick: 0 };
+        expect(adapter.getPoolCurrent(poolData)).toBe(0);
+      });
+
+      it('should work with max tick value', () => {
+        const poolData = { tick: 887272 };
+        expect(adapter.getPoolCurrent(poolData)).toBe(887272);
+      });
+
+      it('should work with min tick value', () => {
+        const poolData = { tick: -887272 };
+        expect(adapter.getPoolCurrent(poolData)).toBe(-887272);
+      });
+    });
+
+    describe('validation', () => {
+      it('should throw if poolData is null', () => {
+        expect(() => adapter.getPoolCurrent(null))
+          .toThrow('Pool data must have tick property');
+      });
+
+      it('should throw if poolData is undefined', () => {
+        expect(() => adapter.getPoolCurrent(undefined))
+          .toThrow('Pool data must have tick property');
+      });
+
+      it('should throw if poolData.tick is undefined', () => {
+        expect(() => adapter.getPoolCurrent({ fee: 500 }))
+          .toThrow('Pool data must have tick property');
+      });
+
+      it('should throw if poolData is empty object', () => {
+        expect(() => adapter.getPoolCurrent({}))
+          .toThrow('Pool data must have tick property');
       });
     });
   });

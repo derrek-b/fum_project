@@ -11,24 +11,24 @@
  * platform-specific helpers. Update as we build out the automation service.
  *
  * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
- * -----------------------------------------------------------------------------
- * | Method                       | Used By                    | Status    |
- * |------------------------------|----------------------------|-----------|
- * | getPositionsForVDS           | VDS.fetchPositions         | CONFIRMED |
- * | getPoolData                  | VDS.fetchAssetValues       | CONFIRMED |
- * | calculateTokenAmounts        | VDS.fetchAssetValues       | CONFIRMED |
- * | getApprovalTarget(opType)    | Strategy.ensureApprovals   | CONFIRMED |
- * | discoverAvailablePools       | Strategy.selectBestPool    | CONFIRMED |
- * | sortTokens                   | Strategy.selectBestPool    | CONFIRMED |
- * | parseClosureReceipt          | Strategy.closePositions    | CONFIRMED |
- * | generateRemoveLiquidityData  | Strategy.closePositions    | CONFIRMED |
- * | getAddLiquidityAmounts       | Strategy.addToPosition     | CONFIRMED |
- * | generateAddLiquidityData     | Strategy.addToPosition     | CONFIRMED |
- * | parseSwapReceipt             | Strategy.addToPosition     | CONFIRMED |
- * | parseIncreaseLiquidityReceipt| Strategy.addToPosition     | CONFIRMED |
- * | getBestSwapQuote             | Strategy.addToPosition     | CONFIRMED |
- * | extractPositionBounds        | Strategy.addToPosition     | CONFIRMED |
- * | getPositionRange             | Strategy.createNewPosition | CONFIRMED |
+ * ---------------------------------------------------------------------------------
+ * | Method                       | Used By                            | Status    |
+ * |------------------------------|------------------------------------|-----------|
+ * | getPositionsForVDS           | VDS.fetchPositions                 | CONFIRMED |
+ * | getPoolData                  | VDS.fetchAssetValues               | CONFIRMED |
+ * | calculateTokenAmounts        | VDS.fetchAssetValues               | CONFIRMED |
+ * | getApprovalTarget(opType)    | Strategy.ensureApprovals           | CONFIRMED |
+ * | selectBestPool               | Strategy.initializeVaultStrategy   | CONFIRMED |
+ * | getPoolCurrent               | Strategy.initializeVaultStrategy   | CONFIRMED |
+ * | parseClosureReceipt          | Strategy.closePositions            | CONFIRMED |
+ * | generateRemoveLiquidityData  | Strategy.closePositions            | CONFIRMED |
+ * | getAddLiquidityAmounts       | Strategy.addToPosition             | CONFIRMED |
+ * | generateAddLiquidityData     | Strategy.addToPosition             | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.addToPosition             | CONFIRMED |
+ * | parseIncreaseLiquidityReceipt| Strategy.addToPosition             | CONFIRMED |
+ * | getBestSwapQuote             | Strategy.addToPosition             | CONFIRMED |
+ * | extractPositionBounds        | Strategy.addToPosition             | CONFIRMED |
+ * | getPositionRange             | Strategy.createNewPosition         | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -434,16 +434,21 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Discover available pools for a token pair across all fee tiers
-   * Adapter handles platform-specific token resolution (e.g., V3 translates ETH → WETH)
-   * @param {string} token0Symbol - Symbol of first token (e.g., 'ETH', 'USDC')
-   * @param {string} token1Symbol - Symbol of second token
+   * Select the best pool for a token pair
+   * Discovers pools, filters inactive ones, sorts by depth, returns best
+   *
+   * @param {string} tokenASymbol - First token symbol (order doesn't matter)
+   * @param {string} tokenBSymbol - Second token symbol
    * @param {Object} provider - Ethers provider instance
    * @param {number} chainId - Chain ID for address lookups
-   * @returns {Promise<Array>} Array of pool information objects with { address, fee, liquidity, sqrtPriceX96, tick, token0, token1 }
+   * @returns {Promise<Object>} Selection result
+   * @returns {Object} result.bestPool - Best pool object (platform-specific structure)
+   * @returns {number} result.poolsDiscovered - Total pools found
+   * @returns {number} result.poolsActive - Pools with non-zero depth
+   * @throws {Error} If no pools or no active pools found
    */
-  async discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
-    throw new Error("discoverAvailablePools must be implemented by subclasses");
+  async selectBestPool(tokenASymbol, tokenBSymbol, provider, chainId) {
+    throw new Error("selectBestPool must be implemented by subclasses");
   }
 
   /**
@@ -477,6 +482,20 @@ export default class PlatformAdapter {
    */
   extractPositionBounds(position) {
     throw new Error("extractPositionBounds must be implemented by subclasses");
+  }
+
+  /**
+   * Get current pool state value for baseline tracking
+   *
+   * Returns platform-specific value representing current pool state.
+   * Used for emergency exit baseline capture.
+   *
+   * @param {Object} poolData - Pool data object from getPoolData or similar
+   * @returns {number} Current state value (tick for V3, price for others)
+   * @throws {Error} If poolData is invalid or missing required state property
+   */
+  getPoolCurrent(poolData) {
+    throw new Error("getPoolCurrent must be implemented by subclasses");
   }
 
   /**

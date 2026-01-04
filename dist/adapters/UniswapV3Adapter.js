@@ -492,6 +492,23 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get current tick from pool data
+   *
+   * For Uniswap V3, the current pool state is represented by the tick.
+   * Used for emergency exit baseline capture.
+   *
+   * @param {Object} poolData - Pool data object with tick property
+   * @returns {number} Current tick
+   * @throws {Error} If poolData is invalid or missing tick property
+   */
+  getPoolCurrent(poolData) {
+    if (!poolData || poolData.tick === undefined) {
+      throw new Error('Pool data must have tick property');
+    }
+    return poolData.tick;
+  }
+
+  /**
    * Validate that provider is on the correct chain
    * @param {Object} provider - Ethers provider instance
    * @throws {Error} If provider is invalid or on wrong chain
@@ -2130,15 +2147,82 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Discover available pools for a token pair across all fee tiers
+   * Select the best pool for a token pair
+   * Discovers pools, filters inactive ones, sorts by liquidity, returns best
+   *
+   * @param {string} tokenASymbol - First token symbol (order doesn't matter)
+   * @param {string} tokenBSymbol - Second token symbol
+   * @param {Object} provider - Ethers provider instance
+   * @param {number} chainId - Chain ID for address lookups
+   * @returns {Promise<Object>} Selection result
+   * @returns {Object} result.bestPool - Best pool object with full pool data
+   * @returns {number} result.poolsDiscovered - Total pools found
+   * @returns {number} result.poolsActive - Pools with non-zero liquidity
+   * @throws {Error} If parameters invalid, no pools found, or no active pools
+   */
+  async selectBestPool(tokenASymbol, tokenBSymbol, provider, chainId) {
+    // Validate tokenASymbol
+    if (!tokenASymbol || typeof tokenASymbol !== 'string') {
+      throw new Error("tokenASymbol parameter is required and must be a string");
+    }
+
+    // Validate tokenBSymbol
+    if (!tokenBSymbol || typeof tokenBSymbol !== 'string') {
+      throw new Error("tokenBSymbol parameter is required and must be a string");
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("provider parameter is required and must be an ethers provider instance");
+    }
+
+    // Validate chainId
+    if (chainId === null || chainId === undefined || typeof chainId !== 'number') {
+      throw new Error("chainId parameter is required and must be a number");
+    }
+
+    // Discover pools (internal method has additional validation for token resolution)
+    const pools = await this._discoverAvailablePools(tokenASymbol, tokenBSymbol, provider, chainId);
+
+    if (pools.length === 0) {
+      throw new Error(`No pools found for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName}`);
+    }
+
+    // Filter dead pools (liquidity = 0)
+    const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
+
+    if (activePools.length === 0) {
+      throw new Error(
+        `No active pools for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName} ` +
+        `(${pools.length} pools exist but all have zero liquidity)`
+      );
+    }
+
+    // Sort by liquidity descending (higher = better depth)
+    activePools.sort((a, b) => {
+      const liqA = BigInt(a.liquidity);
+      const liqB = BigInt(b.liquidity);
+      return liqB > liqA ? 1 : liqB < liqA ? -1 : 0;
+    });
+
+    return {
+      bestPool: activePools[0],
+      poolsDiscovered: pools.length,
+      poolsActive: activePools.length
+    };
+  }
+
+  /**
+   * Discover available pools for a token pair across all fee tiers (internal)
    * V3 adapter translates ETH → WETH internally (V3 only uses WETH, not native ETH)
+   * @private
    * @param {string} token0Symbol - Symbol of first token (e.g., 'ETH', 'USDC')
    * @param {string} token1Symbol - Symbol of second token
    * @param {Object} provider - Ethers provider instance
    * @param {number} chainId - Chain ID for address lookups
    * @returns {Promise<Array>} Array of pool information objects with token metadata
    */
-  async discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
+  async _discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
     // Validate symbols
     if (!token0Symbol || typeof token0Symbol !== 'string') {
       throw new Error("Token0 symbol parameter is required");
