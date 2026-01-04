@@ -412,28 +412,33 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(typeof event.timestamp).toBe('number');
       });
 
-      it('should have correct event structure', () => {
+      it('should have correct event structure with pool object', () => {
         const event = bestPoolSelectedEvents[0];
 
         // Required fields
         expect(event).toHaveProperty('vaultAddress');
-        expect(event).toHaveProperty('token0Symbol');
-        expect(event).toHaveProperty('token1Symbol');
         expect(event).toHaveProperty('platformId');
-        expect(event).toHaveProperty('poolAddress');
-        expect(event).toHaveProperty('poolFee');
-        expect(event).toHaveProperty('poolLiquidity');
-        expect(event).toHaveProperty('poolTick');
+        expect(event).toHaveProperty('pool');
         expect(event).toHaveProperty('poolsDiscovered');
         expect(event).toHaveProperty('poolsActive');
         expect(event).toHaveProperty('timestamp');
+
+        // Pool object structure
+        expect(event.pool).toHaveProperty('address');
+        expect(event.pool).toHaveProperty('fee');
+        expect(event.pool).toHaveProperty('liquidity');
+        expect(event.pool).toHaveProperty('tick');
+        expect(event.pool).toHaveProperty('token0');
+        expect(event.pool).toHaveProperty('token1');
+        expect(event.pool.token0).toHaveProperty('symbol');
+        expect(event.pool.token1).toHaveProperty('symbol');
       });
 
       it('should select pool for correct token pair (sorted order)', () => {
         const event = bestPoolSelectedEvents[0];
 
         // Tokens should be sorted by address - verify both target tokens present
-        const tokenPair = [event.token0Symbol, event.token1Symbol].sort();
+        const tokenPair = [event.pool.token0.symbol, event.pool.token1.symbol].sort();
         expect(tokenPair).toEqual(['USDC', 'WETH']);
       });
 
@@ -446,27 +451,27 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       it('should select pool with valid address', () => {
         const event = bestPoolSelectedEvents[0];
 
-        expect(event.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(event.pool.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
       });
 
       it('should select pool with valid V3 fee tier', () => {
         const event = bestPoolSelectedEvents[0];
 
-        expect(VALID_V3_FEE_TIERS).toContain(event.poolFee);
+        expect(VALID_V3_FEE_TIERS).toContain(event.pool.fee);
       });
 
       it('should select pool with liquidity > 0 (not dead)', () => {
         const event = bestPoolSelectedEvents[0];
 
         // Liquidity is returned as string from BigInt
-        expect(BigInt(event.poolLiquidity)).toBeGreaterThan(0n);
+        expect(BigInt(event.pool.liquidity)).toBeGreaterThan(0n);
       });
 
       it('should select pool with tick in valid V3 range', () => {
         const event = bestPoolSelectedEvents[0];
 
-        expect(event.poolTick).toBeGreaterThanOrEqual(V3_MIN_TICK);
-        expect(event.poolTick).toBeLessThanOrEqual(V3_MAX_TICK);
+        expect(event.pool.tick).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(event.pool.tick).toBeLessThanOrEqual(V3_MAX_TICK);
       });
 
       it('should have poolsActive <= poolsDiscovered', () => {
@@ -541,9 +546,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
         // Verify via PositionsClosed event that a WBTC/WETH position was closed
         if (positionsClosedEvents.length > 0) {
-          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p =>
-            [p.token0Symbol, p.token1Symbol].sort().join('/')
-          );
+          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p => {
+            const poolMeta = service.poolData[p.position.pool];
+            return [poolMeta.token0Symbol, poolMeta.token1Symbol].sort().join('/');
+          });
           expect(closedTokenPairs).toContain('WBTC/WETH');
         }
       });
@@ -558,9 +564,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
         // Verify via PositionsClosed event that a USDC/WETH position was also closed
         if (positionsClosedEvents.length > 0) {
-          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p =>
-            [p.token0Symbol, p.token1Symbol].sort().join('/')
-          );
+          const closedTokenPairs = positionsClosedEvents[0].closedPositions.map(p => {
+            const poolMeta = service.poolData[p.position.pool];
+            return [poolMeta.token0Symbol, poolMeta.token1Symbol].sort().join('/');
+          });
           // Both WBTC/WETH (wrong tokens) and USDC/WETH (wrong pool) should be closed
           expect(closedTokenPairs).toContain('USDC/WETH');
           expect(closedTokenPairs).toContain('WBTC/WETH');
@@ -586,6 +593,37 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         for (const nonAlignedId of event.nonAlignedPositionIds) {
           expect(event.alignedPositionIds).not.toContain(nonAlignedId);
         }
+      });
+    });
+
+    describe('Emergency Exit Baseline', () => {
+      it('should have emergency exit baseline set for the vault', () => {
+        const strategy = service.strategies.get('bob');
+        expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeDefined();
+        expect(typeof strategy.emergencyExitBaseline[testVault.vaultAddress]).toBe('number');
+      });
+
+      it('should have baseline equal to pool tick from BestPoolSelected (aligned position scenario)', () => {
+        const strategy = service.strategies.get('bob');
+        const baseline = strategy.emergencyExitBaseline[testVault.vaultAddress];
+
+        // For aligned positions, baseline is set from getPoolCurrent(targetPool) in initializeVaultStrategy
+        // This should match the pool tick from the BestPoolSelected event
+        const bestPoolEvent = bestPoolSelectedEvents[0];
+        expect(baseline).toBe(bestPoolEvent.pool.tick);
+      });
+
+      it('should clear baseline when clearEmergencyExitBaseline is called', () => {
+        const strategy = service.strategies.get('bob');
+
+        // Verify baseline exists before clearing
+        expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeDefined();
+
+        // Clear the baseline
+        strategy.clearEmergencyExitBaseline(testVault.vaultAddress);
+
+        // Verify baseline is cleared
+        expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeUndefined();
       });
     });
 
@@ -623,9 +661,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       it('should close the WBTC/WETH position (non-aligned - wrong tokens)', () => {
         const event = positionsClosedEvents[0];
 
-        const closedTokenPairs = event.closedPositions.map(p =>
-          [p.token0Symbol, p.token1Symbol].sort().join('/')
-        );
+        const closedTokenPairs = event.closedPositions.map(p => {
+          const poolMeta = service.poolData[p.position.pool];
+          return [poolMeta.token0Symbol, poolMeta.token1Symbol].sort().join('/');
+        });
         expect(closedTokenPairs).toContain('WBTC/WETH');
       });
 
@@ -633,9 +672,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const event = positionsClosedEvents[0];
 
         // One of the closed positions should be USDC/WETH (the one in wrong pool)
-        const closedTokenPairs = event.closedPositions.map(p =>
-          [p.token0Symbol, p.token1Symbol].sort().join('/')
-        );
+        const closedTokenPairs = event.closedPositions.map(p => {
+          const poolMeta = service.poolData[p.position.pool];
+          return [poolMeta.token0Symbol, poolMeta.token1Symbol].sort().join('/');
+        });
         expect(closedTokenPairs).toContain('USDC/WETH');
       });
 
@@ -654,16 +694,18 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(tokens).toEqual(['USDC', 'WETH']);
       });
 
-      it('should have correct token symbols in closed position', () => {
+      it('should have position object in closed position', () => {
         const event = positionsClosedEvents[0];
         const closedPosition = event.closedPositions[0];
 
-        expect(closedPosition).toHaveProperty('token0Symbol');
-        expect(closedPosition).toHaveProperty('token1Symbol');
-        expect(typeof closedPosition.token0Symbol).toBe('string');
-        expect(typeof closedPosition.token1Symbol).toBe('string');
-        expect(closedPosition.token0Symbol.length).toBeGreaterThan(0);
-        expect(closedPosition.token1Symbol.length).toBeGreaterThan(0);
+        // Position object should be included
+        expect(closedPosition).toHaveProperty('position');
+        expect(closedPosition.position).toHaveProperty('pool');
+        expect(closedPosition.position.pool).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(closedPosition.position).toHaveProperty('tickUpper');
+        expect(closedPosition.position).toHaveProperty('tickLower');
+        expect(typeof closedPosition.position.tickUpper).toBe('number');
+        expect(typeof closedPosition.position.tickLower).toBe('number');
       });
 
       it('should have correct platform in closed position', () => {
@@ -673,17 +715,19 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(closedPosition.platform).toBe('uniswapV3');
       });
 
-      it('should have valid tick range in closed position', () => {
+      it('should have valid tick range extractable via adapter', () => {
         const event = positionsClosedEvents[0];
         const closedPosition = event.closedPositions[0];
+        const adapter = service.adapters.get(closedPosition.platform);
 
-        expect(closedPosition).toHaveProperty('lowerBound');
-        expect(closedPosition).toHaveProperty('upperBound');
-        expect(typeof closedPosition.lowerBound).toBe('number');
-        expect(typeof closedPosition.upperBound).toBe('number');
-        expect(closedPosition.lowerBound).toBeLessThan(closedPosition.upperBound);
-        expect(closedPosition.lowerBound).toBeGreaterThanOrEqual(V3_MIN_TICK);
-        expect(closedPosition.upperBound).toBeLessThanOrEqual(V3_MAX_TICK);
+        // Use adapter to extract bounds from position object
+        const { lower, upper } = adapter.extractPositionBounds(closedPosition.position);
+
+        expect(typeof lower).toBe('number');
+        expect(typeof upper).toBe('number');
+        expect(lower).toBeLessThan(upper);
+        expect(lower).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(upper).toBeLessThanOrEqual(V3_MAX_TICK);
       });
 
       it('should have principal amounts as numeric strings', () => {
@@ -1371,16 +1415,19 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.gasEstimated).toBeDefined();
     });
 
-    it('should have correct position range matching position (platform-agnostic names)', () => {
+    it('should have correct position object matching vault position', () => {
       const event = liquidityAddedToPositionEvents[0];
       const vault = service.vaultDataService.getAllVaults()[0];
-      const position = vault.positions[event.positionId];
+      const vaultPosition = vault.positions[event.positionId];
+      const adapter = service.adapters.get(event.platform);
 
-      // Event uses platform-agnostic names, position has platform-specific names
-      expect(event.lowerBound).toBe(position.tickLower);
-      expect(event.upperBound).toBe(position.tickUpper);
-      // No 'current' in addToPosition event (only in NewPositionCreated for emergency exit baseline)
-      expect(event.current).toBeUndefined();
+      // Event contains the position object
+      expect(event.position).toBeDefined();
+
+      // Use adapter to extract bounds and compare with vault position
+      const { lower, upper } = adapter.extractPositionBounds(event.position);
+      expect(lower).toBe(vaultPosition.tickLower);
+      expect(upper).toBe(vaultPosition.tickUpper);
     });
 
     it('should have correct context metadata', () => {

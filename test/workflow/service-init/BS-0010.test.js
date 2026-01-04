@@ -281,11 +281,23 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
       });
 
+      it('should emit pool object with correct structure', () => {
+        const event = bestPoolSelectedEvents[0];
+
+        expect(event.pool).toBeDefined();
+        expect(event.pool.address).toBeDefined();
+        expect(event.pool.fee).toBeDefined();
+        expect(event.pool.liquidity).toBeDefined();
+        expect(event.pool.tick).toBeDefined();
+        expect(event.pool.token0).toBeDefined();
+        expect(event.pool.token1).toBeDefined();
+      });
+
       it('should select pool for LINK/WETH token pair', () => {
         const event = bestPoolSelectedEvents[0];
 
         // Tokens should include LINK and WETH
-        const tokenPair = [event.token0Symbol, event.token1Symbol].sort();
+        const tokenPair = [event.pool.token0.symbol, event.pool.token1.symbol].sort();
         expect(tokenPair).toEqual(['LINK', 'WETH']);
       });
 
@@ -296,18 +308,26 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
 
       it('should select pool with valid V3 fee tier', () => {
         const event = bestPoolSelectedEvents[0];
-        expect(VALID_V3_FEE_TIERS).toContain(event.poolFee);
+        expect(VALID_V3_FEE_TIERS).toContain(event.pool.fee);
       });
 
       it('should select pool with liquidity > 0', () => {
         const event = bestPoolSelectedEvents[0];
-        expect(BigInt(event.poolLiquidity)).toBeGreaterThan(0n);
+        expect(BigInt(event.pool.liquidity)).toBeGreaterThan(0n);
       });
 
       it('should select pool with tick in valid V3 range', () => {
         const event = bestPoolSelectedEvents[0];
-        expect(event.poolTick).toBeGreaterThanOrEqual(V3_MIN_TICK);
-        expect(event.poolTick).toBeLessThanOrEqual(V3_MAX_TICK);
+        expect(event.pool.tick).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(event.pool.tick).toBeLessThanOrEqual(V3_MAX_TICK);
+      });
+
+      it('should include pool discovery counts', () => {
+        const event = bestPoolSelectedEvents[0];
+        expect(typeof event.poolsDiscovered).toBe('number');
+        expect(typeof event.poolsActive).toBe('number');
+        expect(event.poolsDiscovered).toBeGreaterThanOrEqual(event.poolsActive);
+        expect(event.poolsActive).toBeGreaterThan(0);
       });
     });
 
@@ -650,16 +670,21 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(event.gasEstimated).toBeDefined();
     });
 
-    it('should have valid position range (platform-agnostic names)', () => {
+    it('should have valid position range (use adapter to extract bounds)', () => {
       const event = newPositionCreatedEvents[0];
+      const adapter = service.adapters.get(event.platform);
 
-      // Platform-agnostic range fields
-      expect(typeof event.lowerBound).toBe('number');
-      expect(typeof event.upperBound).toBe('number');
-      expect(event.lowerBound).toBeLessThan(event.upperBound);
-      expect(typeof event.current).toBe('number');
+      // Position object should exist
+      expect(event.position).toBeDefined();
 
-      // Current should be within the range (position was just created)
+      // Use adapter to extract bounds
+      const { lower, upper } = adapter.extractPositionBounds(event.position);
+      expect(typeof lower).toBe('number');
+      expect(typeof upper).toBe('number');
+      expect(lower).toBeLessThan(upper);
+
+      // Position includes current tick from pool at creation time
+      expect(typeof event.position.currentTick).toBe('number');
     });
 
     it('should have correct context metadata', () => {
@@ -684,6 +709,37 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       // Note: This depends on whether the vault positions are refreshed after creation
       expect(event.positionId).toBeDefined();
       expect(typeof event.positionId === 'string' || typeof event.positionId === 'number').toBe(true);
+    });
+  });
+
+  describe('Emergency Exit Baseline', () => {
+    it('should have emergency exit baseline set for the vault', () => {
+      const strategy = service.strategies.get('bob');
+      expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeDefined();
+      expect(typeof strategy.emergencyExitBaseline[testVault.vaultAddress]).toBe('number');
+    });
+
+    it('should have baseline equal to current tick from NewPositionCreated event', () => {
+      const strategy = service.strategies.get('bob');
+      const baseline = strategy.emergencyExitBaseline[testVault.vaultAddress];
+
+      // Baseline should match the current tick when position was created
+      // Position object contains currentTick from pool at creation time
+      const newPositionEvent = newPositionCreatedEvents[0];
+      expect(baseline).toBe(newPositionEvent.position.currentTick);
+    });
+
+    it('should clear baseline when clearEmergencyExitBaseline is called', () => {
+      const strategy = service.strategies.get('bob');
+
+      // Verify baseline exists before clearing
+      expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeDefined();
+
+      // Clear the baseline
+      strategy.clearEmergencyExitBaseline(testVault.vaultAddress);
+
+      // Verify baseline is cleared
+      expect(strategy.emergencyExitBaseline[testVault.vaultAddress]).toBeUndefined();
     });
   });
 

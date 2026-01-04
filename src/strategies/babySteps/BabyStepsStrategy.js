@@ -52,13 +52,41 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Step 1: Select best pool (must happen before position evaluation)
     const [targetToken0, targetToken1] = vault.targetTokens;
     const adapter = this.adapters.get(vault.targetPlatforms[0]);
+    const platformId = vault.targetPlatforms[0];
 
     if (!adapter) {
-      throw new Error(`No adapter available for platform ${vault.targetPlatforms[0]}`);
+      throw new Error(`No adapter available for platform ${platformId}`);
     }
 
-    const targetPool = await this.selectBestPool(targetToken0, targetToken1, adapter, vault.address);
-    this.log(`Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
+    // Select best pool via adapter
+    const { bestPool, poolsDiscovered, poolsActive } = await retryRpcCall(
+      () => adapter.selectBestPool(targetToken0, targetToken1, this.provider, this.chainId),
+      'selectBestPool',
+      { log: (msg) => this.log(msg) }
+    );
+
+    // Emit BestPoolSelected event
+    this.eventManager.emit('BestPoolSelected', {
+      vaultAddress: vault.address,
+      platformId,
+      pool: bestPool,
+      poolsDiscovered,
+      poolsActive,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Selected ${bestPool.token0.symbol}/${bestPool.token1.symbol} pool: ${bestPool.address} (fee: ${bestPool.fee}bp)`
+      }
+    });
+
+    // Enrich token metadata with full token data from this.tokens
+    const targetPool = {
+      ...bestPool,
+      token0: { ...this.tokens[bestPool.token0.symbol], ...bestPool.token0 },
+      token1: { ...this.tokens[bestPool.token1.symbol], ...bestPool.token1 }
+    };
+
+    this.log(`🎯 Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
 
     // Step 2: Evaluate positions against targetPool
     const evaluation = await this.evaluateInitialPositions(vault, targetPool);
@@ -91,6 +119,14 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 5: Calculate available deployment
     const { availableDeployment, assetValues } = await this.calculateAvailableDeployment(vault);
+
+    // Step 5.5: Set emergency exit baseline for aligned positions
+    // For new positions, createNewPosition will set/overwrite the baseline
+    if (Object.keys(evaluation.alignedPositions).length > 0) {
+      const adapter = this.adapters.get(vault.targetPlatforms[0]);
+      this.emergencyExitBaseline[vault.address] = adapter.getPoolCurrent(targetPool);
+      this.log(`Set emergency exit baseline ${this.emergencyExitBaseline[vault.address]} for vault ${vault.address}`);
+    }
 
     // Step 6: Deploy capital
     if (availableDeployment > 0) {
@@ -297,100 +333,6 @@ export default class BabyStepsStrategy extends StrategyBase {
   }
 
   // ===========================================================================
-  // Pool Selection
-  // ===========================================================================
-
-  /**
-   * Select the best pool for a token pair based on on-chain liquidity
-   *
-   * Selection criteria:
-   * 1. Pool must have liquidity > 0 (not dead)
-   * 2. Highest liquidity wins (more depth = better execution)
-   *
-   * @param {string} tokenASymbol - First token symbol (order doesn't matter)
-   * @param {string} tokenBSymbol - Second token symbol (order doesn't matter)
-   * @param {Object} adapter - Platform adapter
-   * @param {string} vaultAddress - Vault address (for event/debugging)
-   * @returns {Promise<Object>} Best pool with sorted token data
-   * @returns {string} result.address - Pool address
-   * @returns {number} result.fee - Fee tier in basis points
-   * @returns {string} result.liquidity - Pool liquidity (L value)
-   * @returns {string} result.sqrtPriceX96 - Current sqrt price
-   * @returns {number} result.tick - Current tick
-   * @returns {Object} result.token0 - Sorted token0 data
-   * @returns {Object} result.token1 - Sorted token1 data
-   * @throws {Error} If no active pools found for the pair
-   */
-  async selectBestPool(tokenASymbol, tokenBSymbol, adapter, vaultAddress) {
-    // Discover all pools for this pair
-    // Adapter handles platform-specific token resolution (e.g., V3 translates ETH → WETH)
-    const pools = await retryRpcCall(
-      () => adapter.discoverAvailablePools(
-        tokenASymbol,
-        tokenBSymbol,
-        this.provider,
-        this.chainId
-      ),
-      'discoverAvailablePools',
-      { log: (msg) => this.log(msg) }
-    );
-
-    if (pools.length === 0) {
-      throw new Error(`No pools found for ${tokenASymbol}/${tokenBSymbol} on ${adapter.platformName}`);
-    }
-
-    // Filter dead pools (liquidity = 0)
-    const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
-
-    if (activePools.length === 0) {
-      throw new Error(`No active pools for ${tokenASymbol}/${tokenBSymbol} on ${adapter.platformName} (${pools.length} pools exist but all have zero liquidity)`);
-    }
-
-    // Sort by liquidity descending
-    activePools.sort((a, b) => {
-      const liqA = BigInt(a.liquidity);
-      const liqB = BigInt(b.liquidity);
-      return liqB > liqA ? 1 : liqB < liqA ? -1 : 0;
-    });
-
-    const bestPool = activePools[0];
-
-    // Pool now includes token metadata from adapter (e.g., WETH for V3 when ETH was requested)
-    const { token0, token1 } = bestPool;
-
-    this.log(`🎯 Selected pool: ${bestPool.address} (fee: ${bestPool.fee}bp, liquidity: ${bestPool.liquidity})`);
-
-    this.eventManager.emit('BestPoolSelected', {
-      vaultAddress,
-      token0Symbol: token0.symbol,
-      token1Symbol: token1.symbol,
-      platformId: adapter.platformId,
-      poolAddress: bestPool.address,
-      poolFee: bestPool.fee,
-      poolLiquidity: bestPool.liquidity,
-      poolTick: bestPool.tick,
-      poolsDiscovered: pools.length,
-      poolsActive: activePools.length,
-      timestamp: Date.now(),
-      log: {
-        level: 'info',
-        message: `Selected ${token0.symbol}/${token1.symbol} pool: ${bestPool.address} (fee: ${bestPool.fee}bp)`
-      }
-    });
-
-    // Enrich token metadata with full token data from this.tokens
-    // (adapter returns symbol/address, we need decimals etc. for downstream use)
-    const enrichedToken0 = { ...this.tokens[token0.symbol], ...token0 };
-    const enrichedToken1 = { ...this.tokens[token1.symbol], ...token1 };
-
-    return {
-      ...bestPool,
-      token0: enrichedToken0,
-      token1: enrichedToken1
-    };
-  }
-
-  // ===========================================================================
   // Position Management
   // ===========================================================================
 
@@ -506,19 +448,12 @@ export default class BabyStepsStrategy extends StrategyBase {
       const metadata = positionMetadata[positionId];
       const principal = principalByPosition[positionId] || { amount0: '0', amount1: '0' };
 
-      // Extract position bounds in platform-agnostic format
-      const { lower, upper } = metadata.adapter.extractPositionBounds(position);
-
       return {
         positionId,
-        pool: position.pool,
-        token0Symbol: metadata.poolMetadata.token0Symbol,
-        token1Symbol: metadata.poolMetadata.token1Symbol,
+        position,  // Full position object - use adapter.extractPositionBounds() for bounds
         platform: metadata.poolMetadata.platform,
         principalAmount0: principal.amount0.toString(),
-        principalAmount1: principal.amount1.toString(),
-        lowerBound: lower,
-        upperBound: upper
+        principalAmount1: principal.amount1.toString()
       };
     });
 
@@ -1157,9 +1092,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 
     // Step 9: Emit LiquidityAddedToPosition event
-    // Extract position bounds in platform-agnostic format
-    const { lower, upper } = adapter.extractPositionBounds(position);
-
     this.eventManager.emit('LiquidityAddedToPosition', {
       // Identity
       vaultAddress: vault.address,
@@ -1172,9 +1104,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       actualToken0: receiptData.amount0,
       actualToken1: receiptData.amount1,
 
-      // Position range (platform-agnostic names)
-      lowerBound: lower,
-      upperBound: upper,
+      // Position (full object - use adapter methods to extract bounds)
+      position,
 
       // Transaction
       transactionHash: receipt.transactionHash,
@@ -1680,10 +1611,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       actualToken0: receiptData.amount0,
       actualToken1: receiptData.amount1,
 
-      // Position range (platform-agnostic names, values from getPositionRange)
-      lowerBound: lower,
-      upperBound: upper,
-      current,  // for emergency exit baseline
+      // Position range (full position object - use adapter methods to extract bounds)
+      position,
 
       // Transaction
       transactionHash: receipt.transactionHash,
@@ -1698,6 +1627,12 @@ export default class BabyStepsStrategy extends StrategyBase {
       deploymentAmount: availableDeployment,
       timestamp: Date.now()
     });
+
+    // Step 12.5: Set emergency exit baseline for new position
+    // This overwrites any previous baseline (e.g., from aligned position at init, or previous position before rebalance)
+    const currentPool = adapter.getPoolCurrent(targetPool);
+    this.emergencyExitBaseline[vault.address] = currentPool;
+    this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
 
     // Step 13: Refresh vault cache with new position and updated token balances
     // If this fails, error bubbles up to trigger failed vault retry mechanism
@@ -2121,6 +2056,23 @@ export default class BabyStepsStrategy extends StrategyBase {
     } catch (error) {
       this.log(`⚠️ Failed to get swap quote ${tokenInData.symbol} → ${tokenOutData.symbol}: ${error.message}`);
       return null;
+    }
+  }
+
+  // ===========================================================================
+  // Emergency Exit Baseline
+  // ===========================================================================
+
+  /**
+   * Clear emergency exit baseline for a vault
+   * Called when vault is removed, blacklisted, or positions are closed
+   *
+   * @param {string} vaultAddress - Vault address
+   */
+  clearEmergencyExitBaseline(vaultAddress) {
+    if (this.emergencyExitBaseline[vaultAddress]) {
+      delete this.emergencyExitBaseline[vaultAddress];
+      this.log(`Cleared emergency exit baseline for vault ${vaultAddress}`);
     }
   }
 }
