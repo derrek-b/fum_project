@@ -11512,6 +11512,445 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getPositionRange', () => {
+    let adapter;
+
+    beforeEach(() => {
+      adapter = new UniswapV3Adapter(1);
+    });
+
+    describe('success cases', () => {
+      it('should return position object with tickLower, tickUpper, and currentTick', () => {
+        const poolData = { tick: 201400, fee: 500 };
+        const result = adapter.getPositionRange(poolData, 5, 5);
+
+        expect(result).toBeDefined();
+        expect(result.tickLower).toBeDefined();
+        expect(result.tickUpper).toBeDefined();
+        expect(result.currentTick).toBe(201400);
+        expect(result.tickLower).toBeLessThan(result.tickUpper);
+      });
+
+      it('should match calculateTickRangeFromPercentages output', () => {
+        const poolData = { tick: 201400, fee: 500 };
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const tickRange = adapter.calculateTickRangeFromPercentages(201400, 5, 5, 500);
+
+        expect(positionRange.tickLower).toBe(tickRange.tickLower);
+        expect(positionRange.tickUpper).toBe(tickRange.tickUpper);
+      });
+
+      it('should work with all fee tiers', () => {
+        const feeTiers = [100, 500, 3000, 10000];
+        feeTiers.forEach(fee => {
+          const poolData = { tick: 0, fee };
+          const result = adapter.getPositionRange(poolData, 10, 10);
+          expect(result.tickLower).toBeLessThan(result.tickUpper);
+          expect(result.currentTick).toBe(0);
+        });
+      });
+
+      it('should handle asymmetric ranges', () => {
+        const poolData = { tick: 100000, fee: 3000 };
+        const result = adapter.getPositionRange(poolData, 5, 10);
+
+        expect(result.tickLower).toBeDefined();
+        expect(result.tickUpper).toBeDefined();
+        expect(result.currentTick).toBe(100000);
+      });
+    });
+
+    describe('poolData validation', () => {
+      it('should throw if poolData is null or undefined', () => {
+        expect(() => adapter.getPositionRange(null, 5, 5))
+          .toThrow('poolData is required and must be an object');
+        expect(() => adapter.getPositionRange(undefined, 5, 5))
+          .toThrow('poolData is required and must be an object');
+      });
+
+      it('should throw if poolData is not an object', () => {
+        expect(() => adapter.getPositionRange('invalid', 5, 5))
+          .toThrow('poolData is required and must be an object');
+        expect(() => adapter.getPositionRange(123, 5, 5))
+          .toThrow('poolData is required and must be an object');
+      });
+
+      it('should throw if poolData.tick is missing or invalid', () => {
+        expect(() => adapter.getPositionRange({}, 5, 5))
+          .toThrow('poolData.tick is required');
+        expect(() => adapter.getPositionRange({ tick: null, fee: 500 }, 5, 5))
+          .toThrow('poolData.tick is required');
+        expect(() => adapter.getPositionRange({ tick: NaN, fee: 500 }, 5, 5))
+          .toThrow('poolData.tick must be a finite number');
+        expect(() => adapter.getPositionRange({ tick: Infinity, fee: 500 }, 5, 5))
+          .toThrow('poolData.tick must be a finite number');
+      });
+
+      it('should throw if poolData.fee is missing or invalid', () => {
+        expect(() => adapter.getPositionRange({ tick: 0 }, 5, 5))
+          .toThrow('poolData.fee is required');
+        expect(() => adapter.getPositionRange({ tick: 0, fee: null }, 5, 5))
+          .toThrow('poolData.fee is required');
+        expect(() => adapter.getPositionRange({ tick: 0, fee: NaN }, 5, 5))
+          .toThrow('poolData.fee must be a finite number');
+      });
+    });
+
+    describe('percentage validation', () => {
+      const poolData = { tick: 0, fee: 500 };
+
+      describe('upperPercent validation', () => {
+        it('should throw for null or undefined upperPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, null, 5))
+            .toThrow('upperPercent is required');
+          expect(() => adapter.getPositionRange(poolData, undefined, 5))
+            .toThrow('upperPercent is required');
+        });
+
+        it('should throw for non-finite upperPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, NaN, 5))
+            .toThrow('upperPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, Infinity, 5))
+            .toThrow('upperPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, -Infinity, 5))
+            .toThrow('upperPercent must be a finite number');
+        });
+
+        it('should throw for non-numeric upperPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, '5', 5))
+            .toThrow('upperPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, {}, 5))
+            .toThrow('upperPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, [], 5))
+            .toThrow('upperPercent must be a finite number');
+        });
+
+        it('should throw for out-of-range upperPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, 0, 5))
+            .toThrow('upperPercent must be greater than 0 and at most 100');
+          expect(() => adapter.getPositionRange(poolData, -5, 5))
+            .toThrow('upperPercent must be greater than 0 and at most 100');
+          expect(() => adapter.getPositionRange(poolData, 101, 5))
+            .toThrow('upperPercent must be greater than 0 and at most 100');
+        });
+      });
+
+      describe('lowerPercent validation', () => {
+        it('should throw for null or undefined lowerPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, 5, null))
+            .toThrow('lowerPercent is required');
+          expect(() => adapter.getPositionRange(poolData, 5, undefined))
+            .toThrow('lowerPercent is required');
+        });
+
+        it('should throw for non-finite lowerPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, 5, NaN))
+            .toThrow('lowerPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, 5, Infinity))
+            .toThrow('lowerPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, 5, -Infinity))
+            .toThrow('lowerPercent must be a finite number');
+        });
+
+        it('should throw for non-numeric lowerPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, 5, '5'))
+            .toThrow('lowerPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, 5, {}))
+            .toThrow('lowerPercent must be a finite number');
+          expect(() => adapter.getPositionRange(poolData, 5, []))
+            .toThrow('lowerPercent must be a finite number');
+        });
+
+        it('should throw for out-of-range lowerPercent', () => {
+          expect(() => adapter.getPositionRange(poolData, 5, 0))
+            .toThrow('lowerPercent must be greater than 0 and at most 100');
+          expect(() => adapter.getPositionRange(poolData, 5, -5))
+            .toThrow('lowerPercent must be greater than 0 and at most 100');
+          expect(() => adapter.getPositionRange(poolData, 5, 101))
+            .toThrow('lowerPercent must be greater than 0 and at most 100');
+        });
+      });
+    });
+  });
+
+  describe('extractPositionBounds', () => {
+    let adapter;
+
+    beforeEach(() => {
+      adapter = new UniswapV3Adapter(1);
+    });
+
+    describe('success cases', () => {
+      it('should return lower and upper bounds from position object', () => {
+        const position = {
+          id: '12345',
+          pool: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
+          tickLower: -887220,
+          tickUpper: 887220,
+          liquidity: '1000000000000000000'
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result).toBeDefined();
+        expect(result.lower).toBe(-887220);
+        expect(result.upper).toBe(887220);
+      });
+
+      it('should work with positive tick values', () => {
+        const position = {
+          tickLower: 100000,
+          tickUpper: 200000
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(100000);
+        expect(result.upper).toBe(200000);
+      });
+
+      it('should work with negative tick values', () => {
+        const position = {
+          tickLower: -200000,
+          tickUpper: -100000
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(-200000);
+        expect(result.upper).toBe(-100000);
+      });
+
+      it('should work with zero tick values', () => {
+        const position = {
+          tickLower: 0,
+          tickUpper: 0
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(0);
+        expect(result.upper).toBe(0);
+      });
+
+      it('should work with mixed positive and negative ticks', () => {
+        const position = {
+          tickLower: -60000,
+          tickUpper: 60000
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(-60000);
+        expect(result.upper).toBe(60000);
+      });
+
+      it('should only return lower and upper properties', () => {
+        const position = {
+          id: '12345',
+          pool: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
+          tickLower: -887220,
+          tickUpper: 887220,
+          liquidity: '1000000000000000000',
+          extraField: 'should not be included'
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(Object.keys(result)).toEqual(['lower', 'upper']);
+        expect(result.id).toBeUndefined();
+        expect(result.pool).toBeUndefined();
+        expect(result.liquidity).toBeUndefined();
+      });
+
+      it('should work with typical Uniswap V3 tick spacing values', () => {
+        // 0.05% fee tier (tick spacing 10)
+        const position1 = { tickLower: -887270, tickUpper: 887270 };
+        expect(adapter.extractPositionBounds(position1).lower).toBe(-887270);
+
+        // 0.3% fee tier (tick spacing 60)
+        const position2 = { tickLower: -887220, tickUpper: 887220 };
+        expect(adapter.extractPositionBounds(position2).lower).toBe(-887220);
+
+        // 1% fee tier (tick spacing 200)
+        const position3 = { tickLower: -887200, tickUpper: 887200 };
+        expect(adapter.extractPositionBounds(position3).lower).toBe(-887200);
+      });
+    });
+
+    describe('position validation', () => {
+      it('should throw if position is null', () => {
+        expect(() => adapter.extractPositionBounds(null))
+          .toThrow('Position is required and must be an object');
+      });
+
+      it('should throw if position is undefined', () => {
+        expect(() => adapter.extractPositionBounds(undefined))
+          .toThrow('Position is required and must be an object');
+      });
+
+      it('should throw if position is not an object', () => {
+        expect(() => adapter.extractPositionBounds('invalid'))
+          .toThrow('Position is required and must be an object');
+        expect(() => adapter.extractPositionBounds(123))
+          .toThrow('Position is required and must be an object');
+        expect(() => adapter.extractPositionBounds(true))
+          .toThrow('Position is required and must be an object');
+      });
+
+      it('should throw if position is an array', () => {
+        expect(() => adapter.extractPositionBounds([]))
+          .toThrow('Position is required and must be an object');
+        expect(() => adapter.extractPositionBounds([{ tickLower: 0, tickUpper: 0 }]))
+          .toThrow('Position is required and must be an object');
+      });
+    });
+
+    describe('tickLower validation', () => {
+      it('should throw if tickLower is missing', () => {
+        const position = { tickUpper: 887220 };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickLower property');
+      });
+
+      it('should throw if tickLower is null', () => {
+        const position = { tickLower: null, tickUpper: 887220 };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickLower property');
+      });
+
+      it('should throw if tickLower is undefined', () => {
+        const position = { tickLower: undefined, tickUpper: 887220 };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickLower property');
+      });
+
+      it('should accept tickLower value of zero', () => {
+        const position = { tickLower: 0, tickUpper: 100 };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(0);
+      });
+    });
+
+    describe('tickUpper validation', () => {
+      it('should throw if tickUpper is missing', () => {
+        const position = { tickLower: -887220 };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickUpper property');
+      });
+
+      it('should throw if tickUpper is null', () => {
+        const position = { tickLower: -887220, tickUpper: null };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickUpper property');
+      });
+
+      it('should throw if tickUpper is undefined', () => {
+        const position = { tickLower: -887220, tickUpper: undefined };
+
+        expect(() => adapter.extractPositionBounds(position))
+          .toThrow('Position missing tickUpper property');
+      });
+
+      it('should accept tickUpper value of zero', () => {
+        const position = { tickLower: -100, tickUpper: 0 };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.upper).toBe(0);
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should handle maximum tick values', () => {
+        // MAX_TICK for Uniswap V3 is 887272
+        const position = {
+          tickLower: -887272,
+          tickUpper: 887272
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(-887272);
+        expect(result.upper).toBe(887272);
+      });
+
+      it('should handle narrow ranges', () => {
+        const position = {
+          tickLower: 100,
+          tickUpper: 110
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(100);
+        expect(result.upper).toBe(110);
+        expect(result.upper - result.lower).toBe(10);
+      });
+
+      it('should handle position with additional properties', () => {
+        const position = {
+          id: '999999',
+          pool: '0x1234567890123456789012345678901234567890',
+          tickLower: -50000,
+          tickUpper: 50000,
+          liquidity: '999999999999999999',
+          feeGrowthInside0LastX128: '0',
+          feeGrowthInside1LastX128: '0',
+          tokensOwed0: '0',
+          tokensOwed1: '0',
+          lastUpdated: Date.now()
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(result.lower).toBe(-50000);
+        expect(result.upper).toBe(50000);
+        expect(Object.keys(result)).toHaveLength(2);
+      });
+
+      it('should preserve numeric types (not convert to strings)', () => {
+        const position = {
+          tickLower: -60000,
+          tickUpper: 60000
+        };
+
+        const result = adapter.extractPositionBounds(position);
+
+        expect(typeof result.lower).toBe('number');
+        expect(typeof result.upper).toBe('number');
+      });
+    });
+
+    describe('integration with getPositionRange', () => {
+      it('should extract same values that getPositionRange returns', () => {
+        const poolData = { tick: 201400, fee: 500 };
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+
+        // Simulate a cached position with the same tick values
+        const cachedPosition = {
+          id: '12345',
+          pool: '0xPool',
+          tickLower: positionRange.tickLower,
+          tickUpper: positionRange.tickUpper,
+          liquidity: '1000000'
+        };
+
+        const bounds = adapter.extractPositionBounds(cachedPosition);
+
+        expect(bounds.lower).toBe(positionRange.tickLower);
+        expect(bounds.upper).toBe(positionRange.tickUpper);
+      });
+    });
+  });
+
   describe('parseSwapReceipt', () => {
     // Mock Swap event log for testing
     const createMockSwapLog = (poolAddress, amount0, amount1) => {

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-03T15:03:19.884Z
+Generated on: 2026-01-04T15:23:26.636Z
 
 ## Table of Contents
 

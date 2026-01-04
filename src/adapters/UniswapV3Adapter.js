@@ -391,6 +391,107 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Calculate position range bounds from percentage parameters
+   *
+   * Wraps calculateTickRangeFromPercentages and returns a position object
+   * suitable for passing to getAddLiquidityAmounts and generateCreatePositionData.
+   *
+   * @param {Object} poolData - Pool data object with tick and fee properties
+   * @param {number} poolData.tick - Current tick of the pool
+   * @param {number} poolData.fee - Fee tier (100, 500, 3000, or 10000)
+   * @param {number} upperPercent - Upper range in percentage (e.g., 5 for +5%)
+   * @param {number} lowerPercent - Lower range in percentage (e.g., 5 for -5%)
+   * @returns {{tickLower: number, tickUpper: number, currentTick: number}} Position range
+   * @throws {Error} If poolData is missing required properties or percentages are invalid
+   */
+  getPositionRange(poolData, upperPercent, lowerPercent) {
+    // Validate poolData
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error('poolData.tick is required');
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error('poolData.tick must be a finite number');
+    }
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error('poolData.fee is required');
+    }
+    if (!Number.isFinite(poolData.fee)) {
+      throw new Error('poolData.fee must be a finite number');
+    }
+
+    // Validate upperPercent
+    if (upperPercent === null || upperPercent === undefined) {
+      throw new Error('upperPercent is required');
+    }
+    if (typeof upperPercent !== 'number' || !Number.isFinite(upperPercent)) {
+      throw new Error('upperPercent must be a finite number');
+    }
+    if (upperPercent <= 0 || upperPercent > 100) {
+      throw new Error('upperPercent must be greater than 0 and at most 100');
+    }
+
+    // Validate lowerPercent
+    if (lowerPercent === null || lowerPercent === undefined) {
+      throw new Error('lowerPercent is required');
+    }
+    if (typeof lowerPercent !== 'number' || !Number.isFinite(lowerPercent)) {
+      throw new Error('lowerPercent must be a finite number');
+    }
+    if (lowerPercent <= 0 || lowerPercent > 100) {
+      throw new Error('lowerPercent must be greater than 0 and at most 100');
+    }
+
+    // Delegate to existing method for tick calculation
+    const { tickLower, tickUpper } = this.calculateTickRangeFromPercentages(
+      poolData.tick,
+      upperPercent,
+      lowerPercent,
+      poolData.fee
+    );
+
+    // Return position object with current tick for logging
+    return {
+      tickLower,
+      tickUpper,
+      currentTick: poolData.tick
+    };
+  }
+
+  /**
+   * Extract position bounds from an existing position object
+   *
+   * For Uniswap V3, positions store bounds as tickLower and tickUpper.
+   * This method extracts them in a platform-agnostic format.
+   *
+   * @param {Object} position - Position object from vault cache
+   * @param {number} position.tickLower - Lower tick boundary
+   * @param {number} position.tickUpper - Upper tick boundary
+   * @returns {Object} Position bounds { lower, upper } as numbers
+   * @throws {Error} If position is invalid or missing tick properties
+   */
+  extractPositionBounds(position) {
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('Position is required and must be an object');
+    }
+
+    if (position.tickLower === undefined || position.tickLower === null) {
+      throw new Error('Position missing tickLower property');
+    }
+
+    if (position.tickUpper === undefined || position.tickUpper === null) {
+      throw new Error('Position missing tickUpper property');
+    }
+
+    return {
+      lower: position.tickLower,
+      upper: position.tickUpper
+    };
+  }
+
+  /**
    * Validate that provider is on the correct chain
    * @param {Object} provider - Ethers provider instance
    * @throws {Error} If provider is invalid or on wrong chain

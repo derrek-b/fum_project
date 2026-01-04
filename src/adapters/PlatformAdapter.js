@@ -27,6 +27,8 @@
  * | parseSwapReceipt             | Strategy.addToPosition     | CONFIRMED |
  * | parseIncreaseLiquidityReceipt| Strategy.addToPosition     | CONFIRMED |
  * | getBestSwapQuote             | Strategy.addToPosition     | CONFIRMED |
+ * | extractPositionBounds        | Strategy.addToPosition     | CONFIRMED |
+ * | getPositionRange             | Strategy.createNewPosition | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -442,6 +444,39 @@ export default class PlatformAdapter {
    */
   async discoverAvailablePools(token0Symbol, token1Symbol, provider, chainId) {
     throw new Error("discoverAvailablePools must be implemented by subclasses");
+  }
+
+  /**
+   * Calculate position range bounds from percentage parameters
+   *
+   * Returns a position object with platform-specific range properties that can be
+   * passed directly to other adapter methods (getAddLiquidityAmounts, generateCreatePositionData).
+   *
+   * @param {Object} poolData - Pool data object containing current state
+   * @param {number} upperPercent - Upper range in percentage (e.g., 5 for +5%)
+   * @param {number} lowerPercent - Lower range in percentage (e.g., 5 for -5%)
+   * @returns {Object} Position range object with platform-specific properties
+   *   - For Uniswap V3: { tickLower, tickUpper, currentTick }
+   * @throws {Error} If parameters are invalid
+   */
+  getPositionRange(poolData, upperPercent, lowerPercent) {
+    throw new Error("getPositionRange must be implemented by subclasses");
+  }
+
+  /**
+   * Extract position bounds from an existing position object
+   *
+   * Takes a cached position object and returns bounds in a platform-agnostic format.
+   * Used for event emission where we need generic field names regardless of platform.
+   *
+   * @param {Object} position - Position object from vault cache
+   * @returns {Object} Position bounds { lower, upper } as numbers
+   *   - lower: Lower bound of the position range
+   *   - upper: Upper bound of the position range
+   * @throws {Error} If position is invalid or missing required properties
+   */
+  extractPositionBounds(position) {
+    throw new Error("extractPositionBounds must be implemented by subclasses");
   }
 
   /**
