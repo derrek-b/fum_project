@@ -29,6 +29,8 @@
  * | getBestSwapQuote             | Strategy.addToPosition             | CONFIRMED |
  * | extractPositionBounds        | Strategy.addToPosition             | CONFIRMED |
  * | getPositionRange             | Strategy.createNewPosition         | CONFIRMED |
+ * | evaluatePositionRange        | Strategy.analyzePositions          | CONFIRMED |
+ * | batchSwapTransactions        | Strategy.prepareTokens             | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -205,6 +207,28 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Evaluate a position's range status relative to current pool state
+   *
+   * Determines if a position is in range and calculates distance metrics.
+   * For tick-based AMMs, this checks currentTick against tickLower/tickUpper.
+   *
+   * @param {Object} position - Position object with range bounds
+   * @param {number} position.tickLower - Lower tick bound (for tick-based AMMs)
+   * @param {number} position.tickUpper - Upper tick bound (for tick-based AMMs)
+   * @param {string} position.pool - Pool address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Range evaluation result
+   * @returns {boolean} result.inRange - Is position currently active/earning fees
+   * @returns {number} result.centeredness - Position in range (0-1, 0.5 = centered)
+   * @returns {number} result.distanceToUpper - Distance to upper bound as fraction
+   * @returns {number} result.distanceToLower - Distance to lower bound as fraction
+   * @returns {number} result.currentTick - Current pool tick value
+   */
+  async evaluatePositionRange(position, provider) {
+    throw new Error("evaluatePositionRange must be implemented by subclasses");
+  }
+
+  /**
    * Calculate price from sqrtPriceX96
    * @param {string} sqrtPriceX96 - Square root price in X96 format
    * @param {Object} baseToken - Base token metadata
@@ -316,6 +340,32 @@ export default class PlatformAdapter {
    */
   async generateSwapData(params) {
     throw new Error("generateSwapData must be implemented by subclasses");
+  }
+
+  /**
+   * Generate batched swap transactions with platform-specific auth handling
+   *
+   * Creates multiple swap transactions in a batch, handling platform-specific
+   * requirements like Permit2 nonce tracking across swaps with the same input token.
+   *
+   * @param {Array<Object>} swapInstructions - Array of swap instructions
+   * @param {Object} swapInstructions[].tokenIn - Input token { address, symbol, decimals, isNative? }
+   * @param {Object} swapInstructions[].tokenOut - Output token { address, symbol, decimals, isNative? }
+   * @param {string} swapInstructions[].amount - Amount to swap (raw wei string)
+   * @param {boolean} swapInstructions[].isAmountIn - true for EXACT_INPUT, false for EXACT_OUTPUT
+   * @param {Object} options - Common options for all swaps
+   * @param {Object} options.signer - Ethers Wallet for signing (required for Permit2)
+   * @param {Object} options.provider - Ethers provider instance
+   * @param {number} options.chainId - Chain ID for address lookups
+   * @param {string} options.recipient - Address to receive swap outputs
+   * @param {number} options.slippageTolerance - Slippage tolerance percentage
+   * @returns {Promise<Object>} Batch result
+   * @returns {Array<Object>} result.transactions - Array of { to, data, value } transaction objects
+   * @returns {Array<Object>} result.metadata - Array of swap metadata per transaction
+   * @throws {Error} If required parameters missing or swap generation fails
+   */
+  async batchSwapTransactions(swapInstructions, options) {
+    throw new Error("batchSwapTransactions must be implemented by subclasses");
   }
 
   /**

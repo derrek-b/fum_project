@@ -6212,6 +6212,204 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('evaluatePositionRange', () => {
+    describe('Validation Error Cases', () => {
+      it('should throw error for null position', async () => {
+        await expect(
+          adapter.evaluatePositionRange(null, env.provider)
+        ).rejects.toThrow('position parameter is required');
+      });
+
+      it('should throw error for undefined position', async () => {
+        await expect(
+          adapter.evaluatePositionRange(undefined, env.provider)
+        ).rejects.toThrow('position parameter is required');
+      });
+
+      it('should throw error for missing tickLower', async () => {
+        const position = { tickUpper: 100, pool: env.poolData.poolAddress };
+        await expect(
+          adapter.evaluatePositionRange(position, env.provider)
+        ).rejects.toThrow('Position missing tick range data');
+      });
+
+      it('should throw error for missing tickUpper', async () => {
+        const position = { tickLower: -100, pool: env.poolData.poolAddress };
+        await expect(
+          adapter.evaluatePositionRange(position, env.provider)
+        ).rejects.toThrow('Position missing tick range data');
+      });
+
+      it('should throw error for missing pool address', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(
+          adapter.evaluatePositionRange(position, env.provider)
+        ).rejects.toThrow('Position missing pool address');
+      });
+
+      it('should throw error for invalid tick range (upper <= lower)', async () => {
+        const position = { tickLower: 100, tickUpper: 100, pool: env.poolData.poolAddress };
+        await expect(
+          adapter.evaluatePositionRange(position, env.provider)
+        ).rejects.toThrow('Invalid tick range');
+      });
+
+      it('should throw error for inverted tick range (upper < lower)', async () => {
+        const position = { tickLower: 100, tickUpper: -100, pool: env.poolData.poolAddress };
+        await expect(
+          adapter.evaluatePositionRange(position, env.provider)
+        ).rejects.toThrow('Invalid tick range');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should return inRange=true when current tick is within bounds', async () => {
+        // Use a very wide range that will include any reasonable tick
+        const position = { tickLower: -887220, tickUpper: 887220, pool: env.poolData.poolAddress };
+        const result = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result).toBeDefined();
+        expect(result.inRange).toBe(true);
+        expect(typeof result.currentTick).toBe('number');
+        expect(result.currentTick).toBeGreaterThanOrEqual(-887220);
+        expect(result.currentTick).toBeLessThanOrEqual(887220);
+      });
+
+      it('should return all required fields', async () => {
+        const position = { tickLower: -887220, tickUpper: 887220, pool: env.poolData.poolAddress };
+        const result = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result).toHaveProperty('inRange');
+        expect(result).toHaveProperty('centeredness');
+        expect(result).toHaveProperty('distanceToUpper');
+        expect(result).toHaveProperty('distanceToLower');
+        expect(result).toHaveProperty('currentTick');
+
+        expect(typeof result.inRange).toBe('boolean');
+        expect(typeof result.centeredness).toBe('number');
+        expect(typeof result.distanceToUpper).toBe('number');
+        expect(typeof result.distanceToLower).toBe('number');
+        expect(typeof result.currentTick).toBe('number');
+      });
+
+      it('should return centeredness values between 0 and 1', async () => {
+        const position = { tickLower: -887220, tickUpper: 887220, pool: env.poolData.poolAddress };
+        const result = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result.centeredness).toBeGreaterThanOrEqual(0);
+        expect(result.centeredness).toBeLessThanOrEqual(1);
+        expect(result.distanceToUpper).toBeGreaterThanOrEqual(0);
+        expect(result.distanceToUpper).toBeLessThanOrEqual(1);
+        expect(result.distanceToLower).toBeGreaterThanOrEqual(0);
+        expect(result.distanceToLower).toBeLessThanOrEqual(1);
+      });
+
+      it('should return inRange=false when tick is above upper bound', async () => {
+        // Create a position with narrow range far below current tick
+        // Get current tick first
+        const currentTick = await adapter.getCurrentTick(env.poolData.poolAddress, env.provider);
+
+        // Create range below current tick
+        const position = {
+          tickLower: currentTick - 10000,
+          tickUpper: currentTick - 5000,
+          pool: env.poolData.poolAddress
+        };
+        const result = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result.inRange).toBe(false);
+        expect(result.currentTick).toBeGreaterThan(position.tickUpper);
+      });
+
+      it('should return inRange=false when tick is below lower bound', async () => {
+        // Create a position with narrow range far above current tick
+        const currentTick = await adapter.getCurrentTick(env.poolData.poolAddress, env.provider);
+
+        // Create range above current tick
+        const position = {
+          tickLower: currentTick + 5000,
+          tickUpper: currentTick + 10000,
+          pool: env.poolData.poolAddress
+        };
+        const result = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result.inRange).toBe(false);
+        expect(result.currentTick).toBeLessThan(position.tickLower);
+      });
+
+      it('should be deterministic for same inputs', async () => {
+        const position = { tickLower: -887220, tickUpper: 887220, pool: env.poolData.poolAddress };
+
+        const result1 = await adapter.evaluatePositionRange(position, env.provider);
+        const result2 = await adapter.evaluatePositionRange(position, env.provider);
+
+        expect(result1.inRange).toBe(result2.inRange);
+        expect(result1.currentTick).toBe(result2.currentTick);
+        expect(result1.centeredness).toBe(result2.centeredness);
+      });
+    });
+  });
+
+  describe('batchSwapTransactions', () => {
+    describe('Validation Error Cases', () => {
+      const mockSigner = { _signTypedData: () => Promise.resolve('0x') };
+
+      it('should throw error for missing signer', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: env.testVault.address, slippageTolerance: 0.5 })
+        ).rejects.toThrow('signer is required');
+      });
+
+      it('should throw error for missing provider', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, chainId: 1337, recipient: env.testVault.address, slippageTolerance: 0.5 })
+        ).rejects.toThrow('provider is required');
+      });
+
+      it('should throw error for missing chainId', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, recipient: env.testVault.address, slippageTolerance: 0.5 })
+        ).rejects.toThrow('chainId is required');
+      });
+
+      it('should throw error for missing recipient', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, slippageTolerance: 0.5 })
+        ).rejects.toThrow('recipient is required');
+      });
+
+      it('should throw error for missing slippageTolerance', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: env.testVault.address })
+        ).rejects.toThrow('slippageTolerance is required');
+      });
+
+      it('should throw error for non-array swapInstructions', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: env.testVault.address, slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions('not an array', options)
+        ).rejects.toThrow('swapInstructions must be an array');
+
+        await expect(
+          adapter.batchSwapTransactions({}, options)
+        ).rejects.toThrow('swapInstructions must be an array');
+      });
+
+      it('should throw error for empty swapInstructions array', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: env.testVault.address, slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([], options)
+        ).rejects.toThrow('swapInstructions cannot be empty');
+      });
+    });
+
+    // Note: Full integration tests for batchSwapTransactions require:
+    // - Real token balances
+    // - Valid Permit2 approval
+    // - Real swap routes
+    // These are covered in fum_automation integration tests
+  });
+
   describe('generateClaimFeesData', () => {
     describe('Success Cases', () => {
       it('should generate valid transaction data for position fee collection', async () => {

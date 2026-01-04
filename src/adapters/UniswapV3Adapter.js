@@ -15,7 +15,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress, getTokenBySymbol, getTokenAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
-import { PERMIT2_ADDRESS, wrapWithPermit2 } from "../helpers/Permit2Helper.js";
+import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
@@ -1307,6 +1307,67 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     return currentTick >= tickLower && currentTick <= tickUpper;
+  }
+
+  /**
+   * Evaluate a position's range status for concentrated liquidity positions
+   *
+   * Determines if a position is in range and calculates distance metrics
+   * for strategy decision making. Uses existing getCurrentTick method.
+   *
+   * @param {Object} position - Position object with tick bounds
+   * @param {number} position.tickLower - Lower tick bound
+   * @param {number} position.tickUpper - Upper tick bound
+   * @param {string} position.pool - Pool address
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Range evaluation result
+   * @returns {boolean} result.inRange - Is current tick within position bounds
+   * @returns {number} result.centeredness - Position in range (0-1, 0.5 = centered)
+   * @returns {number} result.distanceToUpper - Distance to upper bound as fraction of range
+   * @returns {number} result.distanceToLower - Distance to lower bound as fraction of range
+   * @returns {number} result.currentTick - Current tick value from pool
+   * @throws {Error} If position missing required tick data or pool address
+   */
+  async evaluatePositionRange(position, provider) {
+    // Validate position object
+    if (!position) {
+      throw new Error('position parameter is required');
+    }
+
+    // Validate tick bounds
+    if (position.tickLower === undefined || position.tickLower === null) {
+      throw new Error(`Position missing tick range data: tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
+    }
+    if (position.tickUpper === undefined || position.tickUpper === null) {
+      throw new Error(`Position missing tick range data: tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
+    }
+
+    // Validate pool address
+    if (!position.pool) {
+      throw new Error('Position missing pool address');
+    }
+
+    // Get current tick using existing method (includes provider validation)
+    const currentTick = await this.getCurrentTick(position.pool, provider);
+
+    // Calculate range metrics
+    const rangeSize = position.tickUpper - position.tickLower;
+    if (rangeSize <= 0) {
+      throw new Error(`Invalid tick range: ${position.tickLower} to ${position.tickUpper}`);
+    }
+
+    const inRange = currentTick >= position.tickLower && currentTick <= position.tickUpper;
+    const distanceToUpper = (position.tickUpper - currentTick) / rangeSize;
+    const distanceToLower = (currentTick - position.tickLower) / rangeSize;
+    const centeredness = distanceToLower; // 0 = at lower, 0.5 = centered, 1 = at upper
+
+    return {
+      inRange,
+      centeredness: Math.max(0, Math.min(1, centeredness)),
+      distanceToUpper: Math.max(0, Math.min(1, distanceToUpper)),
+      distanceToLower: Math.max(0, Math.min(1, distanceToLower)),
+      currentTick
+    };
   }
 
   /**
@@ -4490,6 +4551,224 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       throw new Error(`Failed to generate swap data: ${error.message}`);
     }
+  }
+
+  /**
+   * Generate batched swap transactions with Permit2 nonce tracking
+   *
+   * Creates multiple swap transactions in a batch, handling Uniswap V3-specific
+   * requirements like Permit2 nonce tracking across swaps with the same input token.
+   *
+   * @param {Array<Object>} swapInstructions - Array of swap instructions
+   * @param {Object} swapInstructions[].tokenIn - Input token { address, symbol, decimals, isNative? }
+   * @param {Object} swapInstructions[].tokenOut - Output token { address, symbol, decimals, isNative? }
+   * @param {string} swapInstructions[].amount - Amount to swap (raw wei string)
+   * @param {boolean} swapInstructions[].isAmountIn - true for EXACT_INPUT, false for EXACT_OUTPUT
+   * @param {Object} options - Common options for all swaps
+   * @param {Object} options.signer - Ethers Wallet for signing Permit2 (required for ERC20 inputs)
+   * @param {Object} options.provider - Ethers provider instance
+   * @param {number} options.chainId - Chain ID for address lookups
+   * @param {string} options.recipient - Address to receive swap outputs
+   * @param {number} options.slippageTolerance - Slippage tolerance percentage
+   * @returns {Promise<Object>} Batch result
+   * @returns {Array<Object>} result.transactions - Array of { to, data, value } transaction objects
+   * @returns {Array<Object>} result.metadata - Array of swap metadata per transaction
+   * @throws {Error} If required parameters missing or swap generation fails
+   */
+  async batchSwapTransactions(swapInstructions, options) {
+    const { signer, provider, chainId, recipient, slippageTolerance } = options;
+
+    // Validate required options
+    if (!signer) {
+      throw new Error("signer is required for Permit2 signature generation");
+    }
+    if (!provider) {
+      throw new Error("provider is required");
+    }
+    if (!chainId) {
+      throw new Error("chainId is required");
+    }
+    if (!recipient) {
+      throw new Error("recipient is required");
+    }
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("slippageTolerance is required");
+    }
+
+    // Validate swapInstructions
+    if (!Array.isArray(swapInstructions)) {
+      throw new Error("swapInstructions must be an array");
+    }
+    if (swapInstructions.length === 0) {
+      throw new Error("swapInstructions cannot be empty");
+    }
+
+    const transactions = [];
+    const metadata = [];
+
+    // Create internal nonce tracker for this batch
+    // This handles the Permit2-specific requirement that nonces increment
+    const nonceTracker = new Map();
+
+    for (const instruction of swapInstructions) {
+      const result = await this._generateSwapTransaction({
+        ...instruction,
+        signer,
+        provider,
+        chainId,
+        recipient,
+        slippageTolerance,
+        _nonceTracker: nonceTracker
+      });
+
+      transactions.push(result.transaction);
+      metadata.push({
+        tokenInSymbol: instruction.tokenIn.symbol,
+        tokenOutSymbol: instruction.tokenOut.symbol,
+        tokenInAddress: instruction.tokenIn.address,
+        tokenOutAddress: instruction.tokenOut.address,
+        quotedAmountIn: result.quotedAmountIn,
+        quotedAmountOut: result.quotedAmountOut,
+        isAmountIn: result.isAmountIn
+      });
+    }
+
+    return { transactions, metadata };
+  }
+
+  /**
+   * Generate a single swap transaction using AlphaRouter + Permit2
+   *
+   * Internal method - called by batchSwapTransactions.
+   * Handles all Uniswap V3-specific details:
+   * - AlphaRouter route finding
+   * - Permit2 nonce management
+   * - Permit2 signature generation
+   * - Universal Router calldata wrapping
+   *
+   * @param {Object} params - Swap parameters
+   * @param {Object} params.tokenIn - Input token { address, symbol, decimals, isNative? }
+   * @param {Object} params.tokenOut - Output token { address, symbol, decimals, isNative? }
+   * @param {string} params.amount - Amount to swap (raw wei string)
+   * @param {boolean} params.isAmountIn - true for EXACT_INPUT, false for EXACT_OUTPUT
+   * @param {Object} params.signer - Ethers Wallet for signing Permit2
+   * @param {Object} params.provider - Ethers provider instance
+   * @param {number} params.chainId - Chain ID
+   * @param {string} params.recipient - Address to receive swap output
+   * @param {number} params.slippageTolerance - Slippage tolerance percentage
+   * @param {Map} [params._nonceTracker] - Internal: nonce tracker for batched swaps
+   * @returns {Promise<Object>} Swap result with transaction and metadata
+   * @private
+   */
+  async _generateSwapTransaction(params) {
+    const {
+      tokenIn,
+      tokenOut,
+      amount,
+      isAmountIn,
+      signer,
+      provider,
+      chainId,
+      recipient,
+      slippageTolerance,
+      _nonceTracker
+    } = params;
+
+    // Validate required params
+    if (!tokenIn || !tokenIn.symbol) {
+      throw new Error("tokenIn with symbol is required");
+    }
+    if (!tokenOut || !tokenOut.symbol) {
+      throw new Error("tokenOut with symbol is required");
+    }
+    if (!amount) {
+      throw new Error("amount is required");
+    }
+
+    // 1. Get route from adapter using AlphaRouter
+    // For native ETH, address is not required - adapter uses Ether.onChain() internally
+    const routeResult = await this.getSwapRoute({
+      tokenInAddress: tokenIn.address,
+      tokenOutAddress: tokenOut.address,
+      amount,
+      isAmountIn,
+      recipient,
+      slippageTolerance,
+      deadlineMinutes: 30,
+      tokenInIsNative: tokenIn.isNative,
+      tokenOutIsNative: tokenOut.isNative
+    });
+
+    // 2. Branch: native ETH input skips Permit2
+    if (tokenIn.isNative) {
+      // Native ETH - use route directly, no Permit2 needed
+      const swapData = await this.generateAlphaSwapData({
+        route: routeResult.route,
+        recipient,
+        tokenInAddress: undefined,
+        amountIn: routeResult.amountIn,
+        tokenInIsNative: true
+      });
+
+      return {
+        transaction: swapData,
+        quotedAmountIn: routeResult.amountIn,
+        quotedAmountOut: routeResult.amountOut,
+        isAmountIn
+      };
+    }
+
+    // ERC20 flow - requires Permit2 signature
+
+    // 3. Get/track Permit2 nonce (Uniswap-specific detail)
+    const addresses = getPlatformAddresses(chainId, 'uniswapV3');
+    let nonce;
+
+    if (_nonceTracker?.has(tokenIn.address)) {
+      // Use tracked nonce for batched swaps
+      nonce = _nonceTracker.get(tokenIn.address);
+    } else {
+      // Fetch current nonce from Permit2 contract
+      nonce = await getPermit2Nonce(
+        provider,
+        recipient,
+        tokenIn.address,
+        addresses.universalRouterAddress
+      );
+    }
+
+    // Update tracker for next swap with same token
+    _nonceTracker?.set(tokenIn.address, nonce + 1);
+
+    // 4. Generate Permit2 signature
+    const deadline = Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+    const { signature } = await generatePermit2Signature(
+      signer,
+      chainId,
+      tokenIn.address,
+      routeResult.amountIn,
+      addresses.universalRouterAddress,
+      nonce,
+      deadline
+    );
+
+    // 5. Generate wrapped swap calldata via adapter
+    const swapData = await this.generateAlphaSwapData({
+      route: routeResult.route,
+      recipient,
+      tokenInAddress: tokenIn.address,
+      amountIn: routeResult.amountIn,
+      permit2Signature: signature,
+      permit2Nonce: nonce,
+      permit2Deadline: deadline
+    });
+
+    return {
+      transaction: swapData,
+      quotedAmountIn: routeResult.amountIn,
+      quotedAmountOut: routeResult.amountOut,
+      isAmountIn
+    };
   }
 
   /**
