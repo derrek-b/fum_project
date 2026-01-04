@@ -7,7 +7,6 @@ import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
 import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
-import PlatformUtilsFactory from '../../platformUtils/PlatformUtilsFactory.js';
 
 /**
  * Baby Steps Strategy - Conservative position management with single position per vault
@@ -246,8 +245,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         continue;
       }
 
-      // 5. Range alignment check via platform utils
-      const util = PlatformUtilsFactory.getUtils(positionPlatform);
+      // 5. Range alignment check via adapter
       const adapter = this.adapters.get(positionPlatform);
 
       if (!adapter) {
@@ -255,10 +253,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
 
       const rangeStatus = await retryRpcCall(
-        () => util.evaluatePositionRange(position, {
-          adapter,
-          provider: this.provider
-        }),
+        () => adapter.evaluatePositionRange(position, this.provider),
         'evaluatePositionRange',
         { log: (msg) => this.log(msg) }
       );
@@ -1948,20 +1943,20 @@ export default class BabyStepsStrategy extends StrategyBase {
     const swapTarget = adapter.getApprovalTarget('swap');
     await this.ensureApprovals(vault, tokenInAddresses, swapTarget);
 
-    // Generate swap transactions - platformUtils handles platform-specific auth internally
+    // Generate swap transactions - adapter handles platform-specific auth
     // IMPORTANT: Generate ALL swaps in a single batch to share Permit2 nonce tracker
     // (separate batches would create nonce collisions when executed sequentially)
-    const platformUtils = PlatformUtilsFactory.getUtils(platformId);
+    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
     const swapOptions = {
+      signer,
       recipient: vault.address,
       slippageTolerance: vault.strategy.parameters.maxSlippage,
-      adapter,
       provider: this.provider,
       chainId: this.chainId
     };
 
     const { transactions: allSwapTransactions, metadata: allSwapMetadata } =
-      await platformUtils.batchSwapTransactions(allSwapInstructions, swapOptions);
+      await adapter.batchSwapTransactions(allSwapInstructions, swapOptions);
 
     // Split transactions back into deficit and buffer swaps for separate execution
     const deficitSwaps = allSwapTransactions.slice(0, deficitSwapInstructions.length);

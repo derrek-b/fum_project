@@ -29,23 +29,15 @@ vi.mock('ethers', async (importOriginal) => {
 });
 
 // Mock dependencies before importing
-vi.mock('../../../../src/platformUtils/PlatformUtilsFactory.js', () => ({
-  default: {
-    getUtils: vi.fn()
-  }
-}));
-
 vi.mock('../../../../src/utils/RetryHelper.js', () => ({
   retryRpcCall: vi.fn((fn) => fn())
 }));
 
 import BabyStepsStrategy from '../../../../src/strategies/babySteps/BabyStepsStrategy.js';
-import PlatformUtilsFactory from '../../../../src/platformUtils/PlatformUtilsFactory.js';
 
 describe('BabyStepsStrategy.prepareTokensForPosition', () => {
   let strategy;
   let mockAdapter;
-  let mockPlatformUtils;
   let mockEventManager;
   let emittedEvents;
 
@@ -85,17 +77,12 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
       subscribe: vi.fn()
     };
 
-    // Mock adapter
+    // Mock adapter (includes batchSwapTransactions - moved from platformUtils)
     mockAdapter = {
       getBestSwapQuote: vi.fn(),
-      getApprovalTarget: vi.fn().mockReturnValue('0xMockApprovalTarget')
-    };
-
-    // Mock platform utils
-    mockPlatformUtils = {
+      getApprovalTarget: vi.fn().mockReturnValue('0xMockApprovalTarget'),
       batchSwapTransactions: vi.fn()
     };
-    PlatformUtilsFactory.getUtils.mockReturnValue(mockPlatformUtils);
 
     // Create strategy instance with minimal mocking
     strategy = Object.create(BabyStepsStrategy.prototype);
@@ -222,7 +209,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
       });
 
       // Mock batch swap transaction generation - deficit swaps first, then empty buffer swaps
-      mockPlatformUtils.batchSwapTransactions
+      mockAdapter.batchSwapTransactions
         .mockResolvedValueOnce({
           transactions: [
             { to: '0xRouter', data: '0xswap1', value: '0x00' },
@@ -312,7 +299,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
         return Promise.resolve({ amountIn: amount, amountOut: '200000000000000000' }); // Gets 0.2 WETH
       });
 
-      mockPlatformUtils.batchSwapTransactions.mockResolvedValue({
+      mockAdapter.batchSwapTransactions.mockResolvedValue({
         transactions: [{ to: '0xRouter', data: '0xswap', value: '0x00' }],
         metadata: [{ tokenInSymbol: 'WBTC', tokenOutSymbol: 'WETH', quotedAmountIn: '1000000', quotedAmountOut: '200000000000000000', isAmountIn: true }]
       });
@@ -358,7 +345,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
         return Promise.resolve({ amountIn: '3000000000', amountOut: quote.token0Amount });
       });
 
-      mockPlatformUtils.batchSwapTransactions.mockResolvedValue({
+      mockAdapter.batchSwapTransactions.mockResolvedValue({
         transactions: [{ to: '0xRouter', data: '0xswap', value: '0x00' }],
         metadata: [{ tokenInSymbol: 'USDC', tokenOutSymbol: 'WETH', quotedAmountIn: '2500000000', quotedAmountOut: quote.token0Amount, isAmountIn: true }]
       });
@@ -410,7 +397,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
     beforeEach(() => {
       // Mock batch swap transaction generation - single call with all swaps combined
       // (code combines deficit + buffer instructions into one batchSwapTransactions call)
-      mockPlatformUtils.batchSwapTransactions
+      mockAdapter.batchSwapTransactions
         .mockResolvedValueOnce({
           transactions: [
             { to: '0xRouter', data: '0xbuffer1', value: '0x00' },
@@ -495,7 +482,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
 
       // Single call to batchSwapTransactions with all swaps combined (deficit + buffer)
       // Code combines all swap instructions into one batch call
-      mockPlatformUtils.batchSwapTransactions
+      mockAdapter.batchSwapTransactions
         .mockResolvedValueOnce({
           transactions: [
             // Deficit swaps (first 2)
@@ -705,7 +692,7 @@ describe('BabyStepsStrategy.prepareTokensForPosition', () => {
         amountOut: '1000000000000000000'
       });
 
-      mockPlatformUtils.batchSwapTransactions
+      mockAdapter.batchSwapTransactions
         .mockResolvedValueOnce({
           transactions: [{ to: '0xRouter', data: '0x1', value: '0x00' }],
           metadata: [{ tokenInSymbol: 'USDC', tokenOutSymbol: 'WETH' }]
