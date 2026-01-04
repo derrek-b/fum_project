@@ -170,8 +170,9 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
 
     it('should initialize VaultDataService correctly', () => {
       expect(service.vaultDataService).toBeDefined();
-      expect(service.vaultDataService.vaults).toBeInstanceOf(Map);
-      expect(service.vaultDataService.vaults.size).toBe(0);
+      // vaults is private (#vaults), verify via public methods
+      expect(service.vaultDataService._getCacheSizeForTesting()).toBe(0);
+      expect(service.vaultDataService.getAllVaults()).toEqual([]);
       expect(service.vaultDataService.eventManager).toBe(service.eventManager);
       expect(service.vaultDataService.provider).toBe(null);
       expect(service.vaultDataService.chainId).toBe(null);

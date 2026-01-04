@@ -506,6 +506,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       const metadata = positionMetadata[positionId];
       const principal = principalByPosition[positionId] || { amount0: '0', amount1: '0' };
 
+      // Extract position bounds in platform-agnostic format
+      const { lower, upper } = metadata.adapter.extractPositionBounds(position);
+
       return {
         positionId,
         pool: position.pool,
@@ -514,8 +517,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         platform: metadata.poolMetadata.platform,
         principalAmount0: principal.amount0.toString(),
         principalAmount1: principal.amount1.toString(),
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper
+        lowerBound: lower,
+        upperBound: upper
       };
     });
 
@@ -1154,6 +1157,9 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 
     // Step 9: Emit LiquidityAddedToPosition event
+    // Extract position bounds in platform-agnostic format
+    const { lower, upper } = adapter.extractPositionBounds(position);
+
     this.eventManager.emit('LiquidityAddedToPosition', {
       // Identity
       vaultAddress: vault.address,
@@ -1166,11 +1172,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       actualToken0: receiptData.amount0,
       actualToken1: receiptData.amount1,
 
-      // Position state
-      tickLower: position.tickLower,
-      tickUpper: position.tickUpper,
-      currentTick: targetPool.tick,
-      liquidity: receiptData.liquidity,
+      // Position range (platform-agnostic names)
+      lowerBound: lower,
+      upperBound: upper,
 
       // Transaction
       transactionHash: receipt.transactionHash,
@@ -1185,6 +1189,10 @@ export default class BabyStepsStrategy extends StrategyBase {
       deploymentAmount: availableDeployment,
       timestamp: Date.now()
     });
+
+    // Step 10: Refresh vault cache with updated position and token balances
+    // If this fails, error bubbles up to trigger failed vault retry mechanism
+    await this.vaultDataService.refreshPositionsAndTokens(vault.address);
   }
 
   /**
@@ -1197,18 +1205,503 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @returns {Promise<void>}
    */
   async createNewPosition(vault, availableDeployment, assetValues, targetPool) {
-    // TODO: Implement
-    // 1. Validate availableDeployment
-    // 2. Get adapter for target platform
-    // 3. Calculate tick range using strategy params (targetRangeUpper/Lower)
-    // 4. Get test quote to determine optimal token ratio
-    // 5. Split budget according to optimal ratio
-    // 6. Get full add liquidity quote
-    // 7. Prepare tokens (swap if needed to cover deficits)
-    // 8. JIT approval: adapter.getApprovalTarget('liquidity')
-    // 9. Execute mint transaction
-    // 10. Emit PositionCreated event
-    this.log('⚠️ createNewPosition not yet implemented');
+    // ===========================================================================
+    // IMPLEMENTATION STEPS (mirrors addToPosition with key differences noted)
+    // ===========================================================================
+    //
+    // Step 1: Validate availableDeployment
+    //   - Same as addToPosition
+    //   - Return early if <= 0
+    //
+    // Step 2: Get token data from targetPool
+    //   - Same as addToPosition
+    //   - token0Data = targetPool.token0
+    //   - token1Data = targetPool.token1
+    //
+    // Step 3: Get adapter and calculate position range [DIFFERENT FROM addToPosition]
+    //   - Get adapter from vault.targetPlatforms[0]
+    //   - Use adapter.getPositionRange() to compute position object:
+    //     const position = adapter.getPositionRange(
+    //       targetPool,                                   // pool data with tick and fee
+    //       vault.strategy.parameters.targetRangeUpper,   // e.g., 5 for +5%
+    //       vault.strategy.parameters.targetRangeLower    // e.g., 5 for -5%
+    //     );
+    //   - Returns position object with platform-specific properties (e.g., tickLower/tickUpper for V3)
+    //   - Use Object.values() for generic logging: const [lower, upper, current] = Object.values(position);
+    //
+    // Step 4: Get TEST quote to determine optimal ratio [DIFFERENT FROM addToPosition]
+    //   - addToPosition reads ratio from existing position's token values
+    //   - createNewPosition needs to discover ratio from tick range + pool state
+    //   - Use adapter.getAddLiquidityAmounts() with small test amount:
+    //     const testAmount = ethers.utils.parseUnits("1", token0Data.decimals);
+    //     const testQuote = await adapter.getAddLiquidityAmounts({
+    //       position: { tickLower, tickUpper },
+    //       token0Amount: testAmount.toString(),
+    //       token1Amount: "0",
+    //       provider, poolData: targetPool, token0Data, token1Data
+    //     });
+    //   - Calculate value ratio from test quote:
+    //     const testToken0 = formatUnits(testQuote.token0Amount, token0Data.decimals);
+    //     const testToken1 = formatUnits(testQuote.token1Amount, token1Data.decimals);
+    //     const testToken0ValueUSD = testToken0 * token0Price;
+    //     const testToken1ValueUSD = testToken1 * token1Price;
+    //     const optimalRatio = testToken0ValueUSD / testToken1ValueUSD;
+    //   - Get prices from assetValues.tokens[symbol].price:
+    //       const token0Price = assetValues.tokens[token0Data.symbol]?.price;
+    //       const token1Price = assetValues.tokens[token1Data.symbol]?.price;
+    //     EDGE CASE: If vault has only non-aligned tokens (no target token balances),
+    //     prices might not be in assetValues.tokens. In that case, call fetchTokenPrices()
+    //     directly for the target token symbols.
+    //
+    // Step 5: Split budget according to optimal ratio
+    //   - Same formula as addToPosition:
+    //     const token0Share = availableDeployment * (optimalRatio / (1 + optimalRatio));
+    //     const token0InputDecimal = token0Share / token0Price;
+    //     const token0InputAmount = parseUnits(token0InputDecimal.toFixed(...), ...);
+    //
+    // Step 6: Get FULL add liquidity quote with actual amounts
+    //   - Same as addToPosition Step 4:
+    //     const quote = await adapter.getAddLiquidityAmounts({
+    //       position: { tickLower, tickUpper },  // Note: no .id
+    //       token0Amount: token0InputAmount.toString(),
+    //       token1Amount: "0",
+    //       provider, poolData: targetPool, token0Data, token1Data
+    //     });
+    //   - Capture originalRequirements for post-swap validation
+    //
+    // Step 7: Prepare tokens (swap/wrap if needed to cover deficits)
+    //   - SAME as addToPosition Step 5
+    //   - Call prepareTokensForPosition(vault, quote, token0Data, token1Data)
+    //   - Execute wrap/unwrap first
+    //   - Execute deficit swaps with retry loop
+    //   - Execute buffer swaps (optional, non-critical)
+    //
+    // Step 8: Refresh token balances after swaps
+    //   - SAME as addToPosition Step 6
+    //
+    // Step 9: Validate requirements (if deficit swaps failed)
+    //   - SAME as addToPosition (tolerance-based validation)
+    //
+    // Step 10: Calculate final amounts - cap at original quote
+    //   - SAME as addToPosition Step 7
+    //   - token0ForLiquidity = min(balance, quote.token0Amount)
+    //   - token1ForLiquidity = min(balance, quote.token1Amount)
+    //
+    // Step 11: Execute mint transaction [DIFFERENT FROM addToPosition]
+    //   - 11a. Ensure token approvals:
+    //       const liquidityTarget = adapter.getApprovalTarget('liquidity');
+    //       await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
+    //
+    //   - 11b. Generate CREATE position data (not add liquidity):
+    //       const createPositionData = await adapter.generateCreatePositionData({
+    //         position: { tickLower, tickUpper },  // No id
+    //         token0Amount: token0ForLiquidity,
+    //         token1Amount: token1ForLiquidity,
+    //         provider: this.provider,
+    //         walletAddress: vault.address,        // REQUIRED - recipient of NFT
+    //         poolData: targetPool,
+    //         token0Data,
+    //         token1Data,
+    //         slippageTolerance: vault.strategy.parameters.maxSlippage,
+    //         deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
+    //       });
+    //
+    //   - 11c. Execute MINT transaction (not addliq):
+    //       const { receipt, gasEstimated } = await this.executeBatchTransactions(
+    //         vault,
+    //         [createPositionData],
+    //         'create position',
+    //         'mint'  // Different from 'addliq'
+    //       );
+    //
+    //   - 11d. Parse receipt - SAME method works for both mint and increaseLiquidity:
+    //       const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
+    //       // Returns: { tokenId, liquidity, amount0, amount1, tickLower, tickUpper, poolAddress }
+    //       // For new positions: tickLower, tickUpper, poolAddress come from Mint event
+    //
+    // Step 12: Emit NewPositionCreated event [DIFFERENT FROM addToPosition]
+    //   - Similar structure to LiquidityAddedToPosition but:
+    //     - Event name: 'NewPositionCreated'
+    //     - Include positionId from receiptData.tokenId (newly minted NFT)
+    //     - Include tickLower/tickUpper from receiptData (confirmed from Mint event)
+    //     - No need for existing position context
+    //   - EVENT DESIGN: Focus on fields needed for:
+    //     (1) Tracker module persistence/analytics
+    //     (2) Test assertions and verification
+    //     Determine specific fields when implementing this step.
+    //
+    // ===========================================================================
+
+    this.log(`Creating new position with $${availableDeployment.toFixed(2)} available`);
+
+    // Step 1: Validate availableDeployment
+    if (availableDeployment <= 0) {
+      this.log('No deployment available, skipping createNewPosition');
+      return;
+    }
+
+    // Step 2: Get token data from targetPool
+    const token0Data = targetPool.token0;
+    const token1Data = targetPool.token1;
+
+    // Step 3: Get adapter and calculate position range
+    const platformId = vault.targetPlatforms[0];
+    const adapter = this.adapters.get(platformId);
+    if (!adapter) {
+      throw new Error(`No adapter found for platform: ${platformId}`);
+    }
+
+    // Get position range object (platform-specific properties, e.g., tickLower/tickUpper for V3)
+    const position = adapter.getPositionRange(
+      targetPool,
+      vault.strategy.parameters.targetRangeUpper,
+      vault.strategy.parameters.targetRangeLower
+    );
+
+    // Generic logging via Object.values destructuring
+    const [lower, upper, current] = Object.values(position);
+    this.log(`Calculated range: ${lower} to ${upper} (current: ${current})`);
+    this.log(`Range params: +${vault.strategy.parameters.targetRangeUpper}% / -${vault.strategy.parameters.targetRangeLower}%`);
+
+    // Step 4: Get token prices and determine optimal ratio via test quote
+    // Always fetch prices for target tokens (cache handles efficiency)
+    const prices = await fetchTokenPrices(
+      [token0Data.symbol, token1Data.symbol],
+      CACHE_DURATIONS['30-SECONDS']
+    );
+    const token0Price = prices[token0Data.symbol.toUpperCase()];
+    const token1Price = prices[token1Data.symbol.toUpperCase()];
+
+    if (!token0Price || !token1Price) {
+      throw new Error(`Unable to fetch prices for ${token0Data.symbol} and/or ${token1Data.symbol}`);
+    }
+
+    // Get test quote to determine pool's required ratio at this tick range
+    // Use $100 worth of token0 to ensure precision across extreme price disparities (e.g., PEPE/WBTC)
+    const testValueUSD = 100;
+    const testInputDecimal = testValueUSD / token0Price;
+    const testAmount = ethers.utils.parseUnits(
+      testInputDecimal.toFixed(token0Data.decimals),
+      token0Data.decimals
+    );
+    const testQuote = await retryRpcCall(
+      () => adapter.getAddLiquidityAmounts({
+        position,
+        token0Amount: testAmount.toString(),
+        token1Amount: '0',
+        provider: this.provider,
+        poolData: targetPool,
+        token0Data,
+        token1Data
+      }),
+      'getAddLiquidityAmounts (test quote)'
+    );
+
+    // Calculate optimal VALUE ratio from test quote
+    const testToken0Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token0Amount, token0Data.decimals));
+    const testToken1Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token1Amount, token1Data.decimals));
+    const testToken0ValueUSD = testToken0Decimal * token0Price;
+    const testToken1ValueUSD = testToken1Decimal * token1Price;
+    const optimalRatio = testToken0ValueUSD / testToken1ValueUSD;
+
+    this.log(`Token prices: ${token0Data.symbol}=$${token0Price.toFixed(2)}, ${token1Data.symbol}=$${token1Price.toFixed(2)}`);
+    this.log(`Test quote ratio: ${testToken0Decimal.toFixed(6)} ${token0Data.symbol} : ${testToken1Decimal.toFixed(6)} ${token1Data.symbol}`);
+    this.log(`Optimal value ratio: ${optimalRatio.toFixed(4)} (${(optimalRatio / (1 + optimalRatio) * 100).toFixed(1)}% ${token0Data.symbol} : ${(1 / (1 + optimalRatio) * 100).toFixed(1)}% ${token1Data.symbol})`);
+
+    // Step 5: Split budget according to optimal ratio
+    // Calculate how much of token0 to use as input based on VALUE ratio
+    // If ratio is 1.0 (50%:50%), we allocate 50% of budget to token0
+    const token0Share = availableDeployment * (optimalRatio / (1 + optimalRatio));
+
+    // Convert USD amount to raw token amount
+    const token0InputDecimal = token0Share / token0Price;
+    const token0InputAmount = ethers.utils.parseUnits(
+      token0InputDecimal.toFixed(token0Data.decimals),
+      token0Data.decimals
+    );
+
+    this.log(`Requesting quote for ${ethers.utils.formatUnits(token0InputAmount, token0Data.decimals)} ${token0Data.symbol} ($${token0Share.toFixed(2)} of $${availableDeployment.toFixed(2)} budget)`);
+
+    // Step 6: Get FULL add liquidity quote with actual amounts
+    const quote = await retryRpcCall(
+      () => adapter.getAddLiquidityAmounts({
+        position,
+        token0Amount: token0InputAmount.toString(),
+        token1Amount: '0',
+        provider: this.provider,
+        poolData: targetPool,
+        token0Data,
+        token1Data
+      }),
+      'adapter.getAddLiquidityAmounts'
+    );
+
+    this.log(`Quote amounts received - need: ${ethers.utils.formatUnits(quote.token0Amount, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(quote.token1Amount, token1Data.decimals)} ${token1Data.symbol}`);
+
+    // Capture original requirements for post-swap validation (if deficit swaps fail)
+    const originalRequirements = {
+      token0Amount: BigInt(quote.token0Amount),
+      token1Amount: BigInt(quote.token1Amount)
+    };
+
+    // Step 7: Prepare tokens (swap/wrap if needed to cover deficits)
+    const { deficitSwaps, bufferSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
+      vault,
+      quote,
+      token0Data,
+      token1Data
+    );
+
+    // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
+    if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
+      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
+      await this.executeWrap(vault, wrapUnwrap.wrapAmount);
+    }
+    if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
+      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
+      await this.executeUnwrap(vault, wrapUnwrap.unwrapAmount);
+    }
+
+    // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
+    let currentDeficitSwaps = deficitSwaps;
+    let currentBufferSwaps = bufferSwaps;
+    let currentDeficitMetadata = metadata.deficit;
+    let currentBufferMetadata = metadata.buffer;
+    const maxRetries = 1;
+    let retryCount = 0;
+
+    // Track if deficit swaps failed - we'll still try buffer swaps
+    let deficitSwapsFailed = false;
+    let deficitSwapError = null;
+
+    while (currentDeficitSwaps.length > 0) {
+      try {
+        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps (critical)${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
+        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
+
+        // Extract actual amounts from receipt and emit TokensSwapped event
+        const actualSwaps = adapter.parseSwapReceipt(receipt, currentDeficitMetadata);
+        const swapDetails = this.buildSwapDetails(currentDeficitMetadata, actualSwaps);
+        this.eventManager.emit('TokensSwapped', {
+          vaultAddress: vault.address,
+          swapCount: swapDetails.length,
+          swapType: 'deficit_coverage',
+          swaps: swapDetails,
+          gasUsed: receipt.gasUsed.toString(),
+          gasEstimated: gasEstimated,
+          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+          transactionHash: receipt.transactionHash,
+          success: receipt.status === 1,
+          timestamp: Date.now()
+        });
+
+        break; // Success - exit retry loop
+      } catch (error) {
+        retryCount++;
+        if (retryCount > maxRetries) {
+          // Don't throw yet - try buffer swaps first, then validate
+          deficitSwapsFailed = true;
+          deficitSwapError = error.message;
+          this.log(`⚠️ Deficit swaps failed after ${maxRetries} retry(s), continuing to buffer swaps...`);
+          break;
+        }
+
+        this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);
+        this.log(`   Failure reason: ${error.message}`);
+
+        // Refresh token balances to get current on-chain state
+        vault.tokens = await this.vaultDataService.fetchTokenBalances(
+          vault.address,
+          Object.keys(this.tokens)
+        );
+
+        // Regenerate swap transactions with fresh quotes and Permit2 nonces
+        const freshResult = await this.prepareTokensForPosition(
+          vault,
+          quote,
+          token0Data,
+          token1Data
+        );
+
+        // Note: wrap/unwrap already executed, so freshResult.wrapUnwrap should be 0
+        // But check just in case balances changed unexpectedly
+        if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
+          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
+          await this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount);
+        }
+        if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
+          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
+          await this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount);
+        }
+
+        // Update swaps and metadata for next iteration
+        currentDeficitSwaps = freshResult.deficitSwaps;
+        currentBufferSwaps = freshResult.bufferSwaps;
+        currentDeficitMetadata = freshResult.metadata.deficit;
+        currentBufferMetadata = freshResult.metadata.buffer;
+
+        // If no deficit swaps needed after refresh, we're done
+        if (currentDeficitSwaps.length === 0) {
+          this.log('No deficit swaps needed after balance refresh');
+          break;
+        }
+      }
+    }
+
+    // Execute buffer swaps (OPTIONAL - failure is logged but doesn't block)
+    if (currentBufferSwaps.length > 0) {
+      try {
+        this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
+        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
+
+        // Extract actual amounts from receipt and emit TokensSwapped event
+        const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
+        const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
+        this.eventManager.emit('TokensSwapped', {
+          vaultAddress: vault.address,
+          swapCount: swapDetails.length,
+          swapType: 'buffer',
+          swaps: swapDetails,
+          gasUsed: receipt.gasUsed.toString(),
+          gasEstimated: gasEstimated,
+          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+          transactionHash: receipt.transactionHash,
+          success: receipt.status === 1,
+          timestamp: Date.now()
+        });
+      } catch (error) {
+        this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
+        // Continue - buffer swaps are nice-to-have, not required
+      }
+    }
+
+    // Step 8: Refresh token balances after swaps are completed
+    vault.tokens = await this.vaultDataService.fetchTokenBalances(
+      vault.address,
+      Object.keys(this.tokens)
+    );
+
+    // Step 9: Validate against original requirements (ONLY if deficit swaps failed)
+    // If deficit swaps succeeded, we got what we needed - no extra validation
+    if (deficitSwapsFailed) {
+      const available0 = BigInt(vault.tokens[token0Data.symbol] || '0');
+      const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
+
+      // Use maxSlippage as tolerance (user's configured acceptable variance)
+      const maxSlippage = vault.strategy.parameters.maxSlippage;
+      const toleranceMultiplier = (100 - maxSlippage) / 100; // e.g., 0.995 for 0.5% slippage
+
+      const minRequired0 = BigInt(Math.floor(Number(originalRequirements.token0Amount) * toleranceMultiplier));
+      const minRequired1 = BigInt(Math.floor(Number(originalRequirements.token1Amount) * toleranceMultiplier));
+
+      const hasEnoughToken0 = available0 >= minRequired0;
+      const hasEnoughToken1 = available1 >= minRequired1;
+
+      if (!hasEnoughToken0 || !hasEnoughToken1) {
+        const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
+        const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
+
+        throw new Error(
+          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+          `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
+          `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
+          `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
+          `${token1Data.symbol}: need ${ethers.utils.formatUnits(minRequired1, token1Data.decimals)}, ` +
+          `have ${ethers.utils.formatUnits(available1, token1Data.decimals)} ` +
+          `(short ${ethers.utils.formatUnits(shortfall1, token1Data.decimals)}). ` +
+          `Original error: ${deficitSwapError}`
+        );
+      }
+
+      this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
+    }
+
+    // Step 10: Calculate final amounts - cap at original quote but don't exceed actual balance
+    const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
+    const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+    const originalToken0 = BigInt(quote.token0Amount);
+    const originalToken1 = BigInt(quote.token1Amount);
+
+    const token0ForLiquidity = finalToken0Balance < originalToken0
+      ? finalToken0Balance.toString()
+      : quote.token0Amount;
+    const token1ForLiquidity = finalToken1Balance < originalToken1
+      ? finalToken1Balance.toString()
+      : quote.token1Amount;
+
+    this.log(`Final amounts for liquidity: ${ethers.utils.formatUnits(token0ForLiquidity, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(token1ForLiquidity, token1Data.decimals)} ${token1Data.symbol}`);
+
+    // Step 11: Execute mint transaction
+    // 11a. Ensure token approvals for position manager
+    const liquidityTarget = adapter.getApprovalTarget('liquidity');
+    await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
+
+    // 11b. Generate CREATE position data (different from addToPosition which uses generateAddLiquidityData)
+    const createPositionData = await retryRpcCall(
+      () => adapter.generateCreatePositionData({
+        position,
+        token0Amount: token0ForLiquidity,
+        token1Amount: token1ForLiquidity,
+        provider: this.provider,
+        walletAddress: vault.address,  // REQUIRED - recipient of the NFT
+        poolData: targetPool,
+        token0Data,
+        token1Data,
+        slippageTolerance: vault.strategy.parameters.maxSlippage,
+        deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
+      }),
+      'generateCreatePositionData'
+    );
+
+    // 11c. Execute MINT transaction (different from 'addliq')
+    this.log(`Executing mint for new ${token0Data.symbol}/${token1Data.symbol} position`);
+    const { receipt, gasEstimated } = await this.executeBatchTransactions(
+      vault,
+      [createPositionData],
+      'create position',
+      'mint'
+    );
+
+    // 11d. Parse receipt for actual amounts consumed and new position ID
+    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+    this.log(`✅ Position created: ID ${receiptData.tokenId}, ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
+
+    // Step 12: Emit NewPositionCreated event
+    this.eventManager.emit('NewPositionCreated', {
+      // Identity
+      vaultAddress: vault.address,
+      positionId: receiptData.tokenId,
+      poolAddress: targetPool.address,
+
+      // Amounts (quoted vs actual for slippage tracking)
+      quotedToken0: token0ForLiquidity,
+      quotedToken1: token1ForLiquidity,
+      actualToken0: receiptData.amount0,
+      actualToken1: receiptData.amount1,
+
+      // Position range (platform-agnostic names, values from getPositionRange)
+      lowerBound: lower,
+      upperBound: upper,
+      current,  // for emergency exit baseline
+
+      // Transaction
+      transactionHash: receipt.transactionHash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      gasEstimated,
+      effectiveGasPrice: receipt.effectiveGasPrice.toString(),
+
+      // Context
+      tokenSymbols: [token0Data.symbol, token1Data.symbol],
+      platform: platformId,
+      deploymentAmount: availableDeployment,
+      timestamp: Date.now()
+    });
+
+    // Step 13: Refresh vault cache with new position and updated token balances
+    // If this fails, error bubbles up to trigger failed vault retry mechanism
+    await this.vaultDataService.refreshPositionsAndTokens(vault.address);
   }
 
   // ===========================================================================

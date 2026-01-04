@@ -27,12 +27,14 @@ const ERC20ABI = ERC20ARTIFACT.abi;
  * @since 2.0.0
  */
 class VaultDataService {
+  // Private field - enforces access through public methods
+  #vaults = new Map();
+
   /**
    * Creates a new VaultDataService instance
    * @param {EventManager} eventManager - Event manager instance for emitting events
    */
   constructor(eventManager) {
-    this.vaults = new Map();
     this.eventManager = eventManager;
     this.provider = null;
     this.chainId = null;
@@ -92,8 +94,8 @@ class VaultDataService {
   async getVault(vaultAddress, forceRefresh = false) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
 
-    if (!forceRefresh && this.vaults.has(normalizedAddress)) {
-      return this.vaults.get(normalizedAddress);
+    if (!forceRefresh && this.#vaults.has(normalizedAddress)) {
+      return this.#vaults.get(normalizedAddress);
     }
 
     return this.loadVaultData(normalizedAddress);
@@ -189,7 +191,7 @@ class VaultDataService {
         positions: positions
       });
 
-      this.vaults.set(normalizedAddress, vault);
+      this.#vaults.set(normalizedAddress, vault);
       console.log(`Loaded and cached vault ${normalizedAddress} with ${Object.keys(vault.positions).length} positions`);
 
       this.eventManager.emit('vaultLoaded', {
@@ -380,7 +382,7 @@ class VaultDataService {
    * @returns {Array<Object>} Array of all cached vault objects
    */
   getAllVaults() {
-    return Array.from(this.vaults.values());
+    return Array.from(this.#vaults.values());
   }
 
   /**
@@ -390,7 +392,7 @@ class VaultDataService {
    */
   getVaultStrategyId(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-    const vault = this.vaults.get(normalizedAddress);
+    const vault = this.#vaults.get(normalizedAddress);
     return vault?.strategy?.strategyId || null;
   }
 
@@ -407,7 +409,7 @@ class VaultDataService {
     this.eventManager.emit('positionsRefreshing', normalizedAddress);
 
     try {
-      const vault = this.vaults.get(normalizedAddress);
+      const vault = this.#vaults.get(normalizedAddress);
       if (!vault) {
         throw new Error(`Vault ${normalizedAddress} not found in cache`);
       }
@@ -420,7 +422,7 @@ class VaultDataService {
       vault.tokens = allTokenBalances;
       vault.positions = currentPositions;
       vault.lastUpdated = Date.now();
-      this.vaults.set(normalizedAddress, vault);
+      this.#vaults.set(normalizedAddress, vault);
 
       this.eventManager.emit('positionsRefreshed', normalizedAddress, Object.values(currentPositions));
       return true;
@@ -575,7 +577,7 @@ class VaultDataService {
    */
   hasVault(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-    return this.vaults.has(normalizedAddress);
+    return this.#vaults.has(normalizedAddress);
   }
 
   /**
@@ -585,10 +587,10 @@ class VaultDataService {
    */
   removeVault(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-    const existed = this.vaults.has(normalizedAddress);
+    const existed = this.#vaults.has(normalizedAddress);
 
     if (existed) {
-      this.vaults.delete(normalizedAddress);
+      this.#vaults.delete(normalizedAddress);
       this.eventManager.emit('vaultRemoved', normalizedAddress);
     }
 
@@ -599,7 +601,7 @@ class VaultDataService {
    * Clear all cached data
    */
   clearCache() {
-    this.vaults.clear();
+    this.#vaults.clear();
     this.lastRefreshTime = null;
     this.eventManager.emit('cacheCleared');
   }
@@ -622,7 +624,7 @@ class VaultDataService {
 
       vault.targetTokens = [...newTokens];
       vault.lastUpdated = Date.now();
-      this.vaults.set(normalizedAddress, vault);
+      this.#vaults.set(normalizedAddress, vault);
 
       this.eventManager.emit('targetTokensUpdated', normalizedAddress, newTokens);
       return true;
@@ -650,7 +652,7 @@ class VaultDataService {
 
       vault.targetPlatforms = [...newPlatforms];
       vault.lastUpdated = Date.now();
-      this.vaults.set(normalizedAddress, vault);
+      this.#vaults.set(normalizedAddress, vault);
 
       this.eventManager.emit('targetPlatformsUpdated', normalizedAddress, newPlatforms);
       return true;
@@ -658,6 +660,30 @@ class VaultDataService {
       console.error(`Error updating target platforms for vault ${vaultAddress}:`, error);
       return false;
     }
+  }
+
+  //#endregion
+
+  //#region Test Helpers
+
+  /**
+   * Set vault in cache directly (for testing only)
+   * @param {string} vaultAddress - Vault address
+   * @param {Object} vaultData - Vault data to cache
+   * @private
+   */
+  _setVaultForTesting(vaultAddress, vaultData) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+    this.#vaults.set(normalized, vaultData);
+  }
+
+  /**
+   * Get vault cache size (for testing only)
+   * @returns {number} Number of cached vaults
+   * @private
+   */
+  _getCacheSizeForTesting() {
+    return this.#vaults.size;
   }
 
   //#endregion

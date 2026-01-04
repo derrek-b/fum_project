@@ -677,13 +677,13 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const event = positionsClosedEvents[0];
         const closedPosition = event.closedPositions[0];
 
-        expect(closedPosition).toHaveProperty('tickLower');
-        expect(closedPosition).toHaveProperty('tickUpper');
-        expect(typeof closedPosition.tickLower).toBe('number');
-        expect(typeof closedPosition.tickUpper).toBe('number');
-        expect(closedPosition.tickLower).toBeLessThan(closedPosition.tickUpper);
-        expect(closedPosition.tickLower).toBeGreaterThanOrEqual(V3_MIN_TICK);
-        expect(closedPosition.tickUpper).toBeLessThanOrEqual(V3_MAX_TICK);
+        expect(closedPosition).toHaveProperty('lowerBound');
+        expect(closedPosition).toHaveProperty('upperBound');
+        expect(typeof closedPosition.lowerBound).toBe('number');
+        expect(typeof closedPosition.upperBound).toBe('number');
+        expect(closedPosition.lowerBound).toBeLessThan(closedPosition.upperBound);
+        expect(closedPosition.lowerBound).toBeGreaterThanOrEqual(V3_MIN_TICK);
+        expect(closedPosition.upperBound).toBeLessThanOrEqual(V3_MAX_TICK);
       });
 
       it('should have principal amounts as numeric strings', () => {
@@ -1371,21 +1371,16 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.gasEstimated).toBeDefined();
     });
 
-    it('should have correct tick range matching position', () => {
+    it('should have correct position range matching position (platform-agnostic names)', () => {
       const event = liquidityAddedToPositionEvents[0];
       const vault = service.vaultDataService.getAllVaults()[0];
       const position = vault.positions[event.positionId];
 
-      expect(event.tickLower).toBe(position.tickLower);
-      expect(event.tickUpper).toBe(position.tickUpper);
-      expect(typeof event.currentTick).toBe('number');
-    });
-
-    it('should have liquidity > 0', () => {
-      const event = liquidityAddedToPositionEvents[0];
-
-      expect(event.liquidity).toBeDefined();
-      expect(BigInt(event.liquidity)).toBeGreaterThan(0n);
+      // Event uses platform-agnostic names, position has platform-specific names
+      expect(event.lowerBound).toBe(position.tickLower);
+      expect(event.upperBound).toBe(position.tickUpper);
+      // No 'current' in addToPosition event (only in NewPositionCreated for emergency exit baseline)
+      expect(event.current).toBeUndefined();
     });
 
     it('should have correct context metadata', () => {

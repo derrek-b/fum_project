@@ -24,7 +24,7 @@ describe('VaultDataService', () => {
 
   describe('Constructor', () => {
     it('should initialize with empty vaults map', () => {
-      expect(vaultDataService.vaults.size).toBe(0);
+      expect(vaultDataService._getCacheSizeForTesting()).toBe(0);
     });
 
     it('should store eventManager reference', () => {
@@ -122,13 +122,13 @@ describe('VaultDataService', () => {
       });
 
       it('should return true for cached vault', () => {
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
 
         expect(vaultDataService.hasVault(VAULT_ADDRESS_1)).toBe(true);
       });
 
       it('should normalize address for lookup', () => {
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
 
         // Lowercase should still find it
         expect(vaultDataService.hasVault(VAULT_ADDRESS_1.toLowerCase())).toBe(true);
@@ -137,12 +137,12 @@ describe('VaultDataService', () => {
 
     describe('removeVault', () => {
       it('should remove vault from cache and return true', () => {
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
 
         const result = vaultDataService.removeVault(VAULT_ADDRESS_1);
 
         expect(result).toBe(true);
-        expect(vaultDataService.vaults.has(VAULT_ADDRESS_CHECKSUM)).toBe(false);
+        expect(vaultDataService.hasVault(VAULT_ADDRESS_CHECKSUM)).toBe(false);
       });
 
       it('should return false if vault not in cache', () => {
@@ -153,7 +153,7 @@ describe('VaultDataService', () => {
 
       it('should emit vaultRemoved event when vault removed', () => {
         const emitSpy = vi.spyOn(mockEventManager, 'emit');
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
 
         vaultDataService.removeVault(VAULT_ADDRESS_1);
 
@@ -178,8 +178,8 @@ describe('VaultDataService', () => {
         const vault1 = { address: VAULT_ADDRESS_CHECKSUM };
         const vault2 = { address: ethers.utils.getAddress(VAULT_ADDRESS_2) };
 
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault1);
-        vaultDataService.vaults.set(ethers.utils.getAddress(VAULT_ADDRESS_2), vault2);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault1);
+        vaultDataService._setVaultForTesting(ethers.utils.getAddress(VAULT_ADDRESS_2), vault2);
 
         const vaults = vaultDataService.getAllVaults();
 
@@ -191,12 +191,12 @@ describe('VaultDataService', () => {
 
     describe('clearCache', () => {
       it('should remove all vaults from cache', () => {
-        vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
-        vaultDataService.vaults.set(ethers.utils.getAddress(VAULT_ADDRESS_2), { address: VAULT_ADDRESS_2 });
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+        vaultDataService._setVaultForTesting(ethers.utils.getAddress(VAULT_ADDRESS_2), { address: VAULT_ADDRESS_2 });
 
         vaultDataService.clearCache();
 
-        expect(vaultDataService.vaults.size).toBe(0);
+        expect(vaultDataService._getCacheSizeForTesting()).toBe(0);
       });
 
       it('should reset lastRefreshTime', () => {
@@ -223,13 +223,13 @@ describe('VaultDataService', () => {
     });
 
     it('should return null for vault without strategy', () => {
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, { address: VAULT_ADDRESS_CHECKSUM });
 
       expect(vaultDataService.getVaultStrategyId(VAULT_ADDRESS_1)).toBeNull();
     });
 
     it('should return strategyId for vault with strategy', () => {
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, {
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, {
         address: VAULT_ADDRESS_CHECKSUM,
         strategy: { strategyId: 'bob' }
       });
@@ -322,7 +322,7 @@ describe('VaultDataService', () => {
         strategy: { strategyId: 'bob' },
         lastUpdated: Date.now()
       };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, cachedVault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, cachedVault);
 
       const result = await vaultDataService.getVault(VAULT_ADDRESS_1, false);
 
@@ -332,7 +332,7 @@ describe('VaultDataService', () => {
 
     it('should normalize address for cache lookup', async () => {
       const cachedVault = { address: VAULT_ADDRESS_CHECKSUM };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, cachedVault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, cachedVault);
 
       const result = await vaultDataService.getVault(VAULT_ADDRESS_1.toLowerCase(), false);
 
@@ -353,12 +353,14 @@ describe('VaultDataService', () => {
         targetTokens: ['USDC'],
         lastUpdated: Date.now() - 1000
       };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
 
       const result = await vaultDataService.updateTargetTokens(VAULT_ADDRESS_1, ['USDC', 'ETH', 'ARB']);
 
       expect(result).toBe(true);
-      expect(vaultDataService.vaults.get(VAULT_ADDRESS_CHECKSUM).targetTokens).toEqual(['USDC', 'ETH', 'ARB']);
+      // Verify via getAllVaults since vault object is mutated in place
+      const updatedVault = vaultDataService.getAllVaults().find(v => v.address === VAULT_ADDRESS_CHECKSUM);
+      expect(updatedVault.targetTokens).toEqual(['USDC', 'ETH', 'ARB']);
     });
 
     it('should update lastUpdated timestamp', async () => {
@@ -368,17 +370,18 @@ describe('VaultDataService', () => {
         targetTokens: ['USDC'],
         lastUpdated: oldTime
       };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
 
       await vaultDataService.updateTargetTokens(VAULT_ADDRESS_1, ['WETH']);
 
-      expect(vaultDataService.vaults.get(VAULT_ADDRESS_CHECKSUM).lastUpdated).toBeGreaterThan(oldTime);
+      const updatedVault = vaultDataService.getAllVaults().find(v => v.address === VAULT_ADDRESS_CHECKSUM);
+      expect(updatedVault.lastUpdated).toBeGreaterThan(oldTime);
     });
 
     it('should emit targetTokensUpdated event', async () => {
       const emitSpy = vi.spyOn(mockEventManager, 'emit');
       const vault = { address: VAULT_ADDRESS_CHECKSUM, targetTokens: [] };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
 
       await vaultDataService.updateTargetTokens(VAULT_ADDRESS_1, ['USDC']);
 
@@ -398,18 +401,19 @@ describe('VaultDataService', () => {
         targetPlatforms: ['uniswapV3'],
         lastUpdated: Date.now() - 1000
       };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
 
       const result = await vaultDataService.updateTargetPlatforms(VAULT_ADDRESS_1, ['uniswapV3', 'uniswapV4']);
 
       expect(result).toBe(true);
-      expect(vaultDataService.vaults.get(VAULT_ADDRESS_CHECKSUM).targetPlatforms).toEqual(['uniswapV3', 'uniswapV4']);
+      const updatedVault = vaultDataService.getAllVaults().find(v => v.address === VAULT_ADDRESS_CHECKSUM);
+      expect(updatedVault.targetPlatforms).toEqual(['uniswapV3', 'uniswapV4']);
     });
 
     it('should emit targetPlatformsUpdated event', async () => {
       const emitSpy = vi.spyOn(mockEventManager, 'emit');
       const vault = { address: VAULT_ADDRESS_CHECKSUM, targetPlatforms: [] };
-      vaultDataService.vaults.set(VAULT_ADDRESS_CHECKSUM, vault);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
 
       await vaultDataService.updateTargetPlatforms(VAULT_ADDRESS_1, ['uniswapV4']);
 
