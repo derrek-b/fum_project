@@ -515,17 +515,119 @@ class AutomationService {
 
     // Handle new vault authorization - setup the vault for monitoring
     this.eventManager.subscribe('VaultAuthGranted', async (data) => {
-      this.log(`New vault authorized: ${data.vaultAddress}`);
-      // TODO: Trigger setupVault() for the newly authorized vault
-      // await this.setupVault(data.vaultAddress);
+      const { vaultAddress } = data;
+
+      if (this.isShuttingDown) {
+        this.log('Ignoring VaultAuthGranted - service is shutting down');
+        return;
+      }
+
+      this.log(`New vault authorized: ${vaultAddress}`);
+
+      // Auto-unblacklist if re-authorizing (treat as intent to retry)
+      if (this.isVaultBlacklisted(vaultAddress)) {
+        this.log(`Vault ${vaultAddress} was blacklisted - removing for fresh authorization attempt`);
+        await this.unblacklistVault(vaultAddress);
+      }
+
+      // Clear from retry queue if present (fresh authorization attempt)
+      if (this.failedVaults.has(vaultAddress.toLowerCase())) {
+        this.failedVaults.delete(vaultAddress.toLowerCase());
+        this.log(`Cleared ${vaultAddress} from retry queue for fresh authorization`);
+      }
+
+      try {
+        const result = await this.setupVault(vaultAddress, { forceRefresh: true });
+
+        this.eventManager.emit('VaultOnboarded', {
+          vaultAddress,
+          strategyId: result.vault.strategy.strategyId,
+          positionCount: Object.keys(result.vault.positions).length,
+          log: {
+            level: 'info',
+            message: `Vault onboarded: ${vaultAddress} (${result.vault.strategy.strategyId})`
+          }
+        });
+
+        this.sendTelegramMessage(
+          `🆕 New vault authorized: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}`
+        ).catch(err => console.error('Telegram notification error:', err));
+
+      } catch (error) {
+        // trackFailedVault emits VaultFailed which is already broadcast via SSE
+        await this.trackFailedVault(vaultAddress, error.message, 'auth_event');
+      }
     });
 
     // Handle vault deauthorization - cleanup monitoring
     this.eventManager.subscribe('VaultAuthRevoked', async (data) => {
-      this.log(`Vault deauthorized: ${data.vaultAddress}`);
-      // TODO: Remove vault from monitoring and cleanup listeners
-      // this.eventManager.removeAllVaultListeners(data.vaultAddress);
-      // this.vaultDataService.removeVault(data.vaultAddress);
+      const { vaultAddress } = data;
+
+      if (this.isShuttingDown) {
+        this.log('Ignoring VaultAuthRevoked - service is shutting down');
+        return;
+      }
+
+      this.log(`Vault authorization revoked: ${vaultAddress}`);
+
+      // Track cleanup results
+      const results = {
+        monitoringStopped: false,
+        vaultUnlocked: false,
+        vaultRemoved: false,
+        removedFromBlacklist: false,
+        removedFromRetryQueue: false,
+        errors: []
+      };
+
+      // Remove from blacklist if present (revocation = clean slate)
+      if (this.isVaultBlacklisted(vaultAddress)) {
+        await this.unblacklistVault(vaultAddress);
+        results.removedFromBlacklist = true;
+        this.log(`Removed revoked vault from blacklist: ${vaultAddress}`);
+      }
+
+      // Clear from retry queue if present
+      if (this.failedVaults.has(vaultAddress.toLowerCase())) {
+        this.failedVaults.delete(vaultAddress.toLowerCase());
+        results.removedFromRetryQueue = true;
+        this.log(`Cleared ${vaultAddress} from retry queue`);
+      }
+
+      // Stop monitoring (remove all listeners)
+      try {
+        await this.eventManager.removeAllVaultListeners(vaultAddress);
+        results.monitoringStopped = true;
+      } catch (error) {
+        results.errors.push(`Failed to stop monitoring: ${error.message}`);
+      }
+
+      // Unlock vault if locked
+      if (this.vaultLocks[vaultAddress.toLowerCase()]) {
+        this.unlockVault(vaultAddress);
+        results.vaultUnlocked = true;
+      }
+
+      // Remove from cache
+      results.vaultRemoved = this.vaultDataService.removeVault(vaultAddress);
+
+      // Emit VaultOffboarded event
+      this.eventManager.emit('VaultOffboarded', {
+        vaultAddress,
+        vaultRemoved: results.vaultRemoved,
+        monitoringStopped: results.monitoringStopped,
+        vaultUnlocked: results.vaultUnlocked,
+        errors: results.errors,
+        success: results.errors.length === 0,
+        log: {
+          level: results.errors.length === 0 ? 'info' : 'warn',
+          message: `Vault offboarded: ${vaultAddress} - ${results.errors.length === 0 ? 'success' : `${results.errors.length} error(s)`}`
+        }
+      });
+
+      this.sendTelegramMessage(
+        `⛔ Vault authorization revoked: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}`
+      ).catch(err => console.error('Telegram notification error:', err));
     });
 
     // Handle ExecutorChanged event processing failures
@@ -557,8 +659,16 @@ class AutomationService {
    * @private
    */
   startFailedVaultRetryTimer() {
-    this.failedVaultRetryTimer = setInterval(() => {
-      this.retryFailedVaults();
+    this.failedVaultRetryTimer = setInterval(async () => {
+      await this.retryFailedVaults();
+
+      // Retry failed listener removals from EventManager
+      const failedRemovals = this.eventManager.getFailedRemovals();
+      if (failedRemovals.size > 0) {
+        this.log(`Retrying ${failedRemovals.size} failed listener removals`);
+        const results = await this.eventManager.retryFailedRemovals();
+        this.log(`Failed listener retry: ${results.succeeded} succeeded, ${results.stillFailing} still failing`);
+      }
     }, this.retryIntervalMs);
 
     this.log(`Failed vault retry timer started (interval: ${this.retryIntervalMs}ms)`);
@@ -1236,6 +1346,7 @@ class AutomationService {
   sendTelegramMessage(message) {
     // TODO: Implement Telegram integration
     this.log(`[Telegram] ${message}`);
+    return Promise.resolve();
   }
 
   /**
