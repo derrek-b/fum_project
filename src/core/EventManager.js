@@ -820,7 +820,16 @@ class EventManager {
           });
         }
       } catch (error) {
-        console.error('Error handling executor change event:', error);
+        console.error('🔴 Error handling executor change event:', error);
+        this.emit('VaultAuthEventFailed', {
+          vaultAddress: log.address,
+          rawLog: log,
+          error: error.message,
+          log: {
+            level: 'error',
+            message: `Failed to process ExecutorChanged event for vault: ${log.address}`
+          }
+        });
       }
     };
 

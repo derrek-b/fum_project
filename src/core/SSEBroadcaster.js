@@ -18,6 +18,8 @@ export default class SSEBroadcaster {
    * @param {number} options.port - HTTP server port (required)
    * @param {boolean} [options.debug=false] - Enable debug logging
    * @param {Function} [options.getBlacklist] - Callback to get current blacklist data
+   * @param {Function} [options.getFailedVaults] - Callback to get current failed vaults data (retry queue)
+   * @param {Function} [options.getTrackingFailures] - Callback to get current tracking failures data
    * @param {Function} [options.getVaultMetadata] - Callback to get vault metadata
    * @param {Function} [options.getVaultTransactions] - Callback to get vault transactions
    * @param {Function} [options.onCrash] - Callback on fatal runtime errors
@@ -34,6 +36,8 @@ export default class SSEBroadcaster {
     this.port = options.port;
     this.debug = options.debug || false;
     this.getBlacklist = options.getBlacklist || (() => ({}));
+    this.getFailedVaults = options.getFailedVaults || (() => ({}));
+    this.getTrackingFailures = options.getTrackingFailures || (() => ({}));
     this.getVaultMetadata = options.getVaultMetadata || (() => null);
     this.getVaultTransactions = options.getVaultTransactions || (async () => []);
     this.onCrash = options.onCrash || null;
@@ -57,13 +61,16 @@ export default class SSEBroadcaster {
       'ETHUnwrapped',
       'VaultBaselineCaptured',
       'MonitoringStarted',
-      'VaultLoadFailed',
-      'VaultLoadRecovered',
+      'VaultFailed',
+      'VaultRecovered',
       'VaultUnrecoverable',
       'VaultBlacklisted',
       'VaultUnblacklisted',
       'FeeCollectionFailed',
-      'TransactionLogged'
+      'TransactionLogged',
+      'VaultAuthEventFailed',
+      'TrackerFailure',
+      'TrackerFailureCleared'
     ];
 
     this.unsubscribeFunctions = [];
@@ -136,6 +143,10 @@ export default class SSEBroadcaster {
       this.handleHealthCheck(res);
     } else if (pathname === '/blacklist' && req.method === 'GET') {
       this.handleBlacklistRequest(res);
+    } else if (pathname === '/tracking-failures' && req.method === 'GET') {
+      this.handleTrackingFailuresRequest(res);
+    } else if (pathname === '/failed-vaults' && req.method === 'GET') {
+      this.handleFailedVaultsRequest(res);
     } else if (pathname.startsWith('/vault/') && req.method === 'GET') {
       this.handleVaultRequest(pathname, urlParts.searchParams, res);
     } else {
@@ -203,6 +214,38 @@ export default class SSEBroadcaster {
       this.log(`Error fetching blacklist: ${error.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Failed to fetch blacklist' }));
+    }
+  }
+
+  /**
+   * Handle tracking failures request
+   * @private
+   */
+  handleTrackingFailuresRequest(res) {
+    try {
+      const failuresData = this.getTrackingFailures();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ trackingFailures: failuresData }));
+    } catch (error) {
+      this.log(`Error fetching tracking failures: ${error.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to fetch tracking failures' }));
+    }
+  }
+
+  /**
+   * Handle failed vaults request
+   * @private
+   */
+  handleFailedVaultsRequest(res) {
+    try {
+      const failedData = this.getFailedVaults();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ failedVaults: failedData }));
+    } catch (error) {
+      this.log(`Error fetching failed vaults: ${error.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to fetch failed vaults' }));
     }
   }
 

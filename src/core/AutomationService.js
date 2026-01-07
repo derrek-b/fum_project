@@ -79,6 +79,8 @@ class AutomationService {
       port: this.ssePort,
       debug: this.debug,
       getBlacklist: () => this.getBlacklistData(),
+      getFailedVaults: () => this.getFailedVaultsData(),
+      getTrackingFailures: () => this.tracker.getTrackingFailuresData(),
       getVaultMetadata: (addr) => this.tracker.getMetadata(addr),
       getVaultTransactions: (addr, start, end) => this.tracker.getTransactions(addr, start, end),
       onCrash: (error) => this.handleFatalError(error)
@@ -502,13 +504,13 @@ class AutomationService {
     // Handle config update failures from EventManager
     this.eventManager.subscribe('ConfigUpdateFailed', async (data) => {
       this.log(`Config update failed for vault ${data.vaultAddress}: ${data.configType}`);
-      await this.trackFailedVault(data.vaultAddress, data.error);
+      await this.trackFailedVault(data.vaultAddress, data.error, 'config_update');
     });
 
     // Handle strategy parameter update failures from EventManager
     this.eventManager.subscribe('StrategyParameterUpdateFailed', async (data) => {
       this.log(`Strategy parameter update failed for vault ${data.vaultAddress}`);
-      await this.trackFailedVault(data.vaultAddress, data.error);
+      await this.trackFailedVault(data.vaultAddress, data.error, 'strategy_param_update');
     });
 
     // Handle new vault authorization - setup the vault for monitoring
@@ -524,6 +526,25 @@ class AutomationService {
       // TODO: Remove vault from monitoring and cleanup listeners
       // this.eventManager.removeAllVaultListeners(data.vaultAddress);
       // this.vaultDataService.removeVault(data.vaultAddress);
+    });
+
+    // Handle ExecutorChanged event processing failures
+    this.eventManager.subscribe('VaultAuthEventFailed', async (data) => {
+      const { vaultAddress, error } = data;
+      const isManaged = this.vaultDataService.hasVault(vaultAddress);
+
+      if (isManaged) {
+        // User was trying to DISABLE automation but event processing failed
+        // Blacklist to ensure we don't act on a vault that may have revoked us
+        // Note: blacklistVault() handles listener cleanup internally
+        this.log(`VaultAuthEventFailed for managed vault ${vaultAddress} - blacklisting for safety`);
+        await this.blacklistVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`);
+      } else {
+        // User was trying to ENABLE automation but event processing failed
+        // Track for retry - the retry system will attempt to set up the vault
+        this.log(`VaultAuthEventFailed for unmanaged vault ${vaultAddress} - tracking for retry`);
+        await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
+      }
     });
   }
 
@@ -569,9 +590,14 @@ class AutomationService {
         await this.setupVault(vaultAddress);
         this.failedVaults.delete(vaultAddress);
         this.log(`Vault ${vaultAddress} retry successful`);
+        this.eventManager.emit('VaultRecovered', {
+          vaultAddress,
+          timestamp: Date.now(),
+          log: { level: 'info', message: `Vault ${vaultAddress} recovered from retry queue` }
+        });
       } catch (error) {
         // trackFailedVault updates attempt count and lastError
-        await this.trackFailedVault(vaultAddress, error.message);
+        await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
       }
     }
   }
@@ -580,34 +606,38 @@ class AutomationService {
    * Track a failed vault
    * @param {string} vaultAddress - Vault address
    * @param {string} error - Error message
+   * @param {string} [source='unknown'] - Source of failure (initial_setup, config_update, strategy_param_update, auth_event, retry_attempt, swap_event)
    */
-  async trackFailedVault(vaultAddress, error) {
+  async trackFailedVault(vaultAddress, error, source = 'unknown') {
     const existing = this.failedVaults.get(vaultAddress);
 
     if (existing) {
       existing.attempts += 1;
       existing.lastError = error;
       existing.lastAttemptAt = Date.now();
+      existing.source = source;
     } else {
       this.failedVaults.set(vaultAddress, {
         vaultAddress,
         firstFailedAt: Date.now(),
         lastAttemptAt: Date.now(),
         lastError: error,
-        attempts: 1
+        attempts: 1,
+        source
       });
 
       // Only remove listeners on first failure (not on subsequent retry failures)
       await this.eventManager.removeAllVaultListeners(vaultAddress);
     }
 
-    this.eventManager.emit('VaultLoadFailed', {
+    this.eventManager.emit('VaultFailed', {
       vaultAddress,
       error,
+      source,
       attempts: this.failedVaults.get(vaultAddress).attempts,
       log: {
         level: 'warn',
-        message: `Vault ${vaultAddress} failed: ${error}`
+        message: `Vault ${vaultAddress} failed (${source}): ${error}`
       }
     });
   }
@@ -692,6 +722,18 @@ class AutomationService {
   getBlacklistData() {
     const data = {};
     for (const [address, info] of this.blacklistedVaults.entries()) {
+      data[address] = info;
+    }
+    return data;
+  }
+
+  /**
+   * Get failed vaults data for API
+   * @returns {Object} Failed vaults data
+   */
+  getFailedVaultsData() {
+    const data = {};
+    for (const [address, info] of this.failedVaults.entries()) {
       data[address] = info;
     }
     return data;
@@ -785,7 +827,7 @@ class AutomationService {
       } catch (error) {
         console.error(`Failed to setup vault ${vaultAddress}:`, error.message);
         results.failed.push({ vaultAddress, error: error.message });
-        await this.trackFailedVault(vaultAddress, error.message);
+        await this.trackFailedVault(vaultAddress, error.message, 'initial_setup');
       }
     }
 
@@ -1046,7 +1088,7 @@ class AutomationService {
       // Determine if error is recoverable (cache/RPC failures) vs unrecoverable
       if (this.isRecoverableSwapError(error)) {
         // Recoverable: add to retry queue for re-setup
-        await this.trackFailedVault(vaultAddress, error.message);
+        await this.trackFailedVault(vaultAddress, error.message, 'swap_event');
         this.log(`Vault ${vaultAddress} added to retry queue: ${error.message}`);
       } else {
         // Unrecoverable: blacklist immediately

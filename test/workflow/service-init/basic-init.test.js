@@ -427,7 +427,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
     it('should track failed vault and emit event', async () => {
       const failedVaultAddress = '0x1234567890123456789012345678901234567890';
       let failedEvent = null;
-      service.eventManager.subscribe('VaultLoadFailed', (data) => {
+      service.eventManager.subscribe('VaultFailed', (data) => {
         failedEvent = data;
       });
 

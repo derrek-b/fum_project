@@ -22,6 +22,7 @@ export default class Tracker {
    * @param {string} config.dataDir - Base directory for vault data
    * @param {Object} config.eventManager - EventManager instance
    * @param {boolean} [config.debug=false] - Enable debug logging
+   * @param {string} [config.trackingFailuresFilePath='./data/trackingFailures.json'] - Path to tracking failures file
    */
   constructor(config) {
     if (!config.dataDir) {
@@ -34,8 +35,10 @@ export default class Tracker {
     this.dataDir = path.resolve(config.dataDir);
     this.eventManager = config.eventManager;
     this.debug = config.debug || false;
+    this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
 
     this.vaultMetadata = new Map();
+    this.trackingFailures = new Map();
   }
 
   /**
@@ -47,9 +50,10 @@ export default class Tracker {
 
     await this.ensureDirectoryExists(this.dataDir);
     await this.loadAllVaultMetadata();
+    await this.loadTrackingFailures();
     this.setupEventListeners();
 
-    this.log(`Tracker initialized with ${this.vaultMetadata.size} vaults`);
+    this.log(`Tracker initialized with ${this.vaultMetadata.size} vaults, ${this.trackingFailures.size} tracking failures`);
   }
 
   /**
@@ -137,6 +141,18 @@ export default class Tracker {
       await this.handleWrapUnwrap(data, 'unwrap');
     });
 
+    this.eventManager.subscribe('VaultBlacklisted', async (data) => {
+      await this.handleVaultBlacklisted(data);
+    });
+
+    this.eventManager.subscribe('VaultFailed', async (data) => {
+      await this.handleVaultRetryQueued(data);
+    });
+
+    this.eventManager.subscribe('VaultRecovered', async (data) => {
+      await this.handleVaultRetrySuccess(data);
+    });
+
     this.log('Event listeners set up for vault tracking');
   }
 
@@ -172,6 +188,12 @@ export default class Tracker {
 
       await this.getVaultDirectory(vaultAddress);
 
+      // Check for existing metadata (may exist from prior failures/blacklist/retry during initialization)
+      const existingMetadata = this.vaultMetadata.get(vaultAddress);
+      const firstSeen = existingMetadata?.metadata?.firstSeen || timestamp;
+      const priorBlacklistCount = existingMetadata?.aggregates?.blacklistCount || 0;
+      const priorRetryCount = existingMetadata?.aggregates?.retryCount || 0;
+
       const metadata = {
         vaultAddress,
         baseline: {
@@ -193,7 +215,9 @@ export default class Tracker {
           feeCollectionCount: 0,
           transactionCount: 0,
           wrapUnwrapCount: 0,
-          trackingErrorCount: 0
+          trackingErrorCount: 0,
+          blacklistCount: priorBlacklistCount,
+          retryCount: priorRetryCount
         },
         lastSnapshot: {
           value: totalVaultValue,
@@ -201,16 +225,19 @@ export default class Tracker {
         },
         metadata: {
           strategyId: data.strategyId || null,
-          firstSeen: timestamp,
+          firstSeen,
           lastUpdated: timestamp
         }
       };
 
       await this.saveMetadata(vaultAddress, metadata);
       this.vaultMetadata.set(vaultAddress, metadata);
+
+      // Clear any prior tracking failure for this vault
+      await this.clearTrackingFailure(vaultAddress);
     } catch (error) {
-      // Baseline capture is special - we can't log to transactions since metadata doesn't exist yet
-      console.error(`[Tracker] Failed to capture baseline for ${vaultAddress}: ${error.message}`);
+      console.error(`[Tracker] 🔴 Failed to capture baseline for ${vaultAddress}: ${error.message}`);
+      await this.trackFailure(vaultAddress, 'VaultBaselineCaptured', error.message);
     }
   }
 
@@ -519,6 +546,193 @@ export default class Tracker {
         timestamp,
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Handle vault blacklisted event
+   * Creates metadata if vault was never successfully set up (baseline: null)
+   * @private
+   */
+  async handleVaultBlacklisted(data) {
+    const { vaultAddress, reason } = data;
+    const timestamp = data.timestamp || Date.now();
+
+    try {
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+      // Create metadata if it doesn't exist (vault was never successfully set up)
+      if (!this.vaultMetadata.has(normalizedAddress)) {
+        this.log(`Creating metadata for blacklisted vault ${normalizedAddress} (never set up)`);
+
+        await this.getVaultDirectory(normalizedAddress);
+
+        const metadata = {
+          vaultAddress: normalizedAddress,
+          baseline: null,
+          aggregates: {
+            cumulativeFeesUSD: 0,
+            cumulativeFeesReinvestedUSD: 0,
+            cumulativeFeesWithdrawnUSD: 0,
+            cumulativeGasETH: 0,
+            cumulativeGasUSD: 0,
+            swapCount: 0,
+            rebalanceCount: 0,
+            feeCollectionCount: 0,
+            transactionCount: 0,
+            wrapUnwrapCount: 0,
+            trackingErrorCount: 0,
+            blacklistCount: 1
+          },
+          lastSnapshot: null,
+          metadata: {
+            strategyId: null,
+            firstSeen: timestamp,
+            lastUpdated: timestamp
+          }
+        };
+
+        await this.saveMetadata(normalizedAddress, metadata);
+        this.vaultMetadata.set(normalizedAddress, metadata);
+      } else {
+        // Vault exists - increment blacklist count
+        const metadata = this.vaultMetadata.get(normalizedAddress);
+        metadata.aggregates.blacklistCount = (metadata.aggregates.blacklistCount || 0) + 1;
+        metadata.metadata.lastUpdated = timestamp;
+        await this.saveMetadata(normalizedAddress, metadata);
+      }
+
+      // Append transaction record
+      await this.appendTransaction(normalizedAddress, {
+        type: 'VaultBlacklisted',
+        vaultAddress: normalizedAddress,
+        reason,
+        timestamp
+      });
+
+      this.log(`Tracked blacklist for vault ${normalizedAddress}: ${reason}`);
+    } catch (error) {
+      console.error(`[Tracker] 🔴 Failed to track blacklist for ${vaultAddress}: ${error.message}`);
+      // Attempt to log the error - may also fail if directory creation was the issue
+      try {
+        await this.logTrackingError(vaultAddress, {
+          eventType: 'VaultBlacklisted',
+          timestamp,
+          error: error.message
+        });
+      } catch (logError) {
+        // Directory creation itself failed - nothing more we can do
+        console.error(`[Tracker] 🔴 Unable to log tracking error: ${logError.message}`);
+      }
+    }
+  }
+
+  /**
+   * Handle vault entering retry queue
+   * @private
+   */
+  async handleVaultRetryQueued(data) {
+    const { vaultAddress, error, attempts, source } = data;
+    const timestamp = data.timestamp || Date.now();
+
+    try {
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+      // Create metadata if vault never existed
+      if (!this.vaultMetadata.has(normalizedAddress)) {
+        this.log(`Creating metadata for retry-queued vault ${normalizedAddress} (never set up)`);
+
+        await this.getVaultDirectory(normalizedAddress);
+
+        const metadata = {
+          vaultAddress: normalizedAddress,
+          baseline: null,
+          aggregates: {
+            cumulativeFeesUSD: 0,
+            cumulativeFeesReinvestedUSD: 0,
+            cumulativeFeesWithdrawnUSD: 0,
+            cumulativeGasETH: 0,
+            cumulativeGasUSD: 0,
+            swapCount: 0,
+            rebalanceCount: 0,
+            feeCollectionCount: 0,
+            transactionCount: 0,
+            wrapUnwrapCount: 0,
+            trackingErrorCount: 0,
+            blacklistCount: 0,
+            retryCount: 1
+          },
+          lastSnapshot: null,
+          metadata: {
+            strategyId: null,
+            firstSeen: timestamp,
+            lastUpdated: timestamp
+          }
+        };
+
+        await this.saveMetadata(normalizedAddress, metadata);
+        this.vaultMetadata.set(normalizedAddress, metadata);
+      } else {
+        // Vault exists - increment retry count
+        const metadata = this.vaultMetadata.get(normalizedAddress);
+        metadata.aggregates.retryCount = (metadata.aggregates.retryCount || 0) + 1;
+        metadata.metadata.lastUpdated = timestamp;
+        await this.saveMetadata(normalizedAddress, metadata);
+      }
+
+      // Append transaction record
+      await this.appendTransaction(normalizedAddress, {
+        type: 'VaultRetryQueued',
+        vaultAddress: normalizedAddress,
+        error,
+        source,
+        attempts,
+        timestamp
+      });
+
+      this.log(`Tracked retry queue for vault ${normalizedAddress} (${source}): ${error} (attempt ${attempts})`);
+    } catch (err) {
+      console.error(`[Tracker] 🔴 Failed to track retry for ${vaultAddress}: ${err.message}`);
+      try {
+        await this.logTrackingError(vaultAddress, {
+          eventType: 'VaultFailed',
+          timestamp,
+          error: err.message
+        });
+      } catch (logError) {
+        console.error(`[Tracker] 🔴 Unable to log tracking error: ${logError.message}`);
+      }
+    }
+  }
+
+  /**
+   * Handle vault successfully recovered from retry queue
+   * @private
+   */
+  async handleVaultRetrySuccess(data) {
+    const { vaultAddress } = data;
+    const timestamp = data.timestamp || Date.now();
+
+    try {
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+      // Only log if we have metadata (vault was tracked)
+      if (!this.vaultMetadata.has(normalizedAddress)) return;
+
+      const metadata = this.vaultMetadata.get(normalizedAddress);
+      metadata.metadata.lastUpdated = timestamp;
+      await this.saveMetadata(normalizedAddress, metadata);
+
+      // Append transaction record
+      await this.appendTransaction(normalizedAddress, {
+        type: 'VaultRetrySuccess',
+        vaultAddress: normalizedAddress,
+        timestamp
+      });
+
+      this.log(`Tracked retry success for vault ${normalizedAddress}`);
+    } catch (err) {
+      console.error(`[Tracker] 🔴 Failed to track retry success for ${vaultAddress}: ${err.message}`);
     }
   }
 
@@ -902,6 +1116,121 @@ export default class Tracker {
     }
   }
 
+  //#region Tracking Failures
+
+  /**
+   * Load tracking failures from disk
+   * @private
+   */
+  async loadTrackingFailures() {
+    const dir = path.dirname(this.trackingFailuresFilePath);
+
+    try {
+      await fs.access(dir);
+    } catch {
+      // Directory doesn't exist - will be created when first failure is tracked
+      this.log('Tracking failures directory does not exist yet');
+      return;
+    }
+
+    try {
+      const data = await fs.readFile(this.trackingFailuresFilePath, 'utf-8');
+      const failures = JSON.parse(data);
+
+      for (const [address, info] of Object.entries(failures)) {
+        this.trackingFailures.set(address, info);
+      }
+
+      this.log(`Loaded ${this.trackingFailures.size} tracking failure(s)`);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        this.log('No tracking failures file found');
+        return;
+      }
+      console.error(`[Tracker] Failed to load tracking failures: ${error.message}`);
+    }
+  }
+
+  /**
+   * Save tracking failures to disk
+   * @private
+   */
+  async saveTrackingFailures() {
+    const dir = path.dirname(this.trackingFailuresFilePath);
+
+    try {
+      await fs.access(dir);
+    } catch {
+      await fs.mkdir(dir, { recursive: true });
+    }
+
+    const data = JSON.stringify(this.getTrackingFailuresData(), null, 2);
+    await fs.writeFile(this.trackingFailuresFilePath, data, 'utf-8');
+    this.log('Tracking failures saved');
+  }
+
+  /**
+   * Track a failure for a vault
+   * @param {string} vaultAddress - Vault address
+   * @param {string} eventType - Type of event that failed
+   * @param {string} error - Error message
+   */
+  async trackFailure(vaultAddress, eventType, error) {
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+    const now = Date.now();
+    const existing = this.trackingFailures.get(normalizedAddress);
+
+    this.trackingFailures.set(normalizedAddress, {
+      vaultAddress: normalizedAddress,
+      failedAt: existing?.failedAt || now,
+      lastAttempt: now,
+      attempts: (existing?.attempts || 0) + 1,
+      error,
+      eventType
+    });
+
+    await this.saveTrackingFailures();
+
+    this.eventManager.emit('TrackerFailure', {
+      vaultAddress: normalizedAddress,
+      eventType,
+      error,
+      attempts: this.trackingFailures.get(normalizedAddress).attempts,
+      log: { level: 'error', message: `Tracking failed for ${normalizedAddress}: ${error}` }
+    });
+  }
+
+  /**
+   * Clear a tracking failure for a vault
+   * @param {string} vaultAddress - Vault address
+   */
+  async clearTrackingFailure(vaultAddress) {
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+    if (this.trackingFailures.delete(normalizedAddress)) {
+      await this.saveTrackingFailures();
+
+      this.eventManager.emit('TrackerFailureCleared', {
+        vaultAddress: normalizedAddress,
+        log: { level: 'info', message: `Tracking failure cleared for ${normalizedAddress}` }
+      });
+    }
+  }
+
+  /**
+   * Get tracking failures data for API
+   * @returns {Object} Tracking failures data
+   */
+  getTrackingFailuresData() {
+    const data = {};
+    for (const [address, info] of this.trackingFailures.entries()) {
+      data[address] = info;
+    }
+    return data;
+  }
+
+  //#endregion
+
   /**
    * Log message if debug enabled
    * @private
@@ -921,6 +1250,13 @@ export default class Tracker {
 
     for (const [vaultAddress, metadata] of this.vaultMetadata.entries()) {
       await this.saveMetadata(vaultAddress, metadata);
+    }
+
+    // Save tracking failures
+    try {
+      await this.saveTrackingFailures();
+    } catch (error) {
+      console.error(`[Tracker] Failed to save tracking failures during shutdown: ${error.message}`);
     }
 
     this.log('Tracker shutdown complete');
