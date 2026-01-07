@@ -205,6 +205,69 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getSwapEventFilter', () => {
+    describe('Success Cases', () => {
+      it('should return filter object with address and topics', () => {
+        const poolAddress = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8'; // USDC/ETH 0.3%
+        const result = adapter.getSwapEventFilter(poolAddress);
+
+        expect(result).toHaveProperty('address');
+        expect(result).toHaveProperty('topics');
+        expect(result.address).toBe(poolAddress);
+        expect(Array.isArray(result.topics)).toBe(true);
+        expect(result.topics.length).toBe(1);
+      });
+
+      it('should return correct swap event topic hash', () => {
+        const poolAddress = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8';
+        const result = adapter.getSwapEventFilter(poolAddress);
+
+        const expectedTopic = ethers.utils.id('Swap(address,address,int256,int256,uint160,uint128,int24)');
+        expect(result.topics[0]).toBe(expectedTopic);
+      });
+
+      it('should accept lowercase address after validation', () => {
+        const lowercaseAddress = '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8';
+        const result = adapter.getSwapEventFilter(lowercaseAddress);
+
+        // We return address as-is after validation
+        expect(result.address).toBe(lowercaseAddress);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw error for null poolId', () => {
+        expect(() => adapter.getSwapEventFilter(null))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for undefined poolId', () => {
+        expect(() => adapter.getSwapEventFilter(undefined))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for empty string poolId', () => {
+        expect(() => adapter.getSwapEventFilter(''))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for non-string poolId', () => {
+        expect(() => adapter.getSwapEventFilter(123))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for invalid address format', () => {
+        expect(() => adapter.getSwapEventFilter('not-an-address'))
+          .toThrow('Invalid poolId address: not-an-address');
+      });
+
+      it('should throw error for address with wrong length', () => {
+        expect(() => adapter.getSwapEventFilter('0x1234'))
+          .toThrow('Invalid poolId address: 0x1234');
+      });
+    });
+  });
+
   describe('_validateSlippageTolerance', () => {
     describe('Success Cases', () => {
       it('should accept boundary minimum (0)', () => {

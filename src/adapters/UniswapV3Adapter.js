@@ -152,6 +152,35 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get the event filter for monitoring swap events
+   *
+   * For Uniswap V3, the poolId IS the pool contract address, so the filter
+   * listens directly to that contract for Swap events.
+   *
+   * @param {string} poolId - Pool contract address
+   * @returns {Object} Filter object with address and topics
+   * @throws {Error} If poolId is invalid
+   */
+  getSwapEventFilter(poolId) {
+    // Validate poolId
+    if (!poolId || typeof poolId !== 'string') {
+      throw new Error('poolId parameter is required and must be a string');
+    }
+
+    // Validate it's a valid address format
+    try {
+      ethers.utils.getAddress(poolId);
+    } catch (error) {
+      throw new Error(`Invalid poolId address: ${poolId}`);
+    }
+
+    return {
+      address: poolId,
+      topics: [ethers.utils.id(this.getSwapEventSignature())]
+    };
+  }
+
+  /**
    * Validate and normalize slippage tolerance
    * @param {number} slippageTolerance - Slippage tolerance percentage (0-100)
    * @returns {number} Validated slippage tolerance

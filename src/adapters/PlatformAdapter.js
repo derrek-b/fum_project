@@ -11,26 +11,27 @@
  * platform-specific helpers. Update as we build out the automation service.
  *
  * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
- * ---------------------------------------------------------------------------------
- * | Method                       | Used By                            | Status    |
- * |------------------------------|------------------------------------|-----------|
- * | getPositionsForVDS           | VDS.fetchPositions                 | CONFIRMED |
- * | getPoolData                  | VDS.fetchAssetValues               | CONFIRMED |
- * | calculateTokenAmounts        | VDS.fetchAssetValues               | CONFIRMED |
- * | getApprovalTarget(opType)    | Strategy.ensureApprovals           | CONFIRMED |
- * | selectBestPool               | Strategy.initializeVaultStrategy   | CONFIRMED |
- * | getPoolCurrent               | Strategy.initializeVaultStrategy   | CONFIRMED |
- * | parseClosureReceipt          | Strategy.closePositions            | CONFIRMED |
- * | generateRemoveLiquidityData  | Strategy.closePositions            | CONFIRMED |
- * | getAddLiquidityAmounts       | Strategy.addToPosition             | CONFIRMED |
- * | generateAddLiquidityData     | Strategy.addToPosition             | CONFIRMED |
- * | parseSwapReceipt             | Strategy.addToPosition             | CONFIRMED |
- * | parseIncreaseLiquidityReceipt| Strategy.addToPosition             | CONFIRMED |
- * | getBestSwapQuote             | Strategy.addToPosition             | CONFIRMED |
- * | extractPositionBounds        | Strategy.addToPosition             | CONFIRMED |
- * | getPositionRange             | Strategy.createNewPosition         | CONFIRMED |
- * | evaluatePositionRange        | Strategy.analyzePositions          | CONFIRMED |
- * | batchSwapTransactions        | Strategy.prepareTokens             | CONFIRMED |
+ * ----------------------------------------------------------------------------------
+ * | Method                       | Used By                             | Status    |
+ * |------------------------------|-------------------------------------|-----------|
+ * | calculateTokenAmounts        | VDS.fetchAssetValues                | CONFIRMED |
+ * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
+ * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |
+ * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
+ * | selectBestPool               | Strategy.initializeVaultStrategy    | CONFIRMED |
+ * | getPoolCurrent               | Strategy.initializeVaultStrategy    | CONFIRMED |
+ * | parseClosureReceipt          | Strategy.closePositions             | CONFIRMED |
+ * | generateRemoveLiquidityData  | Strategy.closePositions             | CONFIRMED |
+ * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
+ * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.addToPosition              | CONFIRMED |
+ * | parseIncreaseLiquidityReceipt| Strategy.addToPosition              | CONFIRMED |
+ * | getBestSwapQuote             | Strategy.addToPosition              | CONFIRMED |
+ * | extractPositionBounds        | Strategy.addToPosition              | CONFIRMED |
+ * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
+ * | evaluatePositionRange        | Strategy.analyzePositions           | CONFIRMED |
+ * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
+ * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -151,6 +152,24 @@ export default class PlatformAdapter {
    */
   getSwapEventSignature() {
     throw new Error("getSwapEventSignature must be implemented by subclasses");
+  }
+
+  /**
+   * Get the event filter for monitoring swap events on this platform
+   *
+   * Returns a filter object compatible with ethers provider.on() for listening
+   * to swap events. The filter structure varies by platform:
+   * - V3: Filter by individual pool contract address
+   * - V4: Filter by PoolManager address + PoolId topic
+   *
+   * @param {string} poolId - Pool identifier (address for V3, PoolId for V4)
+   * @returns {Object} Filter object with address and topics array
+   *   - address: Contract address to monitor
+   *   - topics: Array of topic filters for the event
+   * @throws {Error} If poolId is invalid
+   */
+  getSwapEventFilter(poolId) {
+    throw new Error("getSwapEventFilter must be implemented by subclasses");
   }
 
   /**

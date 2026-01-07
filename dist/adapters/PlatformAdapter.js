@@ -154,6 +154,24 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Get the event filter for monitoring swap events on this platform
+   *
+   * Returns a filter object compatible with ethers provider.on() for listening
+   * to swap events. The filter structure varies by platform:
+   * - V3: Filter by individual pool contract address
+   * - V4: Filter by PoolManager address + PoolId topic
+   *
+   * @param {string} poolId - Pool identifier (address for V3, PoolId for V4)
+   * @returns {Object} Filter object with address and topics array
+   *   - address: Contract address to monitor
+   *   - topics: Array of topic filters for the event
+   * @throws {Error} If poolId is invalid
+   */
+  getSwapEventFilter(poolId) {
+    throw new Error("getSwapEventFilter must be implemented by subclasses");
+  }
+
+  /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID
