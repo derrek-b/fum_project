@@ -9,15 +9,15 @@
  *
  * CONFIRMED INTERFACE METHODS (required for all strategies):
  * -----------------------------------------------------------------------------
- * | Method                  | Called By                    | Status    |
- * |-------------------------|------------------------------|-----------|
- * | initializeVault         | AutomationService.setupVault | CONFIRMED |
+ * | Method                  | Called By                         | Status    |
+ * |-------------------------|-----------------------------------|-----------|
+ * | initializeVault         | AutomationService.setupVault      | CONFIRMED |
+ * | handleSwapEvent         | AutomationService.handleSwapEvent | CONFIRMED |
  *
  * PENDING REVIEW (may become required):
  * -----------------------------------------------------------------------------
  * | Method                       | Notes                               |
  * |------------------------------|-------------------------------------|
- * | handleSwapEvent              | Strategy-specific swap handling     |
  * | needsRecovery                | Recovery check logic                |
  * | attemptRecovery              | Recovery execution                  |
  * | cleanup                      | Vault cleanup on revocation         |

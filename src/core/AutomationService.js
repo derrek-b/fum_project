@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
-import { retryRpcCall } from '../utils/RetryHelper.js';
+import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
 
 import EventManager from './EventManager.js';
 import VaultDataService from './VaultDataService.js';
@@ -166,18 +166,32 @@ class AutomationService {
       // Phase 2: Load blacklist from disk
       await this.loadBlacklist();
 
-      // Phase 3: Discover and load authorized vaults
-      await this.loadAuthorizedVaults();
-
-      // Phase 4: Initialize tracker
+      // Phase 3: Initialize tracker (before vault loading so it can track events)
       await this.tracker.initialize();
 
-      // Phase 5: Start SSE broadcaster
+      // Phase 4: Start SSE broadcaster (before vault loading so it can broadcast events)
       await this.sseBroadcaster.start();
 
-      // Phase 6: Subscribe to global blockchain events
-      this.subscribeToAuthorizationEvents();
-      this.subscribeToStrategyParameterEvents();
+      // Phase 5: Discover and load authorized vaults (tracker/broadcaster ready)
+      await this.loadAuthorizedVaults();
+
+      // Phase 6: Subscribe to global blockchain events (after vault loading to avoid race conditions)
+      // If we subscribed before loading, a user could disable a vault mid-setup causing races
+      this.eventManager.subscribeToAuthorizationEvents(
+        this.provider,
+        this.automationServiceAddress,
+        this.chainId
+      );
+
+      const strategyAddresses = [];
+      if (this.contracts.bobStrategy) {
+        strategyAddresses.push(this.contracts.bobStrategy.address);
+      }
+      this.eventManager.subscribeToStrategyParameterEvents(
+        strategyAddresses,
+        this.provider,
+        this.chainId
+      );
 
       // Phase 7: Start failed vault retry timer
       this.startFailedVaultRetryTimer();
@@ -305,6 +319,11 @@ class AutomationService {
       this.vaultDataService.setAdapters(this.adapters);
       this.vaultDataService.setPoolData(this.poolData);
       this.vaultDataService.setTokens(this.tokens);
+
+      // 5b. Pass dependencies to EventManager
+      this.eventManager.setPoolData(this.poolData);
+      this.eventManager.setAdapters(this.adapters);
+      this.eventManager.setVaultDataService(this.vaultDataService);
 
       // 6. Set up VaultDataService logging
       this.setupVaultDataServiceLogging();
@@ -474,138 +493,38 @@ class AutomationService {
     this.eventManager.subscribe('PoolDataFetched', (data) => {
       Object.assign(this.poolData, data.poolData);
     });
-  }
 
-  /**
-   * Subscribe to authorization events (ExecutorChanged)
-   * @private
-   */
-  subscribeToAuthorizationEvents() {
-    this.log('Subscribing to authorization events...');
-
-    const filter = {
-      topics: [ethers.utils.id('ExecutorChanged(address,bool)')]
-    };
-
-    const handleExecutorChanged = async (log) => {
-      try {
-        const executorAddress = '0x' + log.topics[1].slice(26);
-        const isAuthorized = log.topics[2].endsWith('1');
-        const vaultAddress = log.address;
-
-        // Only process events for our automation service
-        if (executorAddress.toLowerCase() !== this.automationServiceAddress.toLowerCase()) {
-          return;
-        }
-
-        if (isAuthorized) {
-          this.eventManager.emit('VaultAuthGranted', {
-            vaultAddress,
-            executorAddress,
-            log: {
-              level: 'info',
-              message: `New vault authorization detected: ${vaultAddress}`
-            }
-          });
-        } else {
-          this.eventManager.emit('VaultAuthRevoked', {
-            vaultAddress,
-            executorAddress,
-            log: {
-              level: 'warn',
-              message: `Vault authorization revoked: ${vaultAddress}`
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error handling executor change event:', error);
-      }
-    };
-
-    this.eventManager.registerFilterListener({
-      provider: this.provider,
-      filter,
-      handler: handleExecutorChanged,
-      address: 'global',
-      eventType: 'authorization',
-      chainId: this.chainId,
-      additionalId: 'executor-changed'
+    // Handle swap events from monitored pools
+    this.eventManager.subscribe('SwapEventDetected', async (data) => {
+      await this.handleSwapEvent(data);
     });
 
-    this.log('Subscribed to authorization events');
-  }
+    // Handle config update failures from EventManager
+    this.eventManager.subscribe('ConfigUpdateFailed', async (data) => {
+      this.log(`Config update failed for vault ${data.vaultAddress}: ${data.configType}`);
+      await this.trackFailedVault(data.vaultAddress, data.error);
+    });
 
-  /**
-   * Subscribe to strategy parameter update events
-   * @private
-   */
-  subscribeToStrategyParameterEvents() {
-    this.log('Subscribing to strategy parameter events...');
+    // Handle strategy parameter update failures from EventManager
+    this.eventManager.subscribe('StrategyParameterUpdateFailed', async (data) => {
+      this.log(`Strategy parameter update failed for vault ${data.vaultAddress}`);
+      await this.trackFailedVault(data.vaultAddress, data.error);
+    });
 
-    // Get strategy contract addresses
-    const strategyAddresses = [];
-    if (this.contracts.bobStrategy) {
-      strategyAddresses.push(this.contracts.bobStrategy.address);
-    }
-    // Future: Add other strategy addresses
+    // Handle new vault authorization - setup the vault for monitoring
+    this.eventManager.subscribe('VaultAuthGranted', async (data) => {
+      this.log(`New vault authorized: ${data.vaultAddress}`);
+      // TODO: Trigger setupVault() for the newly authorized vault
+      // await this.setupVault(data.vaultAddress);
+    });
 
-    if (strategyAddresses.length === 0) {
-      this.log('No strategy contracts loaded, skipping parameter event subscription');
-      return;
-    }
-
-    const handleParameterUpdate = async (log) => {
-      try {
-        const iface = new ethers.utils.Interface([
-          'event ParameterUpdated(address indexed vault, string paramName)'
-        ]);
-        const parsed = iface.parseLog(log);
-        const vaultAddress = parsed.args[0];
-        const paramName = parsed.args[1];
-
-        // Skip if vault is not being monitored
-        if (!this.vaultDataService.hasVault(vaultAddress)) {
-          return;
-        }
-
-        this.log(`Strategy parameter updated for vault ${vaultAddress}: ${paramName}`);
-
-        // Refresh vault data
-        await this.vaultDataService.getVault(vaultAddress, true);
-
-        this.eventManager.emit('StrategyParameterUpdated', {
-          vaultAddress,
-          paramName,
-          log: {
-            level: 'info',
-            message: `Strategy parameters updated for vault ${vaultAddress}: ${paramName}`
-          }
-        });
-      } catch (error) {
-        console.error('Error handling parameter update event:', error);
-      }
-    };
-
-    // Create separate listener for each strategy address
-    for (let i = 0; i < strategyAddresses.length; i++) {
-      const strategyAddress = strategyAddresses[i];
-      const filter = {
-        address: strategyAddress,
-        topics: [ethers.utils.id('ParameterUpdated(address,string)')]
-      };
-
-      this.eventManager.registerFilterListener({
-        provider: this.provider,
-        filter,
-        handler: handleParameterUpdate,
-        address: strategyAddress,
-        eventType: 'parameter-update',
-        chainId: this.chainId,
-        additionalId: `strategy-${i}`
-      });
-    }
-
-    this.log(`Subscribed to parameter events for ${strategyAddresses.length} strategy contract(s)`);
+    // Handle vault deauthorization - cleanup monitoring
+    this.eventManager.subscribe('VaultAuthRevoked', async (data) => {
+      this.log(`Vault deauthorized: ${data.vaultAddress}`);
+      // TODO: Remove vault from monitoring and cleanup listeners
+      // this.eventManager.removeAllVaultListeners(data.vaultAddress);
+      // this.vaultDataService.removeVault(data.vaultAddress);
+    });
   }
 
   //#endregion
@@ -652,7 +571,7 @@ class AutomationService {
         this.log(`Vault ${vaultAddress} retry successful`);
       } catch (error) {
         // trackFailedVault updates attempt count and lastError
-        this.trackFailedVault(vaultAddress, error.message);
+        await this.trackFailedVault(vaultAddress, error.message);
       }
     }
   }
@@ -662,7 +581,7 @@ class AutomationService {
    * @param {string} vaultAddress - Vault address
    * @param {string} error - Error message
    */
-  trackFailedVault(vaultAddress, error) {
+  async trackFailedVault(vaultAddress, error) {
     const existing = this.failedVaults.get(vaultAddress);
 
     if (existing) {
@@ -677,6 +596,9 @@ class AutomationService {
         lastError: error,
         attempts: 1
       });
+
+      // Only remove listeners on first failure (not on subsequent retry failures)
+      await this.eventManager.removeAllVaultListeners(vaultAddress);
     }
 
     this.eventManager.emit('VaultLoadFailed', {
@@ -707,6 +629,9 @@ class AutomationService {
       blacklistedAt: Date.now(),
       reason
     });
+
+    // Remove all listeners for this vault (permanent exclusion)
+    await this.eventManager.removeAllVaultListeners(normalizedAddress);
 
     this.eventManager.emit('VaultBlacklisted', {
       vaultAddress: normalizedAddress,
@@ -860,7 +785,7 @@ class AutomationService {
       } catch (error) {
         console.error(`Failed to setup vault ${vaultAddress}:`, error.message);
         results.failed.push({ vaultAddress, error: error.message });
-        this.trackFailedVault(vaultAddress, error.message);
+        await this.trackFailedVault(vaultAddress, error.message);
       }
     }
 
@@ -948,8 +873,10 @@ class AutomationService {
         throw new Error('Strategy initialization failed');
       }
 
-      // TODO: Step 4 - Monitoring setup (future)
+      // Step 4: Start monitoring (swap events, config changes)
       step = 'monitoring_setup';
+      this.log(`Step 4: Starting monitoring for ${normalizedAddress}`);
+      await this.startMonitoringVault(vault);
 
       this.eventManager.emit('VaultSetupComplete', {
         vaultAddress: normalizedAddress,
@@ -958,10 +885,11 @@ class AutomationService {
         tokenCount: Object.keys(vault.tokens).length,
         baselineCaptured,
         strategyInitialized: true,
+        monitoringStarted: true,
         timestamp: Date.now(),
         log: {
           level: 'info',
-          message: `Vault ${normalizedAddress} setup complete (steps 1-3)`
+          message: `Vault ${normalizedAddress} setup complete (steps 1-4)`
         }
       });
 
@@ -970,7 +898,8 @@ class AutomationService {
         vault,
         vaultLoaded: true,
         baselineCaptured,
-        strategyInitialized: true
+        strategyInitialized: true,
+        monitoringStarted: true
       };
 
     } catch (error) {
@@ -987,6 +916,209 @@ class AutomationService {
 
       throw error;
     }
+  }
+
+  //#endregion
+
+  //#region Monitoring Setup
+
+  /**
+   * Start monitoring for a vault (swap events + config events)
+   * @param {Object} vault - Vault object
+   * @private
+   */
+  async startMonitoringVault(vault) {
+    this.log(`Starting monitoring for vault ${vault.address}`);
+
+    // Validate vault has strategy
+    if (!vault.strategy?.strategyId) {
+      throw new Error(`Vault ${vault.address} missing strategy data`);
+    }
+
+    const strategy = this.strategies.get(vault.strategy.strategyId);
+    if (!strategy) {
+      throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+    }
+
+    // Set up swap event monitoring for all position pools (delegated to EventManager)
+    await retryWithBackoff(
+      () => this.eventManager.subscribeToSwapEvents(vault, this.provider, this.chainId),
+      {
+        maxRetries: 2,
+        baseDelay: 1000,
+        exponential: true,
+        context: `Setting up swap monitoring for vault ${vault.address}`,
+        logger: console
+      }
+    );
+
+    // Set up vault config change monitoring (delegated to EventManager)
+    await retryWithBackoff(
+      () => this.eventManager.subscribeToVaultConfigEvents(vault, this.provider, this.chainId),
+      {
+        maxRetries: 2,
+        baseDelay: 1000,
+        exponential: true,
+        context: `Setting up config monitoring for vault ${vault.address}`,
+        logger: console
+      }
+    );
+
+    // Optional: strategy-specific additional monitoring
+    if (strategy.setupAdditionalMonitoring) {
+      await retryWithBackoff(
+        () => strategy.setupAdditionalMonitoring(vault),
+        {
+          maxRetries: 2,
+          baseDelay: 1000,
+          exponential: true,
+          context: `Setting up additional monitoring for vault ${vault.address}`,
+          logger: console
+        }
+      );
+    }
+
+    this.eventManager.emit('MonitoringStarted', {
+      vaultAddress: vault.address,
+      strategyId: vault.strategy.strategyId,
+      positionCount: Object.keys(vault.positions).length,
+      chainId: this.chainId,
+      timestamp: Date.now(),
+      log: {
+        level: 'info',
+        message: `Monitoring started for vault ${vault.address}`
+      }
+    });
+  }
+
+  //#endregion
+
+  //#region Swap Event Handling
+
+  /**
+   * Handle swap events from monitored pools
+   * @param {Object} data - Swap event data
+   * @param {string} data.vaultAddress - Vault address
+   * @param {string} data.poolAddress - Pool where swap occurred
+   * @param {string} data.platform - Platform identifier
+   * @param {Object} data.log - Raw log from blockchain
+   */
+  async handleSwapEvent(data) {
+    const { vaultAddress, poolAddress, platform, log } = data;
+
+    // Skip if shutting down
+    if (this.isShuttingDown) {
+      this.log(`Swap event for vault ${vaultAddress} ignored - service is shutting down`);
+      return;
+    }
+
+    // Skip if vault is in retry queue (will be re-setup on next retry cycle)
+    if (this.failedVaults.has(vaultAddress)) {
+      this.log(`Swap event for vault ${vaultAddress} ignored - vault in retry queue`);
+      return;
+    }
+
+    // Acquire vault lock
+    if (!this.lockVault(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} locked, skipping swap event`);
+      return;
+    }
+
+    try {
+      // Get vault data
+      const vault = await this.vaultDataService.getVault(vaultAddress);
+      if (!vault) {
+        throw new Error(`Vault ${vaultAddress} not found in VaultDataService`);
+      }
+
+      // Get strategy
+      const strategy = this.strategies.get(vault.strategy.strategyId);
+      if (!strategy) {
+        throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+      }
+
+      // Delegate to strategy
+      await strategy.handleSwapEvent(vault, poolAddress, platform, log);
+
+    } catch (error) {
+      console.error(`Error processing swap event for vault ${vaultAddress}:`, error);
+
+      // Determine if error is recoverable (cache/RPC failures) vs unrecoverable
+      if (this.isRecoverableSwapError(error)) {
+        // Recoverable: add to retry queue for re-setup
+        await this.trackFailedVault(vaultAddress, error.message);
+        this.log(`Vault ${vaultAddress} added to retry queue: ${error.message}`);
+      } else {
+        // Unrecoverable: blacklist immediately
+        await this.blacklistVault(vaultAddress, error.message);
+        this.log(`Vault ${vaultAddress} blacklisted due to unrecoverable error: ${error.message}`);
+      }
+
+      this.eventManager.emit('SwapEventFailed', {
+        vaultAddress,
+        poolAddress,
+        error: error.message,
+        recoverable: this.isRecoverableSwapError(error),
+        timestamp: Date.now(),
+        log: {
+          level: 'error',
+          message: `Swap event processing failed for vault ${vaultAddress}: ${error.message}`
+        }
+      });
+    } finally {
+      this.unlockVault(vaultAddress);
+    }
+  }
+
+  /**
+   * Check if a swap event error is recoverable via retry
+   * @param {Error} error - The error that occurred
+   * @returns {boolean} True if vault should be added to retry queue
+   */
+  isRecoverableSwapError(error) {
+    const message = error.message || '';
+
+    // Unrecoverable errors - should blacklist, NOT retry
+    // Using regex to handle variable content (addresses, IDs) in error messages
+    const unrecoverablePatterns = [
+      /no position found for pool/i,     // Missing position = data inconsistency
+      /unsupported platform/i,           // Platform not implemented
+      /strategy.*not found/i,            // Missing strategy (e.g., "Strategy baby-steps not found")
+      /vault.*not found/i,               // Vault doesn't exist (e.g., "Vault 0x... not found")
+      /not authorized/i,                 // Permission issue
+    ];
+
+    for (const pattern of unrecoverablePatterns) {
+      if (pattern.test(message)) {
+        return false;
+      }
+    }
+
+    // Default: assume recoverable (RPC failures, cache refresh failures, etc.)
+    return true;
+  }
+
+  /**
+   * Attempt to acquire lock on a vault
+   * @param {string} vaultAddress - Vault address to lock
+   * @returns {boolean} True if lock acquired, false if already locked
+   */
+  lockVault(vaultAddress) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+    if (this.vaultLocks[normalized]) {
+      return false;
+    }
+    this.vaultLocks[normalized] = Date.now();
+    return true;
+  }
+
+  /**
+   * Release lock on a vault
+   * @param {string} vaultAddress - Vault address to unlock
+   */
+  unlockVault(vaultAddress) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+    delete this.vaultLocks[normalized];
   }
 
   //#endregion

@@ -162,7 +162,7 @@ describe('EventManager', () => {
   describe('generateListenerKey', () => {
     it('should generate consistent key format', () => {
       const key = eventManager.generateListenerKey({
-        address: '0xAbC123',
+        id: '0xAbC123',
         eventType: 'swap',
         chainId: 1337
       });
@@ -172,7 +172,7 @@ describe('EventManager', () => {
 
     it('should include additionalId when provided', () => {
       const key = eventManager.generateListenerKey({
-        address: '0xAbC123',
+        id: '0xAbC123',
         eventType: 'swap',
         chainId: 1337,
         additionalId: 'extra'
@@ -181,9 +181,9 @@ describe('EventManager', () => {
       expect(key).toBe('0xabc123-swap-1337-extra');
     });
 
-    it('should lowercase the address', () => {
+    it('should lowercase the id', () => {
       const key = eventManager.generateListenerKey({
-        address: '0xABCDEF',
+        id: '0xABCDEF',
         eventType: 'test',
         chainId: 1
       });

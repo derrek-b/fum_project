@@ -9,7 +9,7 @@ import fsSync from 'fs';
 import path from 'path';
 import { ethers } from 'ethers';
 import readline from 'readline';
-import { fetchTokenPrices, CACHE_DURATIONS, getTokenBySymbol } from 'fum_library';
+import { fetchTokenPrices, CACHE_DURATIONS, getTokenBySymbol, AdapterFactory } from 'fum_library';
 
 /**
  * Tracker class for vault performance monitoring
@@ -674,10 +674,8 @@ export default class Tracker {
         totalActualUSD,
         differenceUSD,
         differencePercent,
-        tickLower: data.tickLower,
-        tickUpper: data.tickUpper,
+        ...data.position,
         currentTick: data.currentTick,
-        liquidity: data.liquidity,
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,

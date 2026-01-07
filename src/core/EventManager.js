@@ -7,6 +7,7 @@
  */
 
 import { ethers } from 'ethers';
+import { getVaultContract } from 'fum_library';
 
 /**
  * Core event management system for pub/sub pattern
@@ -31,7 +32,40 @@ class EventManager {
     // Failed listener removal tracking for retry
     this.failedRemovals = new Map();
     this.isCleaningUp = false;
+
+    // Dependencies (injected after AutomationService.initialize())
+    this.poolData = null;
+    this.adapters = null;
+    this.vaultDataService = null;
   }
+
+  //#region Dependency Injection
+
+  /**
+   * Set pool data reference
+   * @param {Object} poolData - Pool data cache from AutomationService
+   */
+  setPoolData(poolData) {
+    this.poolData = poolData;
+  }
+
+  /**
+   * Set adapters reference
+   * @param {Map} adapters - Platform adapters map from AutomationService
+   */
+  setAdapters(adapters) {
+    this.adapters = adapters;
+  }
+
+  /**
+   * Set VaultDataService reference
+   * @param {Object} vaultDataService - VaultDataService instance
+   */
+  setVaultDataService(vaultDataService) {
+    this.vaultDataService = vaultDataService;
+  }
+
+  //#endregion
 
   //#region Pub/Sub Methods
 
@@ -95,7 +129,7 @@ class EventManager {
    * @returns {string} Listener key for future reference
    */
   registerContractListener({ contract, eventName, handler, vaultAddress, eventType, chainId, additionalId }) {
-    const key = this.generateListenerKey({ address: vaultAddress, eventType, chainId, additionalId });
+    const key = this.generateListenerKey({ id: vaultAddress, eventType, chainId, additionalId });
 
     // Check for existing zombie listener
     const existingListener = this.listeners[key];
@@ -143,11 +177,11 @@ class EventManager {
   registerFilterListener({ provider, filter, handler, address, eventType, chainId, additionalId }) {
     if (!this.enabled) {
       this.log(`Filter listener registration skipped (disabled) for address ${address}`);
-      const key = this.generateListenerKey({ address, eventType, chainId, additionalId });
+      const key = this.generateListenerKey({ id: address, eventType, chainId, additionalId });
       return key;
     }
 
-    const key = this.generateListenerKey({ address, eventType, chainId, additionalId });
+    const key = this.generateListenerKey({ id: address, eventType, chainId, additionalId });
 
     // Check for existing zombie listener
     const existingListener = this.listeners[key];
@@ -206,7 +240,7 @@ class EventManager {
    * @returns {string} Interval key for future reference
    */
   registerInterval({ callback, intervalMs, vaultAddress, eventType, chainId, additionalId }) {
-    const key = this.generateListenerKey({ address: vaultAddress, eventType, chainId, additionalId });
+    const key = this.generateListenerKey({ id: vaultAddress, eventType, chainId, additionalId });
 
     const existingListener = this.listeners[key];
     if (existingListener && existingListener.isRemoved) {
@@ -295,21 +329,21 @@ class EventManager {
     let removedCount = 0;
 
     // Step 1: Remove vault from pool mappings and clean up empty pool listeners
-    for (const [poolAddress, vaults] of Object.entries(this.poolToVaults)) {
+    for (const [poolId, vaults] of Object.entries(this.poolToVaults)) {
       const index = vaults.indexOf(vaultAddress);
       if (index > -1) {
         vaults.splice(index, 1);
-        this.log(`Removed vault ${vaultAddress} from pool ${poolAddress} mapping`);
+        this.log(`Removed vault ${vaultAddress} from pool ${poolId} mapping`);
 
         if (vaults.length === 0) {
           const poolListenerKey = Object.keys(this.listeners).find(key =>
-            key.startsWith(poolAddress.toLowerCase()) && key.includes('swap')
+            key.startsWith(poolId.toLowerCase()) && key.includes('swap')
           );
 
           if (poolListenerKey && await this.removeListener(poolListenerKey)) {
             removedCount++;
-            delete this.poolToVaults[poolAddress];
-            this.log(`Removed pool listener for ${poolAddress} (no more vaults)`);
+            delete this.poolToVaults[poolId];
+            this.log(`Removed pool listener for ${poolId} (no more vaults)`);
           }
         }
       }
@@ -452,10 +486,14 @@ class EventManager {
   /**
    * Generate a consistent key for storing listeners
    * @param {Object} options - Key generation options
+   * @param {string} options.id - Unique identifier (vault address, pool id, etc)
+   * @param {string} options.eventType - Type of event being listened for
+   * @param {number} options.chainId - Chain ID
+   * @param {string} [options.additionalId] - Optional additional identifier
    * @returns {string} Unique listener key
    */
-  generateListenerKey({ address, eventType, chainId, additionalId = '' }) {
-    return `${address.toLowerCase()}-${eventType}-${chainId}${additionalId ? `-${additionalId}` : ''}`;
+  generateListenerKey({ id, eventType, chainId, additionalId = '' }) {
+    return `${id.toLowerCase()}-${eventType}-${chainId}${additionalId ? `-${additionalId}` : ''}`;
   }
 
   /**
@@ -506,7 +544,7 @@ class EventManager {
 
   /**
    * Get all pools being monitored
-   * @returns {Array<string>} Array of pool addresses
+   * @returns {Array<string>} Array of pool identifiers
    */
   getMonitoredPools() {
     return Object.keys(this.poolToVaults);
@@ -514,20 +552,20 @@ class EventManager {
 
   /**
    * Get all vaults monitoring a specific pool
-   * @param {string} poolAddress - Pool address
+   * @param {string} poolId - Pool identifier
    * @returns {Array<string>} Array of vault addresses
    */
-  getVaultsForPool(poolAddress) {
-    return this.poolToVaults[poolAddress] || [];
+  getVaultsForPool(poolId) {
+    return this.poolToVaults[poolId] || [];
   }
 
   /**
    * Check if a pool is being monitored
-   * @param {string} poolAddress - Pool address
+   * @param {string} poolId - Pool identifier
    * @returns {boolean} Whether the pool is being monitored
    */
-  isPoolMonitored(poolAddress) {
-    return !!this.poolToVaults[poolAddress] && this.poolToVaults[poolAddress].length > 0;
+  isPoolMonitored(poolId) {
+    return !!this.poolToVaults[poolId] && this.poolToVaults[poolId].length > 0;
   }
 
   /**
@@ -540,18 +578,400 @@ class EventManager {
 
   /**
    * Add a vault to a pool's monitoring list
-   * @param {string} poolAddress - Pool address
+   * @param {string} poolId - Pool identifier
    * @param {string} vaultAddress - Vault address
    */
-  addVaultToPool(poolAddress, vaultAddress) {
-    if (!this.poolToVaults[poolAddress]) {
-      this.poolToVaults[poolAddress] = [];
+  addVaultToPool(poolId, vaultAddress) {
+    if (!this.poolToVaults[poolId]) {
+      this.poolToVaults[poolId] = [];
     }
 
-    if (!this.poolToVaults[poolAddress].includes(vaultAddress)) {
-      this.poolToVaults[poolAddress].push(vaultAddress);
-      this.log(`Added vault ${vaultAddress} to pool ${poolAddress} monitoring`);
+    if (!this.poolToVaults[poolId].includes(vaultAddress)) {
+      this.poolToVaults[poolId].push(vaultAddress);
+      this.log(`Added vault ${vaultAddress} to pool ${poolId} monitoring`);
     }
+  }
+
+  //#endregion
+
+  //#region Vault Monitoring
+
+  /**
+   * Subscribe to swap events for all pools associated with vault positions
+   * @param {Object} vault - Vault object with positions
+   * @param {Object} provider - Ethers provider
+   * @param {number} chainId - Chain ID
+   */
+  async subscribeToSwapEvents(vault, provider, chainId) {
+    for (const position of Object.values(vault.positions)) {
+      const poolId = position.pool;
+      const poolInfo = this.poolData[poolId];
+
+      if (!poolInfo) {
+        this.log(`No pool data for ${poolId}, skipping swap monitoring`);
+        continue;
+      }
+
+      const platform = poolInfo.platform;
+      const adapter = this.adapters.get(platform);
+
+      if (!adapter) {
+        this.log(`No adapter for platform ${platform}, skipping swap monitoring for pool ${poolId}`);
+        continue;
+      }
+
+      // Check if we already have a listener for this pool
+      const listenerKey = this.generateListenerKey({
+        id: poolId,
+        eventType: 'swap',
+        chainId,
+        additionalId: platform
+      });
+
+      if (!this.hasListener(listenerKey)) {
+        // Create handler that emits events for ALL vaults using this pool
+        const handleSwapEvent = async (log) => {
+          const vaultAddresses = this.getVaultsForPool(poolId);
+
+          for (const vaultAddress of vaultAddresses) {
+            this.emit('SwapEventDetected', {
+              vaultAddress,
+              poolId,
+              platform,
+              log
+            });
+          }
+        };
+
+        // Create filter via platform adapter (platform-agnostic)
+        const filter = adapter.getSwapEventFilter(poolId);
+
+        // Register the listener (only once per pool!)
+        this.registerFilterListener({
+          provider,
+          filter,
+          handler: handleSwapEvent,
+          address: poolId,
+          eventType: 'swap',
+          chainId,
+          additionalId: platform
+        });
+
+        this.log(`Created swap listener for ${platform} pool ${poolId}`);
+      }
+
+      // Add vault to pool mapping (whether new or existing listener)
+      this.addVaultToPool(poolId, vault.address);
+
+      this.emit('SwapMonitoringRegistered', {
+        vaultAddress: vault.address,
+        poolId,
+        platformId: platform,
+        chainId,
+        timestamp: Date.now(),
+        log: {
+          level: 'debug',
+          message: `Swap monitoring registered for vault ${vault.address} on pool ${poolId}`
+        }
+      });
+    }
+  }
+
+  /**
+   * Subscribe to vault configuration change events
+   * @param {Object} vault - Vault object
+   * @param {Object} provider - Ethers provider
+   * @param {number} chainId - Chain ID
+   */
+  subscribeToVaultConfigEvents(vault, provider, chainId) {
+    const vaultContract = getVaultContract(vault.address, provider);
+
+    // Handler for target tokens update
+    const handleTokensUpdate = async (tokens) => {
+      try {
+        this.log(`Target tokens updated for vault ${vault.address}: ${tokens.join(', ')}`);
+
+        const updated = await this.vaultDataService.updateTargetTokens(vault.address, tokens);
+        if (!updated) {
+          throw new Error('Failed to update target tokens in cache');
+        }
+
+        const updatedVault = await this.vaultDataService.getVault(vault.address, true);
+
+        this.emit('TargetTokensUpdated', {
+          vault: updatedVault,
+          tokens,
+          log: {
+            level: 'info',
+            message: `Target tokens updated for vault ${vault.address}: ${tokens.join(', ')}`
+          }
+        });
+      } catch (error) {
+        console.error(`Error handling target tokens update for vault ${vault.address}:`, error);
+        this.emit('ConfigUpdateFailed', {
+          vaultAddress: vault.address,
+          configType: 'targetTokens',
+          error: error.message,
+          log: {
+            level: 'error',
+            message: `Config update failed for vault ${vault.address}: ${error.message}`
+          }
+        });
+      }
+    };
+
+    // Handler for target platforms update
+    const handlePlatformsUpdate = async (platforms) => {
+      try {
+        this.log(`Target platforms updated for vault ${vault.address}: ${platforms.join(', ')}`);
+
+        const updated = await this.vaultDataService.updateTargetPlatforms(vault.address, platforms);
+        if (!updated) {
+          throw new Error('Failed to update target platforms in cache');
+        }
+
+        const updatedVault = await this.vaultDataService.getVault(vault.address, true);
+
+        this.emit('TargetPlatformsUpdated', {
+          vault: updatedVault,
+          platforms,
+          log: {
+            level: 'info',
+            message: `Target platforms updated for vault ${vault.address}: ${platforms.join(', ')}`
+          }
+        });
+      } catch (error) {
+        console.error(`Error handling target platforms update for vault ${vault.address}:`, error);
+        this.emit('ConfigUpdateFailed', {
+          vaultAddress: vault.address,
+          configType: 'targetPlatforms',
+          error: error.message,
+          log: {
+            level: 'error',
+            message: `Config update failed for vault ${vault.address}: ${error.message}`
+          }
+        });
+      }
+    };
+
+    // Register listeners
+    this.registerContractListener({
+      contract: vaultContract,
+      eventName: 'TargetTokensUpdated',
+      handler: handleTokensUpdate,
+      vaultAddress: vault.address,
+      eventType: 'config-tokens',
+      chainId
+    });
+
+    this.registerContractListener({
+      contract: vaultContract,
+      eventName: 'TargetPlatformsUpdated',
+      handler: handlePlatformsUpdate,
+      vaultAddress: vault.address,
+      eventType: 'config-platforms',
+      chainId
+    });
+
+    this.log(`Config monitoring registered for vault ${vault.address}`);
+  }
+
+  /**
+   * Subscribe to authorization events (ExecutorChanged)
+   * @param {Object} provider - Ethers provider
+   * @param {string} automationServiceAddress - Address of the automation service
+   * @param {number} chainId - Chain ID
+   */
+  subscribeToAuthorizationEvents(provider, automationServiceAddress, chainId) {
+    this.log('Subscribing to authorization events...');
+
+    const filter = {
+      topics: [ethers.utils.id('ExecutorChanged(address,bool)')]
+    };
+
+    const handleExecutorChanged = async (log) => {
+      try {
+        const executorAddress = '0x' + log.topics[1].slice(26);
+        const isAuthorized = log.topics[2].endsWith('1');
+        const vaultAddress = log.address;
+
+        // Only process events for our automation service
+        if (executorAddress.toLowerCase() !== automationServiceAddress.toLowerCase()) {
+          return;
+        }
+
+        if (isAuthorized) {
+          this.emit('VaultAuthGranted', {
+            vaultAddress,
+            executorAddress,
+            log: {
+              level: 'info',
+              message: `New vault authorization detected: ${vaultAddress}`
+            }
+          });
+        } else {
+          this.emit('VaultAuthRevoked', {
+            vaultAddress,
+            executorAddress,
+            log: {
+              level: 'warn',
+              message: `Vault authorization revoked: ${vaultAddress}`
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error handling executor change event:', error);
+      }
+    };
+
+    this.registerFilterListener({
+      provider,
+      filter,
+      handler: handleExecutorChanged,
+      address: 'global',
+      eventType: 'authorization',
+      chainId,
+      additionalId: 'executor-changed'
+    });
+
+    this.log('Subscribed to authorization events');
+  }
+
+  /**
+   * Subscribe to strategy parameter update events
+   * @param {string[]} strategyAddresses - Array of strategy contract addresses
+   * @param {Object} provider - Ethers provider
+   * @param {number} chainId - Chain ID
+   */
+  subscribeToStrategyParameterEvents(strategyAddresses, provider, chainId) {
+    this.log('Subscribing to strategy parameter events...');
+
+    if (!strategyAddresses || strategyAddresses.length === 0) {
+      this.log('No strategy contracts provided, skipping parameter event subscription');
+      return;
+    }
+
+    const handleParameterUpdate = async (log) => {
+      let vaultAddress;
+      try {
+        const iface = new ethers.utils.Interface([
+          'event ParameterUpdated(address indexed vault, string paramName)'
+        ]);
+        const parsed = iface.parseLog(log);
+        vaultAddress = parsed.args[0];
+        const paramName = parsed.args[1];
+
+        // Skip if vault is not being monitored
+        if (!this.vaultDataService.hasVault(vaultAddress)) {
+          return;
+        }
+
+        this.log(`Strategy parameter updated for vault ${vaultAddress}: ${paramName}`);
+
+        // Refresh vault data
+        await this.vaultDataService.getVault(vaultAddress, true);
+
+        this.emit('StrategyParameterUpdated', {
+          vaultAddress,
+          paramName,
+          log: {
+            level: 'info',
+            message: `Strategy parameters updated for vault ${vaultAddress}: ${paramName}`
+          }
+        });
+      } catch (error) {
+        console.error('Error handling parameter update event:', error);
+        this.emit('StrategyParameterUpdateFailed', {
+          vaultAddress,
+          error: error.message,
+          log: {
+            level: 'error',
+            message: `Strategy parameter update failed for vault ${vaultAddress}: ${error.message}`
+          }
+        });
+      }
+    };
+
+    const handleTemplateSelected = async (log) => {
+      let vaultAddress;
+      try {
+        const iface = new ethers.utils.Interface([
+          'event TemplateSelected(address indexed vault, uint8 template)'
+        ]);
+        const parsed = iface.parseLog(log);
+        vaultAddress = parsed.args[0];
+        const templateId = parsed.args[1];
+
+        // Skip if vault is not being monitored
+        if (!this.vaultDataService.hasVault(vaultAddress)) {
+          return;
+        }
+
+        this.log(`Strategy template changed for vault ${vaultAddress}: template ${templateId}`);
+
+        // Refresh vault data (template change affects effective parameters)
+        await this.vaultDataService.getVault(vaultAddress, true);
+
+        this.emit('StrategyParameterUpdated', {
+          vaultAddress,
+          paramName: 'template',
+          templateId,
+          log: {
+            level: 'info',
+            message: `Strategy template changed for vault ${vaultAddress}: template ${templateId}`
+          }
+        });
+      } catch (error) {
+        console.error('Error handling template selected event:', error);
+        this.emit('StrategyParameterUpdateFailed', {
+          vaultAddress,
+          error: error.message,
+          log: {
+            level: 'error',
+            message: `Strategy template update failed for vault ${vaultAddress}: ${error.message}`
+          }
+        });
+      }
+    };
+
+    // Create listeners for each strategy address
+    for (let i = 0; i < strategyAddresses.length; i++) {
+      const strategyAddress = strategyAddresses[i];
+
+      // ParameterUpdated listener
+      const paramFilter = {
+        address: strategyAddress,
+        topics: [ethers.utils.id('ParameterUpdated(address,string)')]
+      };
+
+      this.registerFilterListener({
+        provider,
+        filter: paramFilter,
+        handler: handleParameterUpdate,
+        address: strategyAddress,
+        eventType: 'parameter-update',
+        chainId,
+        additionalId: `strategy-${i}`
+      });
+
+      // TemplateSelected listener
+      const templateFilter = {
+        address: strategyAddress,
+        topics: [ethers.utils.id('TemplateSelected(address,uint8)')]
+      };
+
+      this.registerFilterListener({
+        provider,
+        filter: templateFilter,
+        handler: handleTemplateSelected,
+        address: strategyAddress,
+        eventType: 'template-selected',
+        chainId,
+        additionalId: `strategy-${i}`
+      });
+    }
+
+    this.log(`Subscribed to parameter and template events for ${strategyAddresses.length} strategy contract(s)`);
   }
 
   //#endregion

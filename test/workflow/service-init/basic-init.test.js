@@ -299,6 +299,22 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(service.vaultDataService.poolData).toBe(service.poolData);
     });
 
+    it('should inject dependencies into EventManager after start', () => {
+      // Verify EventManager dependency injection
+      expect(service.eventManager.poolData).toBeDefined();
+      expect(typeof service.eventManager.poolData).toBe('object');
+      expect(service.eventManager.poolData).toBe(service.poolData); // Same reference
+
+      expect(service.eventManager.adapters).toBeDefined();
+      expect(service.eventManager.adapters).toBeInstanceOf(Map);
+      expect(service.eventManager.adapters).toBe(service.adapters); // Same reference
+      expect(service.eventManager.adapters.size).toBe(1);
+      expect(service.eventManager.adapters.has('uniswapV3')).toBe(true);
+
+      expect(service.eventManager.vaultDataService).toBeDefined();
+      expect(service.eventManager.vaultDataService).toBe(service.vaultDataService); // Same reference
+    });
+
     it('should initialize strategy contracts', () => {
       expect(service.contracts.bobStrategy).toBeDefined();
       expect(typeof service.contracts.bobStrategy.getVersion).toBe('function');
@@ -388,6 +404,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       const vaultListeners = listenerKeys.filter(k =>
         !k.includes('authorization') &&
         !k.includes('parameter-update') &&
+        !k.includes('template-selected') &&
         !k.includes('global')
       );
       expect(vaultListeners.length).toBe(0);
@@ -407,14 +424,14 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
   });
 
   describe('Phase 4: Blacklist and Failed Vault Management', () => {
-    it('should track failed vault and emit event', () => {
+    it('should track failed vault and emit event', async () => {
       const failedVaultAddress = '0x1234567890123456789012345678901234567890';
       let failedEvent = null;
       service.eventManager.subscribe('VaultLoadFailed', (data) => {
         failedEvent = data;
       });
 
-      service.trackFailedVault(failedVaultAddress, 'Test error message');
+      await service.trackFailedVault(failedVaultAddress, 'Test error message');
 
       expect(service.failedVaults.has(failedVaultAddress)).toBe(true);
       const failedData = service.failedVaults.get(failedVaultAddress);
@@ -424,10 +441,10 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(failedEvent.vaultAddress).toBe(failedVaultAddress);
     });
 
-    it('should increment attempts on subsequent failures', () => {
+    it('should increment attempts on subsequent failures', async () => {
       const failedVaultAddress = '0x1234567890123456789012345678901234567890';
-      service.trackFailedVault(failedVaultAddress, 'Error 2');
-      service.trackFailedVault(failedVaultAddress, 'Error 3');
+      await service.trackFailedVault(failedVaultAddress, 'Error 2');
+      await service.trackFailedVault(failedVaultAddress, 'Error 3');
       expect(service.failedVaults.get(failedVaultAddress).attempts).toBe(3);
     });
 

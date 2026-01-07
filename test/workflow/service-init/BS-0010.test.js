@@ -4,7 +4,7 @@
  *
  * Scenario: 0 Aligned Positions / 0 Non-Aligned Positions / 1 Token (native ETH)
  * - Vault funded with native ETH only
- * - Target tokens: LINK/WETH (different from 1212 test which uses USDC/ETH)
+ * - Target tokens: USDC/WETH (different from 1212 test which uses USDC/ETH)
  * - No positions exist, so createNewPosition is called instead of addToPosition
  */
 
@@ -31,6 +31,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
   let vaultLoadedEvents = [];
   let vaultBaselineCapturedEvents = [];
   let vaultSetupCompleteEvents = [];
+  let monitoringStartedEvents = [];
   let vaultsLoadedEvents = [];
   let poolDataFetchedEvents = [];
   let initialPositionsEvaluatedEvents = [];
@@ -72,7 +73,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         positions: [],           // NO positions - key for triggering createNewPosition
         feeGeneratingSwaps: [],  // No fee swaps needed
         tokenTransfers: {},      // No token transfers
-        targetTokens: ['LINK', 'WETH'],  // Different pair than 1212 test
+        targetTokens: ['USDC', 'WETH'],  // Different pair than 1212 test
         targetPlatforms: ['uniswapV3'],
         strategy: 'bob'
       }
@@ -112,6 +113,10 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
 
       service.eventManager.subscribe('VaultSetupComplete', (data) => {
         vaultSetupCompleteEvents.push(data);
+      });
+
+      service.eventManager.subscribe('MonitoringStarted', (data) => {
+        monitoringStartedEvents.push(data);
       });
 
       service.eventManager.subscribe('VaultsLoaded', (data) => {
@@ -187,7 +192,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(vault.chainId).toBe(1337);
       expect(vault.strategy).toBeDefined();
       expect(vault.strategy.strategyId).toBe('bob');
-      expect(vault.targetTokens).toEqual(['LINK', 'WETH']);
+      expect(vault.targetTokens).toEqual(['USDC', 'WETH']);
       expect(vault.targetPlatforms).toEqual(['uniswapV3']);
     });
 
@@ -209,7 +214,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(vault.tokens).toBeDefined();
 
       // After token preparation (Step 7), native ETH is wrapped to WETH
-      // to cover WETH deficit for the LINK/WETH position.
+      // to cover WETH deficit for the USDC/WETH position.
       // ETH balance may be 0 or near-0 (gas dust only)
       const ethBalance = BigInt(vault.tokens.ETH || '0');
       expect(ethBalance).toBeGreaterThanOrEqual(0n);
@@ -227,7 +232,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
       expect(event.strategyId).toBe('bob');
       expect(event.positionCount).toBe(0);  // No positions initially
-      expect(event.targetTokens).toEqual(['LINK', 'WETH']);
+      expect(event.targetTokens).toEqual(['USDC', 'WETH']);
       expect(event.targetPlatforms).toEqual(['uniswapV3']);
     });
   });
@@ -293,12 +298,12 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         expect(event.pool.token1).toBeDefined();
       });
 
-      it('should select pool for LINK/WETH token pair', () => {
+      it('should select pool for USDC/WETH token pair', () => {
         const event = bestPoolSelectedEvents[0];
 
-        // Tokens should include LINK and WETH
+        // Tokens should include USDC and WETH
         const tokenPair = [event.pool.token0.symbol, event.pool.token1.symbol].sort();
-        expect(tokenPair).toEqual(['LINK', 'WETH']);
+        expect(tokenPair).toEqual(['USDC', 'WETH']);
       });
 
       it('should select pool on correct platform', () => {
@@ -439,7 +444,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
     it('should have ETH wrap amount > 0 - native ETH is wrapped to WETH', () => {
       const event = tokenPreparationCompletedEvents[0];
 
-      // This test has nativeEthAmount: '10' and target tokens are LINK/WETH
+      // This test has nativeEthAmount: '10' and target tokens are USDC/WETH
       // ETH should be wrapped to cover WETH requirement
       expect(event.wrapUnwrap).toBeDefined();
       expect(event.wrapUnwrap.wrapAmount).toBeDefined();
@@ -465,25 +470,25 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(event.targetTokens.token0.deficit).toBeDefined();
     });
 
-    it('should have LINK deficit (vault starts with no LINK)', () => {
+    it('should have USDC deficit (vault starts with no USDC)', () => {
       const event = tokenPreparationCompletedEvents[0];
 
-      // Find which token is LINK
-      const linkToken = event.targetTokens.token0.symbol === 'LINK'
+      // Find which token is USDC
+      const USDCToken = event.targetTokens.token0.symbol === 'USDC'
         ? event.targetTokens.token0
         : event.targetTokens.token1;
 
-      // LINK deficit is guaranteed (we start with 0 LINK)
-      const linkDeficit = BigInt(linkToken.deficit);
-      expect(linkDeficit).toBeGreaterThan(0n);
+      // USDC deficit is guaranteed (we start with 0 USDC)
+      const USDCDeficit = BigInt(USDCToken.deficit);
+      expect(USDCDeficit).toBeGreaterThan(0n);
     });
 
     it('should have phasesUsed reflecting ETH wrap and deficit swaps', () => {
       const event = tokenPreparationCompletedEvents[0];
 
-      // 0010 scenario: native ETH only, target LINK/WETH
+      // 0010 scenario: native ETH only, target USDC/WETH
       // - wrapUnwrap: true (ETH wraps to WETH)
-      // - nonAlignedForDeficit: true (ETH used to buy LINK)
+      // - nonAlignedForDeficit: true (ETH used to buy USDC)
       expect(event.phasesUsed.wrapUnwrap).toBe(true);
       expect(event.phasesUsed.nonAlignedForDeficit).toBe(true);
     });
@@ -568,20 +573,20 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       }
     });
 
-    it('should swap to acquire LINK (the deficit token)', () => {
+    it('should swap to acquire USDC (the deficit token)', () => {
       const deficitEvent = tokensSwappedEvents.find(e => e.swapType === 'deficit_coverage');
 
       if (deficitEvent) {
-        // For 0010 scenario: we need LINK, so output should be LINK
+        // For 0010 scenario: we need USDC, so output should be USDC
         const swaps = deficitEvent.swaps;
         expect(swaps.length).toBeGreaterThan(0);
 
-        // At least one swap should output LINK (to cover the deficit)
-        const linkOutputSwap = swaps.find(s => s.tokenOutSymbol === 'LINK');
-        expect(linkOutputSwap).toBeDefined();
+        // At least one swap should output USDC (to cover the deficit)
+        const USDCOutputSwap = swaps.find(s => s.tokenOutSymbol === 'USDC');
+        expect(USDCOutputSwap).toBeDefined();
 
         // Input token should be one of the available tokens (WETH or ETH)
-        expect(['WETH', 'ETH']).toContain(linkOutputSwap.tokenInSymbol);
+        expect(['WETH', 'ETH']).toContain(USDCOutputSwap.tokenInSymbol);
       }
     });
 
@@ -605,13 +610,13 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(tokenBalancesFetchedEvents.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('should have LINK balance after deficit swap', () => {
+    it('should have USDC balance after deficit swap', () => {
       // Get the last token balance event (post-swap)
       const postSwapEvent = tokenBalancesFetchedEvents[tokenBalancesFetchedEvents.length - 1];
 
-      // LINK should now have a balance (from deficit swap)
-      const linkBalance = BigInt(postSwapEvent.balances.LINK || '0');
-      expect(linkBalance).toBeGreaterThan(0n);
+      // USDC should now have a balance (from deficit swap)
+      const USDCBalance = BigInt(postSwapEvent.balances.USDC || '0');
+      expect(USDCBalance).toBeGreaterThan(0n);
     });
 
     it('should have WETH balance after wrapping', () => {
@@ -693,9 +698,9 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(event.tokenSymbols).toBeDefined();
       expect(Array.isArray(event.tokenSymbols)).toBe(true);
       expect(event.tokenSymbols).toHaveLength(2);
-      // WETH/LINK pair (order depends on pool)
+      // WETH/USDC pair (order depends on pool)
       expect(event.tokenSymbols).toContain('WETH');
-      expect(event.tokenSymbols).toContain('LINK');
+      expect(event.tokenSymbols).toContain('USDC');
       expect(event.platform).toBe('uniswapV3');
       expect(event.deploymentAmount).toBeGreaterThan(0);
       expect(typeof event.timestamp).toBe('number');
@@ -744,6 +749,20 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
   });
 
   describe('Setup Completion', () => {
+    it('should emit MonitoringStarted event before VaultSetupComplete', () => {
+      expect(monitoringStartedEvents.length).toBe(1);
+
+      const event = monitoringStartedEvents[0];
+      expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+      expect(event.strategyId).toBe('bob');
+      expect(event.positionCount).toBe(1);
+      expect(typeof event.timestamp).toBe('number');
+
+      // MonitoringStarted should occur before VaultSetupComplete
+      expect(vaultSetupCompleteEvents.length).toBe(1);
+      expect(event.timestamp).toBeLessThanOrEqual(vaultSetupCompleteEvents[0].timestamp);
+    });
+
     it('should emit VaultSetupComplete event', () => {
       expect(vaultSetupCompleteEvents.length).toBe(1);
 

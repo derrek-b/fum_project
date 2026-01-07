@@ -27,6 +27,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let vaultLoadedEvents = [];
   let vaultBaselineCapturedEvents = [];
   let vaultSetupCompleteEvents = [];
+  let monitoringStartedEvents = [];
   let vaultsLoadedEvents = [];
   let poolDataFetchedEvents = [];
   let initialPositionsEvaluatedEvents = [];
@@ -150,6 +151,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('VaultSetupComplete', (data) => {
         vaultSetupCompleteEvents.push(data);
+      });
+
+      service.eventManager.subscribe('MonitoringStarted', (data) => {
+        monitoringStartedEvents.push(data);
       });
 
       service.eventManager.subscribe('VaultsLoaded', (data) => {
@@ -1443,6 +1448,20 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   });
 
   describe('Setup Completion', () => {
+    it('should emit MonitoringStarted event before VaultSetupComplete', () => {
+      expect(monitoringStartedEvents.length).toBe(1);
+
+      const event = monitoringStartedEvents[0];
+      expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
+      expect(event.strategyId).toBe('bob');
+      expect(event.positionCount).toBe(1);
+      expect(typeof event.timestamp).toBe('number');
+
+      // MonitoringStarted should occur before VaultSetupComplete
+      expect(vaultSetupCompleteEvents.length).toBe(1);
+      expect(event.timestamp).toBeLessThanOrEqual(vaultSetupCompleteEvents[0].timestamp);
+    });
+
     it('should emit VaultSetupComplete event', () => {
       expect(vaultSetupCompleteEvents.length).toBe(1);
 

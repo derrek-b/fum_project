@@ -119,20 +119,17 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Step 5: Calculate available deployment
     const { availableDeployment, assetValues } = await this.calculateAvailableDeployment(vault);
 
-    // Step 5.5: Set emergency exit baseline for aligned positions
-    // For new positions, createNewPosition will set/overwrite the baseline
-    if (Object.keys(evaluation.alignedPositions).length > 0) {
-      const adapter = this.adapters.get(vault.targetPlatforms[0]);
-      this.emergencyExitBaseline[vault.address] = adapter.getPoolCurrent(targetPool);
-      this.log(`Set emergency exit baseline ${this.emergencyExitBaseline[vault.address]} for vault ${vault.address}`);
-    }
-
     // Step 6: Deploy capital
     if (availableDeployment > 0) {
       if (Object.keys(evaluation.alignedPositions).length > 0) {
         // We have an aligned position - add liquidity to it
         const position = Object.values(evaluation.alignedPositions)[0]; // BabySteps only allows 1 position
         await this.addToPosition(vault, position, assetValues, availableDeployment, targetPool);
+
+        // Step 6a: Set emergency exit baseline
+        const adapter = this.adapters.get(vault.targetPlatforms[0]);
+        this.emergencyExitBaseline[vault.address] = adapter.getPoolCurrent(targetPool);
+        this.log(`Set emergency exit baseline ${this.emergencyExitBaseline[vault.address]} for vault ${vault.address}`);
       } else {
         // No aligned positions - create a new one
         await this.createNewPosition(vault, availableDeployment, assetValues, targetPool);
@@ -147,9 +144,37 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // TODO: Step 7
-
     return true;
+  }
+
+  // ===========================================================================
+  // Swap Event Handling
+  // ===========================================================================
+
+  /**
+   * Handle a swap event from a monitored pool
+   *
+   * Evaluates whether the vault needs action (rebalance, fee collection, emergency exit)
+   * based on the new pool state after the swap.
+   *
+   * @override
+   * @param {Object} vault - Vault object
+   * @param {string} poolAddress - Pool where swap occurred
+   * @param {string} platform - Platform identifier
+   * @param {Object} log - Raw log from blockchain event
+   * @returns {Promise<void>}
+   */
+  async handleSwapEvent(vault, poolAddress, _platform, _log) {
+    this.log(`[STUB] handleSwapEvent called for vault ${vault.address}, pool ${poolAddress}`);
+
+    // TODO: Implement swap event handling
+    // 1. Parse swap event to get current tick
+    // 2. Find position for this pool
+    // 3. Check emergency exit trigger
+    // 4. Check if rebalance needed
+    // 5. Check if fees need collected
+    // 6. Execute appropriate action
+    // 7. Refresh vault data (errors here trigger retry mechanism)
   }
 
   // ===========================================================================
@@ -445,7 +470,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       return {
         positionId,
-        position,  // Full position object - use adapter.extractPositionBounds() for bounds
+        position,
         platform: metadata.poolMetadata.platform,
         principalAmount0: principal.amount0.toString(),
         principalAmount1: principal.amount1.toString()
@@ -875,11 +900,17 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
     if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
       this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
-      await this.executeWrap(vault, wrapUnwrap.wrapAmount);
+      await retryRpcCall(
+        () => this.executeWrap(vault, wrapUnwrap.wrapAmount),
+        `wrapETH for vault ${vault.address}`
+      );
     }
     if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
       this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
-      await this.executeUnwrap(vault, wrapUnwrap.unwrapAmount);
+      await retryRpcCall(
+        () => this.executeUnwrap(vault, wrapUnwrap.unwrapAmount),
+        `unwrapWETH for vault ${vault.address}`
+      );
     }
 
     // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
@@ -947,11 +978,17 @@ export default class BabyStepsStrategy extends StrategyBase {
         // But check just in case balances changed unexpectedly
         if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
           this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
-          await this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount);
+          await retryRpcCall(
+            () => this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount),
+            `wrapETH (additional) for vault ${vault.address}`
+          );
         }
         if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
           this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
-          await this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount);
+          await retryRpcCall(
+            () => this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount),
+            `unwrapWETH (additional) for vault ${vault.address}`
+          );
         }
 
         // Update swaps and metadata for next iteration
@@ -1102,6 +1139,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       // Position (full object - use adapter methods to extract bounds)
       position,
 
+      // Pool state at time of add (platform-agnostic via adapter)
+      current: adapter.getPoolCurrent(targetPool),
+
       // Transaction
       transactionHash: receipt.transactionHash,
       blockNumber: receipt.blockNumber,
@@ -1131,133 +1171,6 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @returns {Promise<void>}
    */
   async createNewPosition(vault, availableDeployment, assetValues, targetPool) {
-    // ===========================================================================
-    // IMPLEMENTATION STEPS (mirrors addToPosition with key differences noted)
-    // ===========================================================================
-    //
-    // Step 1: Validate availableDeployment
-    //   - Same as addToPosition
-    //   - Return early if <= 0
-    //
-    // Step 2: Get token data from targetPool
-    //   - Same as addToPosition
-    //   - token0Data = targetPool.token0
-    //   - token1Data = targetPool.token1
-    //
-    // Step 3: Get adapter and calculate position range [DIFFERENT FROM addToPosition]
-    //   - Get adapter from vault.targetPlatforms[0]
-    //   - Use adapter.getPositionRange() to compute position object:
-    //     const position = adapter.getPositionRange(
-    //       targetPool,                                   // pool data with tick and fee
-    //       vault.strategy.parameters.targetRangeUpper,   // e.g., 5 for +5%
-    //       vault.strategy.parameters.targetRangeLower    // e.g., 5 for -5%
-    //     );
-    //   - Returns position object with platform-specific properties (e.g., tickLower/tickUpper for V3)
-    //   - Use Object.values() for generic logging: const [lower, upper, current] = Object.values(position);
-    //
-    // Step 4: Get TEST quote to determine optimal ratio [DIFFERENT FROM addToPosition]
-    //   - addToPosition reads ratio from existing position's token values
-    //   - createNewPosition needs to discover ratio from tick range + pool state
-    //   - Use adapter.getAddLiquidityAmounts() with small test amount:
-    //     const testAmount = ethers.utils.parseUnits("1", token0Data.decimals);
-    //     const testQuote = await adapter.getAddLiquidityAmounts({
-    //       position: { tickLower, tickUpper },
-    //       token0Amount: testAmount.toString(),
-    //       token1Amount: "0",
-    //       provider, poolData: targetPool, token0Data, token1Data
-    //     });
-    //   - Calculate value ratio from test quote:
-    //     const testToken0 = formatUnits(testQuote.token0Amount, token0Data.decimals);
-    //     const testToken1 = formatUnits(testQuote.token1Amount, token1Data.decimals);
-    //     const testToken0ValueUSD = testToken0 * token0Price;
-    //     const testToken1ValueUSD = testToken1 * token1Price;
-    //     const optimalRatio = testToken0ValueUSD / testToken1ValueUSD;
-    //   - Get prices from assetValues.tokens[symbol].price:
-    //       const token0Price = assetValues.tokens[token0Data.symbol]?.price;
-    //       const token1Price = assetValues.tokens[token1Data.symbol]?.price;
-    //     EDGE CASE: If vault has only non-aligned tokens (no target token balances),
-    //     prices might not be in assetValues.tokens. In that case, call fetchTokenPrices()
-    //     directly for the target token symbols.
-    //
-    // Step 5: Split budget according to optimal ratio
-    //   - Same formula as addToPosition:
-    //     const token0Share = availableDeployment * (optimalRatio / (1 + optimalRatio));
-    //     const token0InputDecimal = token0Share / token0Price;
-    //     const token0InputAmount = parseUnits(token0InputDecimal.toFixed(...), ...);
-    //
-    // Step 6: Get FULL add liquidity quote with actual amounts
-    //   - Same as addToPosition Step 4:
-    //     const quote = await adapter.getAddLiquidityAmounts({
-    //       position: { tickLower, tickUpper },  // Note: no .id
-    //       token0Amount: token0InputAmount.toString(),
-    //       token1Amount: "0",
-    //       provider, poolData: targetPool, token0Data, token1Data
-    //     });
-    //   - Capture originalRequirements for post-swap validation
-    //
-    // Step 7: Prepare tokens (swap/wrap if needed to cover deficits)
-    //   - SAME as addToPosition Step 5
-    //   - Call prepareTokensForPosition(vault, quote, token0Data, token1Data)
-    //   - Execute wrap/unwrap first
-    //   - Execute deficit swaps with retry loop
-    //   - Execute buffer swaps (optional, non-critical)
-    //
-    // Step 8: Refresh token balances after swaps
-    //   - SAME as addToPosition Step 6
-    //
-    // Step 9: Validate requirements (if deficit swaps failed)
-    //   - SAME as addToPosition (tolerance-based validation)
-    //
-    // Step 10: Calculate final amounts - cap at original quote
-    //   - SAME as addToPosition Step 7
-    //   - token0ForLiquidity = min(balance, quote.token0Amount)
-    //   - token1ForLiquidity = min(balance, quote.token1Amount)
-    //
-    // Step 11: Execute mint transaction [DIFFERENT FROM addToPosition]
-    //   - 11a. Ensure token approvals:
-    //       const liquidityTarget = adapter.getApprovalTarget('liquidity');
-    //       await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
-    //
-    //   - 11b. Generate CREATE position data (not add liquidity):
-    //       const createPositionData = await adapter.generateCreatePositionData({
-    //         position: { tickLower, tickUpper },  // No id
-    //         token0Amount: token0ForLiquidity,
-    //         token1Amount: token1ForLiquidity,
-    //         provider: this.provider,
-    //         walletAddress: vault.address,        // REQUIRED - recipient of NFT
-    //         poolData: targetPool,
-    //         token0Data,
-    //         token1Data,
-    //         slippageTolerance: vault.strategy.parameters.maxSlippage,
-    //         deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
-    //       });
-    //
-    //   - 11c. Execute MINT transaction (not addliq):
-    //       const { receipt, gasEstimated } = await this.executeBatchTransactions(
-    //         vault,
-    //         [createPositionData],
-    //         'create position',
-    //         'mint'  // Different from 'addliq'
-    //       );
-    //
-    //   - 11d. Parse receipt - SAME method works for both mint and increaseLiquidity:
-    //       const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
-    //       // Returns: { tokenId, liquidity, amount0, amount1, tickLower, tickUpper, poolAddress }
-    //       // For new positions: tickLower, tickUpper, poolAddress come from Mint event
-    //
-    // Step 12: Emit NewPositionCreated event [DIFFERENT FROM addToPosition]
-    //   - Similar structure to LiquidityAddedToPosition but:
-    //     - Event name: 'NewPositionCreated'
-    //     - Include positionId from receiptData.tokenId (newly minted NFT)
-    //     - Include tickLower/tickUpper from receiptData (confirmed from Mint event)
-    //     - No need for existing position context
-    //   - EVENT DESIGN: Focus on fields needed for:
-    //     (1) Tracker module persistence/analytics
-    //     (2) Test assertions and verification
-    //     Determine specific fields when implementing this step.
-    //
-    // ===========================================================================
-
     this.log(`Creating new position with $${availableDeployment.toFixed(2)} available`);
 
     // Step 1: Validate availableDeployment
@@ -1381,11 +1294,17 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
     if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
       this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
-      await this.executeWrap(vault, wrapUnwrap.wrapAmount);
+      await retryRpcCall(
+        () => this.executeWrap(vault, wrapUnwrap.wrapAmount),
+        `wrapETH for vault ${vault.address}`
+      );
     }
     if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
       this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
-      await this.executeUnwrap(vault, wrapUnwrap.unwrapAmount);
+      await retryRpcCall(
+        () => this.executeUnwrap(vault, wrapUnwrap.unwrapAmount),
+        `unwrapWETH for vault ${vault.address}`
+      );
     }
 
     // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
@@ -1453,11 +1372,17 @@ export default class BabyStepsStrategy extends StrategyBase {
         // But check just in case balances changed unexpectedly
         if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
           this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
-          await this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount);
+          await retryRpcCall(
+            () => this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount),
+            `wrapETH (additional) for vault ${vault.address}`
+          );
         }
         if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
           this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
-          await this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount);
+          await retryRpcCall(
+            () => this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount),
+            `unwrapWETH (additional) for vault ${vault.address}`
+          );
         }
 
         // Update swaps and metadata for next iteration
@@ -1569,7 +1494,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         token0Amount: token0ForLiquidity,
         token1Amount: token1ForLiquidity,
         provider: this.provider,
-        walletAddress: vault.address,  // REQUIRED - recipient of the NFT
+        walletAddress: vault.address,
         poolData: targetPool,
         token0Data,
         token1Data,
@@ -1608,6 +1533,9 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Position range (full position object - use adapter methods to extract bounds)
       position,
+
+      // Pool state at time of creation (platform-agnostic via adapter)
+      current: adapter.getPoolCurrent(targetPool),
 
       // Transaction
       transactionHash: receipt.transactionHash,
@@ -1852,22 +1780,19 @@ export default class BabyStepsStrategy extends StrategyBase {
         const otherHalf = remainingBalances[tokenSymbol] - halfBalance;
 
         // Check if either half should be a wrap/unwrap instead of swap
-        const { isWrapOrUnwrap: isToken0WrapUnwrap } = this.isWrapUnwrapPair(tokenData, token0Data);
-        const { isWrapOrUnwrap: isToken1WrapUnwrap } = this.isWrapUnwrapPair(tokenData, token1Data);
+        const { isWrap: isToken0Wrap, isUnwrap: isToken0Unwrap } = this.isWrapUnwrapPair(tokenData, token0Data);
+        const { isWrap: isToken1Wrap, isUnwrap: isToken1Unwrap } = this.isWrapUnwrapPair(tokenData, token1Data);
 
         // Handle half going to token0
         if (halfBalance > 0n) {
-          if (isToken0WrapUnwrap) {
-            // ETH → WETH or WETH → ETH
-            if (tokenData.isNative && token0IsWeth) {
-              wrapAmount += halfBalance;
-              phasesUsed.wrapUnwrap = true;
-              this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} ETH to wrap amount`);
-            } else if (tokenData.symbol === 'WETH' && token0IsNativeEth) {
-              unwrapAmount += halfBalance;
-              phasesUsed.wrapUnwrap = true;
-              this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} WETH to unwrap amount`);
-            }
+          if (isToken0Wrap) {
+            wrapAmount += halfBalance;
+            phasesUsed.wrapUnwrap = true;
+            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} ETH to wrap amount`);
+          } else if (isToken0Unwrap) {
+            unwrapAmount += halfBalance;
+            phasesUsed.wrapUnwrap = true;
+            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} WETH to unwrap amount`);
           } else {
             bufferSwapInstructions.push({
               tokenIn: tokenData, tokenOut: token0Data, amount: halfBalance.toString(), isAmountIn: true
@@ -1878,17 +1803,14 @@ export default class BabyStepsStrategy extends StrategyBase {
 
         // Handle half going to token1
         if (otherHalf > 0n) {
-          if (isToken1WrapUnwrap) {
-            // ETH → WETH or WETH → ETH
-            if (tokenData.isNative && token1IsWeth) {
-              wrapAmount += otherHalf;
-              phasesUsed.wrapUnwrap = true;
-              this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} ETH to wrap amount`);
-            } else if (tokenData.symbol === 'WETH' && token1IsNativeEth) {
-              unwrapAmount += otherHalf;
-              phasesUsed.wrapUnwrap = true;
-              this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} WETH to unwrap amount`);
-            }
+          if (isToken1Wrap) {
+            wrapAmount += otherHalf;
+            phasesUsed.wrapUnwrap = true;
+            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} ETH to wrap amount`);
+          } else if (isToken1Unwrap) {
+            unwrapAmount += otherHalf;
+            phasesUsed.wrapUnwrap = true;
+            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} WETH to unwrap amount`);
           } else {
             bufferSwapInstructions.push({
               tokenIn: tokenData, tokenOut: token1Data, amount: otherHalf.toString(), isAmountIn: true
@@ -2020,8 +1942,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       // Try EXACT_OUTPUT first
       const exactOutputQuote = await retryRpcCall(
         () => adapter.getBestSwapQuote({
-          tokenInAddress: tokenInIsNative ? undefined : tokenInData.address,
-          tokenOutAddress: tokenOutIsNative ? undefined : tokenOutData.address,
+          tokenInAddress: tokenInData.address,
+          tokenOutAddress: tokenOutData.address,
           amount: targetDeficit.toString(),
           isAmountIn: false,
           tokenInIsNative,
@@ -2037,8 +1959,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Fall back to EXACT_INPUT
         const exactInputQuote = await retryRpcCall(
           () => adapter.getBestSwapQuote({
-            tokenInAddress: tokenInIsNative ? undefined : tokenInData.address,
-            tokenOutAddress: tokenOutIsNative ? undefined : tokenOutData.address,
+            tokenInAddress: tokenInData.address,
+            tokenOutAddress: tokenOutData.address,
             amount: availableAmount.toString(),
             isAmountIn: true,
             tokenInIsNative,
