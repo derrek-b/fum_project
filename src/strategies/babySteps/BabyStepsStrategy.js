@@ -1992,4 +1992,43 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`Cleared emergency exit baseline for vault ${vaultAddress}`);
     }
   }
+
+  /**
+   * Clean up all strategy-specific state for a vault (called during shutdown)
+   * @param {string} vaultAddress - Vault address to clean up
+   */
+  cleanup(vaultAddress) {
+    if (!vaultAddress) {
+      this.log('Error: No vault address provided for cleanup');
+      return;
+    }
+
+    const normalizedVaultAddress = vaultAddress.toLowerCase();
+
+    // Clean up all lastPositionCheck entries for this vault
+    // Keys are formatted as "vaultAddress-positionId"
+    let removedCheckCount = 0;
+    for (const key of Object.keys(this.lastPositionCheck)) {
+      if (key.toLowerCase().startsWith(`${normalizedVaultAddress}-`)) {
+        delete this.lastPositionCheck[key];
+        removedCheckCount++;
+      }
+    }
+
+    // Clean up emergency exit baseline cache
+    if (this.emergencyExitBaseline[vaultAddress]) {
+      delete this.emergencyExitBaseline[vaultAddress];
+      this.log(`Cleaned up emergency exit baseline for vault ${vaultAddress}`);
+    }
+
+    // Emit event with position check cleanup details
+    this.eventManager.emit('VaultPositionChecksCleared', {
+      vaultAddress,
+      removedCheckCount,
+      log: {
+        message: `Baby Steps cleanup for vault ${vaultAddress} - Cleared ${removedCheckCount} position check timestamps`,
+        level: 'info'
+      }
+    });
+  }
 }

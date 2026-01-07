@@ -52,6 +52,14 @@ class AutomationService {
     this.isShuttingDown = false;
     this.provider = null;
 
+    // Reconnection state
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectBaseDelay = 1000; // 1 second
+    this.heartbeatInterval = null;
+    this.heartbeatIntervalMs = 30000; // 30 seconds
+
     // Caches
     this.contracts = {};
     this.adapters = new Map();
@@ -236,43 +244,56 @@ class AutomationService {
   /**
    * Stop the automation service
    * @param {boolean} [force=false] - Force cleanup even if service isn't fully running (for initialization failures)
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>} True on successful stop
    */
   async stop(force = false) {
     if (!this.isRunning && !force) {
       this.log('Service is not running');
-      return;
+      return true;
     }
 
     this.log(force ? 'Force stopping AutomationService...' : 'Stopping AutomationService...');
+    this.isRunning = false;
     this.isShuttingDown = true;
 
-    // Disable event processing
-    this.eventManager.setEnabled(false);
-
-    // Stop failed vault retry timer
+    // 1. Stop failed vault retry timer
     if (this.failedVaultRetryTimer) {
       clearInterval(this.failedVaultRetryTimer);
       this.failedVaultRetryTimer = null;
     }
 
-    // Remove all event listeners
+    // 2. Stop heartbeat monitoring
+    this.stopHeartbeat();
+
+    // 3. Clean up all monitored vaults (strategy cleanup, listeners, locks)
+    const vaults = this.vaultDataService.getAllVaults();
+    if (vaults.length > 0) {
+      this.log(`Cleaning up ${vaults.length} vault(s)...`);
+      await Promise.allSettled(
+        vaults.map(vault =>
+          this.cleanupVault(vault.address, vault.strategy?.strategyId)
+        )
+      );
+    }
+
+    // 4. Disable event processing and remove remaining listeners
+    this.eventManager.setEnabled(false);
     await this.eventManager.removeAllListeners();
 
-    // Stop SSE broadcaster
+    // 5. Stop SSE broadcaster
     await this.sseBroadcaster.stop();
 
-    // Shutdown tracker (persists data)
+    // 6. Shutdown tracker (persists data)
     await this.tracker.shutdown();
 
-    // Save blacklist - log error but don't block shutdown
+    // 7. Save blacklist - log error but don't block shutdown
     try {
       await this.saveBlacklist();
     } catch (error) {
       console.error('Failed to save blacklist during shutdown:', error);
     }
 
-    // Close provider connection
+    // 8. Close provider connection
     if (this.provider) {
       this.provider.removeAllListeners();
       // Destroy WebSocket connection
@@ -282,10 +303,13 @@ class AutomationService {
       this.provider = null;
     }
 
-    this.isRunning = false;
-    this.isShuttingDown = false;
+    // 9. Clear service state
+    this.vaultDataService.clearCache();
+    this.vaultLocks = {};
 
+    // Note: isShuttingDown stays TRUE after stop
     this.log('AutomationService stopped');
+    return true;
   }
 
   //#endregion
@@ -353,6 +377,9 @@ class AutomationService {
 
     this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
 
+    // Attach WebSocket event handlers for disconnect detection
+    this.attachProviderEventHandlers();
+
     // Test connection with retry logic for transient network failures
     const network = await retryRpcCall(
       () => this.provider.getNetwork(),
@@ -365,6 +392,243 @@ class AutomationService {
     }
 
     this.log(`Connected to chain ${network.chainId} (${network.name})`);
+
+    // Start heartbeat monitoring
+    this.startHeartbeat();
+  }
+
+  /**
+   * Attach WebSocket event handlers for disconnect detection
+   * @private
+   */
+  attachProviderEventHandlers() {
+    if (!this.provider?._websocket) {
+      this.log('Warning: Cannot attach WebSocket handlers - no underlying WebSocket');
+      return;
+    }
+
+    const ws = this.provider._websocket;
+
+    ws.on('close', (code, reason) => {
+      this.log(`WebSocket closed: code=${code}, reason=${reason || 'none'}`);
+      this.handleProviderDisconnect(code, reason);
+    });
+
+    ws.on('error', (error) => {
+      this.log(`WebSocket error: ${error.message}`);
+      // Error is usually followed by close event, so we don't reconnect here
+      this.eventManager.emit('ProviderError', {
+        error: error.message,
+        log: { level: 'error', message: `WebSocket error: ${error.message}` }
+      });
+    });
+
+    this.log('WebSocket event handlers attached');
+  }
+
+  /**
+   * Handle WebSocket provider disconnection
+   * @param {number} code - WebSocket close code
+   * @param {string} reason - Close reason
+   * @private
+   */
+  async handleProviderDisconnect(code, reason) {
+    // Ignore if already shutting down or reconnecting
+    if (this.isShuttingDown || this.isReconnecting) {
+      return;
+    }
+
+    // Ignore normal closure during stop()
+    if (code === 1000) {
+      return;
+    }
+
+    this.log(`Provider disconnected (code: ${code}). Attempting reconnection...`);
+
+    this.eventManager.emit('ProviderDisconnected', {
+      code,
+      reason,
+      log: { level: 'warn', message: `WebSocket disconnected (code: ${code})` }
+    });
+
+    await this.attemptReconnection();
+  }
+
+  /**
+   * Attempt to reconnect the WebSocket provider with exponential backoff
+   * @private
+   */
+  async attemptReconnection() {
+    if (this.isReconnecting) {
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts = 0;
+
+    // Stop heartbeat during reconnection
+    this.stopHeartbeat();
+
+    // Pause event processing
+    this.eventManager.setEnabled(false);
+
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+      this.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+
+      this.eventManager.emit('ProviderReconnecting', {
+        attempt: this.reconnectAttempts,
+        maxAttempts: this.maxReconnectAttempts,
+        delayMs: delay,
+        log: { level: 'info', message: `Reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})` }
+      });
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+
+      try {
+        // Clean up old provider
+        if (this.provider) {
+          this.provider.removeAllListeners();
+          if (this.provider._websocket) {
+            this.provider._websocket.removeAllListeners();
+          }
+        }
+
+        // Remove all EventManager listeners (they reference old provider)
+        await this.eventManager.removeAllListeners();
+
+        // Create new provider
+        this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
+        this.attachProviderEventHandlers();
+
+        // Verify connection
+        const network = await this.provider.getNetwork();
+        if (network.chainId !== this.chainId) {
+          throw new Error(`Chain ID mismatch: ${network.chainId} vs ${this.chainId}`);
+        }
+
+        this.log(`Reconnected to chain ${network.chainId}`);
+
+        // IMPORTANT: Re-enable event processing BEFORE re-subscribing
+        // registerFilterListener() returns early when enabled=false
+        this.eventManager.setEnabled(true);
+
+        // Re-establish all event listeners
+        await this.reestablishEventListeners();
+
+        // Restart heartbeat
+        this.startHeartbeat();
+
+        this.isReconnecting = false;
+
+        this.eventManager.emit('ProviderReconnected', {
+          attempts: this.reconnectAttempts,
+          log: { level: 'info', message: 'WebSocket reconnected successfully' }
+        });
+
+        this.reconnectAttempts = 0;
+        return; // Success
+      } catch (error) {
+        this.log(`Reconnection attempt ${this.reconnectAttempts} failed: ${error.message}`);
+      }
+    }
+
+    // All attempts exhausted
+    this.log('Max reconnection attempts reached. Triggering fatal error handler.');
+    this.isReconnecting = false;
+
+    this.eventManager.emit('ProviderFailed', {
+      attempts: this.reconnectAttempts,
+      log: { level: 'error', message: `Provider reconnection failed after ${this.reconnectAttempts} attempts` }
+    });
+
+    this.handleFatalError(new Error('WebSocket provider reconnection failed'));
+  }
+
+  /**
+   * Re-establish all event listeners after provider reconnection
+   * @private
+   */
+  async reestablishEventListeners() {
+    this.log('Re-establishing event listeners...');
+
+    // 1. Re-subscribe to authorization events (global)
+    this.eventManager.subscribeToAuthorizationEvents(
+      this.provider,
+      this.automationServiceAddress,
+      this.chainId
+    );
+
+    // 2. Re-subscribe to strategy parameter events (global)
+    const strategyAddresses = [];
+    if (this.contracts.bobStrategy) {
+      strategyAddresses.push(this.contracts.bobStrategy.address);
+    }
+    this.eventManager.subscribeToStrategyParameterEvents(
+      strategyAddresses,
+      this.provider,
+      this.chainId
+    );
+
+    // 3. Re-subscribe to events for each monitored vault
+    const vaults = this.vaultDataService.getAllVaults();
+    for (const vault of vaults) {
+      // Re-subscribe to vault config events
+      this.eventManager.subscribeToVaultConfigEvents(
+        vault,
+        this.provider,
+        this.chainId
+      );
+
+      // Re-subscribe to swap events for vault's positions
+      await this.eventManager.subscribeToSwapEvents(
+        vault,
+        this.provider,
+        this.chainId
+      );
+    }
+
+    this.log(`Re-established listeners for ${vaults.length} vault(s)`);
+  }
+
+  /**
+   * Start periodic heartbeat to detect silent disconnects
+   * @private
+   */
+  startHeartbeat() {
+    if (this.heartbeatInterval) {
+      return; // Already running
+    }
+
+    this.heartbeatInterval = setInterval(async () => {
+      if (this.isShuttingDown || this.isReconnecting) {
+        return;
+      }
+
+      try {
+        await this.provider.getBlockNumber();
+      } catch (error) {
+        this.log(`Heartbeat failed: ${error.message}`);
+        // Trigger reconnection
+        this.handleProviderDisconnect(1006, 'Heartbeat failed');
+      }
+    }, this.heartbeatIntervalMs);
+
+    this.log('Heartbeat monitoring started');
+  }
+
+  /**
+   * Stop heartbeat monitoring
+   * @private
+   */
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+      this.log('Heartbeat monitoring stopped');
+    }
   }
 
   /**
@@ -710,6 +974,58 @@ class AutomationService {
         await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
       }
     }
+  }
+
+  /**
+   * Clean up a single vault during shutdown
+   * @param {string} vaultAddress - Vault address
+   * @param {string} strategyId - Strategy ID
+   * @returns {Promise<Object>} Cleanup results
+   */
+  async cleanupVault(vaultAddress, strategyId) {
+    const results = {
+      listenersRemoved: 0,
+      strategyCleanedUp: false,
+      errors: []
+    };
+
+    // 1. Strategy-specific cleanup (clears emergencyExitBaseline, position checks, etc.)
+    try {
+      const strategy = this.strategies.get(strategyId);
+      if (strategy?.cleanup) {
+        strategy.cleanup(vaultAddress);
+        results.strategyCleanedUp = true;
+      }
+    } catch (error) {
+      results.errors.push(`Strategy cleanup failed: ${error.message}`);
+    }
+
+    // 2. Remove all vault-specific listeners
+    try {
+      results.listenersRemoved = await this.eventManager.removeAllVaultListeners(vaultAddress);
+    } catch (error) {
+      results.errors.push(`Listener removal failed: ${error.message}`);
+    }
+
+    // 3. Unlock vault if locked
+    if (this.vaultLocks[vaultAddress.toLowerCase()]) {
+      this.unlockVault(vaultAddress);
+    }
+
+    // 4. Emit VaultMonitoringStopped event
+    this.eventManager.emit('VaultMonitoringStopped', {
+      vaultAddress,
+      strategyId,
+      listenersRemoved: results.listenersRemoved,
+      success: results.errors.length === 0,
+      strategyFound: !!this.strategies.get(strategyId),
+      log: {
+        level: results.errors.length === 0 ? 'info' : 'warn',
+        message: `Stopped monitoring vault ${vaultAddress} (${results.listenersRemoved} listeners removed)`
+      }
+    });
+
+    return results;
   }
 
   /**
