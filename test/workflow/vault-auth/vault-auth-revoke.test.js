@@ -182,13 +182,14 @@ describe('VaultAuthRevoked Workflow', () => {
     expect(vaultOffboardedEvent.vaultAddress.toLowerCase()).toBe(
       testVault.vaultAddress.toLowerCase()
     );
-    expect(vaultOffboardedEvent.vaultRemoved).toBe(true);
+    expect(vaultOffboardedEvent.removedFromCache).toBe(true);
     expect(vaultOffboardedEvent.success).toBe(true);
-    expect(vaultOffboardedEvent.errors).toHaveLength(0);
+    expect(vaultOffboardedEvent.cleanupResults).toBeDefined();
+    expect(vaultOffboardedEvent.cleanupResults.errors).toHaveLength(0);
 
     console.log('VaultOffboarded verified:');
     console.log(`  Vault: ${vaultOffboardedEvent.vaultAddress}`);
-    console.log(`  Vault Removed: ${vaultOffboardedEvent.vaultRemoved}`);
+    console.log(`  Removed from cache: ${vaultOffboardedEvent.removedFromCache}`);
     console.log(`  Success: ${vaultOffboardedEvent.success}`);
   });
 
@@ -205,8 +206,9 @@ describe('VaultAuthRevoked Workflow', () => {
     // The removeAllVaultListeners should have cleaned up
     const listenerCount = service.eventManager.getVaultListenerCount?.(testVault.vaultAddress) || 0;
 
-    // Since we don't expose a direct count method, we verify via the offboarded event
-    expect(vaultOffboardedEvent.monitoringStopped).toBe(true);
+    // Verify via the offboarded event that cleanup was performed
+    expect(vaultOffboardedEvent.cleanupResults).toBeDefined();
+    expect(vaultOffboardedEvent.cleanupResults.strategyCleanedUp).toBe(true);
 
     console.log('Monitoring stopped verified');
   });

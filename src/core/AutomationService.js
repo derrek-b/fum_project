@@ -834,13 +834,9 @@ class AutomationService {
 
       this.log(`Vault authorization revoked: ${vaultAddress}`);
 
-      // Track cleanup results
       const results = {
-        monitoringStopped: false,
-        vaultUnlocked: false,
-        vaultRemoved: false,
+        offboardResults: null,
         removedFromBlacklist: false,
-        removedFromRetryQueue: false,
         errors: []
       };
 
@@ -851,37 +847,18 @@ class AutomationService {
         this.log(`Removed revoked vault from blacklist: ${vaultAddress}`);
       }
 
-      // Clear from retry queue if present
-      if (this.failedVaults.has(vaultAddress.toLowerCase())) {
-        this.failedVaults.delete(vaultAddress.toLowerCase());
-        results.removedFromRetryQueue = true;
-        this.log(`Cleared ${vaultAddress} from retry queue`);
-      }
-
-      // Stop monitoring (remove all listeners)
+      // Full cleanup: strategy state, listeners, locks, caches
       try {
-        await this.eventManager.removeAllVaultListeners(vaultAddress);
-        results.monitoringStopped = true;
+        results.offboardResults = await this.offboardVault(vaultAddress);
       } catch (error) {
-        results.errors.push(`Failed to stop monitoring: ${error.message}`);
+        results.errors.push(`Offboard failed: ${error.message}`);
       }
-
-      // Unlock vault if locked
-      if (this.vaultLocks[vaultAddress.toLowerCase()]) {
-        this.unlockVault(vaultAddress);
-        results.vaultUnlocked = true;
-      }
-
-      // Remove from cache
-      results.vaultRemoved = this.vaultDataService.removeVault(vaultAddress);
 
       // Emit VaultOffboarded event
       this.eventManager.emit('VaultOffboarded', {
         vaultAddress,
-        vaultRemoved: results.vaultRemoved,
-        monitoringStopped: results.monitoringStopped,
-        vaultUnlocked: results.vaultUnlocked,
-        errors: results.errors,
+        ...results.offboardResults,
+        removedFromBlacklist: results.removedFromBlacklist,
         success: results.errors.length === 0,
         log: {
           level: results.errors.length === 0 ? 'info' : 'warn',
@@ -890,7 +867,7 @@ class AutomationService {
       });
 
       this.sendTelegramMessage(
-        `⛔ Vault authorization revoked: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}`
+        `Vault authorization revoked: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}`
       ).catch(err => console.error('Telegram notification error:', err));
     });
 
@@ -1029,6 +1006,44 @@ class AutomationService {
   }
 
   /**
+   * Fully remove a vault from the service (cleanup + cache removal)
+   * Use for permanent removal scenarios: blacklisting, authorization revoked
+   * @param {string} vaultAddress - Vault address
+   * @returns {Object} Results of offboarding operations
+   */
+  async offboardVault(vaultAddress) {
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+    const results = {
+      cleanupResults: null,
+      removedFromRetryQueue: false,
+      removedFromCache: false
+    };
+
+    // 1. Get strategyId before any cleanup (while vault may still be in cache)
+    const strategyId = this.vaultDataService.getVaultStrategyId(normalizedAddress);
+
+    // 2. Core cleanup: strategy state, listeners, locks
+    if (strategyId) {
+      results.cleanupResults = await this.cleanupVault(normalizedAddress, strategyId);
+    } else {
+      // Vault not in cache (failed during initial setup) - just remove listeners
+      await this.eventManager.removeAllVaultListeners(normalizedAddress);
+      results.cleanupResults = { listenersRemoved: 'unknown', strategyCleanedUp: false, errors: [] };
+    }
+
+    // 3. Remove from retry queue if present
+    if (this.failedVaults.has(normalizedAddress.toLowerCase())) {
+      this.failedVaults.delete(normalizedAddress.toLowerCase());
+      results.removedFromRetryQueue = true;
+    }
+
+    // 4. Remove from VaultDataService cache
+    results.removedFromCache = this.vaultDataService.removeVault(normalizedAddress);
+
+    return results;
+  }
+
+  /**
    * Track a failed vault
    * @param {string} vaultAddress - Vault address
    * @param {string} error - Error message
@@ -1080,18 +1095,20 @@ class AutomationService {
   async blacklistVault(vaultAddress, reason) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
 
+    // Full cleanup: strategy state, listeners, locks, caches
+    const offboardResults = await this.offboardVault(normalizedAddress);
+
+    // Add to blacklist
     this.blacklistedVaults.set(normalizedAddress, {
       vaultAddress: normalizedAddress,
       blacklistedAt: Date.now(),
       reason
     });
 
-    // Remove all listeners for this vault (permanent exclusion)
-    await this.eventManager.removeAllVaultListeners(normalizedAddress);
-
     this.eventManager.emit('VaultBlacklisted', {
       vaultAddress: normalizedAddress,
       reason,
+      offboardResults,
       log: {
         level: 'warn',
         message: `Vault ${normalizedAddress} blacklisted: ${reason}`
@@ -1333,7 +1350,7 @@ class AutomationService {
 
       const strategy = this.strategies.get(vault.strategy.strategyId);
       if (!strategy) {
-        throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+        throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
       }
 
       const initSuccess = await strategy.initializeVault(vault);
@@ -1400,12 +1417,12 @@ class AutomationService {
 
     // Validate vault has strategy
     if (!vault.strategy?.strategyId) {
-      throw new Error(`Vault ${vault.address} missing strategy data`);
+      throw new Error(`UNRECOVERABLE ERROR: Vault ${vault.address} missing strategy data`);
     }
 
     const strategy = this.strategies.get(vault.strategy.strategyId);
     if (!strategy) {
-      throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+      throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
     }
 
     // Set up swap event monitoring for all position pools (delegated to EventManager)
@@ -1496,13 +1513,13 @@ class AutomationService {
       // Get vault data
       const vault = await this.vaultDataService.getVault(vaultAddress);
       if (!vault) {
-        throw new Error(`Vault ${vaultAddress} not found in VaultDataService`);
+        throw new Error(`UNRECOVERABLE ERROR: Vault ${vaultAddress} not found in VaultDataService`);
       }
 
       // Get strategy
       const strategy = this.strategies.get(vault.strategy.strategyId);
       if (!strategy) {
-        throw new Error(`Strategy ${vault.strategy.strategyId} not found`);
+        throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
       }
 
       // Delegate to strategy
@@ -1512,7 +1529,7 @@ class AutomationService {
       console.error(`Error processing swap event for vault ${vaultAddress}:`, error);
 
       // Determine if error is recoverable (cache/RPC failures) vs unrecoverable
-      if (this.isRecoverableSwapError(error)) {
+      if (this.isRecoverableError(error)) {
         // Recoverable: add to retry queue for re-setup
         await this.trackFailedVault(vaultAddress, error.message, 'swap_event');
         this.log(`Vault ${vaultAddress} added to retry queue: ${error.message}`);
@@ -1526,7 +1543,7 @@ class AutomationService {
         vaultAddress,
         poolAddress,
         error: error.message,
-        recoverable: this.isRecoverableSwapError(error),
+        recoverable: this.isRecoverableError(error),
         timestamp: Date.now(),
         log: {
           level: 'error',
@@ -1539,31 +1556,18 @@ class AutomationService {
   }
 
   /**
-   * Check if a swap event error is recoverable via retry
+   * Check if an error is recoverable via retry
+   *
+   * Uses prefix convention: errors starting with "UNRECOVERABLE ERROR:" are
+   * permanent failures that should blacklist the vault. All other errors
+   * are considered recoverable and will be retried.
+   *
    * @param {Error} error - The error that occurred
-   * @returns {boolean} True if vault should be added to retry queue
+   * @returns {boolean} True if error is recoverable (vault should retry)
    */
-  isRecoverableSwapError(error) {
+  isRecoverableError(error) {
     const message = error.message || '';
-
-    // Unrecoverable errors - should blacklist, NOT retry
-    // Using regex to handle variable content (addresses, IDs) in error messages
-    const unrecoverablePatterns = [
-      /no position found for pool/i,     // Missing position = data inconsistency
-      /unsupported platform/i,           // Platform not implemented
-      /strategy.*not found/i,            // Missing strategy (e.g., "Strategy baby-steps not found")
-      /vault.*not found/i,               // Vault doesn't exist (e.g., "Vault 0x... not found")
-      /not authorized/i,                 // Permission issue
-    ];
-
-    for (const pattern of unrecoverablePatterns) {
-      if (pattern.test(message)) {
-        return false;
-      }
-    }
-
-    // Default: assume recoverable (RPC failures, cache refresh failures, etc.)
-    return true;
+    return !message.startsWith('UNRECOVERABLE ERROR:');
   }
 
   /**

@@ -33,6 +33,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.lastPositionCheck = {};
     this.rebalanceFailures = {};
     this.emergencyExitBaseline = {};
+    this.swapCountSinceLastFeeCheck = {};  // { [vaultAddress]: number }
   }
 
   // ===========================================================================
@@ -54,7 +55,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
 
     if (!adapter) {
-      throw new Error(`No adapter available for platform ${platformId}`);
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
     }
 
     // Select best pool via adapter
@@ -164,17 +165,305 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @param {Object} log - Raw log from blockchain event
    * @returns {Promise<void>}
    */
-  async handleSwapEvent(vault, poolAddress, _platform, _log) {
-    this.log(`[STUB] handleSwapEvent called for vault ${vault.address}, pool ${poolAddress}`);
+  async handleSwapEvent(vault, poolAddress, platform, log) {
+    this.log(`handleSwapEvent called for vault ${vault.address}, pool ${poolAddress}`);
 
-    // TODO: Implement swap event handling
-    // 1. Parse swap event to get current tick
-    // 2. Find position for this pool
-    // 3. Check emergency exit trigger
-    // 4. Check if rebalance needed
-    // 5. Check if fees need collected
-    // 6. Execute appropriate action
-    // 7. Refresh vault data (errors here trigger retry mechanism)
+    // ==========================================================================
+    // SWAP EVENT HANDLING - IMPLEMENTATION PLAN
+    // ==========================================================================
+    //
+    // When a swap occurs in a monitored pool, we need to evaluate if any action
+    // is required for our position. The swap event gives us the current tick,
+    // which we use to determine position health.
+    //
+    // STEP 1: Parse swap event to extract current tick
+    // ------------------------------------------------
+    // - Use adapter to parse the platform-specific swap event log
+    // - Extract: currentTick, sqrtPriceX96, liquidity (for Uniswap V3)
+    // - The tick tells us the current price in the pool
+    // - Implementation: adapter.parseSwapEvent(log) or manual parsing
+    //
+    // STEP 2: Find position for this pool
+    // -----------------------------------
+    // - Search vault.positions for a position matching poolAddress
+    // - If no position found, throw error (will trigger blacklist - unrecoverable)
+    // - Position gives us: tickLower, tickUpper, liquidity, token0, token1
+    //
+    // STEP 3: Check emergency exit trigger
+    // ------------------------------------
+    // - Compare currentTick against emergencyExitBaseline[vaultAddress]
+    // - Emergency exit triggers when price moves too far from entry point
+    // - Threshold defined in strategy config (e.g., 500 ticks = ~5% for stables)
+    // - If triggered: close position entirely, emit VaultUnrecoverable event
+    // - Priority: HIGHEST (check first, exit immediately if triggered)
+    //
+    // STEP 4: Check if rebalance needed
+    // ---------------------------------
+    // - Determine tick's position within the range [tickLower, tickUpper]
+    // - Calculate "centeredness" - how close tick is to range edges
+    // - Rebalance triggers when tick is too close to either edge
+    // - Threshold: e.g., within 10% of range edge
+    // - If triggered: close current position, open new centered position
+    // - Priority: HIGH (after emergency exit check)
+    //
+    // STEP 5: Check if fees need collected
+    // ------------------------------------
+    // - Query uncollected fees for the position
+    // - Compare against fee collection threshold (USD value or token amount)
+    // - If exceeded: collect fees, distribute per vault strategy
+    // - Priority: NORMAL (only if no rebalance needed)
+    //
+    // STEP 6: Execute appropriate action (mutually exclusive, prioritized)
+    // --------------------------------------------------------------------
+    // Priority order:
+    //   1. Emergency Exit → close position, mark vault unrecoverable
+    //   2. Rebalance → close position, open new centered position
+    //   3. Fee Collection → collect and distribute fees
+    //   4. No action → position is healthy, do nothing
+    //
+    // STEP 7: Refresh vault data
+    // --------------------------
+    // - After any action, refresh vault data from chain
+    // - Update emergencyExitBaseline if position changed
+    // - Errors during refresh trigger retry mechanism (recoverable)
+    //
+    // ==========================================================================
+
+    // -------------------------------------------------------------------------
+    // STEP 1: Parse swap event using platform adapter
+    // -------------------------------------------------------------------------
+    const adapter = this.adapters.get(platform);
+    if (!adapter) {
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platform}`);
+    }
+
+    // Parse swap event - returns platform-specific data (kept opaque for adapter methods)
+    const swapData = adapter.parseSwapEvent(log);
+
+    this.log(`🔍 Swap detected in pool ${poolAddress}`);
+
+    // -------------------------------------------------------------------------
+    // STEP 2: Validate Baby Steps constraints
+    // -------------------------------------------------------------------------
+    // Baby Steps strategy requires exactly 1 position, and the swap event must
+    // be for that position's pool. Violations are recoverable - retry will
+    // reload vault data and rebuild listeners, which should fix stale cache
+    // or listener issues.
+    const positionIds = Object.keys(vault.positions);
+
+    if (positionIds.length === 0) {
+      throw new Error(`BabySteps: vault ${vault.address} has no positions`);
+    }
+
+    if (positionIds.length > 1) {
+      throw new Error(`BabySteps: vault ${vault.address} has ${positionIds.length} positions (expected 1)`);
+    }
+
+    const position = vault.positions[positionIds[0]];
+
+    if (position.pool.toLowerCase() !== poolAddress.toLowerCase()) {
+      throw new Error(`BabySteps: pool mismatch - swap for ${poolAddress} but position in ${position.pool}`);
+    }
+
+    this.log(`Found position ${position.id} for pool ${poolAddress}`);
+
+    // -------------------------------------------------------------------------
+    // STEP 3: Check emergency exit trigger
+    // -------------------------------------------------------------------------
+    // If triggered, execute immediately and return (highest priority)
+    const emergencyExitTrigger = vault.strategy.parameters.emergencyExitTrigger;
+
+    if (emergencyExitTrigger) {
+      const baseline = this.emergencyExitBaseline[vault.address];
+
+      if (baseline === undefined || baseline === null) {
+        throw new Error(`BabySteps: emergency exit configured (${emergencyExitTrigger}%) but no baseline for vault ${vault.address}`);
+      }
+
+      const poolMetadata = this.poolData[position.pool];
+      if (!poolMetadata) {
+        throw new Error(`BabySteps: missing pool metadata for emergency exit check (pool: ${position.pool})`);
+      }
+
+      const token0Data = this.tokens[poolMetadata.token0Symbol];
+      const token1Data = this.tokens[poolMetadata.token1Symbol];
+      if (!token0Data || !token1Data) {
+        throw new Error(`BabySteps: missing token data for emergency exit check (${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol})`);
+      }
+
+      // Evaluate price movement (synchronous calculation, no RPC)
+      const priceMovement = adapter.evaluatePriceMovement(
+        swapData,
+        baseline,
+        token0Data,
+        token1Data
+      );
+
+      this.log(`Price movement: ${priceMovement.priceMovementPercent.toFixed(2)}% (${priceMovement.direction}), trigger: ${emergencyExitTrigger}%`);
+
+      if (priceMovement.priceMovementPercent >= emergencyExitTrigger) {
+        this.log(`🚨 EMERGENCY EXIT TRIGGERED for vault ${vault.address}:`);
+        this.log(`  Price moved ${priceMovement.priceMovementPercent.toFixed(2)}% (trigger: ${emergencyExitTrigger}%)`);
+        this.log(`  Baseline: ${priceMovement.baselinePrice} → Current: ${priceMovement.currentPrice}`);
+
+        // TODO: await this.executeEmergencyExit(vault, position);
+
+        // Refresh vault data and return early
+        this.swapCountSinceLastFeeCheck[vault.address] = 0;
+        await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+        this.log(`Refreshed vault data for ${vault.address}`);
+        return;
+      }
+    } else {
+      throw new Error(`Emergency exit not configured for vault ${vault.address}`);
+    }
+
+    // -------------------------------------------------------------------------
+    // STEP 4: Check if rebalance needed
+    // -------------------------------------------------------------------------
+    // If needed, execute immediately and return
+    // Use 0.5% threshold = using 99% of range before triggering rebalance
+    const REBALANCE_EDGE_THRESHOLD = 0.005;
+
+    const rangeStatus = await adapter.evaluatePositionRange(
+      position,
+      null,  // provider not needed when swapData provided
+      { swapData }
+    );
+
+    this.log(`Position range status: centeredness=${(rangeStatus.centeredness * 100).toFixed(2)}%, inRange=${rangeStatus.inRange}, tick=${rangeStatus.currentTick}`);
+
+    if (!rangeStatus.inRange) {
+      this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position is out of range`);
+      // TODO: await this.rebalancePosition(vault, position);
+      this.swapCountSinceLastFeeCheck[vault.address] = 0;
+      await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+      this.log(`Refreshed vault data for ${vault.address}`);
+      return;
+    }
+
+    if (rangeStatus.centeredness < REBALANCE_EDGE_THRESHOLD) {
+      this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position too close to lower edge (${(rangeStatus.centeredness * 100).toFixed(2)}% < ${REBALANCE_EDGE_THRESHOLD * 100}% threshold)`);
+      // TODO: await this.rebalancePosition(vault, position);
+      this.swapCountSinceLastFeeCheck[vault.address] = 0;
+      await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+      this.log(`Refreshed vault data for ${vault.address}`);
+      return;
+    }
+
+    if (rangeStatus.centeredness > (1 - REBALANCE_EDGE_THRESHOLD)) {
+      this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position too close to upper edge (${(rangeStatus.centeredness * 100).toFixed(2)}% > ${(1 - REBALANCE_EDGE_THRESHOLD) * 100}% threshold)`);
+      // TODO: await this.rebalancePosition(vault, position);
+      this.swapCountSinceLastFeeCheck[vault.address] = 0;
+      await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+      this.log(`Refreshed vault data for ${vault.address}`);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // STEP 5: Check if fees need collected
+    // -------------------------------------------------------------------------
+    // Use 50-swap interval to reduce RPC calls
+    const FEE_CHECK_INTERVAL = 50;
+
+    this.swapCountSinceLastFeeCheck[vault.address] =
+      (this.swapCountSinceLastFeeCheck[vault.address] || 0) + 1;
+
+    const swapCount = this.swapCountSinceLastFeeCheck[vault.address];
+    this.log(`Swap count since last fee check: ${swapCount}/${FEE_CHECK_INTERVAL}`);
+
+    if (swapCount >= FEE_CHECK_INTERVAL) {
+      try {
+        const feeCollectionNeeded = await this.checkFeesToCollect(vault, position, adapter);
+        this.swapCountSinceLastFeeCheck[vault.address] = 0;
+
+        if (feeCollectionNeeded) {
+          this.log(`💰 Executing fee collection for vault ${vault.address}`);
+          // TODO: await this.collectFees(vault, position);
+          await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+          this.log(`Refreshed vault data for ${vault.address}`);
+          return;
+        }
+      } catch (error) {
+        this.log(`Error checking fees: ${error.message}`);
+        // Don't reset counter on error - try again next interval
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // STEP 6: No action needed
+    // -------------------------------------------------------------------------
+    this.log(`✅ Position ${position.id} is healthy, no action needed`);
+  }
+
+  // ===========================================================================
+  // Fee Management
+  // ===========================================================================
+
+  /**
+   * Check if accumulated fees exceed collection threshold
+   *
+   * @param {Object} vault - Vault data
+   * @param {Object} position - Position to check
+   * @param {Object} adapter - Platform adapter
+   * @returns {Promise<boolean>} Whether fee collection is needed
+   */
+  async checkFeesToCollect(vault, position, adapter) {
+    // Check if fee reinvestment is enabled
+    if (!vault.strategy.parameters.feeReinvestment) {
+      this.log(`Fee reinvestment disabled for vault ${vault.address}`);
+      return false;
+    }
+
+    const reinvestmentTrigger = vault.strategy.parameters.reinvestmentTrigger;
+    if (!reinvestmentTrigger || reinvestmentTrigger === 0) {
+      this.log(`No reinvestment trigger set for vault ${vault.address}`);
+      return false;
+    }
+
+    this.log(`🔍 Checking fees for position ${position.id} with trigger $${reinvestmentTrigger}`);
+
+    // Get pool metadata for token symbols
+    const poolMetadata = this.poolData[position.pool];
+    if (!poolMetadata) {
+      this.log(`No pool metadata found for ${position.pool}`);
+      return false;
+    }
+
+    const token0Data = this.tokens[poolMetadata.token0Symbol];
+    const token1Data = this.tokens[poolMetadata.token1Symbol];
+
+    if (!token0Data || !token1Data) {
+      this.log(`Missing token data for fee check`);
+      return false;
+    }
+
+    // Get USD prices from cached token data
+    const token0Price = token0Data.price || 0;
+    const token1Price = token1Data.price || 0;
+
+    if (token0Price === 0 && token1Price === 0) {
+      this.log(`No price data available for fee calculation`);
+      return false;
+    }
+
+    // Use platform-agnostic adapter method (handles all internal data fetching)
+    const fees = await retryRpcCall(
+      () => adapter.getAccruedFeesUSD(
+        position,
+        { token0: token0Price, token1: token1Price },
+        this.provider
+      ),
+      'getAccruedFeesUSD',
+      { log: (msg) => this.log(msg) }
+    );
+
+    this.log(`💵 Fees - ${poolMetadata.token0Symbol}: ${fees.token0Fees.toFixed(6)} ($${fees.token0USD.toFixed(4)}), ${poolMetadata.token1Symbol}: ${fees.token1Fees.toFixed(6)} ($${fees.token1USD.toFixed(4)}), Total: $${fees.totalUSD.toFixed(4)} (trigger: $${reinvestmentTrigger})`);
+
+    const shouldCollect = fees.totalUSD >= reinvestmentTrigger;
+    this.log(`Should collect fees: ${shouldCollect}`);
+
+    return shouldCollect;
   }
 
   // ===========================================================================
@@ -238,7 +527,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       // 1. Get pool metadata from cache
       const poolMetadata = this.poolData[position.pool];
       if (!poolMetadata) {
-        throw new Error(`Position ${positionId} missing pool metadata for ${position.pool} - cache consistency failure`);
+        throw new Error(`UNRECOVERABLE ERROR: Position ${positionId} missing pool metadata for ${position.pool}`);
       }
 
       // 2. Basic alignment check: tokens (using targetPool's resolved tokens)
@@ -274,7 +563,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       const adapter = this.adapters.get(positionPlatform);
 
       if (!adapter) {
-        throw new Error(`No adapter available for platform ${positionPlatform}`);
+        throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${positionPlatform}`);
       }
 
       const rangeStatus = await retryRpcCall(
@@ -377,20 +666,20 @@ export default class BabyStepsStrategy extends StrategyBase {
       // Get pool metadata from cache
       const poolMetadata = this.poolData[position.pool];
       if (!poolMetadata) {
-        throw new Error(`Missing pool metadata for position ${positionId} pool ${position.pool}`);
+        throw new Error(`UNRECOVERABLE ERROR: Missing pool metadata for position ${positionId} pool ${position.pool}`);
       }
 
       // Get adapter for this platform
       const adapter = this.adapters.get(poolMetadata.platform);
       if (!adapter) {
-        throw new Error(`No adapter available for platform ${poolMetadata.platform}`);
+        throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${poolMetadata.platform}`);
       }
 
       // Get token data
       const token0Data = this.tokens[poolMetadata.token0Symbol];
       const token1Data = this.tokens[poolMetadata.token1Symbol];
       if (!token0Data || !token1Data) {
-        throw new Error(`Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
+        throw new Error(`UNRECOVERABLE ERROR: Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
       }
 
       // Fetch fresh pool data
@@ -832,7 +1121,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Step 3: Convert full budget to token0 amount (adapter will determine actual split)
     const positionValues = assetValues.positions[position.id];
     if (!positionValues) {
-      throw new Error(`Position ${position.id} not found in assetValues`);
+      throw new Error(`UNRECOVERABLE ERROR: Position ${position.id} not found in assetValues`);
     }
 
     const token0Price = positionValues.token0Price;
@@ -864,7 +1153,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`No adapter available for platform ${platformId}`);
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
     }
 
     // Get add liquidity amounts - platform-agnostic interface returns amounts in caller's token order
@@ -1059,7 +1348,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
 
         throw new Error(
-          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+          `UNRECOVERABLE ERROR: Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
           `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
           `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
           `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
@@ -1187,7 +1476,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`No adapter found for platform: ${platformId}`);
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
     }
 
     // Get position range object (platform-specific properties, e.g., tickLower/tickUpper for V3)
@@ -1453,7 +1742,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
 
         throw new Error(
-          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+          `UNRECOVERABLE ERROR: Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
           `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
           `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
           `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
@@ -1584,7 +1873,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`No adapter available for platform ${platformId}`);
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
     }
 
     // Track which phases were used
@@ -1767,7 +2056,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Verify deficits are covered
     if (remainingToken0Deficit > 0n || remainingToken1Deficit > 0n) {
-      throw new Error(`Unable to cover deficits: ${token0Data.symbol}=${remainingToken0Deficit}, ${token1Data.symbol}=${remainingToken1Deficit}`);
+      throw new Error(`UNRECOVERABLE ERROR: Unable to cover deficits: ${token0Data.symbol}=${remainingToken0Deficit}, ${token1Data.symbol}=${remainingToken1Deficit}`);
     }
 
     // Phase 3: Buffer swaps for remaining non-aligned tokens
@@ -2019,6 +2308,11 @@ export default class BabyStepsStrategy extends StrategyBase {
     if (this.emergencyExitBaseline[vaultAddress]) {
       delete this.emergencyExitBaseline[vaultAddress];
       this.log(`Cleaned up emergency exit baseline for vault ${vaultAddress}`);
+    }
+
+    // Clean up swap counter for fee checks
+    if (this.swapCountSinceLastFeeCheck[vaultAddress]) {
+      delete this.swapCountSinceLastFeeCheck[vaultAddress];
     }
 
     // Emit event with position check cleanup details

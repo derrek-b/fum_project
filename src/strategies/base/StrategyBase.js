@@ -238,7 +238,7 @@ export default class StrategyBase {
     // Create signer for transaction execution
     const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
     if (!automationPrivateKey) {
-      throw new Error('AUTOMATION_PRIVATE_KEY not found in environment variables');
+      throw new Error('UNRECOVERABLE ERROR: AUTOMATION_PRIVATE_KEY not found in environment variables');
     }
     const signer = new ethers.Wallet(automationPrivateKey, this.provider);
     const vaultContractWithSigner = vaultContract.connect(signer);
@@ -326,7 +326,7 @@ export default class StrategyBase {
       case 'burn':
         return retryRpcCall(() => vaultContract.estimateGas.burn(targets, calldatas), 'estimateGas.burn');
       default:
-        throw new Error(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+        throw new Error(`UNRECOVERABLE ERROR: Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
     }
   }
 
@@ -359,7 +359,7 @@ export default class StrategyBase {
       case 'burn':
         return vaultContract.burn(targets, calldatas);
       default:
-        throw new Error(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+        throw new Error(`UNRECOVERABLE ERROR: Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
     }
   }
 
