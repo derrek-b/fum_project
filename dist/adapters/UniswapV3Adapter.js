@@ -181,6 +181,172 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Parse a Uniswap V3 swap event log from the blockchain
+   *
+   * Extracts key data from a Uniswap V3 Swap event log, returning
+   * normalized data that can be used for position evaluation and decision making.
+   *
+   * Uniswap V3 Swap event signature:
+   * event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)
+   *
+   * @param {Object} log - Raw blockchain event log
+   * @param {string} log.address - Pool contract address that emitted the event
+   * @param {Array<string>} log.topics - Array of indexed event topics [eventSig, sender, recipient]
+   * @param {string} log.data - ABI-encoded non-indexed event data
+   * @returns {Object} Parsed swap event data
+   * @returns {number} result.tick - Current tick after the swap
+   * @returns {string} result.sqrtPriceX96 - Square root price in Q64.96 format (string)
+   * @returns {string} result.liquidity - Pool liquidity at time of swap (string)
+   * @returns {string} result.amount0 - Amount of token0 swapped (signed, string)
+   * @returns {string} result.amount1 - Amount of token1 swapped (signed, string)
+   * @returns {string} result.sender - Address that initiated the swap (indexed)
+   * @returns {string} result.recipient - Address that received the swap output (indexed)
+   * @throws {Error} If log is null/undefined or missing required properties
+   * @throws {Error} If log cannot be parsed as a Uniswap V3 Swap event
+   */
+  parseSwapEvent(log) {
+    // Validate log parameter exists
+    if (!log) {
+      throw new Error('Log parameter is required');
+    }
+
+    // Validate log has required properties
+    if (!log.address) {
+      throw new Error('Log must have address property');
+    }
+
+    if (!log.topics || !Array.isArray(log.topics)) {
+      throw new Error('Log must have topics array');
+    }
+
+    if (log.topics.length < 3) {
+      throw new Error('Log must have at least 3 topics (event signature, sender, recipient)');
+    }
+
+    if (!log.data) {
+      throw new Error('Log must have data property');
+    }
+
+    // Validate the event signature matches Uniswap V3 Swap event
+    const expectedTopic = ethers.utils.id(this.getSwapEventSignature());
+    if (log.topics[0] !== expectedTopic) {
+      throw new Error(`Invalid swap event signature. Expected ${expectedTopic}, got ${log.topics[0]}`);
+    }
+
+    try {
+      // Create interface for parsing
+      const swapInterface = new ethers.utils.Interface([
+        'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+      ]);
+
+      // Parse the log
+      const decoded = swapInterface.parseLog(log);
+
+      // Extract indexed parameters from topics
+      // topics[1] = sender (padded to 32 bytes)
+      // topics[2] = recipient (padded to 32 bytes)
+      const sender = ethers.utils.getAddress('0x' + log.topics[1].slice(26));
+      const recipient = ethers.utils.getAddress('0x' + log.topics[2].slice(26));
+
+      return {
+        tick: Number(decoded.args.tick),
+        sqrtPriceX96: decoded.args.sqrtPriceX96.toString(),
+        liquidity: decoded.args.liquidity.toString(),
+        amount0: decoded.args.amount0.toString(),
+        amount1: decoded.args.amount1.toString(),
+        sender,
+        recipient
+      };
+    } catch (error) {
+      // If it's already one of our validation errors, re-throw
+      if (error.message.startsWith('Log ') || error.message.startsWith('Invalid swap')) {
+        throw error;
+      }
+      // Otherwise wrap the parsing error
+      throw new Error(`Failed to parse swap event: ${error.message}`);
+    }
+  }
+
+  /**
+   * Evaluate price movement between current swap state and a baseline tick
+   *
+   * For Uniswap V3, compares current tick from swap event against a baseline tick
+   * to calculate percentage price movement. Uses tickToPrice for accurate conversion.
+   *
+   * @param {Object} swapData - Parsed swap event data from parseSwapEvent()
+   * @param {number} swapData.tick - Current tick from swap event
+   * @param {number} baseline - Baseline tick value (stored when position was entered)
+   * @param {Object} token0Data - Token0 data object
+   * @param {string} token0Data.address - Token contract address
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {number} token0Data.decimals - Token decimals
+   * @param {Object} token1Data - Token1 data object
+   * @param {string} token1Data.address - Token contract address
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {number} token1Data.decimals - Token decimals
+   * @returns {Object} Price movement evaluation
+   * @returns {number} result.priceMovementPercent - Absolute percentage price movement
+   * @returns {string} result.baselinePrice - Baseline price as human-readable string
+   * @returns {string} result.currentPrice - Current price as human-readable string
+   * @returns {string} result.direction - 'up' or 'down' indicating price direction
+   * @throws {Error} If swapData or baseline is invalid
+   */
+  evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
+    // Validate swapData
+    if (!swapData) {
+      throw new Error('swapData parameter is required');
+    }
+
+    if (typeof swapData.tick !== 'number') {
+      throw new Error('swapData must have tick property as a number');
+    }
+
+    // Validate baseline
+    if (baseline === undefined || baseline === null) {
+      throw new Error('baseline parameter is required');
+    }
+
+    if (typeof baseline !== 'number') {
+      throw new Error('baseline must be a number (tick value)');
+    }
+
+    // Validate token data
+    if (!token0Data || !token0Data.address || !token0Data.symbol || token0Data.decimals === undefined) {
+      throw new Error('token0Data must have address, symbol, and decimals properties');
+    }
+
+    if (!token1Data || !token1Data.address || !token1Data.symbol || token1Data.decimals === undefined) {
+      throw new Error('token1Data must have address, symbol, and decimals properties');
+    }
+
+    const currentTick = swapData.tick;
+
+    // Convert ticks to prices using the SDK
+    const baselinePrice = this.tickToPrice(baseline, token0Data, token1Data, this.chainId);
+    const currentPrice = this.tickToPrice(currentTick, token0Data, token1Data, this.chainId);
+
+    // Calculate price movement percentage
+    const baselinePriceValue = parseFloat(baselinePrice.toSignificant(18));
+    const currentPriceValue = parseFloat(currentPrice.toSignificant(18));
+
+    // Avoid division by zero
+    if (baselinePriceValue === 0) {
+      throw new Error('Baseline price is zero, cannot calculate movement');
+    }
+
+    const priceRatio = currentPriceValue / baselinePriceValue;
+    const priceMovementPercent = Math.abs((priceRatio - 1) * 100);
+    const direction = currentPriceValue >= baselinePriceValue ? 'up' : 'down';
+
+    return {
+      priceMovementPercent,
+      baselinePrice: baselinePriceValue.toString(),
+      currentPrice: currentPriceValue.toString(),
+      direction
+    };
+  }
+
+  /**
    * Validate and normalize slippage tolerance
    * @param {number} slippageTolerance - Slippage tolerance percentage (0-100)
    * @returns {number} Validated slippage tolerance
@@ -1283,6 +1449,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
             tickLower: position.tickLower,
             tickUpper: position.tickUpper,
             liquidity: position.liquidity,
+            // Fee fields - stable values that only change on position interaction (mint, +/- liquidity, collect, burn)
+            feeGrowthInside0LastX128: position.feeGrowthInside0LastX128,
+            feeGrowthInside1LastX128: position.feeGrowthInside1LastX128,
+            tokensOwed0: position.tokensOwed0,
+            tokensOwed1: position.tokensOwed1,
             lastUpdated: Date.now()
           };
         });
@@ -1342,22 +1513,28 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Evaluate a position's range status for concentrated liquidity positions
    *
    * Determines if a position is in range and calculates distance metrics
-   * for strategy decision making. Uses existing getCurrentTick method.
+   * for strategy decision making.
+   *
+   * Can be called in two modes:
+   * 1. Without swapData: fetches current tick from blockchain via provider
+   * 2. With options.swapData: extracts tick from parsed swap event (no RPC call)
    *
    * @param {Object} position - Position object with tick bounds
    * @param {number} position.tickLower - Lower tick bound
    * @param {number} position.tickUpper - Upper tick bound
-   * @param {string} position.pool - Pool address
-   * @param {Object} provider - Ethers provider instance
+   * @param {string} position.pool - Pool address (required if fetching from blockchain)
+   * @param {Object} provider - Ethers provider instance (can be null if swapData provided)
+   * @param {Object} [options] - Optional parameters
+   * @param {Object} [options.swapData] - Parsed swap event data (skips RPC if provided)
    * @returns {Promise<Object>} Range evaluation result
    * @returns {boolean} result.inRange - Is current tick within position bounds
    * @returns {number} result.centeredness - Position in range (0-1, 0.5 = centered)
    * @returns {number} result.distanceToUpper - Distance to upper bound as fraction of range
    * @returns {number} result.distanceToLower - Distance to lower bound as fraction of range
-   * @returns {number} result.currentTick - Current tick value from pool
-   * @throws {Error} If position missing required tick data or pool address
+   * @returns {number} result.currentTick - Current tick value
+   * @throws {Error} If position missing required tick data or currentTick cannot be determined
    */
-  async evaluatePositionRange(position, provider) {
+  async evaluatePositionRange(position, provider, options = {}) {
     // Validate position object
     if (!position) {
       throw new Error('position parameter is required');
@@ -1371,13 +1548,24 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Position missing tick range data: tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
     }
 
-    // Validate pool address
-    if (!position.pool) {
-      throw new Error('Position missing pool address');
+    // Get currentTick - either from swapData or from blockchain
+    let currentTick;
+    if (options.swapData !== undefined) {
+      // Extract tick from parsed swap event (adapter knows the structure)
+      if (!options.swapData || typeof options.swapData.tick !== 'number') {
+        throw new Error('options.swapData must have tick property as a number');
+      }
+      if (!Number.isFinite(options.swapData.tick)) {
+        throw new Error('options.swapData.tick must be a finite number');
+      }
+      currentTick = options.swapData.tick;
+    } else {
+      // Fetch from blockchain (existing behavior)
+      if (!position.pool) {
+        throw new Error('Position missing pool address');
+      }
+      currentTick = await this.getCurrentTick(position.pool, provider);
     }
-
-    // Get current tick using existing method (includes provider validation)
-    const currentTick = await this.getCurrentTick(position.pool, provider);
 
     // Calculate range metrics
     const rangeSize = position.tickUpper - position.tickLower;
@@ -2052,6 +2240,68 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // Return raw bigint values
     return [uncollectedFees0Raw, uncollectedFees1Raw];
+  }
+
+  /**
+   * Calculate accrued (uncollected) fees for a position in USD
+   *
+   * High-level method that handles all platform-specific data fetching internally.
+   * Strategy doesn't need to know about ticks, pool data structures, etc.
+   *
+   * @param {Object} position - Position object (with fee growth fields from cache)
+   * @param {Object} tokenPrices - { token0: number, token1: number } USD prices
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<Object>} Accrued fees breakdown
+   * @returns {number} result.totalUSD - Total fees in USD
+   * @returns {number} result.token0Fees - Token0 fees (formatted, not raw)
+   * @returns {number} result.token1Fees - Token1 fees (formatted, not raw)
+   * @returns {number} result.token0USD - Token0 fees in USD
+   * @returns {number} result.token1USD - Token1 fees in USD
+   */
+  async getAccruedFeesUSD(position, tokenPrices, provider) {
+    // Validate inputs
+    if (!position) throw new Error('position is required');
+    if (!tokenPrices || typeof tokenPrices.token0 !== 'number' || typeof tokenPrices.token1 !== 'number') {
+      throw new Error('tokenPrices must have token0 and token1 as numbers');
+    }
+    if (!provider) throw new Error('provider is required');
+
+    // Validate position has required fee fields
+    if (!position.feeGrowthInside0LastX128 || !position.feeGrowthInside1LastX128) {
+      throw new Error('position missing fee growth fields');
+    }
+    if (!position.tokensOwed0 || !position.tokensOwed1) {
+      throw new Error('position missing tokensOwed fields');
+    }
+
+    // Fetch pool data with tick info (platform-specific knowledge stays here)
+    const poolData = await this.getPoolData(position.pool, {
+      includeTicks: [position.tickLower, position.tickUpper]
+    }, provider);
+
+    // Calculate uncollected fees (raw bigint values)
+    const [token0FeesRaw, token1FeesRaw] = this.calculateUncollectedFees(position, poolData);
+
+    // Get token decimals from pool data
+    const token0Decimals = poolData.token0?.decimals || 18;
+    const token1Decimals = poolData.token1?.decimals || 18;
+
+    // Format fees
+    const token0Fees = Number(token0FeesRaw) / Math.pow(10, token0Decimals);
+    const token1Fees = Number(token1FeesRaw) / Math.pow(10, token1Decimals);
+
+    // Convert to USD
+    const token0USD = token0Fees * tokenPrices.token0;
+    const token1USD = token1Fees * tokenPrices.token1;
+    const totalUSD = token0USD + token1USD;
+
+    return {
+      totalUSD,
+      token0Fees,
+      token1Fees,
+      token0USD,
+      token1USD
+    };
   }
 
   /**

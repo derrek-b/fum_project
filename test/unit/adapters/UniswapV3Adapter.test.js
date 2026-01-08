@@ -268,6 +268,453 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('parseSwapEvent', () => {
+    // Helper to create mock Swap event log for testing
+    const createMockSwapLog = (poolAddress, amount0, amount1, sqrtPriceX96, liquidity, tick) => {
+      const swapInterface = new ethers.utils.Interface([
+        'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+      ]);
+      const eventFragment = swapInterface.getEvent('Swap');
+      const eventTopic = swapInterface.getEventTopic(eventFragment);
+
+      // Encode the non-indexed parameters
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['int256', 'int256', 'uint160', 'uint128', 'int24'],
+        [amount0, amount1, sqrtPriceX96, liquidity, tick]
+      );
+
+      // Create indexed topics for sender and recipient
+      const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+      const recipientTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+
+      return {
+        address: poolAddress,
+        topics: [eventTopic, senderTopic, recipientTopic],
+        data: encodedData
+      };
+    };
+
+    describe('Success Cases', () => {
+      it('should parse a valid swap event log', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',           // amount0 (1 USDC)
+          '-500000000000000000', // amount1 (-0.5 ETH)
+          '79228162514264337593543950336', // sqrtPriceX96
+          '1000000000000',     // liquidity
+          -100                 // tick
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result).toHaveProperty('tick');
+        expect(result).toHaveProperty('sqrtPriceX96');
+        expect(result).toHaveProperty('liquidity');
+        expect(result).toHaveProperty('amount0');
+        expect(result).toHaveProperty('amount1');
+        expect(result).toHaveProperty('sender');
+        expect(result).toHaveProperty('recipient');
+      });
+
+      it('should correctly extract tick as a number', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const testTick = 12345;
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-500000000000000000',
+          '79228162514264337593543950336',
+          '1000000000000',
+          testTick
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.tick).toBe(testTick);
+        expect(typeof result.tick).toBe('number');
+      });
+
+      it('should correctly extract negative tick', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const testTick = -50000;
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-500000000000000000',
+          '79228162514264337593543950336',
+          '1000000000000',
+          testTick
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.tick).toBe(testTick);
+      });
+
+      it('should return amounts as strings', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-500000000000000000',
+          '79228162514264337593543950336',
+          '1000000000000',
+          0
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(typeof result.amount0).toBe('string');
+        expect(typeof result.amount1).toBe('string');
+        expect(typeof result.sqrtPriceX96).toBe('string');
+        expect(typeof result.liquidity).toBe('string');
+        expect(result.amount0).toBe('1000000');
+        expect(result.amount1).toBe('-500000000000000000');
+      });
+
+      it('should extract sender and recipient addresses', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-500000000000000000',
+          '79228162514264337593543950336',
+          '1000000000000',
+          0
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        // Addresses extracted from topics should be checksummed
+        expect(result.sender).toBe(ethers.utils.getAddress('0x1234567890123456789012345678901234567890'));
+        expect(result.recipient).toBe(ethers.utils.getAddress('0x0987654321098765432109876543210987654321'));
+      });
+
+      it('should handle large sqrtPriceX96 values', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const largeSqrtPrice = '1461446703485210103287273052203988822378723970341';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-500000000000000000',
+          largeSqrtPrice,
+          '1000000000000',
+          887220
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.sqrtPriceX96).toBe(largeSqrtPrice);
+      });
+
+      it('should handle zero tick (price at 1:1)', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1000000',
+          '-1000000',
+          '79228162514264337593543950336', // sqrt(1) << 96
+          '1000000000000',
+          0
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.tick).toBe(0);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw error for null log', () => {
+        expect(() => adapter.parseSwapEvent(null))
+          .toThrow('Log parameter is required');
+      });
+
+      it('should throw error for undefined log', () => {
+        expect(() => adapter.parseSwapEvent(undefined))
+          .toThrow('Log parameter is required');
+      });
+
+      it('should throw error for log without address', () => {
+        expect(() => adapter.parseSwapEvent({ topics: [], data: '0x' }))
+          .toThrow('Log must have address property');
+      });
+
+      it('should throw error for log without topics', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', data: '0x' }))
+          .toThrow('Log must have topics array');
+      });
+
+      it('should throw error for log with non-array topics', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', topics: 'not-array', data: '0x' }))
+          .toThrow('Log must have topics array');
+      });
+
+      it('should throw error for log with fewer than 3 topics', () => {
+        const swapInterface = new ethers.utils.Interface([
+          'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+        ]);
+        const eventTopic = swapInterface.getEventTopic('Swap');
+
+        expect(() => adapter.parseSwapEvent({
+          address: '0x123',
+          topics: [eventTopic, '0x000'],
+          data: '0x'
+        })).toThrow('Log must have at least 3 topics (event signature, sender, recipient)');
+      });
+
+      it('should throw error for log without data', () => {
+        const swapInterface = new ethers.utils.Interface([
+          'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
+        ]);
+        const eventTopic = swapInterface.getEventTopic('Swap');
+        const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+        const recipientTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+
+        expect(() => adapter.parseSwapEvent({
+          address: '0x123',
+          topics: [eventTopic, senderTopic, recipientTopic]
+        })).toThrow('Log must have data property');
+      });
+
+      it('should throw error for wrong event signature', () => {
+        const wrongTopic = ethers.utils.id('Transfer(address,address,uint256)');
+        const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+        const recipientTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+
+        expect(() => adapter.parseSwapEvent({
+          address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
+          topics: [wrongTopic, senderTopic, recipientTopic],
+          data: '0x00'
+        })).toThrow(/Invalid swap event signature/);
+      });
+    });
+
+    describe('Edge Cases', () => {
+      it('should handle maximum positive tick (887272)', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const maxTick = 887272;
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1',
+          '-1',
+          '1461446703485210103287273052203988822378723970341',
+          '1',
+          maxTick
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.tick).toBe(maxTick);
+      });
+
+      it('should handle minimum negative tick (-887272)', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        const minTick = -887272;
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          '1',
+          '-1',
+          '4295128739',
+          '1',
+          minTick
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.tick).toBe(minTick);
+      });
+
+      it('should handle very large amounts', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        // Max int256 is 2^255 - 1, use a large but valid int256 value
+        const largeAmount = '57896044618658097711785492504343953926634992332820282019728792003956564819967';
+        const mockLog = createMockSwapLog(
+          poolAddress,
+          largeAmount,
+          '-1',
+          '79228162514264337593543950336',
+          '1000000000000',
+          0
+        );
+
+        const result = adapter.parseSwapEvent(mockLog);
+
+        expect(result.amount0).toBe(largeAmount);
+      });
+    });
+  });
+
+  describe('evaluatePriceMovement', () => {
+    // Mock token data for testing
+    const mockToken0Data = {
+      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+      symbol: 'USDC',
+      decimals: 6
+    };
+
+    const mockToken1Data = {
+      address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+      symbol: 'WETH',
+      decimals: 18
+    };
+
+    describe('Success Cases', () => {
+      it('should calculate zero price movement when ticks are equal', () => {
+        const swapData = { tick: 100 };
+        const baseline = 100;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.priceMovementPercent).toBe(0);
+        expect(result.direction).toBe('up'); // Equal means 'up' (>= comparison)
+      });
+
+      it('should return price movement as a percentage', () => {
+        const swapData = { tick: 1000 };
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(typeof result.priceMovementPercent).toBe('number');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+
+      it('should return up direction when price increases', () => {
+        // Higher tick = higher price for token0/token1
+        const swapData = { tick: 1000 };
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.direction).toBe('up');
+      });
+
+      it('should return down direction when price decreases', () => {
+        // Lower tick = lower price for token0/token1
+        const swapData = { tick: 0 };
+        const baseline = 1000;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.direction).toBe('down');
+      });
+
+      it('should return baselinePrice and currentPrice as strings', () => {
+        const swapData = { tick: 100 };
+        const baseline = 50;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(typeof result.baselinePrice).toBe('string');
+        expect(typeof result.currentPrice).toBe('string');
+      });
+
+      it('should handle negative ticks', () => {
+        const swapData = { tick: -50000 };
+        const baseline = -45000;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result).toHaveProperty('direction');
+        expect(result.priceMovementPercent).toBeGreaterThanOrEqual(0);
+      });
+
+      it('should calculate absolute percentage (always positive)', () => {
+        const swapDataUp = { tick: 1000 };
+        const swapDataDown = { tick: -1000 };
+        const baseline = 0;
+
+        const resultUp = adapter.evaluatePriceMovement(swapDataUp, baseline, mockToken0Data, mockToken1Data);
+        const resultDown = adapter.evaluatePriceMovement(swapDataDown, baseline, mockToken0Data, mockToken1Data);
+
+        expect(resultUp.priceMovementPercent).toBeGreaterThanOrEqual(0);
+        expect(resultDown.priceMovementPercent).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw error for null swapData', () => {
+        expect(() => adapter.evaluatePriceMovement(null, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw error for undefined swapData', () => {
+        expect(() => adapter.evaluatePriceMovement(undefined, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw error for swapData without tick', () => {
+        expect(() => adapter.evaluatePriceMovement({}, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData must have tick property as a number');
+      });
+
+      it('should throw error for swapData with non-number tick', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: '100' }, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData must have tick property as a number');
+      });
+
+      it('should throw error for null baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, null, mockToken0Data, mockToken1Data))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw error for undefined baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, undefined, mockToken0Data, mockToken1Data))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw error for non-number baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, '100', mockToken0Data, mockToken1Data))
+          .toThrow('baseline must be a number (tick value)');
+      });
+
+      it('should throw error for missing token0Data', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, null, mockToken1Data))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for token0Data missing address', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, { symbol: 'USDC', decimals: 6 }, mockToken1Data))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for missing token1Data', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, null))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for token1Data missing decimals', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, { address: '0x123', symbol: 'WETH' }))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+    });
+
+    describe('Edge Cases', () => {
+      it('should handle maximum tick values', () => {
+        const swapData = { tick: 887272 }; // Max tick
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+
+      it('should handle minimum tick values', () => {
+        const swapData = { tick: -887272 }; // Min tick
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+    });
+  });
+
   describe('_validateSlippageTolerance', () => {
     describe('Success Cases', () => {
       it('should accept boundary minimum (0)', () => {
@@ -5038,6 +5485,111 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('getAccruedFeesUSD', () => {
+    describe('Success Cases', () => {
+      it('should return fee breakdown in USD', async () => {
+        // Get position from test environment using getPositionsForVDS (includes fee fields)
+        const vdsData = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        const positionId = Object.keys(vdsData.positions)[0];
+        const position = vdsData.positions[positionId];
+
+        const tokenPrices = { token0: 1, token1: 1 }; // Simplified prices
+        const result = await adapter.getAccruedFeesUSD(position, tokenPrices, env.provider);
+
+        expect(result).toHaveProperty('totalUSD');
+        expect(result).toHaveProperty('token0Fees');
+        expect(result).toHaveProperty('token1Fees');
+        expect(result).toHaveProperty('token0USD');
+        expect(result).toHaveProperty('token1USD');
+        expect(typeof result.totalUSD).toBe('number');
+        expect(typeof result.token0Fees).toBe('number');
+        expect(typeof result.token1Fees).toBe('number');
+        expect(typeof result.token0USD).toBe('number');
+        expect(typeof result.token1USD).toBe('number');
+        expect(result.totalUSD).toBeGreaterThanOrEqual(0);
+      });
+
+      it('should correctly convert fees to USD using token prices', async () => {
+        // Get position from test environment using getPositionsForVDS (includes fee fields)
+        const vdsData = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        const positionId = Object.keys(vdsData.positions)[0];
+        const position = vdsData.positions[positionId];
+
+        // Use asymmetric prices to verify conversion
+        const tokenPrices = { token0: 100, token1: 1 };
+        const result = await adapter.getAccruedFeesUSD(position, tokenPrices, env.provider);
+
+        // USD values should be: fees * price
+        expect(result.token0USD).toBeCloseTo(result.token0Fees * tokenPrices.token0, 6);
+        expect(result.token1USD).toBeCloseTo(result.token1Fees * tokenPrices.token1, 6);
+        expect(result.totalUSD).toBeCloseTo(result.token0USD + result.token1USD, 6);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw for missing position', async () => {
+        await expect(adapter.getAccruedFeesUSD(null, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required');
+      });
+
+      it('should throw for invalid tokenPrices', async () => {
+        const vdsData = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        const positionId = Object.keys(vdsData.positions)[0];
+        const position = vdsData.positions[positionId];
+
+        await expect(adapter.getAccruedFeesUSD(position, {}, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+
+        await expect(adapter.getAccruedFeesUSD(position, { token0: 1 }, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+
+        await expect(adapter.getAccruedFeesUSD(position, { token0: '1', token1: '1' }, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+      });
+
+      it('should throw for missing provider', async () => {
+        const vdsData = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        const positionId = Object.keys(vdsData.positions)[0];
+        const position = vdsData.positions[positionId];
+
+        await expect(adapter.getAccruedFeesUSD(position, { token0: 1, token1: 1 }, null))
+          .rejects.toThrow('provider is required');
+      });
+
+      it('should throw for position missing fee growth fields', async () => {
+        const position = {
+          id: '123',
+          pool: env.poolData.poolAddress,
+          tickLower: -100,
+          tickUpper: 100,
+          liquidity: '1000000',
+          tokensOwed0: '0',
+          tokensOwed1: '0'
+          // Missing: feeGrowthInside0LastX128, feeGrowthInside1LastX128
+        };
+
+        await expect(adapter.getAccruedFeesUSD(position, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position missing fee growth fields');
+      });
+
+      it('should throw for position missing tokensOwed fields', async () => {
+        const position = {
+          id: '123',
+          pool: env.poolData.poolAddress,
+          tickLower: -100,
+          tickUpper: 100,
+          liquidity: '1000000',
+          feeGrowthInside0LastX128: '0',
+          feeGrowthInside1LastX128: '0'
+          // Missing: tokensOwed0, tokensOwed1
+        };
+
+        await expect(adapter.getAccruedFeesUSD(position, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position missing tokensOwed fields');
+      });
+    });
+  });
+
   describe('getPositionsForVDS', () => {
     describe('Success Cases', () => {
       it('should return normalized positions and static pool data with correct values', async () => {
@@ -5076,8 +5628,21 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof position.lastUpdated).toBe('number');
 
         // Verify only expected fields are present (no extra fields)
-        const expectedFields = ['id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated'];
+        const expectedFields = [
+          'id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated',
+          'feeGrowthInside0LastX128', 'feeGrowthInside1LastX128', 'tokensOwed0', 'tokensOwed1'
+        ];
         expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
+
+        // Verify fee fields are present and have correct types (strings for large numbers)
+        expect(position).toHaveProperty('feeGrowthInside0LastX128');
+        expect(position).toHaveProperty('feeGrowthInside1LastX128');
+        expect(position).toHaveProperty('tokensOwed0');
+        expect(position).toHaveProperty('tokensOwed1');
+        expect(typeof position.feeGrowthInside0LastX128).toBe('string');
+        expect(typeof position.feeGrowthInside1LastX128).toBe('string');
+        expect(typeof position.tokensOwed0).toBe('string');
+        expect(typeof position.tokensOwed1).toBe('string');
 
         // Verify position data values match test environment setup
         expect(position.id).toBe(positionId); // ID should match the key
@@ -6409,6 +6974,109 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result1.inRange).toBe(result2.inRange);
         expect(result1.currentTick).toBe(result2.currentTick);
         expect(result1.centeredness).toBe(result2.centeredness);
+      });
+    });
+
+    describe('with options.swapData (no RPC)', () => {
+      it('should use tick from swapData instead of fetching', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: 0 };  // centered
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.centeredness).toBe(0.5);
+        expect(result.inRange).toBe(true);
+        expect(result.currentTick).toBe(0);
+      });
+
+      it('should not require pool address when swapData is provided', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };  // No pool address
+        const swapData = { tick: 50 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.inRange).toBe(true);
+        expect(result.currentTick).toBe(50);
+      });
+
+      it('should correctly evaluate position at lower edge', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: -100 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.centeredness).toBe(0);
+        expect(result.distanceToLower).toBe(0);
+        expect(result.distanceToUpper).toBe(1);
+        expect(result.inRange).toBe(true);
+      });
+
+      it('should correctly evaluate position at upper edge', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: 100 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.centeredness).toBe(1);
+        expect(result.distanceToLower).toBe(1);
+        expect(result.distanceToUpper).toBe(0);
+        expect(result.inRange).toBe(true);
+      });
+
+      it('should return inRange=false when tick is below range', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: -200 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.inRange).toBe(false);
+        expect(result.centeredness).toBe(0);  // Clamped to 0
+        expect(result.distanceToLower).toBe(0);  // Clamped to 0
+      });
+
+      it('should return inRange=false when tick is above range', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        const swapData = { tick: 200 };
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.inRange).toBe(false);
+        expect(result.centeredness).toBe(1);  // Clamped to 1
+        expect(result.distanceToUpper).toBe(0);  // Clamped to 0
+      });
+
+      it('should handle narrow stablecoin-style range', async () => {
+        // 10 tick range (0.1% price range)
+        const position = { tickLower: 1000, tickUpper: 1010 };
+        const swapData = { tick: 1005 };  // centered
+        const result = await adapter.evaluatePositionRange(position, null, { swapData });
+
+        expect(result.centeredness).toBe(0.5);
+        expect(result.inRange).toBe(true);
+      });
+
+      it('should throw for invalid swapData.tick type', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(adapter.evaluatePositionRange(position, null, { swapData: { tick: 'not a number' } }))
+          .rejects.toThrow('options.swapData must have tick property as a number');
+      });
+
+      it('should throw for NaN swapData.tick', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(adapter.evaluatePositionRange(position, null, { swapData: { tick: NaN } }))
+          .rejects.toThrow('options.swapData.tick must be a finite number');
+      });
+
+      it('should throw for Infinity swapData.tick', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(adapter.evaluatePositionRange(position, null, { swapData: { tick: Infinity } }))
+          .rejects.toThrow('options.swapData.tick must be a finite number');
+      });
+
+      it('should throw for swapData without tick property', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(adapter.evaluatePositionRange(position, null, { swapData: {} }))
+          .rejects.toThrow('options.swapData must have tick property as a number');
+      });
+
+      it('should throw for null swapData when explicitly provided', async () => {
+        const position = { tickLower: -100, tickUpper: 100 };
+        await expect(adapter.evaluatePositionRange(position, null, { swapData: null }))
+          .rejects.toThrow('options.swapData must have tick property as a number');
       });
     });
   });

@@ -11,26 +11,30 @@
  * platform-specific helpers. Update as we build out the automation service.
  *
  * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
- * ---------------------------------------------------------------------------------
- * | Method                       | Used By                            | Status    |
- * |------------------------------|------------------------------------|-----------|
- * | getPositionsForVDS           | VDS.fetchPositions                 | CONFIRMED |
- * | getPoolData                  | VDS.fetchAssetValues               | CONFIRMED |
- * | calculateTokenAmounts        | VDS.fetchAssetValues               | CONFIRMED |
- * | getApprovalTarget(opType)    | Strategy.ensureApprovals           | CONFIRMED |
- * | selectBestPool               | Strategy.initializeVaultStrategy   | CONFIRMED |
- * | getPoolCurrent               | Strategy.initializeVaultStrategy   | CONFIRMED |
- * | parseClosureReceipt          | Strategy.closePositions            | CONFIRMED |
- * | generateRemoveLiquidityData  | Strategy.closePositions            | CONFIRMED |
- * | getAddLiquidityAmounts       | Strategy.addToPosition             | CONFIRMED |
- * | generateAddLiquidityData     | Strategy.addToPosition             | CONFIRMED |
- * | parseSwapReceipt             | Strategy.addToPosition             | CONFIRMED |
- * | parseIncreaseLiquidityReceipt| Strategy.addToPosition             | CONFIRMED |
- * | getBestSwapQuote             | Strategy.addToPosition             | CONFIRMED |
- * | extractPositionBounds        | Strategy.addToPosition             | CONFIRMED |
- * | getPositionRange             | Strategy.createNewPosition         | CONFIRMED |
- * | evaluatePositionRange        | Strategy.analyzePositions          | CONFIRMED |
- * | batchSwapTransactions        | Strategy.prepareTokens             | CONFIRMED |
+ * ----------------------------------------------------------------------------------
+ * | Method                       | Used By                             | Status    |
+ * |------------------------------|-------------------------------------|-----------|
+ * | calculateTokenAmounts        | VDS.fetchAssetValues                | CONFIRMED |
+ * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
+ * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |
+ * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
+ * | selectBestPool               | Strategy.initializeVaultStrategy    | CONFIRMED |
+ * | getPoolCurrent               | Strategy.initializeVaultStrategy    | CONFIRMED |
+ * | parseClosureReceipt          | Strategy.closePositions             | CONFIRMED |
+ * | generateRemoveLiquidityData  | Strategy.closePositions             | CONFIRMED |
+ * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
+ * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.addToPosition              | CONFIRMED |
+ * | parseIncreaseLiquidityReceipt| Strategy.addToPosition              | CONFIRMED |
+ * | getBestSwapQuote             | Strategy.addToPosition              | CONFIRMED |
+ * | extractPositionBounds        | Strategy.addToPosition              | CONFIRMED |
+ * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
+ * | evaluatePositionRange        | Strategy.analyzePositions           | CONFIRMED |
+ * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
+ * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
+ * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |
+ * | evaluatePriceMovement        | Strategy.handleSwapEvent            | CONFIRMED |
+ * | getAccruedFeesUSD            | Strategy.handleSwapEvent            | CONFIRMED |
  *
  * PENDING REVIEW (may be interface or platform-specific):
  * -----------------------------------------------------------------------------
@@ -172,6 +176,55 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Parse a swap event log from the blockchain
+   *
+   * Extracts key data from a platform-specific swap event log, returning
+   * normalized data that can be used for position evaluation and decision making.
+   *
+   * @param {Object} log - Raw blockchain event log
+   * @param {string} log.address - Contract address that emitted the event
+   * @param {Array<string>} log.topics - Array of indexed event topics
+   * @param {string} log.data - ABI-encoded non-indexed event data
+   * @returns {Object} Parsed swap event data
+   * @returns {number} result.tick - Current tick after the swap (for tick-based AMMs)
+   * @returns {string} result.sqrtPriceX96 - Square root price in Q64.96 format (string)
+   * @returns {string} result.liquidity - Pool liquidity at time of swap (string)
+   * @returns {string} result.amount0 - Amount of token0 swapped (signed, string)
+   * @returns {string} result.amount1 - Amount of token1 swapped (signed, string)
+   * @throws {Error} If log is invalid or cannot be parsed
+   */
+  parseSwapEvent(log) {
+    throw new Error("parseSwapEvent must be implemented by subclasses");
+  }
+
+  /**
+   * Evaluate price movement between current swap state and a baseline
+   *
+   * Compares the current pool state (from swap event) against a stored baseline
+   * to calculate the percentage price movement. Used for emergency exit evaluation.
+   *
+   * @param {Object} swapData - Parsed swap event data from parseSwapEvent()
+   * @param {number|string} baseline - Baseline state value (tick for V3, price for others)
+   * @param {Object} token0Data - Token0 data object
+   * @param {string} token0Data.address - Token contract address
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {number} token0Data.decimals - Token decimals
+   * @param {Object} token1Data - Token1 data object
+   * @param {string} token1Data.address - Token contract address
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {number} token1Data.decimals - Token decimals
+   * @returns {Object} Price movement evaluation
+   * @returns {number} result.priceMovementPercent - Absolute percentage price movement
+   * @returns {string} result.baselinePrice - Baseline price as human-readable string
+   * @returns {string} result.currentPrice - Current price as human-readable string
+   * @returns {string} result.direction - 'up' or 'down' indicating price direction
+   * @throws {Error} If swapData or baseline is invalid
+   */
+  evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
+    throw new Error("evaluatePriceMovement must be implemented by subclasses");
+  }
+
+  /**
    * Get positions for the connected user
    * @param {string} address - User's wallet address
    * @param {number} chainId - Chain ID
@@ -204,6 +257,26 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Calculate accrued (uncollected) fees for a position in USD
+   *
+   * High-level method that handles all platform-specific data fetching internally.
+   * Strategy doesn't need to know about ticks, pool data structures, etc.
+   *
+   * @param {Object} position - Position object (with fee growth fields from cache)
+   * @param {Object} tokenPrices - { token0: number, token1: number } USD prices
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<Object>} Accrued fees breakdown
+   * @returns {number} result.totalUSD - Total fees in USD
+   * @returns {number} result.token0Fees - Token0 fees (formatted, not raw)
+   * @returns {number} result.token1Fees - Token1 fees (formatted, not raw)
+   * @returns {number} result.token0USD - Token0 fees in USD
+   * @returns {number} result.token1USD - Token1 fees in USD
+   */
+  async getAccruedFeesUSD(position, tokenPrices, provider) {
+    throw new Error("getAccruedFeesUSD must be implemented by subclasses");
+  }
+
+  /**
    * Generate transaction data for claiming fees from a position
    * @param {Object} params - Parameters for generating claim fees data
    * @returns {Promise<Object>} Transaction data object with `to`, `data`, `value` properties
@@ -230,11 +303,17 @@ export default class PlatformAdapter {
    * Determines if a position is in range and calculates distance metrics.
    * For tick-based AMMs, this checks currentTick against tickLower/tickUpper.
    *
+   * Can be called in two modes:
+   * 1. Without swapData: fetches current state from blockchain via provider (async)
+   * 2. With options.swapData: extracts state from parsed swap event (no RPC call)
+   *
    * @param {Object} position - Position object with range bounds
    * @param {number} position.tickLower - Lower tick bound (for tick-based AMMs)
    * @param {number} position.tickUpper - Upper tick bound (for tick-based AMMs)
-   * @param {string} position.pool - Pool address
-   * @param {Object} provider - Ethers provider instance
+   * @param {string} position.pool - Pool address (required if fetching from blockchain)
+   * @param {Object} provider - Ethers provider instance (can be null if swapData provided)
+   * @param {Object} [options] - Optional parameters
+   * @param {Object} [options.swapData] - Parsed swap event data (skips RPC if provided)
    * @returns {Promise<Object>} Range evaluation result
    * @returns {boolean} result.inRange - Is position currently active/earning fees
    * @returns {number} result.centeredness - Position in range (0-1, 0.5 = centered)
@@ -242,7 +321,7 @@ export default class PlatformAdapter {
    * @returns {number} result.distanceToLower - Distance to lower bound as fraction
    * @returns {number} result.currentTick - Current pool tick value
    */
-  async evaluatePositionRange(position, provider) {
+  async evaluatePositionRange(position, provider, options = {}) {
     throw new Error("evaluatePositionRange must be implemented by subclasses");
   }
 
