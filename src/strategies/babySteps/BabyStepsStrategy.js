@@ -306,12 +306,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         this.log(`  Price moved ${priceMovement.priceMovementPercent.toFixed(2)}% (trigger: ${emergencyExitTrigger}%)`);
         this.log(`  Baseline: ${priceMovement.baselinePrice} → Current: ${priceMovement.currentPrice}`);
 
-        // TODO: await this.executeEmergencyExit(vault, position);
-
-        // Refresh vault data and return early
-        this.swapCountSinceLastFeeCheck[vault.address] = 0;
-        await this.vaultDataService.refreshPositionsAndTokens(vault.address);
-        this.log(`Refreshed vault data for ${vault.address}`);
+        // Blacklist and notify - vault cleanup handled by blacklistVault()
+        await this.executeEmergencyExit(vault, priceMovement);
         return;
       }
     } else {
@@ -379,7 +375,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
         if (feeCollectionNeeded) {
           this.log(`💰 Executing fee collection for vault ${vault.address}`);
-          // TODO: await this.collectFees(vault, position);
+          await this.collectFees(vault, position);
           await this.vaultDataService.refreshPositionsAndTokens(vault.address);
           this.log(`Refreshed vault data for ${vault.address}`);
           return;
@@ -394,6 +390,46 @@ export default class BabyStepsStrategy extends StrategyBase {
     // STEP 6: No action needed
     // -------------------------------------------------------------------------
     this.log(`✅ Position ${position.id} is healthy, no action needed`);
+  }
+
+  // ===========================================================================
+  // Emergency Exit
+  // ===========================================================================
+
+  /**
+   * Execute emergency exit - blacklist vault and notify owner
+   *
+   * When price movement exceeds the emergency exit threshold, we stop automated
+   * management and let the owner decide what to do. We do NOT close positions
+   * or make financial decisions - just blacklist and notify.
+   *
+   * @param {Object} vault - Vault data
+   * @param {Object} priceMovement - Price movement data from adapter.evaluatePriceMovement()
+   * @param {number} priceMovement.priceMovementPercent - Percentage price moved
+   * @param {string} priceMovement.direction - 'up' or 'down'
+   * @param {string} priceMovement.baselinePrice - Baseline price string
+   * @param {string} priceMovement.currentPrice - Current price string
+   */
+  async executeEmergencyExit(vault, priceMovement) {
+    const vaultAddress = vault.address;
+    const trigger = vault.strategy.parameters.emergencyExitTrigger;
+
+    const reason = `Emergency exit: price moved ${priceMovement.priceMovementPercent.toFixed(2)}% ` +
+                   `(threshold: ${trigger}%) - ${priceMovement.direction} from ${priceMovement.baselinePrice} to ${priceMovement.currentPrice}`;
+
+    this.log(`🚨 Executing emergency exit for vault ${vaultAddress}`);
+
+    // Blacklist vault - this handles all cleanup (offboardVault, listeners, caches)
+    await this.automationService.blacklistVault(vaultAddress, reason);
+
+    // Notify owner
+    await this.sendTelegramMessage(
+      `🚨 EMERGENCY EXIT: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}\n` +
+      `Price moved ${priceMovement.priceMovementPercent.toFixed(2)}% ${priceMovement.direction} (threshold: ${trigger}%)\n` +
+      `Vault blacklisted - manual review required.`
+    ).catch(err => console.error('Telegram notification error:', err));
+
+    this.log(`Emergency exit complete for vault ${vaultAddress}`);
   }
 
   // ===========================================================================
@@ -464,6 +500,108 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`Should collect fees: ${shouldCollect}`);
 
     return shouldCollect;
+  }
+
+  /**
+   * Collect fees from a position and distribute to owner
+   *
+   * Generates and executes the collect transaction, parses the receipt,
+   * emits the FeesCollected event, and distributes owner's portion.
+   *
+   * @param {Object} vault - Vault data
+   * @param {Object} position - Position to collect fees from
+   * @returns {Promise<Object>} Collection results
+   */
+  async collectFees(vault, position) {
+    const positionId = position.id;
+
+    // Get pool metadata
+    const poolMetadata = this.poolData[position.pool];
+    if (!poolMetadata) {
+      throw new Error(`UNRECOVERABLE ERROR: Missing pool metadata for position ${positionId}`);
+    }
+
+    // Get adapter
+    const adapter = this.adapters.get(poolMetadata.platform);
+    if (!adapter) {
+      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${poolMetadata.platform}`);
+    }
+
+    // Get token data
+    const token0Data = this.tokens[poolMetadata.token0Symbol];
+    const token1Data = this.tokens[poolMetadata.token1Symbol];
+    if (!token0Data || !token1Data) {
+      throw new Error(`UNRECOVERABLE ERROR: Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
+    }
+
+    // Check if tokens are native ETH (platform-agnostic via token data)
+    const token0IsNative = token0Data.isNative === true;
+    const token1IsNative = token1Data.isNative === true;
+
+    this.log(`Generating claim fees transaction for position ${positionId}`);
+
+    // Generate claim fees transaction
+    const claimFeesData = await retryRpcCall(
+      () => adapter.generateClaimFeesData({
+        positionId,
+        provider: this.provider,
+        walletAddress: vault.address,
+        token0Address: token0Data.address,
+        token1Address: token1Data.address,
+        token0Decimals: token0Data.decimals,
+        token1Decimals: token1Data.decimals,
+        token0IsNative,
+        token1IsNative
+      }),
+      'generateClaimFeesData',
+      { log: (msg) => this.log(msg) }
+    );
+
+    // Execute via vault's collect function
+    const txResult = await this.executeBatchTransactions(
+      vault,
+      [{ to: claimFeesData.to, data: claimFeesData.data, value: claimFeesData.value || 0 }],
+      'fee collection',
+      'collect'
+    );
+
+    // Build position metadata for receipt parsing
+    const positionMetadata = {
+      [positionId]: {
+        token0Data,
+        token1Data
+      }
+    };
+
+    // Parse the collect receipt
+    const { feesByPosition } = adapter.parseCollectReceipt(txResult.receipt, positionMetadata);
+
+    // Log collected amounts
+    if (feesByPosition[positionId]) {
+      const fees = feesByPosition[positionId];
+      this.log(`Collected fees - ${token0Data.symbol}: ${ethers.utils.formatUnits(fees.token0, token0Data.decimals)}, ${token1Data.symbol}: ${ethers.utils.formatUnits(fees.token1, token1Data.decimals)}`);
+    }
+
+    // Aggregate fees (single position but using standard flow)
+    const aggregatedFees = this.aggregateFeesFromPositions(feesByPosition);
+
+    // Emit FeesCollected event
+    await this.emitFeesCollected(
+      vault,
+      aggregatedFees,
+      'swap_threshold',
+      [positionId],
+      txResult.receipt.transactionHash
+    );
+
+    // Distribute owner's portion
+    const distributionResult = await this.distributeFees(vault, aggregatedFees);
+
+    return {
+      receipt: txResult.receipt,
+      feesByPosition,
+      distributionResult
+    };
   }
 
   // ===========================================================================
