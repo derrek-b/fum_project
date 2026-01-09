@@ -3147,6 +3147,22 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
    */
   parseClosureReceipt(receipt, positionMetadata) {
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Validate positionMetadata
+    if (positionMetadata === null || positionMetadata === undefined) {
+      throw new Error("Position metadata parameter is required");
+    }
+    if (typeof positionMetadata !== 'object' || Array.isArray(positionMetadata)) {
+      throw new Error("Position metadata must be an object");
+    }
+
     const principalByPosition = {};
     const feesByPosition = {};
 
@@ -3198,6 +3214,63 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     return { principalByPosition, feesByPosition };
+  }
+
+  /**
+   * Parse fee collection receipt to extract collected fee amounts
+   *
+   * For standalone fee collection (no liquidity decrease), this method parses
+   * the transaction receipt to extract the fee amounts from Collect events.
+   * Unlike parseClosureReceipt where fees = Collect - DecreaseLiquidity,
+   * here the Collect amounts ARE the fees directly.
+   *
+   * @param {Object} receipt - Transaction receipt from collect execution
+   * @param {Object} positionMetadata - Metadata for positions keyed by tokenId
+   *   { [tokenId]: { token0Data, token1Data } }
+   * @returns {Object} Parsed fee data
+   *   { feesByPosition: { [tokenId]: { token0: BigNumber, token1: BigNumber, metadata } } }
+   */
+  parseCollectReceipt(receipt, positionMetadata) {
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Validate positionMetadata
+    if (positionMetadata === null || positionMetadata === undefined) {
+      throw new Error("Position metadata parameter is required");
+    }
+    if (typeof positionMetadata !== 'object' || Array.isArray(positionMetadata)) {
+      throw new Error("Position metadata must be an object");
+    }
+
+    const feesByPosition = {};
+    const collectTopic = this.positionManagerInterface.getEventTopic('Collect');
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics[0] === collectTopic) {
+          const decoded = this.positionManagerInterface.parseLog(log);
+          const tokenId = decoded.args.tokenId.toString();
+
+          if (positionMetadata[tokenId]) {
+            // For standalone collect, amounts ARE the fees
+            feesByPosition[tokenId] = {
+              token0: decoded.args.amount0,
+              token1: decoded.args.amount1,
+              metadata: positionMetadata[tokenId]
+            };
+          }
+        }
+      } catch (e) {
+        // Not a Collect event from this interface, continue
+      }
+    }
+
+    return { feesByPosition };
   }
 
   /**

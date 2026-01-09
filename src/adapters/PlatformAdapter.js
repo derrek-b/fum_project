@@ -21,6 +21,7 @@
  * | selectBestPool               | Strategy.initializeVaultStrategy    | CONFIRMED |
  * | getPoolCurrent               | Strategy.initializeVaultStrategy    | CONFIRMED |
  * | parseClosureReceipt          | Strategy.closePositions             | CONFIRMED |
+ * | parseCollectReceipt          | Strategy.collectFees                | CONFIRMED |
  * | generateRemoveLiquidityData  | Strategy.closePositions             | CONFIRMED |
  * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
  * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
@@ -482,6 +483,24 @@ export default class PlatformAdapter {
    */
   parseClosureReceipt(receipt, positionMetadata) {
     throw new Error("parseClosureReceipt must be implemented by subclasses");
+  }
+
+  /**
+   * Parse fee collection receipt to extract collected fee amounts
+   *
+   * For standalone fee collection (no liquidity decrease), this method parses
+   * the transaction receipt to extract the fee amounts from Collect events.
+   * Unlike parseClosureReceipt where fees = Collect - DecreaseLiquidity,
+   * here the Collect amounts ARE the fees directly.
+   *
+   * @param {Object} receipt - Transaction receipt from collect execution
+   * @param {Object} positionMetadata - Metadata for positions keyed by tokenId
+   *   { [tokenId]: { token0Data, token1Data } }
+   * @returns {Object} Parsed fee data
+   *   { feesByPosition: { [tokenId]: { token0: BigNumber, token1: BigNumber, metadata } } }
+   */
+  parseCollectReceipt(receipt, positionMetadata) {
+    throw new Error("parseCollectReceipt must be implemented by subclasses");
   }
 
   /**

@@ -8206,6 +8206,184 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.feesByPosition).toEqual({});
       });
     });
+
+    describe('Error Cases', () => {
+      it('should throw for null receipt', () => {
+        expect(() => adapter.parseClosureReceipt(null, {})).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', () => {
+        expect(() => adapter.parseClosureReceipt(undefined, {})).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs', () => {
+        expect(() => adapter.parseClosureReceipt({}, {})).toThrow('Receipt must have logs property');
+      });
+
+      it('should throw for null positionMetadata', () => {
+        expect(() => adapter.parseClosureReceipt({ logs: [] }, null)).toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for undefined positionMetadata', () => {
+        expect(() => adapter.parseClosureReceipt({ logs: [] }, undefined)).toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for array positionMetadata', () => {
+        expect(() => adapter.parseClosureReceipt({ logs: [] }, [])).toThrow('Position metadata must be an object');
+      });
+    });
+  });
+
+  describe('parseCollectReceipt', () => {
+    // Helper to create mock Collect event log
+    const createMockCollectLog = (tokenId, amount0, amount1) => {
+      const pmInterface = new ethers.utils.Interface([
+        'event Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)'
+      ]);
+      const eventTopic = pmInterface.getEventTopic('Collect');
+
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['address', 'uint256', 'uint256'],
+        ['0x0000000000000000000000000000000000000001', amount0, amount1]
+      );
+
+      const tokenIdTopic = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
+
+      return {
+        address: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // NFT PM address
+        topics: [eventTopic, tokenIdTopic],
+        data: encodedData
+      };
+    };
+
+    describe('Success Cases', () => {
+      it('should parse single position Collect event', () => {
+        const tokenId = '12345';
+        const mockLog = createMockCollectLog(tokenId, '1000000', '500000000000000000');
+
+        const receipt = { logs: [mockLog] };
+        const positionMetadata = {
+          [tokenId]: {
+            token0Data: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 },
+            token1Data: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18 }
+          }
+        };
+
+        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+
+        expect(result.feesByPosition).toBeDefined();
+        expect(result.feesByPosition[tokenId]).toBeDefined();
+        expect(result.feesByPosition[tokenId].token0.toString()).toBe('1000000');
+        expect(result.feesByPosition[tokenId].token1.toString()).toBe('500000000000000000');
+        expect(result.feesByPosition[tokenId].metadata).toEqual(positionMetadata[tokenId]);
+      });
+
+      it('should handle multiple positions in single receipt', () => {
+        const tokenId1 = '12345';
+        const tokenId2 = '67890';
+        const mockLog1 = createMockCollectLog(tokenId1, '1000000', '500000000000000000');
+        const mockLog2 = createMockCollectLog(tokenId2, '2000000', '1000000000000000000');
+
+        const receipt = { logs: [mockLog1, mockLog2] };
+        const positionMetadata = {
+          [tokenId1]: {
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          },
+          [tokenId2]: {
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+
+        expect(Object.keys(result.feesByPosition)).toHaveLength(2);
+        expect(result.feesByPosition[tokenId1].token0.toString()).toBe('1000000');
+        expect(result.feesByPosition[tokenId2].token0.toString()).toBe('2000000');
+      });
+
+      it('should return empty feesByPosition when no matching tokenIds in metadata', () => {
+        const mockLog = createMockCollectLog('12345', '1000000', '500000000000000000');
+
+        const receipt = { logs: [mockLog] };
+        const positionMetadata = {
+          '999999999': {  // Different from "12345" in the event
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+
+        expect(result.feesByPosition).toEqual({});
+      });
+
+      it('should ignore non-Collect events in receipt', () => {
+        const tokenId = '12345';
+        const mockCollectLog = createMockCollectLog(tokenId, '1000000', '500000000000000000');
+
+        // Create a non-Collect event log (random event)
+        const nonCollectLog = {
+          address: '0x1234567890123456789012345678901234567890',
+          topics: ['0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'],
+          data: '0x'
+        };
+
+        const receipt = { logs: [nonCollectLog, mockCollectLog] };
+        const positionMetadata = {
+          [tokenId]: {
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+
+        expect(Object.keys(result.feesByPosition)).toHaveLength(1);
+        expect(result.feesByPosition[tokenId]).toBeDefined();
+      });
+
+      it('should handle empty receipt logs array', () => {
+        const receipt = { logs: [] };
+        const positionMetadata = {
+          '12345': {
+            token0Data: { symbol: 'USDC' },
+            token1Data: { symbol: 'WETH' }
+          }
+        };
+
+        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+
+        expect(result.feesByPosition).toEqual({});
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw for null receipt', () => {
+        expect(() => adapter.parseCollectReceipt(null, {})).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', () => {
+        expect(() => adapter.parseCollectReceipt(undefined, {})).toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs', () => {
+        expect(() => adapter.parseCollectReceipt({}, {})).toThrow('Receipt must have logs property');
+      });
+
+      it('should throw for null positionMetadata', () => {
+        expect(() => adapter.parseCollectReceipt({ logs: [] }, null)).toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for undefined positionMetadata', () => {
+        expect(() => adapter.parseCollectReceipt({ logs: [] }, undefined)).toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for array positionMetadata', () => {
+        expect(() => adapter.parseCollectReceipt({ logs: [] }, [])).toThrow('Position metadata must be an object');
+      });
+    });
   });
 
   describe('getAddLiquidityQuote', () => {
