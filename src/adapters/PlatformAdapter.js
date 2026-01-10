@@ -30,7 +30,7 @@
  * | getBestSwapQuote             | Strategy.addToPosition              | CONFIRMED |
  * | extractPositionBounds        | Strategy.addToPosition              | CONFIRMED |
  * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
- * | evaluatePositionRange        | Strategy.analyzePositions           | CONFIRMED |
+ * | evaluatePositionRange        | Strategy.evaluateInitialPositions   | CONFIRMED |
  * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
  * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
  * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |

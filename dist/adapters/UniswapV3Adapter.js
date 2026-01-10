@@ -273,8 +273,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * For Uniswap V3, compares current tick from swap event against a baseline tick
    * to calculate percentage price movement. Uses tickToPrice for accurate conversion.
    *
-   * @param {Object} swapData - Parsed swap event data from parseSwapEvent()
-   * @param {number} swapData.tick - Current tick from swap event
+   * @param {Object} currentTickData - Parsed swap event data from parseSwapEvent()
+   * @param {number} currentTickData.tick - Current tick from swap event
    * @param {number} baseline - Baseline tick value (stored when position was entered)
    * @param {Object} token0Data - Token0 data object
    * @param {string} token0Data.address - Token contract address
@@ -289,16 +289,16 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {string} result.baselinePrice - Baseline price as human-readable string
    * @returns {string} result.currentPrice - Current price as human-readable string
    * @returns {string} result.direction - 'up' or 'down' indicating price direction
-   * @throws {Error} If swapData or baseline is invalid
+   * @throws {Error} If currentTickData or baseline is invalid
    */
-  evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
-    // Validate swapData
-    if (!swapData) {
-      throw new Error('swapData parameter is required');
+  evaluatePriceMovement(currentTickData, baseline, token0Data, token1Data) {
+    // Validate currentTickData
+    if (!currentTickData) {
+      throw new Error('currentTickData parameter is required');
     }
 
-    if (typeof swapData.tick !== 'number') {
-      throw new Error('swapData must have tick property as a number');
+    if (typeof currentTickData.tick !== 'number') {
+      throw new Error('currentTickData must have tick property as a number');
     }
 
     // Validate baseline
@@ -319,7 +319,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('token1Data must have address, symbol, and decimals properties');
     }
 
-    const currentTick = swapData.tick;
+    const currentTick = currentTickData.tick;
 
     // Convert ticks to prices using the SDK
     const baselinePrice = this.tickToPrice(baseline, token0Data, token1Data, this.chainId);
@@ -2274,17 +2274,20 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('position missing tokensOwed fields');
     }
 
-    // Fetch pool data with tick info (platform-specific knowledge stays here)
+    // Fetch pool data with tick info and token data (platform-specific knowledge stays here)
     const poolData = await this.getPoolData(position.pool, {
-      includeTicks: [position.tickLower, position.tickUpper]
+      includeTicks: [position.tickLower, position.tickUpper],
+      includeTokens: true
     }, provider);
 
     // Calculate uncollected fees (raw bigint values)
     const [token0FeesRaw, token1FeesRaw] = this.calculateUncollectedFees(position, poolData);
 
-    // Get token decimals from pool data
-    const token0Decimals = poolData.token0?.decimals || 18;
-    const token1Decimals = poolData.token1?.decimals || 18;
+    // Get token decimals from config using addresses
+    const token0Data = getTokenByAddress(poolData.token0, this.chainId);
+    const token1Data = getTokenByAddress(poolData.token1, this.chainId);
+    const token0Decimals = token0Data.decimals;
+    const token1Decimals = token1Data.decimals;
 
     // Format fees
     const token0Fees = Number(token0FeesRaw) / Math.pow(10, token0Decimals);
