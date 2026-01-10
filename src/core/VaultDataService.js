@@ -440,7 +440,7 @@ class VaultDataService {
    * @param {number} [cacheDuration] - Cache duration in ms
    * @returns {Promise<Object>} Asset values
    */
-  async fetchAssetValues(vault, cacheDuration = CACHE_DURATIONS['5-SECONDS']) {
+  async fetchAssetValues(vault, cacheDuration = CACHE_DURATIONS['30-SECONDS']) {
     return retryWithBackoff(
       () => this._fetchAssetValuesInternal(vault, cacheDuration),
       {

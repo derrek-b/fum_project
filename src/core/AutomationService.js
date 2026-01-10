@@ -889,6 +889,31 @@ class AutomationService {
         await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
       }
     });
+
+    // Handle position rebalanced - refresh swap listeners for new pool
+    // After rebalance, the new position might be in a different pool (different fee tier)
+    this.eventManager.subscribe('PositionRebalanced', async (data) => {
+      try {
+        await retryWithBackoff(
+          () => this.eventManager.refreshSwapListeners(
+            data.vaultAddress,
+            this.provider,
+            this.chainId
+          ),
+          {
+            maxRetries: 2,
+            baseDelay: 1000,
+            exponential: true,
+            context: `Refresh swap listeners after rebalance for ${data.vaultAddress}`,
+            logger: console
+          }
+        );
+        this.log(`Refreshed swap listeners for ${data.vaultAddress} after rebalance`);
+      } catch (error) {
+        console.error(`Failed to refresh swap listeners for ${data.vaultAddress}:`, error);
+        await this.trackFailedVault(data.vaultAddress, error, 'listener_refresh');
+      }
+    });
   }
 
   //#endregion
@@ -1050,6 +1075,12 @@ class AutomationService {
    * @param {string} [source='unknown'] - Source of failure (initial_setup, config_update, strategy_param_update, auth_event, retry_attempt, swap_event)
    */
   async trackFailedVault(vaultAddress, error, source = 'unknown') {
+    // Skip if vault is already blacklisted (prevents re-adding to retry queue after emergency exit)
+    if (this.isVaultBlacklisted(vaultAddress)) {
+      this.log(`Skipping trackFailedVault for blacklisted vault ${vaultAddress}`);
+      return;
+    }
+
     const existing = this.failedVaults.get(vaultAddress);
 
     if (existing) {
@@ -1484,12 +1515,12 @@ class AutomationService {
    * Handle swap events from monitored pools
    * @param {Object} data - Swap event data
    * @param {string} data.vaultAddress - Vault address
-   * @param {string} data.poolAddress - Pool where swap occurred
+   * @param {string} data.poolId - Pool where swap occurred
    * @param {string} data.platform - Platform identifier
    * @param {Object} data.log - Raw log from blockchain
    */
   async handleSwapEvent(data) {
-    const { vaultAddress, poolAddress, platform, log } = data;
+    const { vaultAddress, poolId, platform, log } = data;
 
     // Skip if shutting down
     if (this.isShuttingDown) {
@@ -1523,7 +1554,7 @@ class AutomationService {
       }
 
       // Delegate to strategy
-      await strategy.handleSwapEvent(vault, poolAddress, platform, log);
+      await strategy.handleSwapEvent(vault, poolId, platform, log);
 
     } catch (error) {
       console.error(`Error processing swap event for vault ${vaultAddress}:`, error);
@@ -1541,7 +1572,7 @@ class AutomationService {
 
       this.eventManager.emit('SwapEventFailed', {
         vaultAddress,
-        poolAddress,
+        poolId,
         error: error.message,
         recoverable: this.isRecoverableError(error),
         timestamp: Date.now(),
@@ -1581,6 +1612,13 @@ class AutomationService {
       return false;
     }
     this.vaultLocks[normalized] = Date.now();
+    this.log(`Locked vault ${vaultAddress} for exclusive processing`);
+
+    this.eventManager.emit('VaultLocked', {
+      vaultAddress: normalized,
+      timestamp: Date.now()
+    });
+
     return true;
   }
 
@@ -1591,6 +1629,12 @@ class AutomationService {
   unlockVault(vaultAddress) {
     const normalized = ethers.utils.getAddress(vaultAddress);
     delete this.vaultLocks[normalized];
+    this.log(`Unlocked vault ${vaultAddress} after processing`);
+
+    this.eventManager.emit('VaultUnlocked', {
+      vaultAddress: normalized,
+      timestamp: Date.now()
+    });
   }
 
   //#endregion

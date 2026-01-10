@@ -109,6 +109,14 @@ export default class Tracker {
       await this.handleFeesCollected(data);
     });
 
+    this.eventManager.subscribe('FeesDistributed', async (data) => {
+      await this.handleFeesDistributed(data);
+    });
+
+    this.eventManager.subscribe('FeeDistributionFailed', async (data) => {
+      await this.handleFeeDistributionFailed(data);
+    });
+
     this.eventManager.subscribe('PositionRebalanced', async (data) => {
       await this.handlePositionRebalanced(data);
     });
@@ -208,6 +216,7 @@ export default class Tracker {
           cumulativeFeesUSD: 0,
           cumulativeFeesReinvestedUSD: 0,
           cumulativeFeesWithdrawnUSD: 0,
+          cumulativeFeesWithdrawFailedUSD: 0,
           cumulativeGasETH: 0,
           cumulativeGasUSD: 0,
           swapCount: 0,
@@ -219,6 +228,7 @@ export default class Tracker {
           blacklistCount: priorBlacklistCount,
           retryCount: priorRetryCount
         },
+        failedDistributions: [],
         lastSnapshot: {
           value: totalVaultValue,
           timestamp
@@ -272,9 +282,10 @@ export default class Tracker {
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.cumulativeFeesUSD += totalUSD;
 
+      // Track reinvested portion at collection time (stays in vault)
       const reinvestmentRatio = data.reinvestmentRatio ?? 0;
       metadata.aggregates.cumulativeFeesReinvestedUSD += totalUSD * (reinvestmentRatio / 100);
-      metadata.aggregates.cumulativeFeesWithdrawnUSD += totalUSD * ((100 - reinvestmentRatio) / 100);
+      // NOTE: cumulativeFeesWithdrawnUSD updated in handleFeesDistributed on actual distribution
 
       if (data.source === 'explicit_collection') {
         metadata.aggregates.feeCollectionCount += 1;
@@ -289,6 +300,98 @@ export default class Tracker {
         transactionHash,
         timestamp,
         error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle fees distributed event - fees actually sent to owner
+   * @private
+   */
+  async handleFeesDistributed(data) {
+    const { vaultAddress, timestamp } = data;
+
+    if (!this.vaultMetadata.has(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} not tracked yet, skipping distribution event`);
+      return;
+    }
+
+    try {
+      const { distributions, reinvestmentRatio, totalDistributedUSD } = data;
+
+      this.log(`Fees distributed for vault ${vaultAddress}: $${totalDistributedUSD?.toFixed(2) || '0.00'}`);
+
+      await this.appendTransaction(vaultAddress, {
+        type: 'FeesDistributed',
+        vaultAddress,
+        distributions,
+        reinvestmentRatio,
+        totalDistributedUSD,
+        timestamp
+      });
+
+      const metadata = this.vaultMetadata.get(vaultAddress);
+      if (totalDistributedUSD) {
+        metadata.aggregates.cumulativeFeesWithdrawnUSD += totalDistributedUSD;
+      }
+      metadata.metadata.lastUpdated = timestamp;
+
+      await this.saveMetadata(vaultAddress, metadata);
+    } catch (error) {
+      await this.logTrackingError(vaultAddress, {
+        eventType: 'FeesDistributed',
+        timestamp,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle fee distribution failure - fees remain in vault
+   * @private
+   */
+  async handleFeeDistributionFailed(data) {
+    const { vaultAddress, timestamp } = data;
+
+    if (!this.vaultMetadata.has(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} not tracked yet, skipping distribution failure event`);
+      return;
+    }
+
+    try {
+      const { fees, source, error, totalFailedUSD } = data;
+      this.log(`Fee distribution failed for vault ${vaultAddress}: $${totalFailedUSD?.toFixed(2) || '0.00'} - ${error}`);
+
+      await this.appendTransaction(vaultAddress, {
+        type: 'FeeDistributionFailed',
+        vaultAddress,
+        fees,
+        source,
+        error,
+        totalFailedUSD,
+        timestamp
+      });
+
+      // Track failed distribution in metadata for visibility
+      const metadata = this.vaultMetadata.get(vaultAddress);
+      metadata.failedDistributions.push({
+        fees,
+        source,
+        error,
+        totalFailedUSD,
+        timestamp
+      });
+      if (totalFailedUSD) {
+        metadata.aggregates.cumulativeFeesWithdrawFailedUSD += totalFailedUSD;
+      }
+      metadata.metadata.lastUpdated = timestamp;
+
+      await this.saveMetadata(vaultAddress, metadata);
+    } catch (trackError) {
+      await this.logTrackingError(vaultAddress, {
+        eventType: 'FeeDistributionFailed',
+        timestamp,
+        error: trackError.message
       });
     }
   }
@@ -574,6 +677,7 @@ export default class Tracker {
             cumulativeFeesUSD: 0,
             cumulativeFeesReinvestedUSD: 0,
             cumulativeFeesWithdrawnUSD: 0,
+            cumulativeFeesWithdrawFailedUSD: 0,
             cumulativeGasETH: 0,
             cumulativeGasUSD: 0,
             swapCount: 0,
@@ -584,6 +688,7 @@ export default class Tracker {
             trackingErrorCount: 0,
             blacklistCount: 1
           },
+          failedDistributions: [],
           lastSnapshot: null,
           metadata: {
             strategyId: null,
@@ -651,6 +756,7 @@ export default class Tracker {
             cumulativeFeesUSD: 0,
             cumulativeFeesReinvestedUSD: 0,
             cumulativeFeesWithdrawnUSD: 0,
+            cumulativeFeesWithdrawFailedUSD: 0,
             cumulativeGasETH: 0,
             cumulativeGasUSD: 0,
             swapCount: 0,
@@ -662,6 +768,7 @@ export default class Tracker {
             blacklistCount: 0,
             retryCount: 1
           },
+          failedDistributions: [],
           lastSnapshot: null,
           metadata: {
             strategyId: null,

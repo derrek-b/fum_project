@@ -225,7 +225,6 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(bobStrategy.config.id).toBe('bob');
 
       // Strategy-specific caches initialized
-      expect(bobStrategy.lastPositionCheck).toEqual({});
       expect(bobStrategy.registeredListenerKeys).toEqual({});
     });
   });

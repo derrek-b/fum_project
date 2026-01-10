@@ -678,6 +678,55 @@ class EventManager {
   }
 
   /**
+   * Refresh swap event listeners for a vault after position changes
+   *
+   * Called after rebalance to ensure the vault is listening to the correct pool.
+   * The new position might be in a different pool (e.g., different fee tier).
+   *
+   * @param {string} vaultAddress - Vault address
+   * @param {Object} provider - Ethers provider
+   * @param {number} chainId - Chain ID
+   */
+  async refreshSwapListeners(vaultAddress, provider, chainId) {
+    this.log(`Refreshing swap listeners for vault ${vaultAddress}`);
+
+    // Step 1: Remove vault from all pool mappings and clean up unused listeners
+    for (const [poolAddress, vaults] of Object.entries(this.poolToVaults)) {
+      const index = vaults.indexOf(vaultAddress);
+      if (index > -1) {
+        vaults.splice(index, 1);
+        this.log(`Removed vault ${vaultAddress} from pool ${poolAddress}`);
+
+        // Clean up empty pool listeners
+        if (vaults.length === 0) {
+          const platform = this.poolData[poolAddress]?.platform;
+          const listenerKey = this.generateListenerKey({
+            id: poolAddress,
+            eventType: 'swap',
+            chainId,
+            additionalId: platform
+          });
+
+          if (this.hasListener(listenerKey)) {
+            await this.removeListener(listenerKey);
+            delete this.poolToVaults[poolAddress];
+            this.log(`Removed pool listener for ${poolAddress} (no vaults remain)`);
+          }
+        }
+      }
+    }
+
+    // Step 2: Get fresh vault data and re-subscribe to swap events
+    const vault = await this.vaultDataService.getVault(vaultAddress);
+    if (vault && Object.keys(vault.positions || {}).length > 0) {
+      await this.subscribeToSwapEvents(vault, provider, chainId);
+      this.log(`Refreshed swap listeners for vault ${vaultAddress}`);
+    } else {
+      this.log(`No positions for vault ${vaultAddress} - no swap listeners added`);
+    }
+  }
+
+  /**
    * Subscribe to vault configuration change events
    * @param {Object} vault - Vault object
    * @param {Object} provider - Ethers provider
