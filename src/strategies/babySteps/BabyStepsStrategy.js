@@ -2675,12 +2675,11 @@ export default class BabyStepsStrategy extends StrategyBase {
       delete this.swapCountSinceLastFeeCheck[vaultAddress];
     }
 
-    // Emit event with position check cleanup details
+    // Emit cleanup event
     this.eventManager.emit('VaultPositionChecksCleared', {
       vaultAddress,
-      removedCheckCount,
       log: {
-        message: `Baby Steps cleanup for vault ${vaultAddress} - Cleared ${removedCheckCount} position check timestamps`,
+        message: `Baby Steps cleanup for vault ${vaultAddress}`,
         level: 'info'
       }
     });

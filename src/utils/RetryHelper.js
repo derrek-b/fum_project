@@ -9,6 +9,12 @@
  * @returns {boolean} True if this specific error is retryable
  */
 function checkSingleError(error) {
+  // Never retry errors explicitly marked as unrecoverable
+  const errorMessage = error.message || '';
+  if (errorMessage.startsWith('UNRECOVERABLE ERROR:')) {
+    return false;
+  }
+
   // Network and timeout errors
   const retryableCodes = [
     'NETWORK_ERROR',
@@ -45,8 +51,8 @@ function checkSingleError(error) {
   }
 
   // Check error message patterns
-  const errorMessage = error.message?.toLowerCase() || '';
-  return retryableMessages.some(pattern => errorMessage.includes(pattern.toLowerCase()));
+  const lowerMessage = errorMessage.toLowerCase();
+  return retryableMessages.some(pattern => lowerMessage.includes(pattern.toLowerCase()));
 }
 
 /**

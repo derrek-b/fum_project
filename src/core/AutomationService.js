@@ -70,6 +70,7 @@ class AutomationService {
     this.vaultLocks = {};
     this.failedVaults = new Map();
     this.blacklistedVaults = new Map();
+    this.vaultTripHistory = new Map(); // Track retry trips: { trips: [{timestamp, source}], firstTripAt }
 
     // Core dependencies
     this.eventManager = new EventManager();
@@ -795,8 +796,10 @@ class AutomationService {
       }
 
       // Clear from retry queue if present (fresh authorization attempt)
-      if (this.failedVaults.has(vaultAddress.toLowerCase())) {
-        this.failedVaults.delete(vaultAddress.toLowerCase());
+      // Note: failedVaults uses checksummed addresses as keys
+      const normalizedVaultAddress = ethers.utils.getAddress(vaultAddress);
+      if (this.failedVaults.has(normalizedVaultAddress)) {
+        this.failedVaults.delete(normalizedVaultAddress);
         this.log(`Cleared ${vaultAddress} from retry queue for fresh authorization`);
       }
 
@@ -914,6 +917,26 @@ class AutomationService {
         await this.trackFailedVault(data.vaultAddress, error, 'listener_refresh');
       }
     });
+
+    // Handle unrecoverable vault errors - immediate blacklist
+    this.eventManager.subscribe('VaultUnrecoverable', async (data) => {
+      const { vaultAddress, reason, details } = data;
+
+      this.log(`🚨 VaultUnrecoverable received for ${vaultAddress}: ${reason}`);
+
+      // Immediate blacklist - no retry for unrecoverable errors
+      await this.blacklistVault(vaultAddress, reason);
+
+      // Clean up trip history
+      this.vaultTripHistory.delete(vaultAddress);
+
+      // Send urgent notification
+      this.sendTelegramMessage(
+        `🚨 VAULT UNRECOVERABLE: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}\n` +
+        `Reason: ${reason}\n` +
+        `Details: ${JSON.stringify(details || {}).slice(0, 100)}`
+      ).catch(console.error);
+    });
   }
 
   //#endregion
@@ -950,6 +973,19 @@ class AutomationService {
     this.log(`Retrying ${this.failedVaults.size} failed vault(s)...`);
 
     const now = Date.now();
+    const DECAY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Check for trip history decay (no trips in 24 hours = reset)
+    for (const [vaultAddress, history] of this.vaultTripHistory.entries()) {
+      // If vault is not in failedVaults and last trip was > 24h ago, clear history
+      if (!this.failedVaults.has(vaultAddress)) {
+        const lastTrip = history.trips[history.trips.length - 1];
+        if (lastTrip && (now - lastTrip.timestamp) > DECAY_WINDOW_MS) {
+          this.log(`🔄 Vault ${vaultAddress} trip history decayed (no trips in 24h)`);
+          this.vaultTripHistory.delete(vaultAddress);
+        }
+      }
+    }
 
     for (const [vaultAddress, failureData] of this.failedVaults.entries()) {
       // Check if max failure duration exceeded
@@ -958,6 +994,13 @@ class AutomationService {
         this.log(`Vault ${vaultAddress} exceeded max failure duration, blacklisting`);
         this.blacklistVault(vaultAddress, failureData.lastError);
         this.failedVaults.delete(vaultAddress);
+        this.vaultTripHistory.delete(vaultAddress); // Clean up trip history
+        continue;
+      }
+
+      // Acquire vault lock - skip if already locked (concurrent retry or swap processing)
+      if (!this.lockVault(vaultAddress)) {
+        this.log(`Vault ${vaultAddress} locked, skipping retry this cycle`);
         continue;
       }
 
@@ -972,8 +1015,18 @@ class AutomationService {
           log: { level: 'info', message: `Vault ${vaultAddress} recovered from retry queue` }
         });
       } catch (error) {
-        // trackFailedVault updates attempt count and lastError
-        await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
+        if (this.isRecoverableError(error)) {
+          // Recoverable: trackFailedVault updates attempt count and lastError
+          await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
+        } else {
+          // Unrecoverable: blacklist immediately and remove from retry queue
+          this.failedVaults.delete(vaultAddress);
+          this.vaultTripHistory.delete(vaultAddress);
+          await this.blacklistVault(vaultAddress, error.message);
+          this.log(`Vault ${vaultAddress} blacklisted during retry due to unrecoverable error: ${error.message}`);
+        }
+      } finally {
+        this.unlockVault(vaultAddress);
       }
     }
   }
@@ -1057,8 +1110,9 @@ class AutomationService {
     }
 
     // 3. Remove from retry queue if present
-    if (this.failedVaults.has(normalizedAddress.toLowerCase())) {
-      this.failedVaults.delete(normalizedAddress.toLowerCase());
+    // Note: failedVaults uses checksummed addresses as keys (via trackFailedVault)
+    if (this.failedVaults.has(normalizedAddress)) {
+      this.failedVaults.delete(normalizedAddress);
       results.removedFromRetryQueue = true;
     }
 
@@ -1089,6 +1143,17 @@ class AutomationService {
       existing.lastAttemptAt = Date.now();
       existing.source = source;
     } else {
+      // Record trip and check for excessive trips (yo-yo detection)
+      const shouldBlacklist = this.recordRetryTrip(vaultAddress, source);
+      if (shouldBlacklist) {
+        await this.blacklistVault(
+          vaultAddress,
+          `Exceeded retry trip limit: ${this.vaultTripHistory.get(vaultAddress)?.trips.length || 0} trips in 24 hours`
+        );
+        this.vaultTripHistory.delete(vaultAddress);
+        return; // Don't emit VaultFailed, we're blacklisting
+      }
+
       this.failedVaults.set(vaultAddress, {
         vaultAddress,
         firstFailedAt: Date.now(),
@@ -1112,6 +1177,54 @@ class AutomationService {
         message: `Vault ${vaultAddress} failed (${source}): ${error}`
       }
     });
+  }
+
+  /**
+   * Record a trip to the retry queue and check for excessive trips
+   * @param {string} vaultAddress - Vault address
+   * @param {string} source - Failure source
+   * @returns {boolean} True if vault should be blacklisted due to excessive trips
+   */
+  recordRetryTrip(vaultAddress, source) {
+    const TRIP_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const MAX_TRIPS_IN_WINDOW = 5;
+
+    const now = Date.now();
+
+    // Get or create trip history
+    let history = this.vaultTripHistory.get(vaultAddress);
+    if (!history) {
+      history = { trips: [], firstTripAt: now };
+      this.vaultTripHistory.set(vaultAddress, history);
+    }
+
+    // Add this trip
+    history.trips.push({ timestamp: now, source });
+
+    // Filter to only trips within the window
+    const windowStart = now - TRIP_WINDOW_MS;
+    history.trips = history.trips.filter(trip => trip.timestamp > windowStart);
+
+    // Emit monitoring event
+    this.eventManager.emit('VaultRetryTrip', {
+      vaultAddress,
+      source,
+      tripCount: history.trips.length,
+      tripsInWindow: history.trips.length,
+      timestamp: now,
+      log: {
+        level: history.trips.length >= 3 ? 'warn' : 'info',
+        message: `🔄 Vault ${vaultAddress} trip #${history.trips.length} (source: ${source})`
+      }
+    });
+
+    // Check if exceeds threshold
+    if (history.trips.length >= MAX_TRIPS_IN_WINDOW) {
+      this.log(`🔄 Vault ${vaultAddress} exceeded ${MAX_TRIPS_IN_WINDOW} retry trips in 24h - blacklisting`);
+      return true; // Should blacklist
+    }
+
+    return false;
   }
 
   //#endregion
@@ -1301,7 +1414,14 @@ class AutomationService {
       } catch (error) {
         console.error(`Failed to setup vault ${vaultAddress}:`, error.message);
         results.failed.push({ vaultAddress, error: error.message });
-        await this.trackFailedVault(vaultAddress, error.message, 'initial_setup');
+
+        // Check if error is recoverable - blacklist immediately for unrecoverable errors
+        if (this.isRecoverableError(error)) {
+          await this.trackFailedVault(vaultAddress, error.message, 'initial_setup');
+        } else {
+          this.log(`Unrecoverable error during initial setup - blacklisting ${vaultAddress}`);
+          await this.blacklistVault(vaultAddress, error.message);
+        }
       }
     }
 

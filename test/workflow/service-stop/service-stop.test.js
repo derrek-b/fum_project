@@ -157,7 +157,6 @@ describe('Service Stop Workflow', () => {
     expect(vaultPositionChecksClearedEvents.length).toBe(1);
     const positionChecksClearedEvent = vaultPositionChecksClearedEvents[0];
     expect(positionChecksClearedEvent.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
-    expect(typeof positionChecksClearedEvent.removedCheckCount).toBe('number');
 
     console.log('VaultPositionChecksCleared event verified');
 
