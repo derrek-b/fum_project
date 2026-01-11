@@ -470,9 +470,6 @@ class AutomationService {
     // Stop heartbeat during reconnection
     this.stopHeartbeat();
 
-    // Pause event processing
-    this.eventManager.setEnabled(false);
-
     while (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectBaseDelay * Math.pow(2, this.reconnectAttempts - 1);
@@ -511,10 +508,6 @@ class AutomationService {
         }
 
         this.log(`Reconnected to chain ${network.chainId}`);
-
-        // IMPORTANT: Re-enable event processing BEFORE re-subscribing
-        // registerFilterListener() returns early when enabled=false
-        this.eventManager.setEnabled(true);
 
         // Re-establish all event listeners
         await this.reestablishEventListeners();
@@ -768,14 +761,28 @@ class AutomationService {
 
     // Handle config update failures from EventManager
     this.eventManager.subscribe('ConfigUpdateFailed', async (data) => {
-      this.log(`Config update failed for vault ${data.vaultAddress}: ${data.configType}`);
-      await this.trackFailedVault(data.vaultAddress, data.error, 'config_update');
+      try {
+        this.log(`Config update failed for vault ${data.vaultAddress}: ${data.configType}`);
+        await this.trackFailedVault(data.vaultAddress, data.error, 'config_update');
+      } catch (handlerError) {
+        // Handler failure means vault isn't in retry queue but has stale config
+        // Blacklist to stop operating on outdated data - re-auth will clear it
+        console.error(`ConfigUpdateFailed handler error for ${data.vaultAddress}:`, handlerError.message);
+        await this.emergencyVaultCleanup(data.vaultAddress, `ConfigUpdateFailed handler error: ${handlerError.message}`);
+      }
     });
 
     // Handle strategy parameter update failures from EventManager
     this.eventManager.subscribe('StrategyParameterUpdateFailed', async (data) => {
-      this.log(`Strategy parameter update failed for vault ${data.vaultAddress}`);
-      await this.trackFailedVault(data.vaultAddress, data.error, 'strategy_param_update');
+      try {
+        this.log(`Strategy parameter update failed for vault ${data.vaultAddress}`);
+        await this.trackFailedVault(data.vaultAddress, data.error, 'strategy_param_update');
+      } catch (handlerError) {
+        // Handler failure means vault isn't in retry queue but has stale parameters
+        // Blacklist to stop operating on outdated data - re-auth will clear it
+        console.error(`StrategyParameterUpdateFailed handler error for ${data.vaultAddress}:`, handlerError.message);
+        await this.emergencyVaultCleanup(data.vaultAddress, `StrategyParameterUpdateFailed handler error: ${handlerError.message}`);
+      }
     });
 
     // Handle new vault authorization - setup the vault for monitoring
@@ -876,20 +883,27 @@ class AutomationService {
 
     // Handle ExecutorChanged event processing failures
     this.eventManager.subscribe('VaultAuthEventFailed', async (data) => {
-      const { vaultAddress, error } = data;
-      const isManaged = this.vaultDataService.hasVault(vaultAddress);
+      try {
+        const { vaultAddress, error } = data;
+        const isManaged = this.vaultDataService.hasVault(vaultAddress);
 
-      if (isManaged) {
-        // User was trying to DISABLE automation but event processing failed
-        // Blacklist to ensure we don't act on a vault that may have revoked us
-        // Note: blacklistVault() handles listener cleanup internally
-        this.log(`VaultAuthEventFailed for managed vault ${vaultAddress} - blacklisting for safety`);
-        await this.blacklistVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`);
-      } else {
-        // User was trying to ENABLE automation but event processing failed
-        // Track for retry - the retry system will attempt to set up the vault
-        this.log(`VaultAuthEventFailed for unmanaged vault ${vaultAddress} - tracking for retry`);
-        await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
+        if (isManaged) {
+          // User was trying to DISABLE automation but event processing failed
+          // Blacklist to ensure we don't act on a vault that may have revoked us
+          // Note: blacklistVault() handles listener cleanup internally
+          this.log(`VaultAuthEventFailed for managed vault ${vaultAddress} - blacklisting for safety`);
+          await this.blacklistVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`);
+        } else {
+          // User was trying to ENABLE automation but event processing failed
+          // Track for retry - the retry system will attempt to set up the vault
+          this.log(`VaultAuthEventFailed for unmanaged vault ${vaultAddress} - tracking for retry`);
+          await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
+        }
+      } catch (handlerError) {
+        // Handler failure means we couldn't blacklist or track the vault
+        // Emergency cleanup to prevent acting on a vault with unknown auth state
+        console.error(`VaultAuthEventFailed handler error for ${data.vaultAddress}:`, handlerError.message);
+        await this.emergencyVaultCleanup(data.vaultAddress, `VaultAuthEventFailed handler error: ${handlerError.message}`);
       }
     });
 
@@ -918,25 +932,6 @@ class AutomationService {
       }
     });
 
-    // Handle unrecoverable vault errors - immediate blacklist
-    this.eventManager.subscribe('VaultUnrecoverable', async (data) => {
-      const { vaultAddress, reason, details } = data;
-
-      this.log(`🚨 VaultUnrecoverable received for ${vaultAddress}: ${reason}`);
-
-      // Immediate blacklist - no retry for unrecoverable errors
-      await this.blacklistVault(vaultAddress, reason);
-
-      // Clean up trip history
-      this.vaultTripHistory.delete(vaultAddress);
-
-      // Send urgent notification
-      this.sendTelegramMessage(
-        `🚨 VAULT UNRECOVERABLE: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}\n` +
-        `Reason: ${reason}\n` +
-        `Details: ${JSON.stringify(details || {}).slice(0, 100)}`
-      ).catch(console.error);
-    });
   }
 
   //#endregion
@@ -973,26 +968,13 @@ class AutomationService {
     this.log(`Retrying ${this.failedVaults.size} failed vault(s)...`);
 
     const now = Date.now();
-    const DECAY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-    // Check for trip history decay (no trips in 24 hours = reset)
-    for (const [vaultAddress, history] of this.vaultTripHistory.entries()) {
-      // If vault is not in failedVaults and last trip was > 24h ago, clear history
-      if (!this.failedVaults.has(vaultAddress)) {
-        const lastTrip = history.trips[history.trips.length - 1];
-        if (lastTrip && (now - lastTrip.timestamp) > DECAY_WINDOW_MS) {
-          this.log(`🔄 Vault ${vaultAddress} trip history decayed (no trips in 24h)`);
-          this.vaultTripHistory.delete(vaultAddress);
-        }
-      }
-    }
 
     for (const [vaultAddress, failureData] of this.failedVaults.entries()) {
       // Check if max failure duration exceeded
       const failureDuration = now - failureData.firstFailedAt;
       if (failureDuration > this.maxFailureDurationMs) {
         this.log(`Vault ${vaultAddress} exceeded max failure duration, blacklisting`);
-        this.blacklistVault(vaultAddress, failureData.lastError);
+        await this.blacklistVault(vaultAddress, failureData.lastError);
         this.failedVaults.delete(vaultAddress);
         this.vaultTripHistory.delete(vaultAddress); // Clean up trip history
         continue;
@@ -1084,10 +1066,92 @@ class AutomationService {
   }
 
   /**
+   * Emergency cleanup when event handlers fail - last resort to stop operating on a vault
+   * Attempts each cleanup step independently, continuing even if individual steps fail.
+   * Used when normal error handling (trackFailedVault/blacklistVault) has already failed.
+   * @param {string} vaultAddress - Vault address
+   * @param {string} reason - Reason for emergency cleanup
+   */
+  async emergencyVaultCleanup(vaultAddress, reason) {
+    console.error(`🚨 Emergency vault cleanup for ${vaultAddress}: ${reason}`);
+
+    const results = {
+      listenersRemoved: false,
+      removedFromCache: false,
+      blacklisted: false,
+      lockReleased: false,
+      errors: []
+    };
+
+    // Step 1: Remove listeners to stop receiving events
+    try {
+      await this.eventManager.removeAllVaultListeners(vaultAddress);
+      results.listenersRemoved = true;
+    } catch (error) {
+      results.errors.push(`Listener removal failed: ${error.message}`);
+    }
+
+    // Step 2: Remove from cache to prevent stale data operations
+    try {
+      this.vaultDataService.removeVault(vaultAddress);
+      results.removedFromCache = true;
+    } catch (error) {
+      results.errors.push(`Cache removal failed: ${error.message}`);
+    }
+
+    // Step 3: Blacklist to prevent future operations (re-auth will clear it)
+    try {
+      // Direct blacklist without full offboard (we already did cleanup above)
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+      this.blacklistedVaults.set(normalizedAddress, {
+        vaultAddress: normalizedAddress,
+        blacklistedAt: Date.now(),
+        reason: `EMERGENCY: ${reason}`
+      });
+      await this.saveBlacklist();
+      results.blacklisted = true;
+    } catch (error) {
+      results.errors.push(`Blacklist failed: ${error.message}`);
+    }
+
+    // Step 4: Release any lock (defensive - in case vault was locked during concurrent operation)
+    try {
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+      if (this.vaultLocks[normalizedAddress]) {
+        this.unlockVault(normalizedAddress);
+        results.lockReleased = true;
+      }
+    } catch (error) {
+      results.errors.push(`Lock release failed: ${error.message}`);
+    }
+
+    // Log final status
+    if (results.errors.length === 0) {
+      console.error(`🚨 Emergency cleanup complete for ${vaultAddress}: all steps succeeded`);
+    } else {
+      console.error(`🚨 Emergency cleanup partial for ${vaultAddress}: ${results.errors.join('; ')}`);
+    }
+
+    // Emit event for visibility (SSE broadcast, tracking)
+    this.eventManager.emit('VaultBlacklisted', {
+      vaultAddress,
+      reason: `EMERGENCY: ${reason}`,
+      emergency: true,
+      cleanupResults: results,
+      log: {
+        level: 'error',
+        message: `Emergency blacklist: ${vaultAddress} - ${reason}`
+      }
+    });
+
+    return results;
+  }
+
+  /**
    * Fully remove a vault from the service (cleanup + cache removal)
    * Use for permanent removal scenarios: blacklisting, authorization revoked
    * @param {string} vaultAddress - Vault address
-   * @returns {Object} Results of offboarding operations
+   * @returns {Promise<Object>} Results of offboarding operations
    */
   async offboardVault(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
@@ -1198,12 +1262,17 @@ class AutomationService {
       this.vaultTripHistory.set(vaultAddress, history);
     }
 
-    // Add this trip
-    history.trips.push({ timestamp: now, source });
-
-    // Filter to only trips within the window
+    // Prune trips older than 24h (lazy decay - happens when vault fails again)
     const windowStart = now - TRIP_WINDOW_MS;
     history.trips = history.trips.filter(trip => trip.timestamp > windowStart);
+
+    // If all old trips were pruned, this is effectively a fresh start
+    if (history.trips.length === 0) {
+      history.firstTripAt = now;
+    }
+
+    // Add this trip
+    history.trips.push({ timestamp: now, source });
 
     // Emit monitoring event
     this.eventManager.emit('VaultRetryTrip', {

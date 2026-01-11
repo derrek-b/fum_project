@@ -63,7 +63,6 @@ export default class SSEBroadcaster {
       'MonitoringStarted',
       'VaultFailed',
       'VaultRecovered',
-      'VaultUnrecoverable',
       'VaultBlacklisted',
       'VaultUnblacklisted',
       'FeeCollectionFailed',

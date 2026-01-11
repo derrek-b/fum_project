@@ -3,7 +3,8 @@
  *
  * Tests:
  * 1. Swap listeners registered after service initialization
- * 2. Concurrent swap processing prevented by vault locking
+ * 2. Sequential swap events process correctly with balanced lock/unlock
+ * 3. Concurrent swap events - second event skipped when vault already locked
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -205,4 +206,104 @@ describe('Swap Event Detection', () => {
 
     console.log(`Concurrency test passed: ${vaultLockEvents.length} lock/unlock cycles`);
   }, 60000);
+
+  it('should skip second swap event when vault is locked by first', async () => {
+    // This test verifies that when a vault is already locked (being processed),
+    // a second swap event for the same vault is skipped rather than queued or processed
+
+    const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+
+    // Track events
+    const swapEventsReceived = [];
+    const skippedLogs = [];
+
+    // Spy on service.log to capture "locked, skipping" messages
+    const originalLog = service.log.bind(service);
+    vi.spyOn(service, 'log').mockImplementation((msg) => {
+      if (msg.includes('locked, skipping')) {
+        skippedLogs.push(msg);
+      }
+      originalLog(msg);
+    });
+
+    service.eventManager.subscribe('SwapEventDetected', (data) => {
+      if (data.vaultAddress === testVault.vaultAddress) {
+        swapEventsReceived.push(data);
+      }
+    });
+
+    // Get vault data for pool info
+    const vaultData = await service.vaultDataService.getVault(testVault.vaultAddress);
+    const position = Object.values(vaultData.positions)[0];
+    const poolAddress = position.pool;
+
+    // Step 1: Manually lock the vault (simulating first event being processed)
+    console.log('Manually locking vault to simulate in-progress processing...');
+    const lockAcquired = service.lockVault(normalizedAddress);
+    expect(lockAcquired).toBe(true);
+    expect(service.vaultLocks[normalizedAddress]).toBeDefined();
+
+    // Step 2: Emit a SwapEventDetected event while vault is locked
+    console.log('Emitting SwapEventDetected while vault is locked...');
+    service.eventManager.emit('SwapEventDetected', {
+      vaultAddress: testVault.vaultAddress,
+      poolAddress: poolAddress,
+      poolId: poolAddress,
+      platform: 'uniswapV3',
+      log: { blockNumber: 12345, transactionHash: '0xtest' }
+    });
+
+    // Give time for the event to be processed (or skipped)
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Step 3: Verify the event was skipped
+    expect(skippedLogs.length).toBe(1);
+    expect(skippedLogs[0]).toContain(testVault.vaultAddress);
+    expect(skippedLogs[0]).toContain('locked, skipping');
+    console.log(`Verified: swap event was skipped - "${skippedLogs[0]}"`);
+
+    // Step 4: Unlock the vault
+    service.unlockVault(normalizedAddress);
+    expect(service.vaultLocks[normalizedAddress]).toBeUndefined();
+
+    // Step 5: Emit another event - this one should process (acquire lock)
+    console.log('Emitting SwapEventDetected after vault is unlocked...');
+    const lockEventsAfterUnlock = [];
+    service.eventManager.subscribe('VaultLocked', (data) => {
+      if (data.vaultAddress === normalizedAddress) {
+        lockEventsAfterUnlock.push(data);
+      }
+    });
+
+    service.eventManager.emit('SwapEventDetected', {
+      vaultAddress: testVault.vaultAddress,
+      poolAddress: poolAddress,
+      poolId: poolAddress,
+      platform: 'uniswapV3',
+      log: { blockNumber: 12346, transactionHash: '0xtest2' }
+    });
+
+    // Wait for processing to complete
+    await waitForCondition(
+      () => lockEventsAfterUnlock.length > 0,
+      10000,
+      100
+    );
+
+    // This event should have acquired the lock (not skipped)
+    expect(lockEventsAfterUnlock.length).toBe(1);
+    console.log('Verified: swap event processed after unlock');
+
+    // Wait for unlock
+    await waitForCondition(
+      () => !service.vaultLocks[normalizedAddress],
+      10000,
+      100
+    );
+
+    // Restore mock
+    vi.restoreAllMocks();
+
+    console.log('Concurrent lock test passed');
+  }, 30000);
 });

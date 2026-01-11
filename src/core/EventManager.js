@@ -94,7 +94,7 @@ class EventManager {
    * @param {...any} args - Arguments to pass to handlers
    */
   emit(event, ...args) {
-    // Skip event processing if system is disabled
+    // Skip event processing if system is disabled (only during shutdown)
     if (!this.enabled) {
       this.log(`Event emission skipped (disabled): ${event}`);
       return;

@@ -503,4 +503,141 @@ describe('Blacklist Management', () => {
       console.log(`🔍 Vault offboarded after revocation: ${offboardEvent !== undefined}`);
     }, 60000);
   });
+
+  // ==========================================================================
+  // BLACKLIST PERSISTENCE TESTS
+  // ==========================================================================
+  describe('Blacklist Persistence', () => {
+
+    // ------------------------------------------------------------------------
+    // Test 6: Blacklist persists across service restart
+    // ------------------------------------------------------------------------
+    it('should skip blacklisted vaults on service restart', async () => {
+      const { service: svc1, blacklistPath } = await createTestService(3310);
+      const events1 = setupEventTracking(svc1);
+      service = svc1; // For afterEach cleanup
+
+      // Mock getVault to fail with UNRECOVERABLE ERROR
+      vi.spyOn(svc1.vaultDataService, 'getVault').mockImplementation(async (addr) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          throw new Error('UNRECOVERABLE ERROR: Strategy bob not found');
+        }
+        return null;
+      });
+
+      // Start first service → vault gets blacklisted
+      console.log('=== First service: Blacklisting vault ===');
+      await svc1.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verify vault is blacklisted
+      expect(svc1.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault blacklisted in first service: ${svc1.isVaultBlacklisted(testVault.vaultAddress)}`);
+
+      // Verify blacklist file was written
+      const blacklistData = JSON.parse(await fs.readFile(blacklistPath, 'utf-8'));
+      const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+      expect(blacklistData[normalizedAddress]).toBeDefined();
+      console.log(`🔍 Blacklist file contains vault: ${blacklistData[normalizedAddress] !== undefined}`);
+
+      // Record the blacklist reason for later comparison
+      const originalReason = blacklistData[normalizedAddress].reason;
+      const originalTimestamp = blacklistData[normalizedAddress].blacklistedAt;
+      console.log(`🔍 Original reason: ${originalReason}`);
+
+      // Stop first service
+      console.log('Stopping first service...');
+      await svc1.stop();
+      vi.restoreAllMocks();
+
+      // Create second service with SAME blacklist file path
+      console.log('\n=== Second service: Verifying persistence ===');
+      const svc2 = new AutomationService({
+        automationServiceAddress: testConfig.automationServiceAddress,
+        chainId: 1337,
+        wsUrl: testConfig.wsUrl,
+        blacklistFilePath: blacklistPath,  // Same file!
+        trackingDataDir: path.join(tempDir, 'vaults2'),
+        ssePort: 3311,
+        debug: true,
+        retryIntervalMs: 999999999
+      });
+      service = svc2; // Update for afterEach cleanup
+
+      const events2 = setupEventTracking(svc2);
+
+      // Start second service
+      await svc2.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verify vault is still blacklisted (loaded from file)
+      expect(svc2.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault blacklisted in second service: ${svc2.isVaultBlacklisted(testVault.vaultAddress)}`);
+
+      // Verify vault was NOT loaded (not in vault cache)
+      expect(svc2.vaultDataService.hasVault(testVault.vaultAddress)).toBe(false);
+      console.log(`🔍 Vault in cache: ${svc2.vaultDataService.hasVault(testVault.vaultAddress)}`);
+
+      // Verify reason was preserved
+      const preservedInfo = svc2.blacklistedVaults.get(normalizedAddress);
+      expect(preservedInfo).toBeDefined();
+      expect(preservedInfo.reason).toBe(originalReason);
+      expect(preservedInfo.blacklistedAt).toBe(originalTimestamp);
+      console.log(`🔍 Reason preserved: ${preservedInfo.reason === originalReason}`);
+
+      // No VaultBlacklisted event on second service (already in file)
+      expect(events2.vaultBlacklisted.length).toBe(0);
+      console.log(`🔍 No new VaultBlacklisted events: ${events2.vaultBlacklisted.length === 0}`);
+
+      console.log('Blacklist persistence test passed');
+    }, 90000);
+
+    // ------------------------------------------------------------------------
+    // Test 7: Blacklist file format verification
+    // ------------------------------------------------------------------------
+    it('should write blacklist file with correct format', async () => {
+      const { blacklistPath } = await createTestService(3312);
+      const events = setupEventTracking(service);
+
+      // Mock getVault to fail with UNRECOVERABLE ERROR
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          throw new Error('UNRECOVERABLE ERROR: Invalid vault configuration');
+        }
+        return null;
+      });
+
+      // Start service → vault gets blacklisted
+      console.log('Starting service to trigger blacklist...');
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verify vault is blacklisted
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+
+      // Read and verify blacklist file format
+      const fileContent = await fs.readFile(blacklistPath, 'utf-8');
+      console.log('🔍 Blacklist file content:');
+      console.log(fileContent);
+
+      const blacklistData = JSON.parse(fileContent);
+      const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+      const entry = blacklistData[normalizedAddress];
+
+      // Verify required fields
+      expect(entry).toBeDefined();
+      expect(entry.vaultAddress).toBe(normalizedAddress);
+      expect(typeof entry.blacklistedAt).toBe('number');
+      expect(entry.blacklistedAt).toBeGreaterThan(0);
+      expect(typeof entry.reason).toBe('string');
+      expect(entry.reason.length).toBeGreaterThan(0);
+
+      console.log('🔍 Entry fields:');
+      console.log(`  - vaultAddress: ${entry.vaultAddress}`);
+      console.log(`  - blacklistedAt: ${entry.blacklistedAt} (${new Date(entry.blacklistedAt).toISOString()})`);
+      console.log(`  - reason: ${entry.reason}`);
+
+      console.log('Blacklist file format test passed');
+    }, 60000);
+  });
 });

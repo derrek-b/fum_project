@@ -4,6 +4,9 @@
  * 1. Recovery - successful retry removes vault from queue
  * 2. Blacklist - unrecoverable error removes vault from queue and blacklists
  * 3. Auth revoked - offboarding removes vault from queue
+ *
+ * Also tests listener removal failure handling:
+ * 4. Listener removal failure - tracked in failedRemovals, retried successfully
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
@@ -133,7 +136,8 @@ describe('Retry Queue Cleanup', () => {
       vaultFailed: [],
       vaultRecovered: [],
       vaultBlacklisted: [],
-      vaultOffboarded: []
+      vaultOffboarded: [],
+      vaultRetryTrip: []
     };
 
     service.eventManager.subscribe('VaultFailed', (data) => {
@@ -154,6 +158,11 @@ describe('Retry Queue Cleanup', () => {
     service.eventManager.subscribe('VaultOffboarded', (data) => {
       console.log(`  [EVENT] VaultOffboarded: ${data.vaultAddress?.slice(0, 10)}...`);
       events.vaultOffboarded.push(data);
+    });
+
+    service.eventManager.subscribe('VaultRetryTrip', (data) => {
+      console.log(`  [EVENT] VaultRetryTrip: ${data.vaultAddress?.slice(0, 10)}... trip #${data.tripCount}`);
+      events.vaultRetryTrip.push(data);
     });
 
     return events;
@@ -349,5 +358,257 @@ describe('Retry Queue Cleanup', () => {
       expect(offboardData).toBeDefined();
       expect(offboardData.removedFromRetryQueue).toBe(true);
     }, 60000);
+  });
+
+  // ============================================================================
+  // Listener Removal Failure - tracked for retry
+  // ============================================================================
+  describe('Listener Removal Failure', () => {
+    it('should track failed listener removal and succeed on retry', async () => {
+      await createTestService(3305);
+
+      // Start service - vault should load successfully
+      await service.start();
+
+      // Verify vault is tracked and has listeners
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+      console.log(`Vault tracked: ${testVault.vaultAddress}`);
+
+      // Check that vault has swap event listeners registered
+      const allListeners = Object.keys(service.eventManager.listeners);
+      const vaultListenerKeys = allListeners.filter(key =>
+        key.toLowerCase().includes(testVault.vaultAddress.toLowerCase())
+      );
+      const initialListenerCount = vaultListenerKeys.length;
+      console.log(`Initial listeners for vault: ${initialListenerCount}`);
+      console.log(`  Keys: ${vaultListenerKeys.join(', ')}`);
+      expect(initialListenerCount).toBeGreaterThan(0);
+
+      // Mock removeListener to fail for vault's listeners
+      let removeListenerCallCount = 0;
+      const realRemoveListener = service.eventManager.removeListener.bind(service.eventManager);
+      vi.spyOn(service.eventManager, 'removeListener').mockImplementation(async (key) => {
+        // Only fail for the test vault's listeners
+        if (key.includes(testVault.vaultAddress.toLowerCase())) {
+          removeListenerCallCount++;
+          console.log(`  [MOCK] removeListener call #${removeListenerCallCount} for ${key} - FAILING`);
+
+          // Simulate the tracking that happens in the real implementation
+          const listener = service.eventManager.listeners[key];
+          if (listener) {
+            service.eventManager.trackFailedListenerRemoval(key, listener, new Error('RPC_ERROR: Provider disconnected'));
+          }
+          return false;  // Return false to indicate failure
+        }
+        return realRemoveListener(key);
+      });
+
+      // Trigger cleanup via blacklisting (which calls offboardVault -> removeAllVaultListeners)
+      console.log('Triggering blacklist to initiate listener cleanup...');
+      await service.blacklistVault(testVault.vaultAddress, 'Test blacklist for listener removal');
+
+      // Wait for async operations
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Verify failures were tracked
+      const failedRemovals = service.eventManager.getFailedRemovals();
+      console.log(`Failed removals tracked: ${failedRemovals.size}`);
+      expect(failedRemovals.size).toBeGreaterThan(0);
+
+      // Verify the tracked failures are for our vault
+      for (const [key, data] of failedRemovals.entries()) {
+        expect(key.toLowerCase()).toContain(testVault.vaultAddress.toLowerCase());
+        expect(data.lastError).toContain('Provider disconnected');
+        console.log(`  Tracked failure: ${key} - ${data.lastError}`);
+      }
+
+      // Restore the real removeListener for retry
+      vi.spyOn(service.eventManager, 'removeListener').mockImplementation(realRemoveListener);
+
+      // Retry failed removals
+      console.log('Retrying failed listener removals...');
+      const retryResults = await service.eventManager.retryFailedRemovals();
+      console.log(`Retry results: ${retryResults.succeeded} succeeded, ${retryResults.stillFailing} still failing`);
+
+      // Verify retries succeeded
+      expect(retryResults.succeeded).toBeGreaterThan(0);
+      expect(retryResults.stillFailing).toBe(0);
+
+      // Verify failed removals map is now empty
+      const remainingFailures = service.eventManager.getFailedRemovals();
+      expect(remainingFailures.size).toBe(0);
+      console.log('All listener removals succeeded on retry');
+    }, 60000);
+  });
+
+  // ============================================================================
+  // Trip History Decay - lazy pruning when vault fails again after 24+ hours
+  // ============================================================================
+  describe('Trip History Decay', () => {
+    it('should reset trip count when vault fails again after 24+ hours of stability', async () => {
+      await createTestService(3306);
+      const events = setupEventTracking(service);
+
+      // Track call count - fail on calls 1 and 3, succeed on call 2
+      let getVaultCallCount = 0;
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+          if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+            getVaultCallCount++;
+            console.log(`  🔧 getVault call #${getVaultCallCount}`);
+
+            // Fail on call 1 (initial) and call 3 (after recovery)
+            if (getVaultCallCount === 1 || getVaultCallCount === 3) {
+              throw new Error('RPC_ERROR: Connection refused');
+            }
+          }
+          return realGetVault(addr, forceRefresh);
+        });
+      };
+
+      // Start service → vault fails → enters retry queue (trip #1)
+      console.log('=== Step 1: Start service, vault fails (trip #1) ===');
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const normalizedAddress = testVault.vaultAddress;
+
+      // Verify vault is in retry queue with trip recorded
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
+      expect(service.vaultTripHistory.has(normalizedAddress)).toBe(true);
+      const historyAfterFirstFail = service.vaultTripHistory.get(normalizedAddress);
+      expect(historyAfterFirstFail.trips.length).toBe(1);
+      console.log(`🔍 Trip count after first failure: ${historyAfterFirstFail.trips.length}`);
+
+      // Retry → vault recovers (call #2 succeeds)
+      console.log('\n=== Step 2: Retry succeeds, vault recovers ===');
+      await service.retryFailedVaults();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verify vault recovered
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
+      expect(events.vaultRecovered.length).toBe(1);
+      console.log(`🔍 Vault recovered: ${events.vaultRecovered.length === 1}`);
+
+      // Trip history still exists (hasn't decayed yet - lazy pruning)
+      expect(service.vaultTripHistory.has(normalizedAddress)).toBe(true);
+      console.log(`🔍 Trip history still exists (waiting for decay): ${service.vaultTripHistory.has(normalizedAddress)}`);
+
+      // Simulate 25 hours passing by backdating the trip timestamp
+      console.log('\n=== Step 3: Simulate 25 hours passing ===');
+      const history = service.vaultTripHistory.get(normalizedAddress);
+      const twentyFiveHoursAgo = Date.now() - (25 * 60 * 60 * 1000);
+      history.trips[0].timestamp = twentyFiveHoursAgo;
+      console.log(`🔍 Backdated trip to: ${new Date(twentyFiveHoursAgo).toISOString()}`);
+
+      // Trigger another failure via swap event (call #3 fails)
+      console.log('\n=== Step 4: Vault fails again - should start fresh ===');
+      service.eventManager.emit('SwapEventDetected', {
+        vaultAddress: testVault.vaultAddress,
+        poolId: 'test-pool-id',
+        platform: 'uniswapV3',
+        log: {}
+      });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Verify vault is back in retry queue
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault back in failedVaults: ${service.failedVaults.has(testVault.vaultAddress)}`);
+
+      // KEY CHECK: Trip count should be 1 (old trip was pruned, this is a fresh start)
+      const historyAfterDecay = service.vaultTripHistory.get(normalizedAddress);
+      expect(historyAfterDecay.trips.length).toBe(1);
+      console.log(`🔍 Trip count after decay + new failure: ${historyAfterDecay.trips.length}`);
+
+      // Verify VaultRetryTrip event shows trip #1 (not #2)
+      const lastTripEvent = events.vaultRetryTrip.filter(
+        e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
+      ).pop();
+      expect(lastTripEvent).toBeDefined();
+      expect(lastTripEvent.tripCount).toBe(1);
+      console.log(`🔍 VaultRetryTrip shows trip #${lastTripEvent.tripCount}`);
+
+      console.log('Trip history lazy decay test passed');
+    }, 60000);
+
+    it('should accumulate trips when failures happen within 24 hours', async () => {
+      await createTestService(3307);
+      const events = setupEventTracking(service);
+
+      // Mock to alternate: fail, succeed, fail, succeed...
+      let getVaultCallCount = 0;
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+          if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+            getVaultCallCount++;
+            console.log(`  🔧 getVault call #${getVaultCallCount}`);
+
+            // Odd calls fail, even calls succeed
+            if (getVaultCallCount % 2 === 1) {
+              throw new Error('RPC_ERROR: Connection refused');
+            }
+          }
+          return realGetVault(addr, forceRefresh);
+        });
+      };
+
+      // Trip 1: Initial failure
+      console.log('=== Trip 1: Initial failure ===');
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      expect(events.vaultRetryTrip.length).toBe(1);
+      expect(events.vaultRetryTrip[0].tripCount).toBe(1);
+
+      // Recovery
+      console.log('=== Recovery 1 ===');
+      await service.retryFailedVaults();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Trip 2: Fail again (within 24h - trips accumulate)
+      console.log('=== Trip 2: Fail again (within 24h) ===');
+      service.eventManager.emit('SwapEventDetected', {
+        vaultAddress: testVault.vaultAddress,
+        poolId: 'test-pool-id',
+        platform: 'uniswapV3',
+        log: {}
+      });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      expect(events.vaultRetryTrip.length).toBe(2);
+      expect(events.vaultRetryTrip[1].tripCount).toBe(2);
+      console.log(`🔍 Trip count: ${events.vaultRetryTrip[1].tripCount} (should be 2)`);
+
+      // Recovery
+      console.log('=== Recovery 2 ===');
+      await service.retryFailedVaults();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Trip 3: Fail again (still within 24h)
+      console.log('=== Trip 3: Fail again (still within 24h) ===');
+      service.eventManager.emit('SwapEventDetected', {
+        vaultAddress: testVault.vaultAddress,
+        poolId: 'test-pool-id',
+        platform: 'uniswapV3',
+        log: {}
+      });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      expect(events.vaultRetryTrip.length).toBe(3);
+      expect(events.vaultRetryTrip[2].tripCount).toBe(3);
+      console.log(`🔍 Trip count: ${events.vaultRetryTrip[2].tripCount} (should be 3)`);
+
+      console.log('Trip accumulation test passed');
+    }, 90000);
   });
 });

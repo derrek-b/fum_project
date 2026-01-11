@@ -780,4 +780,252 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(blacklistEvents.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
     }, 60000);
   });
+
+  // ============================================================================
+  // Multiple Vault Concurrent Failures
+  // ============================================================================
+  describe('Multiple Vault Concurrent Failures', () => {
+    let multiVaultSnapshot;
+    let vault1, vault2, vault3;
+
+    beforeAll(async () => {
+      // Take snapshot before creating additional vaults
+      multiVaultSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
+
+      // Create 3 vaults for concurrent failure testing
+      const vaultConfig = {
+        automationServiceAddress: testConfig.automationServiceAddress,
+        wrapEthAmount: '5',
+        swapTokens: [{ from: 'WETH', to: 'USDC', amount: '1' }],
+        positions: [{
+          token0: 'USDC',
+          token1: 'WETH',
+          fee: 500,
+          percentOfAssets: 50,
+          tickRange: { type: 'centered', spacing: 10 }
+        }],
+        tokenTransfers: { 'WETH': 50, 'USDC': 50 },
+        targetTokens: ['USDC', 'WETH'],
+        targetPlatforms: ['uniswapV3'],
+        strategy: 'bob'
+      };
+
+      vault1 = await setupTestVault(
+        testEnv.hardhatServer,
+        testEnv.contracts,
+        testEnv.deployedContracts,
+        { ...vaultConfig, vaultName: 'Concurrent Test Vault 1' }
+      );
+      console.log(`Vault 1 created: ${vault1.vaultAddress}`);
+
+      vault2 = await setupTestVault(
+        testEnv.hardhatServer,
+        testEnv.contracts,
+        testEnv.deployedContracts,
+        { ...vaultConfig, vaultName: 'Concurrent Test Vault 2' }
+      );
+      console.log(`Vault 2 created: ${vault2.vaultAddress}`);
+
+      vault3 = await setupTestVault(
+        testEnv.hardhatServer,
+        testEnv.contracts,
+        testEnv.deployedContracts,
+        { ...vaultConfig, vaultName: 'Concurrent Test Vault 3' }
+      );
+      console.log(`Vault 3 created: ${vault3.vaultAddress}`);
+    }, 180000);
+
+    afterAll(async () => {
+      // Revert to snapshot to clean up the 3 vaults
+      if (multiVaultSnapshot) {
+        await testEnv.hardhatServer.provider.send('evm_revert', [multiVaultSnapshot]);
+      }
+    });
+
+    it('should track all vaults independently when multiple fail during startup', async () => {
+      await createTestService(3121);
+
+      const events = {
+        vaultFailed: [],
+        vaultRecovered: []
+      };
+
+      service.eventManager.subscribe('VaultFailed', (data) => {
+        console.log(`  [EVENT] VaultFailed: ${data.vaultAddress?.slice(0, 10)}...`);
+        events.vaultFailed.push(data);
+      });
+
+      service.eventManager.subscribe('VaultRecovered', (data) => {
+        console.log(`  [EVENT] VaultRecovered: ${data.vaultAddress?.slice(0, 10)}...`);
+        events.vaultRecovered.push(data);
+      });
+
+      // Track call counts per vault address
+      const callCounts = new Map();
+      const vaultAddresses = [vault1.vaultAddress, vault2.vaultAddress, vault3.vaultAddress];
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+        vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+          // Only track our 3 test vaults
+          if (vaultAddresses.includes(addr)) {
+            const count = (callCounts.get(addr) || 0) + 1;
+            callCounts.set(addr, count);
+            console.log(`  🔧 getVault for ${addr.slice(0, 10)}... call #${count}`);
+
+            // Fail first call for each vault, succeed on retry
+            if (count === 1) {
+              throw new Error('RPC_ERROR: Connection refused');
+            }
+          }
+          return realGetVault(addr, forceRefresh);
+        });
+      };
+
+      // Start service - all 3 vaults should fail
+      console.log('Starting service (expecting 3 concurrent failures)...');
+      await service.start();
+
+      // Verify all 3 are in failedVaults
+      expect(service.failedVaults.has(vault1.vaultAddress)).toBe(true);
+      expect(service.failedVaults.has(vault2.vaultAddress)).toBe(true);
+      expect(service.failedVaults.has(vault3.vaultAddress)).toBe(true);
+      expect(service.failedVaults.size).toBe(3);
+      console.log(`🔍 All 3 vaults in failedVaults: ${service.failedVaults.size === 3}`);
+
+      // Verify VaultFailed events for all 3
+      expect(events.vaultFailed.length).toBe(3);
+      expect(events.vaultFailed.some(e => e.vaultAddress === vault1.vaultAddress)).toBe(true);
+      expect(events.vaultFailed.some(e => e.vaultAddress === vault2.vaultAddress)).toBe(true);
+      expect(events.vaultFailed.some(e => e.vaultAddress === vault3.vaultAddress)).toBe(true);
+      console.log(`🔍 VaultFailed events: ${events.vaultFailed.length}`);
+
+      // Retry - all 3 should recover
+      console.log('Triggering retry (expecting 3 recoveries)...');
+      await service.retryFailedVaults();
+
+      // Verify all 3 recovered
+      expect(service.failedVaults.has(vault1.vaultAddress)).toBe(false);
+      expect(service.failedVaults.has(vault2.vaultAddress)).toBe(false);
+      expect(service.failedVaults.has(vault3.vaultAddress)).toBe(false);
+      expect(service.failedVaults.size).toBe(0);
+      console.log(`🔍 All 3 vaults recovered: ${service.failedVaults.size === 0}`);
+
+      // Verify VaultRecovered events for all 3
+      expect(events.vaultRecovered.length).toBe(3);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === vault1.vaultAddress)).toBe(true);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === vault2.vaultAddress)).toBe(true);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === vault3.vaultAddress)).toBe(true);
+      console.log(`🔍 VaultRecovered events: ${events.vaultRecovered.length}`);
+
+      // Verify all 3 are now tracked
+      expect(service.vaultDataService.hasVault(vault1.vaultAddress)).toBe(true);
+      expect(service.vaultDataService.hasVault(vault2.vaultAddress)).toBe(true);
+      expect(service.vaultDataService.hasVault(vault3.vaultAddress)).toBe(true);
+      console.log('🔍 All 3 vaults now tracked in vaultDataService');
+
+      console.log('Multiple vault concurrent failures test passed');
+    }, 120000);
+
+    it('should handle mixed recovery outcomes independently', async () => {
+      await createTestService(3122);
+
+      const events = {
+        vaultFailed: [],
+        vaultRecovered: [],
+        vaultBlacklisted: []
+      };
+
+      service.eventManager.subscribe('VaultFailed', (data) => {
+        events.vaultFailed.push(data);
+      });
+
+      service.eventManager.subscribe('VaultRecovered', (data) => {
+        events.vaultRecovered.push(data);
+      });
+
+      service.eventManager.subscribe('VaultBlacklisted', (data) => {
+        console.log(`  [EVENT] VaultBlacklisted: ${data.vaultAddress?.slice(0, 10)}...`);
+        events.vaultBlacklisted.push(data);
+      });
+
+      // Track call counts per vault
+      const callCounts = new Map();
+      const vaultAddresses = [vault1.vaultAddress, vault2.vaultAddress, vault3.vaultAddress];
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+        vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+          if (vaultAddresses.includes(addr)) {
+            const count = (callCounts.get(addr) || 0) + 1;
+            callCounts.set(addr, count);
+            console.log(`  🔧 getVault for ${addr.slice(0, 10)}... call #${count}`);
+
+            // Vault 1: fails first, recovers on retry
+            if (addr === vault1.vaultAddress && count === 1) {
+              throw new Error('RPC_ERROR: Connection refused');
+            }
+
+            // Vault 2: fails with unrecoverable error (immediate blacklist)
+            if (addr === vault2.vaultAddress) {
+              throw new Error('UNRECOVERABLE ERROR: Invalid configuration');
+            }
+
+            // Vault 3: fails twice, recovers on 3rd attempt
+            if (addr === vault3.vaultAddress && count <= 2) {
+              throw new Error('TIMEOUT: Request timed out');
+            }
+          }
+          return realGetVault(addr, forceRefresh);
+        });
+      };
+
+      // Start service
+      console.log('Starting service (mixed failure scenarios)...');
+      await service.start();
+
+      // Vault 1: in failedVaults (recoverable)
+      // Vault 2: blacklisted (unrecoverable)
+      // Vault 3: in failedVaults (recoverable)
+      expect(service.failedVaults.has(vault1.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(vault2.vaultAddress)).toBe(true);
+      expect(service.failedVaults.has(vault2.vaultAddress)).toBe(false);
+      expect(service.failedVaults.has(vault3.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault 1 in failedVaults: ${service.failedVaults.has(vault1.vaultAddress)}`);
+      console.log(`🔍 Vault 2 blacklisted: ${service.isVaultBlacklisted(vault2.vaultAddress)}`);
+      console.log(`🔍 Vault 3 in failedVaults: ${service.failedVaults.has(vault3.vaultAddress)}`);
+
+      // First retry - vault 1 recovers, vault 3 still fails
+      console.log('Retry #1...');
+      await service.retryFailedVaults();
+
+      expect(service.failedVaults.has(vault1.vaultAddress)).toBe(false);
+      expect(service.failedVaults.has(vault3.vaultAddress)).toBe(true);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === vault1.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault 1 recovered: ${!service.failedVaults.has(vault1.vaultAddress)}`);
+      console.log(`🔍 Vault 3 still failing: ${service.failedVaults.has(vault3.vaultAddress)}`);
+
+      // Second retry - vault 3 recovers
+      console.log('Retry #2...');
+      await service.retryFailedVaults();
+
+      expect(service.failedVaults.has(vault3.vaultAddress)).toBe(false);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === vault3.vaultAddress)).toBe(true);
+      console.log(`🔍 Vault 3 recovered: ${!service.failedVaults.has(vault3.vaultAddress)}`);
+
+      // Final state
+      expect(service.failedVaults.size).toBe(0);
+      expect(service.vaultDataService.hasVault(vault1.vaultAddress)).toBe(true);
+      expect(service.vaultDataService.hasVault(vault3.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(vault2.vaultAddress)).toBe(true);
+
+      console.log('Mixed recovery outcomes test passed');
+    }, 120000);
+  });
 });

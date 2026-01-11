@@ -16,6 +16,10 @@
  *    - closePositions failure → retry queue
  *    - createNewPosition sub-failures → retry queue
  *    - Recovery after rebalance failure
+ *
+ * 4. Fee Distribution Failure - graceful degradation
+ *    - distributeFees failure → operation continues, fees stay in vault
+ *    - FeeDistributionFailed event emitted
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
@@ -750,5 +754,89 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       const recoveredEvent = events.vaultRecovered.find(e => e.vaultAddress === currentVault.vaultAddress);
       expect(recoveredEvent).toBeDefined();
     }, 240000);
+  });
+
+  // ------------------------------------------------------------------------
+  // Fee Distribution Failure - operation continues, fees stay in vault
+  // ------------------------------------------------------------------------
+  describe('Fee Distribution Failure', () => {
+    it('should continue rebalance operation when fee distribution fails', async () => {
+      // Create fresh vault for this test
+      currentVault = await createFreshVault('Fee Distribution Failure Test');
+
+      await createTestService(3213);
+
+      // Use standard event tracking helper
+      const events = setupRebalanceEventTracking(service);
+
+      // Add fee-specific event tracking
+      const feeEvents = {
+        feesCollected: [],
+        feesDistributed: [],
+        feeDistributionFailed: []
+      };
+
+      service.eventManager.subscribe('FeesCollected', (data) => {
+        if (data.vaultAddress === currentVault.vaultAddress) {
+          console.log(`  [EVENT] FeesCollected: $${data.totalUSD?.toFixed(2)}`);
+          feeEvents.feesCollected.push(data);
+        }
+      });
+
+      service.eventManager.subscribe('FeesDistributed', (data) => {
+        if (data.vaultAddress === currentVault.vaultAddress) {
+          console.log(`  [EVENT] FeesDistributed: $${data.totalDistributedUSD?.toFixed(2)}`);
+          feeEvents.feesDistributed.push(data);
+        }
+      });
+
+      service.eventManager.subscribe('FeeDistributionFailed', (data) => {
+        if (data.vaultAddress === currentVault.vaultAddress) {
+          console.log(`  [EVENT] FeeDistributionFailed: ${data.error}`);
+          feeEvents.feeDistributionFailed.push(data);
+        }
+      });
+
+      // Start service
+      await service.start();
+
+      // Verify vault is tracked
+      expect(service.vaultDataService.hasVault(currentVault.vaultAddress)).toBe(true);
+
+      // Mock distributeFees to fail
+      const strategy = service.strategies.get('bob');
+      vi.spyOn(strategy, 'distributeFees').mockImplementation(async () => {
+        throw new Error('NETWORK_ERROR: Failed to send tokens to owner');
+      });
+
+      // Execute swaps until rebalance is triggered
+      const result = await executeSwapsUntilRebalance(events, currentVault);
+      console.log(`Swaps executed: ${result.swapCount}`);
+
+      // Wait for event processing
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // If rebalance was triggered, verify fee distribution failure was handled gracefully
+      if (events.positionRebalanced.length > 0) {
+        // Rebalance completed despite fee distribution failure
+        console.log('Rebalance completed successfully despite fee distribution failure');
+
+        // Vault should NOT be in retry queue (operation succeeded)
+        expect(service.failedVaults.has(currentVault.vaultAddress)).toBe(false);
+        expect(service.isVaultBlacklisted(currentVault.vaultAddress)).toBe(false);
+
+        // If fees were collected, we should see the failure event
+        if (feeEvents.feesCollected.length > 0) {
+          expect(feeEvents.feeDistributionFailed.length).toBeGreaterThan(0);
+          expect(feeEvents.feesDistributed.length).toBe(0); // No successful distribution
+        }
+      } else {
+        // No rebalance triggered - verify vault is still healthy
+        expect(service.failedVaults.has(currentVault.vaultAddress)).toBe(false);
+        console.log('No rebalance triggered during test - vault remains healthy');
+      }
+
+      console.log('Fee distribution failure test passed');
+    }, 180000);
   });
 });
