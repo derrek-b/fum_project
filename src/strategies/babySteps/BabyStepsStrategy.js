@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
 import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
+import { UnrecoverableError } from '../../utils/errors.js';
 
 /**
  * Baby Steps Strategy - Conservative position management with single position per vault
@@ -53,7 +54,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
 
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
+      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
     // Select best pool via adapter
@@ -266,7 +267,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // STEP 1: Parse swap event using platform adapter
     const adapter = this.adapters.get(platform);
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platform}`);
+      throw new UnrecoverableError(`No adapter for platform ${platform}`);
     }
 
     // Parse swap event - returns platform-specific data (kept opaque for adapter methods)
@@ -531,20 +532,20 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Get pool metadata
     const poolMetadata = this.poolData[position.pool];
     if (!poolMetadata) {
-      throw new Error(`UNRECOVERABLE ERROR: Missing pool metadata for position ${positionId}`);
+      throw new UnrecoverableError(`Missing pool metadata for position ${positionId}`);
     }
 
     // Get adapter
     const adapter = this.adapters.get(poolMetadata.platform);
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${poolMetadata.platform}`);
+      throw new UnrecoverableError(`No adapter for platform ${poolMetadata.platform}`);
     }
 
     // Get token data
     const token0Data = this.tokens[poolMetadata.token0Symbol];
     const token1Data = this.tokens[poolMetadata.token1Symbol];
     if (!token0Data || !token1Data) {
-      throw new Error(`UNRECOVERABLE ERROR: Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
+      throw new UnrecoverableError(`Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
     }
 
     // Check if tokens are native ETH (platform-agnostic via token data)
@@ -680,7 +681,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       // Step 1: Get fresh targetPool data for new position creation
       const adapter = this.adapters.get(vault.targetPlatforms[0]);
       if (!adapter) {
-        throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${vault.targetPlatforms[0]}`);
+        throw new UnrecoverableError(`No adapter for platform ${vault.targetPlatforms[0]}`);
       }
 
       // selectBestPool handles ETH -> WETH resolution internally
@@ -768,8 +769,8 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Step 6: Validate - we MUST have capital after closing a position
       if (availableDeployment <= 0) {
-        throw new Error(
-          `UNRECOVERABLE ERROR: No available capital after closing position. ` +
+        throw new UnrecoverableError(
+          `No available capital after closing position. ` +
           `availableDeployment=${availableDeployment}, totalValue=${assetValues.totalVaultValue}, ` +
           `maxUtilization=${vault.strategy.parameters.maxUtilization}%`
         );
@@ -877,7 +878,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       // 1. Get pool metadata from cache
       const poolMetadata = this.poolData[position.pool];
       if (!poolMetadata) {
-        throw new Error(`UNRECOVERABLE ERROR: Position ${positionId} missing pool metadata for ${position.pool}`);
+        throw new UnrecoverableError(`Position ${positionId} missing pool metadata for ${position.pool}`);
       }
 
       // 2. Basic alignment check: tokens (using targetPool's resolved tokens)
@@ -913,7 +914,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       const adapter = this.adapters.get(positionPlatform);
 
       if (!adapter) {
-        throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${positionPlatform}`);
+        throw new UnrecoverableError(`No adapter for platform ${positionPlatform}`);
       }
 
       const rangeStatus = await retryRpcCall(
@@ -1016,20 +1017,20 @@ export default class BabyStepsStrategy extends StrategyBase {
       // Get pool metadata from cache
       const poolMetadata = this.poolData[position.pool];
       if (!poolMetadata) {
-        throw new Error(`UNRECOVERABLE ERROR: Missing pool metadata for position ${positionId} pool ${position.pool}`);
+        throw new UnrecoverableError(`Missing pool metadata for position ${positionId} pool ${position.pool}`);
       }
 
       // Get adapter for this platform
       const adapter = this.adapters.get(poolMetadata.platform);
       if (!adapter) {
-        throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${poolMetadata.platform}`);
+        throw new UnrecoverableError(`No adapter for platform ${poolMetadata.platform}`);
       }
 
       // Get token data
       const token0Data = this.tokens[poolMetadata.token0Symbol];
       const token1Data = this.tokens[poolMetadata.token1Symbol];
       if (!token0Data || !token1Data) {
-        throw new Error(`UNRECOVERABLE ERROR: Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
+        throw new UnrecoverableError(`Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
       }
 
       // Fetch fresh pool data
@@ -1491,7 +1492,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Step 3: Convert full budget to token0 amount (adapter will determine actual split)
     const positionValues = assetValues.positions[position.id];
     if (!positionValues) {
-      throw new Error(`UNRECOVERABLE ERROR: Position ${position.id} not found in assetValues`);
+      throw new UnrecoverableError(`Position ${position.id} not found in assetValues`);
     }
 
     const token0Price = positionValues.token0Price;
@@ -1523,7 +1524,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
+      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
     // Get add liquidity amounts - platform-agnostic interface returns amounts in caller's token order
@@ -1717,8 +1718,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
         const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
 
-        throw new Error(
-          `UNRECOVERABLE ERROR: Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+        throw new UnrecoverableError(
+          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
           `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
           `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
           `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
@@ -1846,7 +1847,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
+      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
     // Get position range object (platform-specific properties, e.g., tickLower/tickUpper for V3)
@@ -2111,8 +2112,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
         const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
 
-        throw new Error(
-          `UNRECOVERABLE ERROR: Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
+        throw new UnrecoverableError(
+          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
           `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
           `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
           `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
@@ -2243,7 +2244,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
-      throw new Error(`UNRECOVERABLE ERROR: No adapter for platform ${platformId}`);
+      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
     // Track which phases were used
@@ -2426,7 +2427,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Verify deficits are covered
     if (remainingToken0Deficit > 0n || remainingToken1Deficit > 0n) {
-      throw new Error(`UNRECOVERABLE ERROR: Unable to cover deficits: ${token0Data.symbol}=${remainingToken0Deficit}, ${token1Data.symbol}=${remainingToken1Deficit}`);
+      throw new UnrecoverableError(`Unable to cover deficits: ${token0Data.symbol}=${remainingToken0Deficit}, ${token1Data.symbol}=${remainingToken1Deficit}`);
     }
 
     // Phase 3: Buffer swaps for remaining non-aligned tokens

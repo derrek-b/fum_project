@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import AutomationService from '../../../src/core/AutomationService.js';
+import { UnrecoverableError } from '../../../src/utils/errors.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import path from 'path';
@@ -766,7 +767,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
         vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
           // Only fail testVault with unrecoverable error
           if (addr === testVault.vaultAddress) {
-            throw new Error('UNRECOVERABLE ERROR: Vault has invalid strategy configuration');
+            throw new UnrecoverableError('Vault has invalid strategy configuration');
           }
           return realGetVault(addr, forceRefresh);
         });
@@ -974,7 +975,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
 
             // Vault 2: fails with unrecoverable error (immediate blacklist)
             if (addr === vault2.vaultAddress) {
-              throw new Error('UNRECOVERABLE ERROR: Invalid configuration');
+              throw new UnrecoverableError('Invalid configuration');
             }
 
             // Vault 3: fails twice, recovers on 3rd attempt

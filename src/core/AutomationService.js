@@ -7,6 +7,7 @@
 import { ethers } from 'ethers';
 import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
 import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
+import { UnrecoverableError } from '../utils/errors.js';
 
 import EventManager from './EventManager.js';
 import VaultDataService from './VaultDataService.js';
@@ -89,6 +90,7 @@ class AutomationService {
       debug: this.debug,
       getBlacklist: () => this.getBlacklistData(),
       getFailedVaults: () => this.getFailedVaultsData(),
+      getFailedRemovals: () => this.eventManager.getFailedRemovals(),
       getTrackingFailures: () => this.tracker.getTrackingFailuresData(),
       getVaultMetadata: (addr) => this.tracker.getMetadata(addr),
       getVaultTransactions: (addr, start, end) => this.tracker.getTransactions(addr, start, end),
@@ -1570,7 +1572,7 @@ class AutomationService {
 
       const strategy = this.strategies.get(vault.strategy.strategyId);
       if (!strategy) {
-        throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
+        throw new UnrecoverableError(`Strategy ${vault.strategy.strategyId} not found`);
       }
 
       const initSuccess = await strategy.initializeVault(vault);
@@ -1637,12 +1639,12 @@ class AutomationService {
 
     // Validate vault has strategy
     if (!vault.strategy?.strategyId) {
-      throw new Error(`UNRECOVERABLE ERROR: Vault ${vault.address} missing strategy data`);
+      throw new UnrecoverableError(`Vault ${vault.address} missing strategy data`);
     }
 
     const strategy = this.strategies.get(vault.strategy.strategyId);
     if (!strategy) {
-      throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
+      throw new UnrecoverableError(`Strategy ${vault.strategy.strategyId} not found`);
     }
 
     // Set up swap event monitoring for all position pools (delegated to EventManager)
@@ -1733,13 +1735,13 @@ class AutomationService {
       // Get vault data
       const vault = await this.vaultDataService.getVault(vaultAddress);
       if (!vault) {
-        throw new Error(`UNRECOVERABLE ERROR: Vault ${vaultAddress} not found in VaultDataService`);
+        throw new UnrecoverableError(`Vault ${vaultAddress} not found in VaultDataService`);
       }
 
       // Get strategy
       const strategy = this.strategies.get(vault.strategy.strategyId);
       if (!strategy) {
-        throw new Error(`UNRECOVERABLE ERROR: Strategy ${vault.strategy.strategyId} not found`);
+        throw new UnrecoverableError(`Strategy ${vault.strategy.strategyId} not found`);
       }
 
       // Delegate to strategy
@@ -1786,8 +1788,7 @@ class AutomationService {
    * @returns {boolean} True if error is recoverable (vault should retry)
    */
   isRecoverableError(error) {
-    const message = error.message || '';
-    return !message.startsWith('UNRECOVERABLE ERROR:');
+    return !(error instanceof UnrecoverableError || error.isUnrecoverable);
   }
 
   /**

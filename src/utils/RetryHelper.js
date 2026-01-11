@@ -3,6 +3,8 @@
  * @description Utility module for retry logic with exponential backoff
  */
 
+import { UnrecoverableError } from './errors.js';
+
 /**
  * Check a single error object for retryable conditions
  * @param {Error} error - The error to check
@@ -10,8 +12,7 @@
  */
 function checkSingleError(error) {
   // Never retry errors explicitly marked as unrecoverable
-  const errorMessage = error.message || '';
-  if (errorMessage.startsWith('UNRECOVERABLE ERROR:')) {
+  if (error instanceof UnrecoverableError || error.isUnrecoverable) {
     return false;
   }
 
@@ -51,7 +52,7 @@ function checkSingleError(error) {
   }
 
   // Check error message patterns
-  const lowerMessage = errorMessage.toLowerCase();
+  const lowerMessage = (error.message || '').toLowerCase();
   return retryableMessages.some(pattern => lowerMessage.includes(pattern.toLowerCase()));
 }
 

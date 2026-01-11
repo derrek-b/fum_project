@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import AutomationService from '../../../src/core/AutomationService.js';
+import { UnrecoverableError } from '../../../src/utils/errors.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import path from 'path';
@@ -248,7 +249,7 @@ describe('Retry Queue Cleanup', () => {
             }
             // Second call (retry): unrecoverable error -> blacklist
             if (getVaultCallCount === 2) {
-              throw new Error('UNRECOVERABLE ERROR: Vault configuration is invalid');
+              throw new UnrecoverableError('Vault configuration is invalid');
             }
           }
           return realGetVault(addr, forceRefresh);

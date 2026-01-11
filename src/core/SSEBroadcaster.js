@@ -19,6 +19,7 @@ export default class SSEBroadcaster {
    * @param {boolean} [options.debug=false] - Enable debug logging
    * @param {Function} [options.getBlacklist] - Callback to get current blacklist data
    * @param {Function} [options.getFailedVaults] - Callback to get current failed vaults data (retry queue)
+   * @param {Function} [options.getFailedRemovals] - Callback to get failed listener removals from EventManager
    * @param {Function} [options.getTrackingFailures] - Callback to get current tracking failures data
    * @param {Function} [options.getVaultMetadata] - Callback to get vault metadata
    * @param {Function} [options.getVaultTransactions] - Callback to get vault transactions
@@ -37,6 +38,7 @@ export default class SSEBroadcaster {
     this.debug = options.debug || false;
     this.getBlacklist = options.getBlacklist || (() => ({}));
     this.getFailedVaults = options.getFailedVaults || (() => ({}));
+    this.getFailedRemovals = options.getFailedRemovals || (() => new Map());
     this.getTrackingFailures = options.getTrackingFailures || (() => ({}));
     this.getVaultMetadata = options.getVaultMetadata || (() => null);
     this.getVaultTransactions = options.getVaultTransactions || (async () => []);
@@ -190,13 +192,23 @@ export default class SSEBroadcaster {
    * @private
    */
   handleHealthCheck(res) {
+    const blacklistData = this.getBlacklist();
+    const failedVaultsData = this.getFailedVaults();
+    const failedRemovalsData = this.getFailedRemovals();
+    const trackingFailuresData = this.getTrackingFailures();
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
       isRunning: this.isRunning,
       connectedClients: this.clients.size,
       port: this.port,
-      subscribedEvents: this.broadcastEvents.length
+      subscribedEvents: this.broadcastEvents.length,
+      // Summary counts for quick monitoring
+      retryQueueSize: Object.keys(failedVaultsData).length,
+      blacklistCount: Object.keys(blacklistData).length,
+      failedListenerCount: failedRemovalsData.size,
+      trackingFailureCount: Object.keys(trackingFailuresData).length
     }));
   }
 

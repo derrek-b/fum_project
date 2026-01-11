@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
+import { UnrecoverableError } from '../../../src/utils/errors.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import path from 'path';
@@ -201,7 +202,7 @@ describe('Blacklist Management', () => {
       // Mock getVault to throw UNRECOVERABLE ERROR during setup
       vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr) => {
         if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
-          throw new Error('UNRECOVERABLE ERROR: Strategy bob not found');
+          throw new UnrecoverableError('Strategy bob not found');
         }
         return null;
       });
@@ -226,7 +227,7 @@ describe('Blacklist Management', () => {
         e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
       );
       expect(blacklistEvent).toBeDefined();
-      expect(blacklistEvent.reason).toContain('UNRECOVERABLE');
+      expect(blacklistEvent.reason).toContain('Strategy bob not found');
       console.log(`🔍 Blacklist reason: ${blacklistEvent.reason}`);
 
       // Verify no VaultFailed event (didn't enter retry queue)
@@ -414,7 +415,7 @@ describe('Blacklist Management', () => {
 
           // First call fails with UNRECOVERABLE, subsequent calls succeed
           if (getVaultCallCount === 1) {
-            throw new Error('UNRECOVERABLE ERROR: Strategy bob not found');
+            throw new UnrecoverableError('Strategy bob not found');
           }
         }
         return realGetVault(addr, forceRefresh);
@@ -464,7 +465,7 @@ describe('Blacklist Management', () => {
       // Mock getVault to fail with UNRECOVERABLE ERROR
       vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr) => {
         if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
-          throw new Error('UNRECOVERABLE ERROR: Strategy bob not found');
+          throw new UnrecoverableError('Strategy bob not found');
         }
         return null;
       });
@@ -520,7 +521,7 @@ describe('Blacklist Management', () => {
       // Mock getVault to fail with UNRECOVERABLE ERROR
       vi.spyOn(svc1.vaultDataService, 'getVault').mockImplementation(async (addr) => {
         if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
-          throw new Error('UNRECOVERABLE ERROR: Strategy bob not found');
+          throw new UnrecoverableError('Strategy bob not found');
         }
         return null;
       });
@@ -602,7 +603,7 @@ describe('Blacklist Management', () => {
       // Mock getVault to fail with UNRECOVERABLE ERROR
       vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr) => {
         if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
-          throw new Error('UNRECOVERABLE ERROR: Invalid vault configuration');
+          throw new UnrecoverableError('Invalid vault configuration');
         }
         return null;
       });
