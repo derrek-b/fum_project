@@ -736,71 +736,31 @@ class EventManager {
     const vaultContract = getVaultContract(vault.address, provider);
 
     // Handler for target tokens update
-    const handleTokensUpdate = async (tokens) => {
-      try {
-        this.log(`Target tokens updated for vault ${vault.address}: ${tokens.join(', ')}`);
-
-        const updated = await this.vaultDataService.updateTargetTokens(vault.address, tokens);
-        if (!updated) {
-          throw new Error('Failed to update target tokens in cache');
+    // Note: Just emits raw data - AutomationService handles lock-aware cache updates
+    const handleTokensUpdate = (tokens) => {
+      this.log(`Target tokens updated on-chain for vault ${vault.address}: ${tokens.join(', ')}`);
+      this.emit('TargetTokensUpdated', {
+        vaultAddress: vault.address,
+        tokens,
+        log: {
+          level: 'info',
+          message: `Target tokens updated for vault ${vault.address}: ${tokens.join(', ')}`
         }
-
-        const updatedVault = await this.vaultDataService.getVault(vault.address, true);
-
-        this.emit('TargetTokensUpdated', {
-          vault: updatedVault,
-          tokens,
-          log: {
-            level: 'info',
-            message: `Target tokens updated for vault ${vault.address}: ${tokens.join(', ')}`
-          }
-        });
-      } catch (error) {
-        console.error(`Error handling target tokens update for vault ${vault.address}:`, error);
-        this.emit('ConfigUpdateFailed', {
-          vaultAddress: vault.address,
-          configType: 'targetTokens',
-          error: error.message,
-          log: {
-            level: 'error',
-            message: `Config update failed for vault ${vault.address}: ${error.message}`
-          }
-        });
-      }
+      });
     };
 
     // Handler for target platforms update
-    const handlePlatformsUpdate = async (platforms) => {
-      try {
-        this.log(`Target platforms updated for vault ${vault.address}: ${platforms.join(', ')}`);
-
-        const updated = await this.vaultDataService.updateTargetPlatforms(vault.address, platforms);
-        if (!updated) {
-          throw new Error('Failed to update target platforms in cache');
+    // Note: Just emits raw data - AutomationService handles lock-aware cache updates
+    const handlePlatformsUpdate = (platforms) => {
+      this.log(`Target platforms updated on-chain for vault ${vault.address}: ${platforms.join(', ')}`);
+      this.emit('TargetPlatformsUpdated', {
+        vaultAddress: vault.address,
+        platforms,
+        log: {
+          level: 'info',
+          message: `Target platforms updated for vault ${vault.address}: ${platforms.join(', ')}`
         }
-
-        const updatedVault = await this.vaultDataService.getVault(vault.address, true);
-
-        this.emit('TargetPlatformsUpdated', {
-          vault: updatedVault,
-          platforms,
-          log: {
-            level: 'info',
-            message: `Target platforms updated for vault ${vault.address}: ${platforms.join(', ')}`
-          }
-        });
-      } catch (error) {
-        console.error(`Error handling target platforms update for vault ${vault.address}:`, error);
-        this.emit('ConfigUpdateFailed', {
-          vaultAddress: vault.address,
-          configType: 'targetPlatforms',
-          error: error.message,
-          log: {
-            level: 'error',
-            message: `Config update failed for vault ${vault.address}: ${error.message}`
-          }
-        });
-      }
+      });
     };
 
     // Register listeners
@@ -909,7 +869,9 @@ class EventManager {
       return;
     }
 
-    const handleParameterUpdate = async (log) => {
+    // Handler for strategy parameter updates
+    // Note: Just emits raw data - AutomationService handles lock-aware cache updates
+    const handleParameterUpdate = (log) => {
       let vaultAddress;
       try {
         const iface = new ethers.utils.Interface([
@@ -924,17 +886,14 @@ class EventManager {
           return;
         }
 
-        this.log(`Strategy parameter updated for vault ${vaultAddress}: ${paramName}`);
-
-        // Refresh vault data
-        await this.vaultDataService.getVault(vaultAddress, true);
+        this.log(`Strategy parameter updated on-chain for vault ${vaultAddress}: ${paramName}`);
 
         this.emit('StrategyParameterUpdated', {
           vaultAddress,
           paramName,
           log: {
             level: 'info',
-            message: `Strategy parameters updated for vault ${vaultAddress}: ${paramName}`
+            message: `Strategy parameter updated for vault ${vaultAddress}: ${paramName}`
           }
         });
       } catch (error) {
@@ -950,7 +909,9 @@ class EventManager {
       }
     };
 
-    const handleTemplateSelected = async (log) => {
+    // Handler for strategy template selection
+    // Note: Just emits raw data - AutomationService handles lock-aware cache updates
+    const handleTemplateSelected = (log) => {
       let vaultAddress;
       try {
         const iface = new ethers.utils.Interface([
@@ -965,10 +926,7 @@ class EventManager {
           return;
         }
 
-        this.log(`Strategy template changed for vault ${vaultAddress}: template ${templateId}`);
-
-        // Refresh vault data (template change affects effective parameters)
-        await this.vaultDataService.getVault(vaultAddress, true);
+        this.log(`Strategy template changed on-chain for vault ${vaultAddress}: template ${templateId}`);
 
         this.emit('StrategyParameterUpdated', {
           vaultAddress,

@@ -7,21 +7,14 @@
  * =============================================================================
  * This tracks required methods that all strategies must implement.
  *
- * CONFIRMED INTERFACE METHODS (required for all strategies):
+ * REQUIRED INTERFACE METHODS:
  * -----------------------------------------------------------------------------
  * | Method                  | Called By                         | Status    |
  * |-------------------------|-----------------------------------|-----------|
  * | initializeVault         | AutomationService.setupVault      | CONFIRMED |
  * | handleSwapEvent         | AutomationService.handleSwapEvent | CONFIRMED |
+ * | cleanup                 | AutomationService.cleanupVault    | CONFIRMED |
  *
- * PENDING REVIEW (may become required):
- * -----------------------------------------------------------------------------
- * | Method                       | Notes                               |
- * |------------------------------|-------------------------------------|
- * | needsRecovery                | Recovery check logic                |
- * | attemptRecovery              | Recovery execution                  |
- * | cleanup                      | Vault cleanup on revocation         |
- * | setupAdditionalMonitoring    | Optional supplementary monitoring   |
  *
  * HELPER METHODS (shared utilities in StrategyBase):
  * -----------------------------------------------------------------------------
@@ -29,7 +22,8 @@
  * |------------------------------|-------------------------------------|
  * | executeBatchTransactions     | Execute tx batch through vault      |
  * | ensureApprovals              | Check & approve tokens as needed    |
- * | wrapETH                      | Wrap native ETH to WETH             |
+ * | executeWrap                  | Wrap native ETH to WETH             |
+ * | executeUnwrap                | Unwrap WETH to native ETH           |
  * | log                          | Debug logging with strategy prefix  |
  * =============================================================================
  */

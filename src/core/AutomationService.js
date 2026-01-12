@@ -72,6 +72,7 @@ class AutomationService {
     this.failedVaults = new Map();
     this.blacklistedVaults = new Map();
     this.vaultTripHistory = new Map(); // Track retry trips: { trips: [{timestamp, source}], firstTripAt }
+    this.pendingConfigUpdates = new Map(); // vaultAddress -> [{type, data, timestamp}]
 
     // Core dependencies
     this.eventManager = new EventManager();
@@ -309,6 +310,7 @@ class AutomationService {
     // 9. Clear service state
     this.vaultDataService.clearCache();
     this.vaultLocks = {};
+    this.pendingConfigUpdates.clear();
 
     // Note: isShuttingDown stays TRUE after stop
     this.log('AutomationService stopped');
@@ -787,6 +789,26 @@ class AutomationService {
       }
     });
 
+    // Handle target tokens update - lock-aware cache update
+    this.eventManager.subscribe('TargetTokensUpdated', async (data) => {
+      await this.handleConfigUpdate(data.vaultAddress, 'tokens', data.tokens);
+    });
+
+    // Handle target platforms update - lock-aware cache update
+    this.eventManager.subscribe('TargetPlatformsUpdated', async (data) => {
+      await this.handleConfigUpdate(data.vaultAddress, 'platforms', data.platforms);
+    });
+
+    // Handle strategy parameter update - lock-aware cache update
+    this.eventManager.subscribe('StrategyParameterUpdated', async (data) => {
+      await this.handleConfigUpdate(data.vaultAddress, 'params', data.paramName);
+    });
+
+    // Process pending config updates when vault unlocks
+    this.eventManager.subscribe('VaultUnlocked', async ({ vaultAddress }) => {
+      await this.processPendingConfigUpdates(vaultAddress);
+    });
+
     // Handle new vault authorization - setup the vault for monitoring
     this.eventManager.subscribe('VaultAuthGranted', async (data) => {
       const { vaultAddress } = data;
@@ -831,7 +853,12 @@ class AutomationService {
 
       } catch (error) {
         // trackFailedVault emits VaultFailed which is already broadcast via SSE
-        await this.trackFailedVault(vaultAddress, error.message, 'auth_event');
+        try {
+          await this.trackFailedVault(vaultAddress, error.message, 'auth_event');
+        } catch (handlerError) {
+          console.error(`[auth_event] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+          await this.emergencyVaultCleanup(vaultAddress, `[auth_event] trackFailedVault failed: ${handlerError.message}`);
+        }
       }
     });
 
@@ -930,7 +957,12 @@ class AutomationService {
         this.log(`Refreshed swap listeners for ${data.vaultAddress} after rebalance`);
       } catch (error) {
         console.error(`Failed to refresh swap listeners for ${data.vaultAddress}:`, error);
-        await this.trackFailedVault(data.vaultAddress, error, 'listener_refresh');
+        try {
+          await this.trackFailedVault(data.vaultAddress, error.message, 'listener_refresh');
+        } catch (handlerError) {
+          console.error(`[listener_refresh] trackFailedVault error for ${data.vaultAddress}:`, handlerError.message);
+          await this.emergencyVaultCleanup(data.vaultAddress, `[listener_refresh] trackFailedVault failed: ${handlerError.message}`);
+        }
       }
     });
 
@@ -1001,7 +1033,12 @@ class AutomationService {
       } catch (error) {
         if (this.isRecoverableError(error)) {
           // Recoverable: trackFailedVault updates attempt count and lastError
-          await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
+          try {
+            await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
+          } catch (handlerError) {
+            console.error(`[retry_attempt] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+            await this.emergencyVaultCleanup(vaultAddress, `[retry_attempt] trackFailedVault failed: ${handlerError.message}`);
+          }
         } else {
           // Unrecoverable: blacklist immediately and remove from retry queue
           this.failedVaults.delete(vaultAddress);
@@ -1051,7 +1088,10 @@ class AutomationService {
       this.unlockVault(vaultAddress);
     }
 
-    // 4. Emit VaultMonitoringStopped event
+    // 4. Clear any pending config updates
+    this.clearPendingConfigUpdates(vaultAddress);
+
+    // 5. Emit VaultMonitoringStopped event
     this.eventManager.emit('VaultMonitoringStopped', {
       vaultAddress,
       strategyId,
@@ -1126,6 +1166,9 @@ class AutomationService {
     } catch (error) {
       results.errors.push(`Lock release failed: ${error.message}`);
     }
+
+    // Step 5: Clear any pending config updates
+    this.clearPendingConfigUpdates(vaultAddress);
 
     // Log final status
     if (results.errors.length === 0) {
@@ -1488,7 +1531,12 @@ class AutomationService {
 
         // Check if error is recoverable - blacklist immediately for unrecoverable errors
         if (this.isRecoverableError(error)) {
-          await this.trackFailedVault(vaultAddress, error.message, 'initial_setup');
+          try {
+            await this.trackFailedVault(vaultAddress, error.message, 'initial_setup');
+          } catch (handlerError) {
+            console.error(`[initial_setup] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+            await this.emergencyVaultCleanup(vaultAddress, `[initial_setup] trackFailedVault failed: ${handlerError.message}`);
+          }
         } else {
           this.log(`Unrecoverable error during initial setup - blacklisting ${vaultAddress}`);
           await this.blacklistVault(vaultAddress, error.message);
@@ -1753,8 +1801,13 @@ class AutomationService {
       // Determine if error is recoverable (cache/RPC failures) vs unrecoverable
       if (this.isRecoverableError(error)) {
         // Recoverable: add to retry queue for re-setup
-        await this.trackFailedVault(vaultAddress, error.message, 'swap_event');
-        this.log(`Vault ${vaultAddress} added to retry queue: ${error.message}`);
+        try {
+          await this.trackFailedVault(vaultAddress, error.message, 'swap_event');
+          this.log(`Vault ${vaultAddress} added to retry queue: ${error.message}`);
+        } catch (handlerError) {
+          console.error(`[swap_event] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+          await this.emergencyVaultCleanup(vaultAddress, `[swap_event] trackFailedVault failed: ${handlerError.message}`);
+        }
       } else {
         // Unrecoverable: blacklist immediately
         await this.blacklistVault(vaultAddress, error.message);
@@ -1825,6 +1878,143 @@ class AutomationService {
       vaultAddress: normalized,
       timestamp: Date.now()
     });
+  }
+
+  //#endregion
+
+  //#region Config Update Handling
+
+  /**
+   * Handle config update with lock awareness
+   * If vault is locked (operation in progress), queue the update for later.
+   * If not locked, apply immediately.
+   * @param {string} vaultAddress - Vault address
+   * @param {string} type - 'tokens' or 'platforms'
+   * @param {Array} data - New config data (token symbols or platform IDs)
+   */
+  async handleConfigUpdate(vaultAddress, type, data) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+
+    if (this.isShuttingDown) {
+      this.log(`Ignoring ${type} config update - service shutting down`);
+      return;
+    }
+
+    // Check if vault is locked (operation in progress)
+    if (this.vaultLocks[normalized]) {
+      this.log(`Vault ${vaultAddress} locked - queueing ${type} update`);
+      this.queueConfigUpdate(normalized, type, data);
+      return;
+    }
+
+    // Not locked - apply immediately
+    await this.applyConfigUpdate(normalized, type, data);
+  }
+
+  /**
+   * Queue a config update for later processing when vault unlocks
+   * If an update of the same type is already queued, replace it (latest wins)
+   * @param {string} vaultAddress - Normalized vault address
+   * @param {string} type - 'tokens' or 'platforms'
+   * @param {Array} data - New config data
+   */
+  queueConfigUpdate(vaultAddress, type, data) {
+    if (!this.pendingConfigUpdates.has(vaultAddress)) {
+      this.pendingConfigUpdates.set(vaultAddress, []);
+    }
+
+    const queue = this.pendingConfigUpdates.get(vaultAddress);
+
+    // Replace existing update of same type (latest wins)
+    const existingIndex = queue.findIndex(u => u.type === type);
+    if (existingIndex >= 0) {
+      queue[existingIndex] = { type, data, timestamp: Date.now() };
+      this.log(`Replaced queued ${type} update for ${vaultAddress}`);
+    } else {
+      queue.push({ type, data, timestamp: Date.now() });
+      this.log(`Queued ${type} update for ${vaultAddress}`);
+    }
+  }
+
+  /**
+   * Apply a config update to VDS cache
+   * @param {string} vaultAddress - Normalized vault address
+   * @param {string} type - 'tokens', 'platforms', or 'params'
+   * @param {Array|string} data - New config data (array for tokens/platforms, string paramName for params)
+   */
+  async applyConfigUpdate(vaultAddress, type, data) {
+    try {
+      let updated;
+      if (type === 'tokens') {
+        updated = await this.vaultDataService.updateTargetTokens(vaultAddress, data);
+      } else if (type === 'platforms') {
+        updated = await this.vaultDataService.updateTargetPlatforms(vaultAddress, data);
+      } else if (type === 'params') {
+        updated = await this.vaultDataService.updateStrategyParameters(vaultAddress);
+      } else {
+        throw new Error(`Unknown config update type: ${type}`);
+      }
+
+      if (!updated) {
+        throw new Error(`Failed to update ${type} in cache`);
+      }
+
+      // Log and notify based on type
+      if (type === 'params') {
+        this.log(`Applied ${type} update for ${vaultAddress}: ${data}`);
+        this.sendTelegramMessage(
+          `⚙️ Strategy parameters updated for vault ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}: ${data}`
+        ).catch(err => console.error('Telegram notification error:', err));
+      } else {
+        this.log(`Applied ${type} update for ${vaultAddress}: ${data.join(', ')}`);
+        this.sendTelegramMessage(
+          `🔄 Target ${type} updated for vault ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}: ${data.join(', ')}`
+        ).catch(err => console.error('Telegram notification error:', err));
+      }
+
+    } catch (error) {
+      console.error(`Error applying ${type} update for ${vaultAddress}:`, error);
+      // Track as failed vault for retry
+      try {
+        await this.trackFailedVault(vaultAddress, error.message, 'config_update');
+      } catch (handlerError) {
+        console.error(`[config_update] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+        await this.emergencyVaultCleanup(vaultAddress, `[config_update] trackFailedVault failed: ${handlerError.message}`);
+      }
+    }
+  }
+
+  /**
+   * Process any pending config updates for a vault after it unlocks
+   * @param {string} vaultAddress - Vault address (will be normalized)
+   */
+  async processPendingConfigUpdates(vaultAddress) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+    const pending = this.pendingConfigUpdates.get(normalized);
+
+    if (!pending || pending.length === 0) {
+      return;
+    }
+
+    this.log(`Processing ${pending.length} pending config update(s) for ${vaultAddress}`);
+
+    for (const update of pending) {
+      await this.applyConfigUpdate(normalized, update.type, update.data);
+    }
+
+    this.pendingConfigUpdates.delete(normalized);
+  }
+
+  /**
+   * Clear pending config updates for a vault (used during cleanup/blacklist)
+   * @param {string} vaultAddress - Vault address (will be normalized)
+   */
+  clearPendingConfigUpdates(vaultAddress) {
+    const normalized = ethers.utils.getAddress(vaultAddress);
+    if (this.pendingConfigUpdates.has(normalized)) {
+      this.pendingConfigUpdates.delete(normalized);
+      this.log(`Cleared pending config updates for ${vaultAddress}`);
+    }
   }
 
   //#endregion

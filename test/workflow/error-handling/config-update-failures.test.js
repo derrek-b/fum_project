@@ -1,17 +1,22 @@
 /**
  * @fileoverview Integration tests for config update failure handling
  *
- * Tests failure scenarios when vault/strategy config changes fail to process:
+ * Tests failure scenarios when vault/strategy config changes fail to process.
  *
- * 1. Vault Config Failures
- *    - TargetTokensUpdated event handler fails → ConfigUpdateFailed → vault tracked for retry
- *    - TargetPlatformsUpdated event handler fails → ConfigUpdateFailed → vault tracked for retry
+ * New Architecture (lock-aware config updates):
+ * - EventManager emits raw TargetTokensUpdated/TargetPlatformsUpdated/StrategyParameterUpdated events
+ * - AutomationService handles these via handleConfigUpdate() → applyConfigUpdate()
+ * - applyConfigUpdate() calls VDS.updateTargetTokens(), VDS.updateTargetPlatforms(), or VDS.updateStrategyParameters()
  *
- * 2. Strategy Parameter Failures
- *    - ParameterUpdated event handler fails → StrategyParameterUpdateFailed → vault tracked for retry
+ * Failure scenarios tested:
  *
- * 3. Handler Cascade Failures
- *    - ConfigUpdateFailed handler itself fails → emergencyVaultCleanup → vault blacklisted
+ * 1. VDS Update Failures
+ *    - updateTargetTokens() fails → trackFailedVault → vault added to retry queue
+ *    - updateTargetPlatforms() fails → trackFailedVault → vault added to retry queue
+ *    - updateStrategyParameters() fails → trackFailedVault → vault added to retry queue
+ *
+ * 2. Cascade Failures (trackFailedVault itself fails)
+ *    - Config update fails AND trackFailedVault fails → emergencyVaultCleanup → vault blacklisted
  *    - StrategyParameterUpdateFailed handler itself fails → emergencyVaultCleanup → vault blacklisted
  *
  * Note: Uses EVM snapshots to reset vault state between tests for isolation.
@@ -148,15 +153,27 @@ describe('Config Update Failures', () => {
    */
   const setupEventTracking = (service) => {
     const events = {
-      configUpdateFailed: [],
+      targetTokensUpdated: [],
+      targetPlatformsUpdated: [],
+      strategyParameterUpdated: [],
       strategyParamUpdateFailed: [],
       vaultFailed: [],
       vaultBlacklisted: []
     };
 
-    service.eventManager.subscribe('ConfigUpdateFailed', (data) => {
-      console.log(`  [EVENT] ConfigUpdateFailed: ${data.vaultAddress?.slice(0, 10)}... - ${data.configType}`);
-      events.configUpdateFailed.push(data);
+    service.eventManager.subscribe('TargetTokensUpdated', (data) => {
+      console.log(`  [EVENT] TargetTokensUpdated: ${data.vaultAddress?.slice(0, 10)}...`);
+      events.targetTokensUpdated.push(data);
+    });
+
+    service.eventManager.subscribe('TargetPlatformsUpdated', (data) => {
+      console.log(`  [EVENT] TargetPlatformsUpdated: ${data.vaultAddress?.slice(0, 10)}...`);
+      events.targetPlatformsUpdated.push(data);
+    });
+
+    service.eventManager.subscribe('StrategyParameterUpdated', (data) => {
+      console.log(`  [EVENT] StrategyParameterUpdated: ${data.vaultAddress?.slice(0, 10)}... paramName=${data.paramName}`);
+      events.strategyParameterUpdated.push(data);
     });
 
     service.eventManager.subscribe('StrategyParameterUpdateFailed', (data) => {
@@ -178,10 +195,10 @@ describe('Config Update Failures', () => {
   };
 
   // ============================================================================
-  // Vault Config Failures
+  // VDS Update Failures
   // ============================================================================
-  describe('Vault Config Failures', () => {
-    it('should track vault for retry when TargetTokensUpdated handler fails', async () => {
+  describe('VDS Update Failures', () => {
+    it('should track vault for retry when updateTargetTokens fails', async () => {
       await createTestService(3401);
       const events = setupEventTracking(service);
 
@@ -194,16 +211,10 @@ describe('Config Update Failures', () => {
       );
       console.log('Service started and vault loaded');
 
-      // Mock getVault to fail on forceRefresh (cache refresh after config event)
-      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
-      let refreshCallCount = 0;
-      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
-        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase() && forceRefresh) {
-          refreshCallCount++;
-          console.log(`  [MOCK] getVault with forceRefresh=true, call #${refreshCallCount} - FAILING`);
-          throw new Error('NETWORK_ERROR: RPC connection failed during cache refresh');
-        }
-        return realGetVault(addr, forceRefresh);
+      // Mock updateTargetTokens to fail (simulating VDS cache update failure)
+      vi.spyOn(service.vaultDataService, 'updateTargetTokens').mockImplementation(async (addr, tokens) => {
+        console.log(`  [MOCK] updateTargetTokens for ${addr?.slice(0, 10)}... - FAILING`);
+        throw new Error('CACHE_ERROR: Failed to update target tokens in cache');
       });
 
       // Trigger real TargetTokensUpdated event by changing target tokens
@@ -213,22 +224,17 @@ describe('Config Update Failures', () => {
       await setTokensTx.wait();
       console.log('setTargetTokens transaction confirmed');
 
-      // Wait for ConfigUpdateFailed event
+      // Wait for TargetTokensUpdated event (shows event was received)
       await waitForCondition(
-        () => events.configUpdateFailed.length > 0,
+        () => events.targetTokensUpdated.length > 0,
         15000,
         500
       );
 
-      // Verify ConfigUpdateFailed was emitted
-      expect(events.configUpdateFailed.length).toBe(1);
-      expect(events.configUpdateFailed[0].vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
-      expect(events.configUpdateFailed[0].configType).toBe('targetTokens');
-
-      // Verify VaultFailed was emitted (from trackFailedVault)
+      // Wait for VaultFailed event (from trackFailedVault in applyConfigUpdate catch block)
       await waitForCondition(
         () => events.vaultFailed.length > 0,
-        5000,
+        10000,
         500
       );
       expect(events.vaultFailed.length).toBe(1);
@@ -238,13 +244,13 @@ describe('Config Update Failures', () => {
       const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
       expect(service.failedVaults.has(normalizedAddress)).toBe(true);
 
-      // Verify vault is NOT blacklisted (recoverable error)
+      // Verify vault is NOT blacklisted (recoverable error - just goes to retry queue)
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
 
-      console.log('TargetTokensUpdated failure test passed');
+      console.log('updateTargetTokens failure test passed');
     }, 90000);
 
-    it('should track vault for retry when TargetPlatformsUpdated handler fails', async () => {
+    it('should track vault for retry when updateTargetPlatforms fails', async () => {
       await createTestService(3402);
       const events = setupEventTracking(service);
 
@@ -257,38 +263,38 @@ describe('Config Update Failures', () => {
       );
       console.log('Service started and vault loaded');
 
-      // Mock getVault to fail on forceRefresh
-      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
-      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
-        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase() && forceRefresh) {
-          console.log('  [MOCK] getVault with forceRefresh=true - FAILING');
-          throw new Error('NETWORK_ERROR: Provider timeout during cache refresh');
-        }
-        return realGetVault(addr, forceRefresh);
+      // Mock updateTargetPlatforms to fail
+      vi.spyOn(service.vaultDataService, 'updateTargetPlatforms').mockImplementation(async (addr, platforms) => {
+        console.log(`  [MOCK] updateTargetPlatforms for ${addr?.slice(0, 10)}... - FAILING`);
+        throw new Error('CACHE_ERROR: Failed to update target platforms in cache');
       });
 
-      // Trigger real TargetPlatformsUpdated event by changing to different platforms
+      // Trigger real TargetPlatformsUpdated event
       console.log('Triggering TargetPlatformsUpdated event...');
       const setTx = await testVault.vault.setTargetPlatforms([]);
       await setTx.wait();
       console.log('setTargetPlatforms transaction confirmed');
 
-      // Wait for ConfigUpdateFailed event
+      // Wait for TargetPlatformsUpdated event
       await waitForCondition(
-        () => events.configUpdateFailed.length > 0,
+        () => events.targetPlatformsUpdated.length > 0,
         15000,
         500
       );
 
-      // Verify ConfigUpdateFailed was emitted with correct configType
-      expect(events.configUpdateFailed.length).toBe(1);
-      expect(events.configUpdateFailed[0].configType).toBe('targetPlatforms');
+      // Wait for VaultFailed event
+      await waitForCondition(
+        () => events.vaultFailed.length > 0,
+        10000,
+        500
+      );
+      expect(events.vaultFailed[0].source).toBe('config_update');
 
       // Verify vault is in failedVaults
       const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
       expect(service.failedVaults.has(normalizedAddress)).toBe(true);
 
-      console.log('TargetPlatformsUpdated failure test passed');
+      console.log('updateTargetPlatforms failure test passed');
     }, 90000);
   });
 
@@ -296,8 +302,9 @@ describe('Config Update Failures', () => {
   // Strategy Parameter Failures
   // ============================================================================
   describe('Strategy Parameter Failures', () => {
-    it('should track vault for retry when ParameterUpdated handler fails', async () => {
+    it('should track vault for retry when updateStrategyParameters fails', async () => {
       await createTestService(3403);
+      const events = setupEventTracking(service);
 
       // Start service and wait for vault to be FULLY set up
       await service.start();
@@ -311,20 +318,17 @@ describe('Config Update Failures', () => {
       );
       console.log('Service started and vault fully loaded');
 
-      // Set up event tracking AFTER initial setup complete
-      const events = setupEventTracking(service);
-
-      // Mock getVault to fail on forceRefresh
-      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
-      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
-        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase() && forceRefresh) {
-          console.log('  [MOCK] getVault with forceRefresh=true - FAILING');
-          throw new Error('NETWORK_ERROR: WebSocket disconnected during cache refresh');
-        }
-        return realGetVault(addr, forceRefresh);
+      // Mock updateStrategyParameters to fail (simulating VDS cache update failure)
+      vi.spyOn(service.vaultDataService, 'updateStrategyParameters').mockImplementation(async (addr) => {
+        console.log(`  [MOCK] updateStrategyParameters for ${addr?.slice(0, 10)}... - FAILING`);
+        throw new Error('CACHE_ERROR: Failed to update strategy parameters in cache');
       });
 
-      // Authorize vault with strategy contract first (required for parameter updates)
+      // Trigger real ParameterUpdated event by changing strategy parameters on vault
+      // Strategy methods must be called via vault.execute() due to onlyAuthorizedVault modifier
+      console.log('Triggering ParameterUpdated event via setRangeParameters...');
+
+      // Authorize vault on strategy contract (required for setRangeParameters)
       const babyStepsStrategyAddress = testEnv.deployedContracts.BabyStepsStrategy;
       const strategyContract = new ethers.Contract(
         babyStepsStrategyAddress,
@@ -333,58 +337,43 @@ describe('Config Update Failures', () => {
       );
       const authTx = await strategyContract.authorizeVault(testVault.vaultAddress);
       await authTx.wait();
-      console.log('Vault authorized with strategy contract');
+      console.log('Vault authorized on strategy contract');
 
-      // Trigger real ParameterUpdated event by changing strategy parameters
-      console.log('Triggering ParameterUpdated event...');
-
+      // Encode the strategy call and execute through vault
       const strategyInterface = new ethers.utils.Interface([
         'function setRangeParameters(uint16 upperRange, uint16 lowerRange) external'
       ]);
-
-      // Change range parameters (this emits ParameterUpdated event)
-      const setRangeData = strategyInterface.encodeFunctionData('setRangeParameters', [
-        50,  // New upper range (0.5%)
-        50   // New lower range (0.5%)
-      ]);
-
-      const executeTx = await testVault.vault.execute(
+      const setRangeData = strategyInterface.encodeFunctionData('setRangeParameters', [50, 50]);
+      const setParamsTx = await testVault.vault.execute(
         [babyStepsStrategyAddress],
         [setRangeData]
       );
-      await executeTx.wait();
-      console.log('Strategy parameter update transaction confirmed');
+      await setParamsTx.wait();
+      console.log('setRangeParameters transaction confirmed');
 
-      // Wait for StrategyParameterUpdateFailed event
+      // Wait for VaultFailed event (from applyConfigUpdate catch block)
       await waitForCondition(
-        () => events.strategyParamUpdateFailed.length > 0,
+        () => events.vaultFailed.length > 0,
         15000,
         500
       );
+      expect(events.vaultFailed[0].source).toBe('config_update');
 
-      // Verify StrategyParameterUpdateFailed was emitted
-      expect(events.strategyParamUpdateFailed.length).toBeGreaterThan(0);
-      expect(events.strategyParamUpdateFailed[0].vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
-
-      // Verify VaultFailed was emitted
-      await waitForCondition(
-        () => events.vaultFailed.length > 0,
-        5000,
-        500
-      );
-      expect(events.vaultFailed[0].source).toBe('strategy_param_update');
-
+      // Verify vault is in failedVaults
       expect(service.failedVaults.has(normalizedAddress)).toBe(true);
 
-      console.log('ParameterUpdated failure test passed');
+      // Verify vault is NOT blacklisted (recoverable error - just goes to retry queue)
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      console.log('updateStrategyParameters failure test passed');
     }, 90000);
   });
 
   // ============================================================================
-  // Handler Cascade Failures (handler itself fails)
+  // Cascade Failures (trackFailedVault also fails)
   // ============================================================================
-  describe('Handler Cascade Failures', () => {
-    it('should emergency blacklist and release lock when ConfigUpdateFailed handler itself fails', async () => {
+  describe('Cascade Failures', () => {
+    it('should emergency blacklist when config update fails AND trackFailedVault fails', async () => {
       await createTestService(3404);
 
       // Start service and wait for vault to be FULLY set up
@@ -402,40 +391,47 @@ describe('Config Update Failures', () => {
       // Set up event tracking AFTER initial setup complete
       const events = setupEventTracking(service);
 
-      // Manually lock the vault to simulate concurrent operation
-      console.log('Locking vault to test lock release during emergency cleanup...');
-      const lockAcquired = service.lockVault(normalizedAddress);
-      expect(lockAcquired).toBe(true);
-      expect(service.vaultLocks[normalizedAddress]).toBeDefined();
+      // DON'T lock the vault - we want the config update to be applied (not queued)
+      // so we can test the cascade failure scenario
+      expect(service.vaultLocks[normalizedAddress]).toBeUndefined();
+      console.log('Vault is NOT locked (config update will be applied immediately)');
 
-      // Mock trackFailedVault to throw (simulating handler failure)
+      // Mock updateTargetTokens to fail (first failure)
+      vi.spyOn(service.vaultDataService, 'updateTargetTokens').mockImplementation(async () => {
+        // Lock the vault INSIDE the mock to test lock release during emergency cleanup
+        // This simulates a scenario where a lock was acquired by another operation
+        console.log('  [MOCK] updateTargetTokens - acquiring lock before failing...');
+        service.lockVault(normalizedAddress);
+        console.log('  [MOCK] updateTargetTokens - FAILING');
+        throw new Error('CACHE_ERROR: Failed to update target tokens');
+      });
+
+      // Mock trackFailedVault to also fail (cascade failure)
       vi.spyOn(service, 'trackFailedVault').mockImplementation(async () => {
-        console.log('  [MOCK] trackFailedVault - THROWING');
+        console.log('  [MOCK] trackFailedVault - THROWING (cascade failure)');
         throw new Error('Database write failed');
       });
 
       // Spy on emergencyVaultCleanup
       const emergencyCleanupSpy = vi.spyOn(service, 'emergencyVaultCleanup');
 
-      // Emit ConfigUpdateFailed directly (simpler than triggering real event + cache failure)
-      console.log('Emitting ConfigUpdateFailed event...');
-      service.eventManager.emit('ConfigUpdateFailed', {
-        vaultAddress: testVault.vaultAddress,
-        configType: 'targetTokens',
-        error: 'Simulated cache refresh failure'
-      });
+      // Trigger real TargetTokensUpdated event
+      console.log('Triggering TargetTokensUpdated event...');
+      const setTokensTx = await testVault.vault.setTargetTokens(['WETH']);
+      await setTokensTx.wait();
+      console.log('setTargetTokens transaction confirmed');
 
       // Wait for emergencyVaultCleanup to be called
       await waitForCondition(
         () => emergencyCleanupSpy.mock.calls.length > 0,
-        10000,
+        15000,
         500
       );
 
       // Verify emergencyVaultCleanup was called
       expect(emergencyCleanupSpy).toHaveBeenCalledWith(
-        testVault.vaultAddress,
-        expect.stringContaining('ConfigUpdateFailed handler error')
+        normalizedAddress,
+        expect.stringContaining('[config_update] trackFailedVault failed')
       );
 
       // Wait for VaultBlacklisted event
@@ -451,11 +447,11 @@ describe('Config Update Failures', () => {
       expect(events.vaultBlacklisted[0].cleanupResults.lockReleased).toBe(true);
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
 
-      // Verify lock was released
+      // Verify lock was released by emergency cleanup
       expect(service.vaultLocks[normalizedAddress]).toBeUndefined();
       console.log('Lock was released during emergency cleanup');
 
-      console.log('ConfigUpdateFailed cascade failure test passed');
+      console.log('Config update cascade failure test passed');
     }, 90000);
 
     it('should emergency blacklist when StrategyParameterUpdateFailed handler itself fails', async () => {

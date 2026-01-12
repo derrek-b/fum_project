@@ -420,4 +420,46 @@ describe('VaultDataService', () => {
       expect(emitSpy).toHaveBeenCalledWith('targetPlatformsUpdated', VAULT_ADDRESS_CHECKSUM, ['uniswapV4']);
     });
   });
+
+  describe('updateStrategyParameters', () => {
+    // Note: Success cases tested in workflow tests (require real blockchain)
+    // Unit tests cover error handling only
+
+    beforeEach(() => {
+      vaultDataService.provider = { getNetwork: vi.fn() };
+      vaultDataService.chainId = 1337;
+    });
+
+    it('should return false when vault not found', async () => {
+      const result = await vaultDataService.updateStrategyParameters(VAULT_ADDRESS_1);
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when vault has no strategy', async () => {
+      const vault = {
+        address: VAULT_ADDRESS_CHECKSUM,
+        strategy: null,
+        lastUpdated: Date.now()
+      };
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
+
+      const result = await vaultDataService.updateStrategyParameters(VAULT_ADDRESS_1);
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when strategy has no address', async () => {
+      const vault = {
+        address: VAULT_ADDRESS_CHECKSUM,
+        strategy: { strategyId: 'bob', strategyAddress: null },
+        lastUpdated: Date.now()
+      };
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_CHECKSUM, vault);
+
+      const result = await vaultDataService.updateStrategyParameters(VAULT_ADDRESS_1);
+
+      expect(result).toBe(false);
+    });
+  });
 });

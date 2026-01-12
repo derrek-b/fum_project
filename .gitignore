@@ -19,3 +19,6 @@ node_modules
 /test/data/.vault-blacklist.json
 
 cache/
+
+# Test artifacts
+test/.hardhat-state.json

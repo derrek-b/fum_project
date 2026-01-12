@@ -662,6 +662,47 @@ class VaultDataService {
     }
   }
 
+  /**
+   * Update strategy parameters for a vault (without full vault refresh)
+   * @param {string} vaultAddress - Vault address
+   * @returns {Promise<boolean>} True if successful
+   */
+  async updateStrategyParameters(vaultAddress) {
+    this.ensureInitialized();
+
+    try {
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+      const vault = await this.getVault(normalizedAddress);
+      if (!vault) {
+        throw new Error(`Vault ${normalizedAddress} not found`);
+      }
+
+      if (!vault.strategy || !vault.strategy.strategyAddress) {
+        throw new Error(`Vault ${normalizedAddress} has no strategy configured`);
+      }
+
+      // Get fresh params from strategy contract
+      const contractInfo = getContractInfoByAddress(vault.strategy.strategyAddress);
+      const strategyContract = await getContract(contractInfo.contractName, this.provider);
+      const rawParams = await retryRpcCall(
+        () => strategyContract.getAllParameters(normalizedAddress),
+        'strategy.getAllParameters'
+      );
+      const mappedParams = mapStrategyParameters(contractInfo.contractName, rawParams);
+
+      // Update just the parameters
+      vault.strategy.parameters = mappedParams;
+      vault.lastUpdated = Date.now();
+      this.#vaults.set(normalizedAddress, vault);
+
+      this.eventManager.emit('strategyParametersUpdated', normalizedAddress, mappedParams);
+      return true;
+    } catch (error) {
+      console.error(`Error updating strategy parameters for vault ${vaultAddress}:`, error);
+      return false;
+    }
+  }
+
   //#endregion
 
   //#region Test Helpers
