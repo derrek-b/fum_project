@@ -93,11 +93,29 @@ async function connectToSharedHardhat() {
     },
 
     /**
-     * Cleanup WebSocket provider (don't stop Hardhat - it's shared)
+     * Cleanup providers (don't stop Hardhat - it's shared)
      */
     async cleanup() {
       try {
+        // Cleanup JsonRpcProvider - stop polling and clear any pending timers
+        if (provider) {
+          // Stop polling first
+          provider.polling = false;
+
+          // Clear any pending poll timer (internal ethers v5 property)
+          // This prevents orphaned setTimeout callbacks from firing after cleanup
+          if (provider._poller) {
+            clearTimeout(provider._poller);
+            provider._poller = null;
+          }
+
+          // Remove all event listeners
+          provider.removeAllListeners();
+        }
+
+        // Cleanup WebSocketProvider
         if (wsProvider) {
+          wsProvider.removeAllListeners();
           await wsProvider.destroy();
         }
       } catch (error) {

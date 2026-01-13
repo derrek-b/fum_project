@@ -96,11 +96,8 @@ describe('Config Update Success Cases', () => {
 
     if (service) {
       try {
-        if (service.isRunning) {
-          await service.stop();
-        } else if (service.provider) {
-          await service.stop(true);
-        }
+        // Always force stop to clean up all resources
+        await service.stop(true);
       } catch (e) {
         // Ignore cleanup errors
       }

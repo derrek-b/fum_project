@@ -105,11 +105,8 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
 
     if (service) {
       try {
-        if (service.isRunning) {
-          await service.stop();
-        } else if (service.provider) {
-          await service.stop(true);
-        }
+        // Always force stop to clean up all resources
+        await service.stop(true);
       } catch (e) {
         // Ignore cleanup errors
       }
@@ -419,11 +416,8 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
 
     if (service) {
       try {
-        if (service.isRunning) {
-          await service.stop();
-        } else if (service.provider) {
-          await service.stop(true);
-        }
+        // Always force stop to clean up all resources
+        await service.stop(true);
       } catch (e) {
         // Ignore cleanup errors
       }

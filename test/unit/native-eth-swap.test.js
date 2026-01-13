@@ -18,6 +18,7 @@ describe('Native ETH Swap Proof of Concept', () => {
   let provider;
   let signer;
   let alphaRouter;
+  let arbitrumProvider; // Track for cleanup
 
   // Chain IDs
   const LOCAL_CHAIN_ID = 1337;
@@ -32,7 +33,7 @@ describe('Native ETH Swap Proof of Concept', () => {
     // Create Alpha Router instance (same as UniswapV3Adapter does)
     // For local testing, we need to use Arbitrum chainId for Alpha Router
     // but connect to our local forked provider
-    const arbitrumProvider = new ethers.providers.JsonRpcProvider(
+    arbitrumProvider = new ethers.providers.JsonRpcProvider(
       process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc'
     );
 
@@ -47,6 +48,16 @@ describe('Native ETH Swap Proof of Concept', () => {
   }, 60000);
 
   afterAll(async () => {
+    // Cleanup arbitrum provider to prevent hanging timers
+    if (arbitrumProvider) {
+      arbitrumProvider.polling = false;
+      // Clear any pending poll timer
+      if (arbitrumProvider._poller) {
+        clearTimeout(arbitrumProvider._poller);
+        arbitrumProvider._poller = null;
+      }
+      arbitrumProvider.removeAllListeners();
+    }
     if (testEnv) {
       await cleanupTestBlockchain(testEnv);
     }

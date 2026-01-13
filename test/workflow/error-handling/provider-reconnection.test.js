@@ -76,11 +76,9 @@ describe('Provider Reconnection', () => {
 
     if (service) {
       try {
-        if (service.isRunning) {
-          await service.stop();
-        } else if (service.provider) {
-          await service.stop(true);
-        }
+        // Always force stop to clean up SSEBroadcaster, EventManager, etc.
+        // even when isRunning=false and provider=null (e.g., after failed reconnection)
+        await service.stop(true);
       } catch (e) {
         // Ignore cleanup errors
       }
@@ -342,12 +340,13 @@ describe('Provider Reconnection', () => {
       // Track handleFatalError calls
       let fatalErrorCalled = false;
       let fatalError = null;
-      const originalHandleFatalError = service.handleFatalError.bind(service);
-      vi.spyOn(service, 'handleFatalError').mockImplementation((error) => {
+      vi.spyOn(service, 'handleFatalError').mockImplementation(async (error) => {
         console.log(`  [MOCK] handleFatalError called: ${error.message}`);
         fatalErrorCalled = true;
         fatalError = error;
-        // Don't call original - it would stop the service and we want to verify state
+        // Do the cleanup that handleFatalError does, but skip process.exit(1)
+        // which vitest intercepts and throws an error for
+        await service.stop();
       });
 
       // Start service
@@ -359,8 +358,7 @@ describe('Provider Reconnection', () => {
       service.reconnectBaseDelay = 100;  // 100ms base delay
 
       // Mock provider creation to always fail
-      const originalWebSocketProvider = ethers.providers.WebSocketProvider;
-      vi.spyOn(ethers.providers, 'WebSocketProvider').mockImplementation(() => {
+      const wsProviderSpy = vi.spyOn(ethers.providers, 'WebSocketProvider').mockImplementation(() => {
         throw new Error('Connection refused');
       });
 
@@ -389,8 +387,8 @@ describe('Provider Reconnection', () => {
 
       console.log('Failed reconnection test passed');
 
-      // Restore WebSocketProvider for cleanup
-      vi.spyOn(ethers.providers, 'WebSocketProvider').mockImplementation(originalWebSocketProvider);
+      // Restore WebSocketProvider mock before afterEach cleanup
+      wsProviderSpy.mockRestore();
     }, 60000);
   });
 });

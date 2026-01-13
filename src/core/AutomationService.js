@@ -1719,19 +1719,17 @@ class AutomationService {
       }
     );
 
-    // Optional: strategy-specific additional monitoring
-    if (strategy.setupAdditionalMonitoring) {
-      await retryWithBackoff(
-        () => strategy.setupAdditionalMonitoring(vault),
-        {
-          maxRetries: 2,
-          baseDelay: 1000,
-          exponential: true,
-          context: `Setting up additional monitoring for vault ${vault.address}`,
-          logger: console
-        }
-      );
-    }
+    // Strategy-specific additional monitoring (required interface method)
+    await retryWithBackoff(
+      () => strategy.setupAdditionalMonitoring(vault),
+      {
+        maxRetries: 2,
+        baseDelay: 1000,
+        exponential: true,
+        context: `Setting up additional monitoring for vault ${vault.address}`,
+        logger: console
+      }
+    );
 
     this.eventManager.emit('MonitoringStarted', {
       vaultAddress: vault.address,

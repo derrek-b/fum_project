@@ -9,12 +9,12 @@
  *
  * REQUIRED INTERFACE METHODS:
  * -----------------------------------------------------------------------------
- * | Method                  | Called By                         | Status    |
- * |-------------------------|-----------------------------------|-----------|
- * | initializeVault         | AutomationService.setupVault      | CONFIRMED |
- * | handleSwapEvent         | AutomationService.handleSwapEvent | CONFIRMED |
- * | cleanup                 | AutomationService.cleanupVault    | CONFIRMED |
- *
+ * | Method                    | Called By                          | Status    |
+ * |---------------------------|------------------------------------|-----------|
+ * | initializeVault           | AutomationService.setupVault       | CONFIRMED |
+ * | handleSwapEvent           | AutomationService.handleSwapEvent  | CONFIRMED |
+ * | cleanup                   | AutomationService.cleanupVault     | CONFIRMED |
+ * | setupAdditionalMonitoring | AutomationService.startMonitoring  | CONFIRMED |
  *
  * HELPER METHODS (shared utilities in StrategyBase):
  * -----------------------------------------------------------------------------
@@ -24,6 +24,8 @@
  * | ensureApprovals              | Check & approve tokens as needed    |
  * | executeWrap                  | Wrap native ETH to WETH             |
  * | executeUnwrap                | Unwrap WETH to native ETH           |
+ * | isWrapUnwrapPair             | Check if swap is ETH<->WETH         |
+ * | buildSwapDetails             | Combine metadata with actual swaps  |
  * | log                          | Debug logging with strategy prefix  |
  * =============================================================================
  */

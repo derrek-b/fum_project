@@ -34,12 +34,8 @@ describe('Service Initialization Error Scenarios', () => {
     // Clean up service
     if (service) {
       try {
-        if (service.isRunning) {
-          await service.stop();
-        } else if (service.provider) {
-          // Force cleanup if partially initialized
-          await service.stop(true);
-        }
+        // Always force stop to clean up all resources
+        await service.stop(true);
       } catch (e) {
         // Ignore cleanup errors
       }

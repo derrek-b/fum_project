@@ -2685,4 +2685,16 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     });
   }
+
+  /**
+   * Set up any additional monitoring beyond standard swap events
+   * BabySteps strategy uses only standard swap event monitoring, so this is a no-op
+   * @param {Object} vault - Vault data object
+   * @returns {Promise<void>}
+   */
+  async setupAdditionalMonitoring(vault) {
+    // BabySteps doesn't need additional monitoring beyond swap events
+    // This stub satisfies the interface requirement
+    this.log(`No additional monitoring needed for vault ${vault.address}`);
+  }
 }
