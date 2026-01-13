@@ -18,48 +18,27 @@
  * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
  * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |
  * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
- * | selectBestPool               | Strategy.initializeVaultStrategy    | CONFIRMED |
- * | getPoolCurrent               | Strategy.initializeVaultStrategy    | CONFIRMED |
+ * | selectBestPool               | Strategy.initializeVault            | CONFIRMED |
+ * | getPoolCurrent               | Strategy.initializeVault            | CONFIRMED |
  * | parseClosureReceipt          | Strategy.closePositions             | CONFIRMED |
  * | parseCollectReceipt          | Strategy.collectFees                | CONFIRMED |
  * | generateRemoveLiquidityData  | Strategy.closePositions             | CONFIRMED |
+ * | generateClaimFeesData        | Strategy.collectFees                | CONFIRMED |
  * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
  * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
- * | parseSwapReceipt             | Strategy.addToPosition              | CONFIRMED |
+ * | generateCreatePositionData   | Strategy.createNewPosition          | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.prepareTokens              | CONFIRMED |
  * | parseIncreaseLiquidityReceipt| Strategy.addToPosition              | CONFIRMED |
- * | getBestSwapQuote             | Strategy.addToPosition              | CONFIRMED |
- * | extractPositionBounds        | Strategy.addToPosition              | CONFIRMED |
+ * | getBestSwapQuote             | Strategy.prepareTokens              | CONFIRMED |
+ * | extractPositionBounds        | Strategy event emission             | CONFIRMED |
  * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
- * | evaluatePositionRange        | Strategy.evaluateInitialPositions   | CONFIRMED |
+ * | evaluatePositionRange        | Strategy.evaluatePositions          | CONFIRMED |
  * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
  * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
  * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |
  * | evaluatePriceMovement        | Strategy.handleSwapEvent            | CONFIRMED |
  * | getAccruedFeesUSD            | Strategy.handleSwapEvent            | CONFIRMED |
- *
- * PENDING REVIEW (may be interface or platform-specific):
- * -----------------------------------------------------------------------------
- * | Method                       | Notes                               |
- * |------------------------------|-------------------------------------|
- * | isPositionInRange            | Likely interface - hides tick logic |
- * | calculateUncollectedFees     | Likely interface - hides fee logic  |
- * | generateSwapData             | Likely interface - tx generation    |
- * | generateCreatePositionData   | Likely interface - tx generation    |
- * | generateClaimFeesData        | Likely interface - tx generation    |
- *
- * LIKELY PLATFORM-SPECIFIC (tick-based AMM only):
- * -----------------------------------------------------------------------------
- * | Method                       | Notes                               |
- * |------------------------------|-------------------------------------|
- * | getCurrentTick               | Tick-based AMMs only                |
- * | tickToPrice                  | Tick-based AMMs only                |
- * | calculatePriceFromSqrtPrice  | Tick-based AMMs only                |
- * | getPoolAddress               | May vary by platform                |
- * | checkPoolExists              | May vary by platform                |
- * | getSwapEventSignature        | Platform-specific event format      |
- * | getPoolABI                   | Platform-specific                   |
- * | getPositionManagerABI        | Platform-specific                   |
- * | getPositions                 | Superseded by getPositionsForVDS?   |
+ * | sortTokens                   | Strategy pool token ordering        | CONFIRMED |
  * =============================================================================
  */
 export default class PlatformAdapter {
@@ -90,72 +69,6 @@ export default class PlatformAdapter {
     if (!this.platformName) {
       throw new Error("platformName must be defined");
     }
-  }
-
-  /**
-   * Get pool address for tokens and fee
-   * @param {Object} token0 - First token details
-   * @param {string} token0.address - Token contract address
-   * @param {number} token0.decimals - Token decimals
-   * @param {Object} token1 - Second token details
-   * @param {string} token1.address - Token contract address
-   * @param {number} token1.decimals - Token decimals
-   * @param {number} fee - Fee tier
-   * @param {Object} provider - Provider instance
-   * @returns {Promise<string>} Pool contract address
-   */
-  async getPoolAddress(token0, token1, fee, provider) {
-    throw new Error("getPoolAddress must be implemented by subclasses");
-  }
-
-  /**
-   * Get pool ABI
-   * @returns {Array} - Pool ABI
-   */
-  async getPoolABI() {
-    throw new Error("getPoolABI must be implemented by subclasses");
-  }
-
-  /**
-   * Get current tick for a pool
-   * @param {string} poolAddress - Pool contract address
-   * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<number>} Current tick value
-   * @throws {Error} If pool address invalid or provider chain mismatch
-   */
-  async getCurrentTick(poolAddress, provider) {
-    throw new Error("getCurrentTick must be implemented by subclasses");
-  }
-
-  /**
-   * Get position manager ABI
-   * @returns {Array} - Position Manager ABI
-   */
-  getPositionManagerABI() {
-    throw new Error("getPositionManagerABI must be implemented by subclasses");
-  }
-
-  /**
-   * Check if a pool exists for the given tokens and fee tier
-   * @param {Object} token0 - First token details
-   * @param {string} token0.address - Token contract address
-   * @param {number} token0.decimals - Token decimals
-   * @param {Object} token1 - Second token details
-   * @param {string} token1.address - Token contract address
-   * @param {number} token1.decimals - Token decimals
-   * @param {number} fee - Fee tier
-   * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
-   */
-  async checkPoolExists(token0, token1, fee) {
-    throw new Error("checkPoolExists must be implemented by subclasses");
-  }
-
-  /**
-   * Get the swap event signature for this platform
-   * @returns {string} The event signature string for the platform's swap event
-   */
-  getSwapEventSignature() {
-    throw new Error("getSwapEventSignature must be implemented by subclasses");
   }
 
   /**
@@ -226,16 +139,6 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Get positions for the connected user
-   * @param {string} address - User's wallet address
-   * @param {number} chainId - Chain ID
-   * @returns {Promise<{positions: Array, poolData: Object, tokenData: Object}>} Position data
-   */
-  async getPositions(address, chainId) {
-    throw new Error("getPositions must be implemented by subclasses");
-  }
-
-  /**
    * Get positions formatted for VaultDataService
    * @param {string} address - Vault address
    * @param {Object} provider - Ethers provider instance
@@ -243,18 +146,6 @@ export default class PlatformAdapter {
    */
   async getPositionsForVDS(address, provider) {
     throw new Error("getPositionsForVDS must be implemented by subclasses");
-  }
-
-  /**
-   * Calculate uncollected fees for a position
-   * @param {Object} position - Position object with liquidity and fee growth data
-   * @param {Object} poolData - Current pool state including fee growth globals and tick data
-   * @param {number} token0Decimals - Token0 decimals for formatting
-   * @param {number} token1Decimals - Token1 decimals for formatting
-   * @returns {{token0: {raw: bigint, formatted: string}, token1: {raw: bigint, formatted: string}}} Uncollected fees
-   */
-  calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals) {
-    throw new Error("calculateUncollectedFees must be implemented by subclasses");
   }
 
   /**
@@ -287,17 +178,6 @@ export default class PlatformAdapter {
     throw new Error("generateClaimFeesData must be implemented by subclasses");
   }
 
-
-  /**
-   * Check if a position is in range (active)
-   * @param {Object} position - Position object
-   * @param {Object} poolData - Pool data
-   * @returns {boolean} - Whether the position is in range
-   */
-  isPositionInRange(position, poolData) {
-    throw new Error("isPositionInRange must be implemented by subclasses");
-  }
-
   /**
    * Evaluate a position's range status relative to current pool state
    *
@@ -324,30 +204,6 @@ export default class PlatformAdapter {
    */
   async evaluatePositionRange(position, provider, options = {}) {
     throw new Error("evaluatePositionRange must be implemented by subclasses");
-  }
-
-  /**
-   * Calculate price from sqrtPriceX96
-   * @param {string} sqrtPriceX96 - Square root price in X96 format
-   * @param {Object} baseToken - Base token metadata
-   * @param {Object} quoteToken - Quote token metadata
-   * @param {number} chainId - Chain ID
-   * @returns {string} Formatted price
-   */
-  calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId) {
-    throw new Error("calculatePriceFromSqrtPrice must be implemented by subclasses");
-  }
-
-  /**
-   * Convert a tick value to a corresponding price
-   * @param {number} tick - The tick value
-   * @param {Object} baseToken - Base token metadata
-   * @param {Object} quoteToken - Quote token metadata
-   * @param {number} chainId - Chain ID
-   * @returns {string} The formatted price corresponding to the tick
-   */
-  tickToPrice(tick, baseToken, quoteToken, chainId) {
-    throw new Error("tickToPrice must be implemented by subclasses");
   }
 
   /**
@@ -428,16 +284,6 @@ export default class PlatformAdapter {
    */
   async generateCreatePositionData(params) {
     throw new Error("generateCreatePositionData must be implemented by subclasses");
-  }
-
-
-  /**
-   * Generate swap transaction data
-   * @param {Object} params - Swap parameters
-   * @returns {Promise<Object>} Transaction data with to, data, and value
-   */
-  async generateSwapData(params) {
-    throw new Error("generateSwapData must be implemented by subclasses");
   }
 
   /**

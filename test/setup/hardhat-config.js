@@ -90,15 +90,29 @@ export const ARBITRUM_ADDRESSES = {
  */
 async function waitForNode(url, maxAttempts = 30) {
   const provider = new ethers.providers.JsonRpcProvider(url);
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      await provider.getBlockNumber();
-      return true;
-    } catch (e) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+  let ready = false;
+
+  try {
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        await provider.getBlockNumber();
+        ready = true;
+        break;
+      } catch (e) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
+  } finally {
+    // Always clean up the provider to prevent orphaned polling timers
+    provider.polling = false;
+    if (provider._poller) {
+      clearTimeout(provider._poller);
+      provider._poller = null;
+    }
+    provider.removeAllListeners();
   }
-  return false;
+
+  return ready;
 }
 
 /**
@@ -161,7 +175,19 @@ export async function startHardhat(options = {}) {
     process.off('SIGTERM', stop);
 
     try {
+      // Clean up JsonRpcProvider to prevent orphaned polling timers
+      provider.polling = false;
+      if (provider._poller) {
+        clearTimeout(provider._poller);
+        provider._poller = null;
+      }
+      provider.removeAllListeners();
+
+      // Clean up WebSocketProvider
+      wsProvider.removeAllListeners();
       await wsProvider.destroy();
+
+      // Stop the Hardhat process
       hardhatProcess.kill('SIGINT');
     } catch (error) {
       // Ignore cleanup errors
