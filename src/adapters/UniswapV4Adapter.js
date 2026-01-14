@@ -23,7 +23,7 @@
 
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
-import { getPlatformFeeTiers, getPlatformTickBounds } from "../helpers/platformHelpers.js";
+import { getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress, getTokenBySymbol, getWethAddress } from "../helpers/tokenHelpers.js";
 import { PERMIT2_ADDRESS } from "../helpers/Permit2Helper.js";
@@ -1316,45 +1316,164 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
-   * Calculate position range bounds from percentage parameters
+   * Calculate tick range from percentage offsets around a current tick.
+   * Internal helper used by getPositionRange.
    *
-   * V4 note: Same tick calculation as V3.
+   * V4 note: tickSpacing is an explicit pool parameter, not derived from fee.
    *
-   * @param {Object} poolData - Pool data with current tick
-   * @param {number} upperPercent - Upper range percentage
-   * @param {number} lowerPercent - Lower range percentage
+   * @param {number} currentTick - Current pool tick
+   * @param {number} upperPercent - Upper range percentage (e.g., 5 for +5%)
+   * @param {number} lowerPercent - Lower range percentage (e.g., 5 for -5%)
+   * @param {number} tickSpacing - Pool's tick spacing (from PoolKey)
+   * @returns {Object} { tickLower, tickUpper }
+   * @throws {Error} If parameters are invalid or result in invalid tick range
+   */
+  _calculateTickRangeFromPercentages(currentTick, upperPercent, lowerPercent, tickSpacing) {
+    if (!Number.isFinite(currentTick)) {
+      throw new Error(`Invalid currentTick: ${currentTick}. Must be a finite number.`);
+    }
+    if (!Number.isFinite(upperPercent)) {
+      throw new Error(`Invalid upperPercent: ${upperPercent}. Must be a finite number.`);
+    }
+    if (upperPercent <= 0 || upperPercent > 100) {
+      throw new Error(`Invalid upperPercent: ${upperPercent}. Must be between 0 and 100 (exclusive of 0).`);
+    }
+    if (!Number.isFinite(lowerPercent)) {
+      throw new Error(`Invalid lowerPercent: ${lowerPercent}. Must be a finite number.`);
+    }
+    if (lowerPercent <= 0 || lowerPercent > 100) {
+      throw new Error(`Invalid lowerPercent: ${lowerPercent}. Must be between 0 and 100 (exclusive of 0).`);
+    }
+    if (!Number.isFinite(tickSpacing) || tickSpacing <= 0) {
+      throw new Error(`Invalid tickSpacing: ${tickSpacing}. Must be a positive finite number.`);
+    }
+
+    const LOG_BASE = Math.log(1.0001);
+
+    const upperPrice = 1 + upperPercent / 100;
+    const lowerPrice = 1 - lowerPercent / 100;
+    const upperTickOffset = Math.round(Math.log(upperPrice) / LOG_BASE);
+    const lowerTickOffset = Math.round(Math.log(lowerPrice) / LOG_BASE);
+
+    let tickUpper = currentTick + upperTickOffset;
+    let tickLower = currentTick + lowerTickOffset;
+
+    // Align to tick spacing (round down for upper, round up for lower to narrow range)
+    tickUpper = Math.floor(tickUpper / tickSpacing) * tickSpacing;
+    tickLower = Math.ceil(tickLower / tickSpacing) * tickSpacing;
+
+    // Clamp to platform tick bounds
+    tickUpper = Math.min(tickUpper, this.tickBounds.maxTick);
+    tickLower = Math.max(tickLower, this.tickBounds.minTick);
+
+    if (tickLower >= tickUpper) {
+      throw new Error(`Invalid tick range: tickLower (${tickLower}) must be less than tickUpper (${tickUpper})`);
+    }
+
+    return { tickLower, tickUpper };
+  }
+
+  /**
+   * Calculate position range bounds from percentage parameters.
+   * Wraps _calculateTickRangeFromPercentages with poolData validation.
+   *
+   * V4 note: tickSpacing is an explicit pool parameter in V4, not derived from fee.
+   *
+   * @param {Object} poolData - Pool data with current tick and tickSpacing
+   * @param {number} poolData.tick - Current tick of the pool
+   * @param {number} poolData.tickSpacing - Pool's tick spacing (from PoolKey)
+   * @param {number} upperPercent - Upper range percentage (e.g., 5 for +5%)
+   * @param {number} lowerPercent - Lower range percentage (e.g., 5 for -5%)
    * @returns {Object} { tickLower, tickUpper, currentTick }
+   * @throws {Error} If parameters are invalid
    */
   getPositionRange(poolData, upperPercent, lowerPercent) {
-    // TODO: Calculate tick range from percentages
-    // Same math as V3 - convert percentages to tick offsets
-    throw new Error("UniswapV4Adapter.getPositionRange not implemented");
+    // Validate poolData
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error('poolData.tick is required');
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error('poolData.tick must be a finite number');
+    }
+    if (poolData.tickSpacing === null || poolData.tickSpacing === undefined) {
+      throw new Error('poolData.tickSpacing is required');
+    }
+    if (!Number.isFinite(poolData.tickSpacing) || poolData.tickSpacing <= 0) {
+      throw new Error('poolData.tickSpacing must be a positive finite number');
+    }
+
+    // Validate upperPercent
+    if (upperPercent === null || upperPercent === undefined) {
+      throw new Error('upperPercent is required');
+    }
+    if (!Number.isFinite(upperPercent)) {
+      throw new Error('upperPercent must be a finite number');
+    }
+
+    // Validate lowerPercent
+    if (lowerPercent === null || lowerPercent === undefined) {
+      throw new Error('lowerPercent is required');
+    }
+    if (!Number.isFinite(lowerPercent)) {
+      throw new Error('lowerPercent must be a finite number');
+    }
+
+    const { tickLower, tickUpper } = this._calculateTickRangeFromPercentages(
+      poolData.tick,
+      upperPercent,
+      lowerPercent,
+      poolData.tickSpacing
+    );
+
+    return { tickLower, tickUpper, currentTick: poolData.tick };
   }
 
   /**
-   * Extract position bounds from an existing position object
+   * Extract position bounds from an existing position object.
    *
-   * @param {Object} position - Position object
-   * @returns {Object} { lower, upper } as numbers
+   * For Uniswap V4, positions store bounds as tickLower and tickUpper.
+   * This method extracts them in a platform-agnostic format.
+   *
+   * @param {Object} position - Position object from vault cache
+   * @param {number} position.tickLower - Lower tick boundary
+   * @param {number} position.tickUpper - Upper tick boundary
+   * @returns {Object} Position bounds { lower, upper } as numbers
+   * @throws {Error} If position is invalid or missing tick properties
    */
   extractPositionBounds(position) {
-    // TODO: Extract tickLower/tickUpper from V4 position
-    // Similar structure to V3
-    throw new Error("UniswapV4Adapter.extractPositionBounds not implemented");
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('Position is required and must be an object');
+    }
+    if (position.tickLower === undefined || position.tickLower === null) {
+      throw new Error('Position missing tickLower property');
+    }
+    if (position.tickUpper === undefined || position.tickUpper === null) {
+      throw new Error('Position missing tickUpper property');
+    }
+    return {
+      lower: position.tickLower,
+      upper: position.tickUpper
+    };
   }
 
   /**
-   * Get current pool state value for baseline tracking
+   * Get current pool state value for baseline tracking.
    *
    * V4 note: Returns current tick, same as V3.
    *
-   * @param {Object} poolData - Pool data object
+   * @param {Object} poolData - Pool data object with tick property
+   * @param {number} poolData.tick - Current tick of the pool
    * @returns {number} Current tick
+   * @throws {Error} If poolData is missing or doesn't have tick property
    */
   getPoolCurrent(poolData) {
-    // TODO: Extract current tick from pool data
-    // return poolData.tick;
-    throw new Error("UniswapV4Adapter.getPoolCurrent not implemented");
+    if (!poolData || poolData.tick === undefined) {
+      throw new Error('Pool data must have tick property');
+    }
+    return poolData.tick;
   }
 
   /**

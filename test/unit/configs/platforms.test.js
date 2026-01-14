@@ -162,7 +162,7 @@ function validateSubgraphs(platformId, subgraphs, chains) {
 describe('Platform Configuration Validation', () => {
   it('should have all required properties for every platform', () => {
     const requiredStringProperties = ['id', 'name', 'logo', 'color', 'description'];
-    const requiredObjectProperties = ['features', 'subgraphs', 'feeTiers'];
+    const requiredObjectProperties = ['features', 'subgraphs'];
     const requiredNumberProperties = ['minTick', 'maxTick'];
 
     const errors = [];
@@ -212,11 +212,15 @@ describe('Platform Configuration Validation', () => {
         platformErrors.push(`Property logo must be a valid path format, got: ${platform.logo}`);
       }
 
-      // Validate fee tiers structure
-      try {
-        validateFeeTiers(platformKey, platform.feeTiers);
-      } catch (error) {
-        platformErrors.push(`feeTiers validation failed: ${error.message}`);
+      // Validate fee tiers structure (only for platforms with fixed fee tiers)
+      // V4 has flexible fees where fee and tickSpacing are independent PoolKey parameters
+      const hasFlexibleFees = platform.features?.flexibleFees === true;
+      if (!hasFlexibleFees) {
+        try {
+          validateFeeTiers(platformKey, platform.feeTiers);
+        } catch (error) {
+          platformErrors.push(`feeTiers validation failed: ${error.message}`);
+        }
       }
 
       // Validate features structure
@@ -307,12 +311,47 @@ describe('Platform Configuration Validation', () => {
 
     it('should have correct tick bounds', () => {
       const uniswapV3 = platforms.uniswapV3;
-      
+
       // Validate Uniswap V3 specific tick bounds
       expect(uniswapV3.minTick).toBe(-887272);
       expect(uniswapV3.maxTick).toBe(887272);
       expect(typeof uniswapV3.minTick).toBe('number');
       expect(typeof uniswapV3.maxTick).toBe('number');
+    });
+  });
+
+  describe('Uniswap V4 Platform Validation', () => {
+    it('should have flexible fees feature (no fixed fee tiers)', () => {
+      const uniswapV4 = platforms.uniswapV4;
+      expect(uniswapV4).toBeDefined();
+
+      // V4 should have flexibleFees feature indicating fee/tickSpacing are independent
+      expect(uniswapV4.features.flexibleFees).toBe(true);
+      expect(uniswapV4.features.flexibleTickSpacing).toBe(true);
+
+      // V4 should NOT have feeTiers (fee and tickSpacing are independent PoolKey params)
+      expect(uniswapV4.feeTiers).toBeUndefined();
+    });
+
+    it('should have V4-specific features', () => {
+      const uniswapV4 = platforms.uniswapV4;
+
+      // V4 specific features
+      expect(uniswapV4.features.hooks).toBe(true);
+      expect(uniswapV4.features.nativeETH).toBe(true);
+      expect(uniswapV4.features.flashAccounting).toBe(true);
+      expect(uniswapV4.features.dynamicFees).toBe(true);
+      expect(uniswapV4.features.concentratedLiquidity).toBe(true);
+    });
+
+    it('should have correct tick bounds (same as V3)', () => {
+      const uniswapV4 = platforms.uniswapV4;
+
+      // V4 uses same tick bounds as V3 (concentrated liquidity math unchanged)
+      expect(uniswapV4.minTick).toBe(-887272);
+      expect(uniswapV4.maxTick).toBe(887272);
+      expect(typeof uniswapV4.minTick).toBe('number');
+      expect(typeof uniswapV4.maxTick).toBe('number');
     });
   });
 });
