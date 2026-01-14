@@ -50,7 +50,7 @@ classDiagram
         +calculateUncollectedFees(position, poolData, token0Data, token1Data)*
         +calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)*
         +tickToPrice(tick, baseToken, quoteToken, chainId)*
-        +generateSwapData(params)*
+        +batchSwapTransactions(swapInstructions, options)*
     }
     
     class UniswapV3Adapter {
@@ -62,7 +62,7 @@ classDiagram
         +calculateUncollectedFees(position, poolData, token0Data, token1Data)
         +calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
         +tickToPrice(tick, baseToken, quoteToken, chainId)
-        +generateSwapData(params)
+        +batchSwapTransactions(swapInstructions, options)
         -_calculateUncollectedFeesInternal(params)
     }
     

@@ -57,6 +57,9 @@
     "@uniswap/v3-core": "^1.0.1",
     "@uniswap/v3-periphery": "^1.4.4",
     "@uniswap/v3-sdk": "^3.18.2",
+    "@uniswap/v4-core": "^1.0.0",
+    "@uniswap/v4-periphery": "^1.0.0",
+    "@uniswap/v4-sdk": "^1.0.0",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
   },

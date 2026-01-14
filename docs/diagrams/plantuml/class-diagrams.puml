@@ -32,7 +32,7 @@ package "Adapters" {
         + {abstract} addLiquidity(params): Promise<Object>
         + {abstract} generateCreatePositionData(params): Promise<Object>
         + {abstract} createPosition(params): Promise<Object>
-        + {abstract} generateSwapData(params): Promise<Object>
+        + {abstract} batchSwapTransactions(swapInstructions, options): Promise<Object>
     }
     
     class UniswapV3Adapter {
@@ -61,7 +61,7 @@ package "Adapters" {
         + addLiquidity(params): Promise<Object>
         + generateCreatePositionData(params): Promise<Object>
         + createPosition(params): Promise<Object>
-        + generateSwapData(params): Promise<Object>
+        + batchSwapTransactions(swapInstructions, options): Promise<Object>
     }
     
     class AdapterFactory <<singleton>> {

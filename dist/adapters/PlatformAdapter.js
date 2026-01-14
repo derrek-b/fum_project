@@ -16,7 +16,7 @@
  * |------------------------------|-------------------------------------|-----------|
  * | calculateTokenAmounts        | VDS.fetchAssetValues                | CONFIRMED |
  * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
- * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |
+ * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |x
  * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
  * | selectBestPool               | Strategy.initializeVault            | CONFIRMED |
  * | getPoolCurrent               | Strategy.initializeVault            | CONFIRMED |
@@ -27,15 +27,15 @@
  * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
  * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
  * | generateCreatePositionData   | Strategy.createNewPosition          | CONFIRMED |
- * | parseSwapReceipt             | Strategy.prepareTokens              | CONFIRMED |
+ * | parseSwapReceipt             | Strategy.prepareTokens              | CONFIRMED |x??
  * | parseIncreaseLiquidityReceipt| Strategy.addToPosition              | CONFIRMED |
  * | getBestSwapQuote             | Strategy.prepareTokens              | CONFIRMED |
  * | extractPositionBounds        | Strategy event emission             | CONFIRMED |
  * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
  * | evaluatePositionRange        | Strategy.evaluatePositions          | CONFIRMED |
  * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
- * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
- * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |
+ * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |x
+ * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |x
  * | evaluatePriceMovement        | Strategy.handleSwapEvent            | CONFIRMED |
  * | getAccruedFeesUSD            | Strategy.handleSwapEvent            | CONFIRMED |
  * | sortTokens                   | Strategy pool token ordering        | CONFIRMED |
@@ -378,6 +378,9 @@ export default class PlatformAdapter {
    *
    * @param {Object} receipt - Transaction receipt from increaseLiquidity/mint
    * @param {Object} receipt.logs - Array of transaction logs
+   * @param {Object} context - Platform-specific context for parsing
+   * @param {Object} context.position - Position object with tick bounds
+   * @param {Object} context.poolData - Pool data with current price (sqrtPriceX96)
    * @returns {Object} Parsed position data
    * @returns {string} result.tokenId - Position NFT token ID
    * @returns {string} result.liquidity - Liquidity added
@@ -385,10 +388,10 @@ export default class PlatformAdapter {
    * @returns {string} result.amount1 - Actual token1 amount consumed
    * @returns {number|null} result.tickLower - Lower tick (only for new positions)
    * @returns {number|null} result.tickUpper - Upper tick (only for new positions)
-   * @returns {string|null} result.poolAddress - Pool address (only for new positions)
-   * @throws {Error} If receipt is null/undefined or IncreaseLiquidity event not found
+   * @returns {string|null} result.poolAddress - Pool address/ID (only for new positions)
+   * @throws {Error} If receipt is null/undefined or liquidity event not found
    */
-  parseIncreaseLiquidityReceipt(receipt) {
+  parseIncreaseLiquidityReceipt(receipt, { position, poolData }) {
     throw new Error("parseIncreaseLiquidityReceipt must be implemented by subclasses");
   }
 
@@ -511,35 +514,33 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Get comprehensive pool data by pool address with optional additional data
-   * @param {string} poolAddress - Pool contract address
-   * @param {Object} options - Options for additional data to include
-   * @param {Array<number>} [options.includeTicks] - Array of tick indices to fetch data for (must be integers)
-   * @param {boolean} [options.includeTokens] - Whether to fetch token0 and token1 addresses
+   * Get pool data by pool identifier
+   *
+   * Returns core pool state needed for position management and price calculations.
+   * For V3: poolId is the pool contract address
+   * For V4: poolId is the bytes32 PoolId hash
+   *
+   * @param {string} poolId - Pool identifier (address for V3, bytes32 for V4)
    * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<Object>} Complete pool data object with requested additional fields
+   * @returns {Promise<Object>} Pool data object with core state
    * @throws {Error} If parameters are invalid or pool data cannot be retrieved
    * @example
-   * // Basic pool data
-   * const poolData = await adapter.getPoolData(poolAddress, {}, provider);
+   * // V3: Pass pool contract address
+   * const poolData = await adapter.getPoolData('0x8ad599c3...', provider);
    *
-   * // With tick data for specific ticks
-   * const poolDataWithTicks = await adapter.getPoolData(poolAddress, {
-   *   includeTicks: [-887220, 887220]
-   * }, provider);
+   * // V4: Pass poolId (bytes32 hash)
+   * const poolData = await adapter.getPoolData('0xabcd1234...', provider);
    *
-   * // With token addresses
-   * const poolDataWithTokens = await adapter.getPoolData(poolAddress, {
-   *   includeTokens: true
-   * }, provider);
-   *
-   * // Combined options
-   * const fullPoolData = await adapter.getPoolData(poolAddress, {
-   *   includeTicks: [-60000, 60000],
-   *   includeTokens: true
-   * }, provider);
+   * // Common return fields:
+   * // - address: Pool identifier (address for V3, poolId for V4)
+   * // - sqrtPriceX96: Current price as sqrt ratio
+   * // - tick: Current tick
+   * // - liquidity: Active liquidity in range
+   * // - fee: Fee tier in basis points
+   * // - feeGrowthGlobal0X128, feeGrowthGlobal1X128: Fee accumulators
+   * // - lastUpdated: Timestamp of data fetch
    */
-  async getPoolData(poolAddress, options, provider) {
+  async getPoolData(poolId, provider) {
     throw new Error("getPoolData must be implemented by subclasses");
   }
 }

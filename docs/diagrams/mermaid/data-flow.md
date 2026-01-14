@@ -45,7 +45,7 @@ sequenceDiagram
     participant Router
     participant Pool
     
-    User->>Adapter: generateSwapData(params)
+    User->>Adapter: batchSwapTransactions(swapInstructions, options)
     
     Note over Adapter: Validate parameters
     Adapter->>Adapter: Check token addresses

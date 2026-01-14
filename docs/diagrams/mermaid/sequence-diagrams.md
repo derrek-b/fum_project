@@ -57,7 +57,7 @@ sequenceDiagram
     participant Pool as Uniswap Pool
     
     User->>UI: Initiate swap
-    UI->>Adapter: generateSwapData(params)
+    UI->>Adapter: batchSwapTransactions(swapInstructions, options)
     
     Note over Adapter: Validate parameters
     Adapter->>Adapter: Check addresses

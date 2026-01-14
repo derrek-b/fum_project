@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-12T23:11:02.936Z
+Generated on: 2026-01-14T01:00:14.655Z
 
 ## Table of Contents
 
@@ -27,6 +27,7 @@ Generated on: 2026-01-12T23:11:02.936Z
 **Imports:**
 - from `../helpers/chainHelpers.js`
 - from `./UniswapV3Adapter.js`
+- from `./UniswapV4Adapter.js`
 
 **Exports:**
 - default: `AdapterFactory` (class)
@@ -90,6 +91,36 @@ UniswapV3Adapter - Uniswap V3 Protocol Integration
 
 **Exports:**
 - default: `UniswapV3Adapter` (class)
+
+---
+
+### UniswapV4Adapter.js
+
+Uniswap V4 Platform Adapter
+
+**Path:** `src/adapters/UniswapV4Adapter.js`
+
+**Imports:**
+- from `../helpers/Permit2Helper.js`
+- from `../helpers/chainHelpers.js`
+- from `../helpers/platformHelpers.js`
+- from `../helpers/tokenHelpers.js`
+- from `./PlatformAdapter.js`
+- from `@openzeppelin/contracts/build/contracts/ERC20.json`
+- from `@uniswap/sdk-core`
+- from `@uniswap/smart-order-router`
+- from `@uniswap/universal-router/artifacts/contracts/UniversalRouter.sol/UniversalRouter.json`
+- from `@uniswap/v3-sdk`
+- from `@uniswap/v4-core/out/PoolManager.sol/PoolManager.json`
+- from `@uniswap/v4-periphery/foundry-out/PositionManager.sol/PositionManager.json`
+- from `@uniswap/v4-periphery/foundry-out/StateView.sol/StateView.json`
+- from `@uniswap/v4-periphery/foundry-out/V4Quoter.sol/V4Quoter.json`
+- from `@uniswap/v4-sdk`
+- from `ethers`
+- from `jsbi`
+
+**Exports:**
+- default: `UniswapV4Adapter` (class)
 
 ---
 

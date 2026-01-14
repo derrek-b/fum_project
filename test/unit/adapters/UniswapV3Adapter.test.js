@@ -191,14 +191,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('getSwapEventSignature', () => {
+  describe('_getSwapEventSignature', () => {
     it('should return the correct Uniswap V3 swap event signature', () => {
-      const signature = adapter.getSwapEventSignature();
+      const signature = adapter._getSwapEventSignature();
       expect(signature).toBe('Swap(address,address,int256,int256,uint160,uint128,int24)');
     });
 
     it('should generate the correct topic hash for V3 swap events', () => {
-      const signature = adapter.getSwapEventSignature();
+      const signature = adapter._getSwapEventSignature();
       const topicHash = ethers.utils.id(signature);
       // This is the actual V3 Swap event topic hash
       expect(topicHash).toBe('0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67');
@@ -636,24 +636,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
 
     describe('Validation Error Cases', () => {
-      it('should throw error for null swapData', () => {
+      it('should throw error for null currentTickData', () => {
         expect(() => adapter.evaluatePriceMovement(null, 100, mockToken0Data, mockToken1Data))
-          .toThrow('swapData parameter is required');
+          .toThrow('currentTickData parameter is required');
       });
 
-      it('should throw error for undefined swapData', () => {
+      it('should throw error for undefined currentTickData', () => {
         expect(() => adapter.evaluatePriceMovement(undefined, 100, mockToken0Data, mockToken1Data))
-          .toThrow('swapData parameter is required');
+          .toThrow('currentTickData parameter is required');
       });
 
-      it('should throw error for swapData without tick', () => {
+      it('should throw error for currentTickData without tick', () => {
         expect(() => adapter.evaluatePriceMovement({}, 100, mockToken0Data, mockToken1Data))
-          .toThrow('swapData must have tick property as a number');
+          .toThrow('currentTickData must have tick property as a number');
       });
 
-      it('should throw error for swapData with non-number tick', () => {
+      it('should throw error for currentTickData with non-number tick', () => {
         expect(() => adapter.evaluatePriceMovement({ tick: '100' }, 100, mockToken0Data, mockToken1Data))
-          .toThrow('swapData must have tick property as a number');
+          .toThrow('currentTickData must have tick property as a number');
       });
 
       it('should throw error for null baseline', () => {
@@ -876,7 +876,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       const wethAddress = getWethAddress(1337);
 
       // Create real contract instances using addresses from adapter config
-      const poolAddress = await adapter.getPoolAddress(
+      const poolAddress = await adapter._getPoolAddress(
         usdcToken.addresses[1337],
         wethAddress,
         500,
@@ -1109,7 +1109,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should estimate gas for complex swap transaction', async () => {
-        // Create swap transaction data using adapter's generateSwapData
+        // Create swap transaction data using adapter's _generateSwapData
         const swapParams = {
           tokenIn: wethContract.address,
           tokenOut: usdcContract.address,
@@ -1122,7 +1122,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           deadlineMinutes: 2
         };
 
-        const swapTxData = await adapter.generateSwapData(swapParams);
+        const swapTxData = await adapter._generateSwapData(swapParams);
 
         // Create approval transaction data - vault needs to approve router first
         const approveData = wethContract.interface.encodeFunctionData('approve', [
@@ -1809,10 +1809,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('getPoolAddress', () => {
+  describe('_getPoolAddress', () => {
     describe('Success Cases', () => {
       it('should return pool address as string for existing pool', async () => {
-        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const poolAddress = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
 
         expect(typeof poolAddress).toBe('string');
         expect(poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
@@ -1822,22 +1822,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should return zero address for non-existent pool', async () => {
         // Use fee tier that doesn't exist (600 basis points)
-        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 600, env.provider);
+        const poolAddress = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 600, env.provider);
 
         expect(poolAddress).toBe(ethers.constants.AddressZero);
       });
 
       it('should return same address regardless of token input order', async () => {
-        const address1 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
-        const address2 = await adapter.getPoolAddress(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const address1 = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address2 = await adapter._getPoolAddress(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         expect(address1).toBe(address2);
         expect(address1).not.toBe(ethers.constants.AddressZero);
       });
 
       it('should return different addresses for different fee tiers', async () => {
-        const address500 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
-        const address3000 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 3000, env.provider);
+        const address500 = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address3000 = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 3000, env.provider);
 
         expect(address500).not.toBe(address3000);
         expect(typeof address500).toBe('string');
@@ -1851,15 +1851,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Error Cases', () => {
       it('should throw error for missing token0 address', async () => {
         await expect(
-          adapter.getPoolAddress(null, env.usdcAddress, 500, env.provider)
+          adapter._getPoolAddress(null, env.usdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress(undefined, env.usdcAddress, 500, env.provider)
+          adapter._getPoolAddress(undefined, env.usdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress('', env.usdcAddress, 500, env.provider)
+          adapter._getPoolAddress('', env.usdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
       });
 
@@ -1872,22 +1872,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidAddress of invalidAddresses) {
           await expect(
-            adapter.getPoolAddress(invalidAddress, env.usdcAddress, 500, env.provider)
+            adapter._getPoolAddress(invalidAddress, env.usdcAddress, 500, env.provider)
           ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
         }
       });
 
       it('should throw error for missing token1 address', async () => {
         await expect(
-          adapter.getPoolAddress(env.wethAddress, null, 500, env.provider)
+          adapter._getPoolAddress(env.wethAddress, null, 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress(env.wethAddress, undefined, 500, env.provider)
+          adapter._getPoolAddress(env.wethAddress, undefined, 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
 
         await expect(
-          adapter.getPoolAddress(env.wethAddress, '', 500, env.provider)
+          adapter._getPoolAddress(env.wethAddress, '', 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
       });
 
@@ -1900,18 +1900,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidAddress of invalidAddresses) {
           await expect(
-            adapter.getPoolAddress(env.wethAddress, invalidAddress, 500, env.provider)
+            adapter._getPoolAddress(env.wethAddress, invalidAddress, 500, env.provider)
           ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
         }
       });
 
       it('should throw error for missing fee', async () => {
         await expect(
-          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, null, env.provider)
+          adapter._getPoolAddress(env.wethAddress, env.usdcAddress, null, env.provider)
         ).rejects.toThrow('Fee parameter is required');
 
         await expect(
-          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, undefined, env.provider)
+          adapter._getPoolAddress(env.wethAddress, env.usdcAddress, undefined, env.provider)
         ).rejects.toThrow('Fee parameter is required');
       });
 
@@ -1928,33 +1928,33 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidFee of invalidFees) {
           await expect(
-            adapter.getPoolAddress(env.wethAddress, env.usdcAddress, invalidFee, env.provider)
+            adapter._getPoolAddress(env.wethAddress, env.usdcAddress, invalidFee, env.provider)
           ).rejects.toThrow('Fee must be a valid number');
         }
       });
 
       it('should throw error for invalid provider', async () => {
         await expect(
-          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, null)
+          adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, null)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
 
         await expect(
-          adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, {})
+          adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, {})
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
 
     describe('Special Cases', () => {
       it('should be deterministic for same inputs', async () => {
-        const address1 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
-        const address2 = await adapter.getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address1 = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const address2 = await adapter._getPoolAddress(env.wethAddress, env.usdcAddress, 500, env.provider);
 
         expect(address1).toBe(address2);
       });
 
       it('should return zero address for identical token addresses', async () => {
         // No pool can exist between a token and itself
-        const poolAddress = await adapter.getPoolAddress(env.wethAddress, env.wethAddress, 500, env.provider);
+        const poolAddress = await adapter._getPoolAddress(env.wethAddress, env.wethAddress, 500, env.provider);
         expect(poolAddress).toBe(ethers.constants.AddressZero);
       });
     });
@@ -2508,13 +2508,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('fetchPoolData', () => {
+  describe('_fetchPoolData', () => {
     describe('Success Cases', () => {
       it('should return complete pool data for WETH/USDC 500 pool', async () => {
         const wethAddress = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // Arbitrum WETH
         const usdcAddress = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Arbitrum USDC
 
-        const result = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
+        const result = await adapter._fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
 
         // Test structure - all required properties present
         expect(result).toHaveProperty('poolAddress');
@@ -2560,15 +2560,15 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should throw error for missing token0 address', async () => {
         await expect(
-          adapter.fetchPoolData(null, validUsdcAddress, 500, env.provider)
+          adapter._fetchPoolData(null, validUsdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
 
         await expect(
-          adapter.fetchPoolData(undefined, validUsdcAddress, 500, env.provider)
+          adapter._fetchPoolData(undefined, validUsdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
 
         await expect(
-          adapter.fetchPoolData('', validUsdcAddress, 500, env.provider)
+          adapter._fetchPoolData('', validUsdcAddress, 500, env.provider)
         ).rejects.toThrow('Token0 address parameter is required');
       });
 
@@ -2582,22 +2582,22 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidAddress of invalidAddresses) {
           await expect(
-            adapter.fetchPoolData(invalidAddress, validUsdcAddress, 500, env.provider)
+            adapter._fetchPoolData(invalidAddress, validUsdcAddress, 500, env.provider)
           ).rejects.toThrow();
         }
       });
 
       it('should throw error for missing token1 address', async () => {
         await expect(
-          adapter.fetchPoolData(validWethAddress, null, 500, env.provider)
+          adapter._fetchPoolData(validWethAddress, null, 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
 
         await expect(
-          adapter.fetchPoolData(validWethAddress, undefined, 500, env.provider)
+          adapter._fetchPoolData(validWethAddress, undefined, 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
 
         await expect(
-          adapter.fetchPoolData(validWethAddress, '', 500, env.provider)
+          adapter._fetchPoolData(validWethAddress, '', 500, env.provider)
         ).rejects.toThrow('Token1 address parameter is required');
       });
 
@@ -2611,18 +2611,18 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidAddress of invalidAddresses) {
           await expect(
-            adapter.fetchPoolData(validWethAddress, invalidAddress, 500, env.provider)
+            adapter._fetchPoolData(validWethAddress, invalidAddress, 500, env.provider)
           ).rejects.toThrow();
         }
       });
 
       it('should throw error for missing fee', async () => {
         await expect(
-          adapter.fetchPoolData(validWethAddress, validUsdcAddress, null, env.provider)
+          adapter._fetchPoolData(validWethAddress, validUsdcAddress, null, env.provider)
         ).rejects.toThrow('Fee parameter is required');
 
         await expect(
-          adapter.fetchPoolData(validWethAddress, validUsdcAddress, undefined, env.provider)
+          adapter._fetchPoolData(validWethAddress, validUsdcAddress, undefined, env.provider)
         ).rejects.toThrow('Fee parameter is required');
       });
 
@@ -2639,24 +2639,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         for (const invalidFee of invalidFees) {
           await expect(
-            adapter.fetchPoolData(validWethAddress, validUsdcAddress, invalidFee, env.provider)
+            adapter._fetchPoolData(validWethAddress, validUsdcAddress, invalidFee, env.provider)
           ).rejects.toThrow('Fee must be a valid number');
         }
       });
 
       it('should throw error for invalid provider', async () => {
         await expect(
-          adapter.fetchPoolData(validWethAddress, validUsdcAddress, 500, null)
+          adapter._fetchPoolData(validWethAddress, validUsdcAddress, 500, null)
         ).rejects.toThrow();
 
         await expect(
-          adapter.fetchPoolData(validWethAddress, validUsdcAddress, 500, undefined)
+          adapter._fetchPoolData(validWethAddress, validUsdcAddress, 500, undefined)
         ).rejects.toThrow();
 
         // Test wrong chain provider
         const wrongChainAdapter = new UniswapV3Adapter(1); // Ethereum instead of 1337
         await expect(
-          wrongChainAdapter.fetchPoolData(validWethAddress, validUsdcAddress, 500, env.provider)
+          wrongChainAdapter._fetchPoolData(validWethAddress, validUsdcAddress, 500, env.provider)
         ).rejects.toThrow();
       });
 
@@ -2665,11 +2665,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const unknownToken = '0x1234567890123456789012345678901234567890';
 
         await expect(
-          adapter.fetchPoolData(unknownToken, validUsdcAddress, 500, env.provider)
+          adapter._fetchPoolData(unknownToken, validUsdcAddress, 500, env.provider)
         ).rejects.toThrow(/No token found at address.*on chain/);
 
         await expect(
-          adapter.fetchPoolData(validWethAddress, unknownToken, 500, env.provider)
+          adapter._fetchPoolData(validWethAddress, unknownToken, 500, env.provider)
         ).rejects.toThrow(/No token found at address.*on chain/);
       });
 
@@ -2679,7 +2679,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const fakeToken2 = '0x0000000000000000000000000000000000000002';
 
         await expect(
-          adapter.fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
+          adapter._fetchPoolData(fakeToken1, fakeToken2, 500, env.provider)
         ).rejects.toThrow(/No token found at address.*on chain/);
       });
     });
@@ -2687,11 +2687,11 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
   describe('getPoolData', () => {
     describe('Success Cases', () => {
-      it('should fetch basic pool data with empty options', async () => {
+      it('should fetch pool data', async () => {
         const testStartTime = Date.now();
 
         // Use test environment pool address (WETH/USDC 500)
-        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {}, env.provider);
+        const poolData = await adapter.getPoolData(env.poolData.poolAddress, env.provider);
 
         // Test structure - all required properties present
         expect(poolData).toHaveProperty('address');
@@ -2699,6 +2699,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(poolData).toHaveProperty('tick');
         expect(poolData).toHaveProperty('liquidity');
         expect(poolData).toHaveProperty('fee');
+        expect(poolData).toHaveProperty('feeGrowthGlobal0X128');
+        expect(poolData).toHaveProperty('feeGrowthGlobal1X128');
         expect(poolData).toHaveProperty('lastUpdated');
 
         // Test specific values from test environment
@@ -2710,143 +2712,30 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Test data types
         expect(typeof poolData.sqrtPriceX96).toBe('string');
         expect(typeof poolData.liquidity).toBe('string');
+        expect(typeof poolData.feeGrowthGlobal0X128).toBe('string');
+        expect(typeof poolData.feeGrowthGlobal1X128).toBe('string');
         expect(Number.isInteger(poolData.tick)).toBe(true);
-      });
-
-      it('should fetch pool data with includeTicks option', async () => {
-        const ticksToFetch = [env.testPosition.tickLower, env.testPosition.tickUpper];
-
-        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
-          includeTicks: ticksToFetch
-        }, env.provider);
-
-        // Should have basic pool data
-        expect(poolData.address).toBe(env.poolData.poolAddress);
-        expect(poolData.fee).toBe(500);
-
-        // Should have ticks data
-        expect(poolData).toHaveProperty('ticks');
-        expect(typeof poolData.ticks).toBe('object');
-
-        // Should have data for requested ticks
-        ticksToFetch.forEach(tick => {
-          expect(poolData.ticks).toHaveProperty(tick.toString());
-          const tickData = poolData.ticks[tick.toString()];
-          expect(tickData).toHaveProperty('liquidityGross');
-          expect(tickData).toHaveProperty('liquidityNet');
-          expect(tickData).toHaveProperty('feeGrowthOutside0X128');
-          expect(tickData).toHaveProperty('feeGrowthOutside1X128');
-          expect(tickData).toHaveProperty('initialized');
-          expect(tickData).toHaveProperty('lastUpdated');
-        });
-      });
-
-      it('should fetch pool data with includeTokens option', async () => {
-        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
-          includeTokens: true
-        }, env.provider);
-
-        // Should have basic pool data
-        expect(poolData.address).toBe(env.poolData.poolAddress);
-        expect(poolData.fee).toBe(500);
-
-        // Should have token addresses
-        expect(poolData).toHaveProperty('token0');
-        expect(poolData).toHaveProperty('token1');
-        expect(typeof poolData.token0).toBe('string');
-        expect(typeof poolData.token1).toBe('string');
-        expect(poolData.token0.length).toBe(42); // Ethereum address length
-        expect(poolData.token1.length).toBe(42);
-      });
-
-      it('should fetch pool data with combined options', async () => {
-        const ticksToFetch = [env.testPosition.tickLower];
-
-        const poolData = await adapter.getPoolData(env.poolData.poolAddress, {
-          includeTicks: ticksToFetch,
-          includeTokens: true
-        }, env.provider);
-
-        // Should have basic pool data
-        expect(poolData.address).toBe(env.poolData.poolAddress);
-        expect(poolData.fee).toBe(500);
-
-        // Should have ticks data
-        expect(poolData).toHaveProperty('ticks');
-        expect(poolData.ticks).toHaveProperty(ticksToFetch[0].toString());
-
-        // Should have token addresses
-        expect(poolData).toHaveProperty('token0');
-        expect(poolData).toHaveProperty('token1');
       });
     });
 
     describe('Parameter Validation', () => {
       const validPoolAddress = '0x1234567890123456789012345678901234567890';
 
-      it('should reject invalid options parameter - null', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, null, env.provider)
-        ).rejects.toThrow('Options parameter must be an object');
-      });
-
-      it('should reject invalid options parameter - array', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, [], env.provider)
-        ).rejects.toThrow('Options parameter must be an object');
-      });
-
-      it('should reject invalid options parameter - string', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, 'invalid', env.provider)
-        ).rejects.toThrow('Options parameter must be an object');
-      });
-
-      it('should reject invalid includeTicks - not array', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, { includeTicks: 'invalid' }, env.provider)
-        ).rejects.toThrow('includeTicks must be an array');
-      });
-
-      it('should reject invalid includeTicks - non-integer values', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, { includeTicks: [1.5, 2] }, env.provider)
-        ).rejects.toThrow('All includeTicks values must be integers');
-      });
-
-      it('should reject invalid includeTicks - string values', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, { includeTicks: ['123', 456] }, env.provider)
-        ).rejects.toThrow('All includeTicks values must be integers');
-      });
-
-      it('should reject invalid includeTokens - not boolean', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, { includeTokens: 'true' }, env.provider)
-        ).rejects.toThrow('includeTokens must be a boolean');
-      });
-
-      it('should reject invalid includeTokens - number', async () => {
-        await expect(
-          adapter.getPoolData(validPoolAddress, { includeTokens: 1 }, env.provider)
-        ).rejects.toThrow('includeTokens must be a boolean');
-      });
-
       it('should reject invalid pool address - null', async () => {
         await expect(
-          adapter.getPoolData(null, {}, env.provider)
+          adapter.getPoolData(null, env.provider)
         ).rejects.toThrow('Pool address parameter is required');
       });
 
       it('should reject invalid pool address - invalid format', async () => {
         await expect(
-          adapter.getPoolData('invalid-address', {}, env.provider)
+          adapter.getPoolData('invalid-address', env.provider)
         ).rejects.toThrow('Invalid pool address');
       });
 
       it('should reject missing provider', async () => {
         await expect(
-          adapter.getPoolData(validPoolAddress, {}, null)
+          adapter.getPoolData(validPoolAddress, null)
         ).rejects.toThrow('Provider parameter is required');
       });
     });
@@ -2863,7 +2752,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       const usdcToken = getTokenBySymbol('USDC');
       const usdcAddress = usdcToken.addresses[1337];
 
-      const poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
+      const poolData = await adapter._fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
       validPoolAddress = poolData.poolAddress;
 
       // Use valid tick values around current tick
@@ -3043,7 +2932,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
   describe('getCurrentTick', () => {
     describe('Success Cases', () => {
       it('should return current tick for valid pool', async () => {
-        const poolAddress = await adapter.getPoolAddress(
+        const poolAddress = await adapter._getPoolAddress(
           env.wethAddress,
           env.usdcAddress,
           500,
@@ -3060,7 +2949,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return same tick as getPoolData', async () => {
-        const poolAddress = await adapter.getPoolAddress(
+        const poolAddress = await adapter._getPoolAddress(
           env.wethAddress,
           env.usdcAddress,
           500,
@@ -3068,7 +2957,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         );
 
         const tick = await adapter.getCurrentTick(poolAddress, env.provider);
-        const poolData = await adapter.getPoolData(poolAddress, {}, env.provider);
+        const poolData = await adapter.getPoolData(poolAddress, env.provider);
 
         expect(tick).toBe(poolData.tick);
       });
@@ -3113,7 +3002,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error for invalid provider', async () => {
-        const poolAddress = await adapter.getPoolAddress(
+        const poolAddress = await adapter._getPoolAddress(
           env.wethAddress,
           env.usdcAddress,
           500,
@@ -3134,7 +3023,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should throw error for wrong chain provider', async () => {
-        const poolAddress = await adapter.getPoolAddress(
+        const poolAddress = await adapter._getPoolAddress(
           env.wethAddress,
           env.usdcAddress,
           500,
@@ -3219,7 +3108,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       const usdcToken = getTokenBySymbol('USDC');
       const usdcAddress = usdcToken.addresses[1337];
 
-      poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
+      poolData = await adapter._fetchPoolData(wethAddress, usdcAddress, 500, env.provider);
 
       // Capture expected values for assertions
       expectedNonce = Number(positionData.nonce);
@@ -3419,7 +3308,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const { token0, token1, fee, tickLower, tickUpper } = realPositionData;
 
         // Get pool data
-        const poolData = await adapter.fetchPoolData(token0, token1, Number(fee), env.provider);
+        const poolData = await adapter._fetchPoolData(token0, token1, Number(fee), env.provider);
 
         // Get tick data
         const tickData = await adapter.fetchTickData(poolData.poolAddress, Number(tickLower), Number(tickUpper), env.provider);
@@ -3537,7 +3426,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await (await usdc.approve(env.uniswapV3.positionManagerAddress, usdcAmount)).wait();
 
         // Get current pool data and create position with different ticks
-        const poolData = await adapter.fetchPoolData(env.wethAddress, env.usdcAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.wethAddress, env.usdcAddress, 500, env.provider);
         const tickSpacing = 10;
         const tickLower = Math.floor(poolData.tick / tickSpacing) * tickSpacing - tickSpacing * 5; // Different from first position
         const tickUpper = Math.floor(poolData.tick / tickSpacing) * tickSpacing + tickSpacing * 5;
@@ -3657,10 +3546,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should throw error if any position fails to process', async () => {
         // Mock fetchPoolData to fail for specific call
-        const originalFetchPoolData = adapter.fetchPoolData;
-        adapter.fetchPoolData = vi.fn().mockImplementation((token0, token1, fee, provider) => {
+        const originalFetchPoolData = adapter._fetchPoolData;
+        adapter._fetchPoolData = vi.fn().mockImplementation((token0, token1, fee, provider) => {
           // Fail on first call, succeed on others
-          if (adapter.fetchPoolData.mock.calls.length === 1) {
+          if (adapter._fetchPoolData.mock.calls.length === 1) {
             throw new Error('Mocked pool data failure');
           }
           return originalFetchPoolData.call(adapter, token0, token1, fee, provider);
@@ -3673,7 +3562,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         } finally {
           // Restore original function
-          adapter.fetchPoolData = originalFetchPoolData;
+          adapter._fetchPoolData = originalFetchPoolData;
         }
       });
     });
@@ -5013,7 +4902,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         }
 
         // Get updated pool data after swaps
-        const updatedPoolData = await adapter.fetchPoolData(
+        const updatedPoolData = await adapter._fetchPoolData(
           initialPoolData.token0.address,
           initialPoolData.token1.address,
           position.fee,
@@ -5524,6 +5413,50 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.token1USD).toBeCloseTo(result.token1Fees * tokenPrices.token1, 6);
         expect(result.totalUSD).toBeCloseTo(result.token0USD + result.token1USD, 6);
       });
+
+      it('should fetch pool data and tick data for fee calculation', async () => {
+        // This test verifies that getAccruedFeesUSD correctly fetches pool and tick data internally
+        const vdsData = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+        const positionId = Object.keys(vdsData.positions)[0];
+        const position = vdsData.positions[positionId];
+
+        // Verify position has tick bounds that will be fetched
+        expect(position).toHaveProperty('tickLower');
+        expect(position).toHaveProperty('tickUpper');
+        expect(typeof position.tickLower).toBe('number');
+        expect(typeof position.tickUpper).toBe('number');
+
+        // Verify we can independently fetch the same data
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const tickData = await adapter.fetchTickData(
+          position.pool,
+          position.tickLower,
+          position.tickUpper,
+          env.provider
+        );
+
+        // Verify pool data has required fields for fee calculation
+        expect(poolData).toHaveProperty('tick');
+        expect(poolData).toHaveProperty('feeGrowthGlobal0X128');
+        expect(poolData).toHaveProperty('feeGrowthGlobal1X128');
+
+        // Verify tick data has required fields
+        expect(tickData).toHaveProperty('tickLower');
+        expect(tickData).toHaveProperty('tickUpper');
+        expect(tickData.tickLower).toHaveProperty('feeGrowthOutside0X128');
+        expect(tickData.tickLower).toHaveProperty('feeGrowthOutside1X128');
+        expect(tickData.tickUpper).toHaveProperty('feeGrowthOutside0X128');
+        expect(tickData.tickUpper).toHaveProperty('feeGrowthOutside1X128');
+
+        // Now verify getAccruedFeesUSD works with this data
+        const tokenPrices = { token0: 1, token1: 1 };
+        const result = await adapter.getAccruedFeesUSD(position, tokenPrices, env.provider);
+
+        // Should complete successfully using fetched data
+        expect(result.totalUSD).toBeGreaterThanOrEqual(0);
+        expect(result.token0Fees).toBeGreaterThanOrEqual(0);
+        expect(result.token1Fees).toBeGreaterThanOrEqual(0);
+      });
     });
 
     describe('Error Cases', () => {
@@ -5751,7 +5684,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
             : [env.usdcAddress, env.wethAddress, usdcAmount, wethAmount];
 
         // Get pool data first
-        const poolData = await adapter.fetchPoolData(
+        const poolData = await adapter._fetchPoolData(
           token0,
           token1,
           500,
@@ -6518,7 +6451,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(pools.length).toBeGreaterThan(0);
 
         for (const pool of pools) {
-          const directAddress = await adapter.getPoolAddress(env.usdcAddress, env.wethAddress, pool.fee, env.provider);
+          const directAddress = await adapter._getPoolAddress(env.usdcAddress, env.wethAddress, pool.fee, env.provider);
           expect(pool.address).toBe(directAddress);
         }
       });
@@ -7374,7 +7307,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;
@@ -7504,7 +7437,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;
@@ -8017,7 +7950,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should parse principal and fees from a position closure receipt', async () => {
         // 1. Get pool data and position data
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
         const { tickLower, tickUpper } = env.testPosition;
         const positionId = env.positionTokenId.toString();
 
@@ -8048,7 +7981,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await (await swapRouter.exactInputSingle(swapParams)).wait();
 
         // 3. Refresh pool data after swap
-        const updatedPoolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const updatedPoolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // 4. Generate remove liquidity data (100% removal triggers DecreaseLiquidity + Collect)
         const removeLiquidityData = await adapter.generateRemoveLiquidityData({
@@ -8390,7 +8323,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Success Cases', () => {
       it('should return position object with metadata', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8429,7 +8362,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should calculate both token amounts when providing only token0', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8478,7 +8411,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should calculate both token amounts when providing only token1', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8527,7 +8460,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle out-of-range positions correctly (above current tick)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Position above current tick should contain only token0
         const currentTick = poolData.tick;
@@ -8572,7 +8505,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle out-of-range positions correctly (below current tick)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Position below current tick should contain only token1
         const currentTick = poolData.tick;
@@ -8617,7 +8550,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should scale proportionally when doubling inputs', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const baseParams = {
           position: {
@@ -8662,7 +8595,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle token sorting correctly', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8700,7 +8633,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return valid liquidity amount', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8732,7 +8665,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should maintain consistent tick range', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -8766,7 +8699,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         baseParams = {
           position: {
@@ -8977,7 +8910,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Success Cases', () => {
       it('should return token amounts in caller order (not SDK sorted order)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -9021,7 +8954,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should calculate token1 amount when providing only token0', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -9055,7 +8988,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should calculate token0 amount when providing only token1', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -9089,7 +9022,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle out-of-range position above current tick (token0 only)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Position above current tick - only requires one token
         const currentTick = poolData.tick;
@@ -9126,7 +9059,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should handle out-of-range position below current tick (token1 only)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Position below current tick - only requires one token
         const currentTick = poolData.tick;
@@ -9161,7 +9094,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should return consistent results for same inputs', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -9191,7 +9124,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       });
 
       it('should match getAddLiquidityQuote amounts (with correct mapping)', async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         const params = {
           position: {
@@ -9234,7 +9167,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       let baseParams;
 
       beforeEach(async () => {
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         baseParams = {
           position: {
@@ -9961,7 +9894,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('generateSwapData', () => {
+  describe('_generateSwapData', () => {
     describe('Success Cases', () => {
       it('should generate valid transaction data for ETH → USDC swap', async () => {
         const swapParams = {
@@ -9976,7 +9909,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           provider: env.provider
         };
 
-        const result = await adapter.generateSwapData(swapParams);
+        const result = await adapter._generateSwapData(swapParams);
 
         // Basic structure validation
         expect(result).toBeDefined();
@@ -10018,7 +9951,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           provider: env.provider
         };
 
-        const result = await adapter.generateSwapData(swapParams);
+        const result = await adapter._generateSwapData(swapParams);
 
         // Basic structure validation
         expect(result).toBeDefined();
@@ -10064,8 +9997,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           provider: env.provider
         };
 
-        const result1 = await adapter.generateSwapData(swapParams);
-        const result2 = await adapter.generateSwapData(swapParams);
+        const result1 = await adapter._generateSwapData(swapParams);
+        const result2 = await adapter._generateSwapData(swapParams);
 
         expect(result1.to).toBe(result2.to);
         expect(result1.data).toBe(result2.data);
@@ -10095,13 +10028,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('TokenIn address validation', () => {
         it('should throw error for missing tokenIn address', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenIn: null })
+            adapter._generateSwapData({ ...baseParams, tokenIn: null })
           ).rejects.toThrow('TokenIn address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenIn: undefined })
+            adapter._generateSwapData({ ...baseParams, tokenIn: undefined })
           ).rejects.toThrow('TokenIn address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenIn: '' })
+            adapter._generateSwapData({ ...baseParams, tokenIn: '' })
           ).rejects.toThrow('TokenIn address parameter is required');
         });
 
@@ -10109,7 +10042,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
           for (const invalidAddress of invalidAddresses) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, tokenIn: invalidAddress })
+              adapter._generateSwapData({ ...baseParams, tokenIn: invalidAddress })
             ).rejects.toThrow(`Invalid tokenIn address: ${invalidAddress}`);
           }
         });
@@ -10117,14 +10050,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for non-string tokenIn address', async () => {
           // Falsy non-string types hit the "required" check
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenIn: false })
+            adapter._generateSwapData({ ...baseParams, tokenIn: false })
           ).rejects.toThrow('TokenIn address parameter is required');
 
           // Truthy non-string types make it to ethers.utils.getAddress() and fail there
           const truthyTypes = [123, true, {}, []];
           for (const invalidType of truthyTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, tokenIn: invalidType })
+              adapter._generateSwapData({ ...baseParams, tokenIn: invalidType })
             ).rejects.toThrow(`Invalid tokenIn address: ${invalidType}`);
           }
         });
@@ -10133,13 +10066,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('TokenOut address validation', () => {
         it('should throw error for missing tokenOut address', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenOut: null })
+            adapter._generateSwapData({ ...baseParams, tokenOut: null })
           ).rejects.toThrow('TokenOut address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenOut: undefined })
+            adapter._generateSwapData({ ...baseParams, tokenOut: undefined })
           ).rejects.toThrow('TokenOut address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenOut: '' })
+            adapter._generateSwapData({ ...baseParams, tokenOut: '' })
           ).rejects.toThrow('TokenOut address parameter is required');
         });
 
@@ -10147,7 +10080,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
           for (const invalidAddress of invalidAddresses) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, tokenOut: invalidAddress })
+              adapter._generateSwapData({ ...baseParams, tokenOut: invalidAddress })
             ).rejects.toThrow(`Invalid tokenOut address: ${invalidAddress}`);
           }
         });
@@ -10155,14 +10088,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for non-string tokenOut address', async () => {
           // Falsy non-string types hit the "required" check
           await expect(
-            adapter.generateSwapData({ ...baseParams, tokenOut: false })
+            adapter._generateSwapData({ ...baseParams, tokenOut: false })
           ).rejects.toThrow('TokenOut address parameter is required');
 
           // Truthy non-string types make it to ethers.utils.getAddress() and fail there
           const truthyTypes = [123, true, {}, []];
           for (const invalidType of truthyTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, tokenOut: invalidType })
+              adapter._generateSwapData({ ...baseParams, tokenOut: invalidType })
             ).rejects.toThrow(`Invalid tokenOut address: ${invalidType}`);
           }
         });
@@ -10171,10 +10104,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('Fee validation', () => {
         it('should throw error for missing fee', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, fee: null })
+            adapter._generateSwapData({ ...baseParams, fee: null })
           ).rejects.toThrow('Fee parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, fee: undefined })
+            adapter._generateSwapData({ ...baseParams, fee: undefined })
           ).rejects.toThrow('Fee parameter is required');
         });
 
@@ -10182,7 +10115,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidTypes = ['500', true, false, {}, []];
           for (const invalidType of invalidTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, fee: invalidType })
+              adapter._generateSwapData({ ...baseParams, fee: invalidType })
             ).rejects.toThrow('Fee must be a valid number');
           }
         });
@@ -10192,7 +10125,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidNumbers = [NaN, Infinity];
           for (const invalidNumber of invalidNumbers) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, fee: invalidNumber })
+              adapter._generateSwapData({ ...baseParams, fee: invalidNumber })
             ).rejects.toThrow('Fee must be a valid number');
           }
 
@@ -10200,7 +10133,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidTiers = [1000, 5000, 15000, 0, -500, 1, 2, 999999];
           for (const invalidTier of invalidTiers) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, fee: invalidTier })
+              adapter._generateSwapData({ ...baseParams, fee: invalidTier })
             ).rejects.toThrow('Invalid fee tier');
           }
         });
@@ -10209,13 +10142,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('Recipient address validation', () => {
         it('should throw error for missing recipient address', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, recipient: null })
+            adapter._generateSwapData({ ...baseParams, recipient: null })
           ).rejects.toThrow('Recipient address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, recipient: undefined })
+            adapter._generateSwapData({ ...baseParams, recipient: undefined })
           ).rejects.toThrow('Recipient address parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, recipient: '' })
+            adapter._generateSwapData({ ...baseParams, recipient: '' })
           ).rejects.toThrow('Recipient address parameter is required');
         });
 
@@ -10223,7 +10156,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
           for (const invalidAddress of invalidAddresses) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, recipient: invalidAddress })
+              adapter._generateSwapData({ ...baseParams, recipient: invalidAddress })
             ).rejects.toThrow(`Invalid recipient address: ${invalidAddress}`);
           }
         });
@@ -10231,14 +10164,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         it('should throw error for non-string recipient address', async () => {
           // Falsy non-string types hit the "required" check
           await expect(
-            adapter.generateSwapData({ ...baseParams, recipient: false })
+            adapter._generateSwapData({ ...baseParams, recipient: false })
           ).rejects.toThrow('Recipient address parameter is required');
 
           // Truthy non-string types make it to ethers.utils.getAddress() and fail there
           const truthyTypes = [123, true, {}, []];
           for (const invalidType of truthyTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, recipient: invalidType })
+              adapter._generateSwapData({ ...baseParams, recipient: invalidType })
             ).rejects.toThrow(`Invalid recipient address: ${invalidType}`);
           }
         });
@@ -10247,27 +10180,27 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('AmountIn validation', () => {
         it('should throw error for missing amountIn', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, amountIn: null })
+            adapter._generateSwapData({ ...baseParams, amountIn: null })
           ).rejects.toThrow('AmountIn parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, amountIn: undefined })
+            adapter._generateSwapData({ ...baseParams, amountIn: undefined })
           ).rejects.toThrow('AmountIn parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, amountIn: '' })
+            adapter._generateSwapData({ ...baseParams, amountIn: '' })
           ).rejects.toThrow('AmountIn parameter is required');
         });
 
         it('should throw error for non-string amountIn', async () => {
           // Falsy non-string types hit the "required" check
           await expect(
-            adapter.generateSwapData({ ...baseParams, amountIn: false })
+            adapter._generateSwapData({ ...baseParams, amountIn: false })
           ).rejects.toThrow('AmountIn parameter is required');
 
           // Truthy non-string types make it to string type check and fail there
           const truthyTypes = [123, true, {}, []];
           for (const invalidType of truthyTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, amountIn: invalidType })
+              adapter._generateSwapData({ ...baseParams, amountIn: invalidType })
             ).rejects.toThrow('AmountIn must be a string');
           }
         });
@@ -10276,14 +10209,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidAmounts = ['abc', '12.5', '-100', '12abc', ' 123', '123 '];
           for (const invalidAmount of invalidAmounts) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, amountIn: invalidAmount })
+              adapter._generateSwapData({ ...baseParams, amountIn: invalidAmount })
             ).rejects.toThrow('AmountIn must be a positive numeric string');
           }
         });
 
         it('should throw error for zero amountIn', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, amountIn: '0' })
+            adapter._generateSwapData({ ...baseParams, amountIn: '0' })
           ).rejects.toThrow('AmountIn cannot be zero');
         });
       });
@@ -10291,10 +10224,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('Slippage tolerance validation', () => {
         it('should throw error for missing slippage tolerance', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, slippageTolerance: null })
+            adapter._generateSwapData({ ...baseParams, slippageTolerance: null })
           ).rejects.toThrow('Slippage tolerance is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, slippageTolerance: undefined })
+            adapter._generateSwapData({ ...baseParams, slippageTolerance: undefined })
           ).rejects.toThrow('Slippage tolerance is required');
         });
 
@@ -10302,7 +10235,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidTypes = ['0.5', true, false, {}, []];
           for (const invalidType of invalidTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, slippageTolerance: invalidType })
+              adapter._generateSwapData({ ...baseParams, slippageTolerance: invalidType })
             ).rejects.toThrow('Slippage tolerance must be a finite number');
           }
         });
@@ -10312,7 +10245,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const nonFiniteValues = [NaN, Infinity, -Infinity];
           for (const invalidValue of nonFiniteValues) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, slippageTolerance: invalidValue })
+              adapter._generateSwapData({ ...baseParams, slippageTolerance: invalidValue })
             ).rejects.toThrow('Slippage tolerance must be a finite number');
           }
 
@@ -10320,7 +10253,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const outOfRangeValues = [-1, -0.1, 101, 150];
           for (const invalidValue of outOfRangeValues) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, slippageTolerance: invalidValue })
+              adapter._generateSwapData({ ...baseParams, slippageTolerance: invalidValue })
             ).rejects.toThrow('Slippage tolerance must be between 0 and 100');
           }
         });
@@ -10329,10 +10262,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('SqrtPriceLimitX96 validation', () => {
         it('should throw error for missing sqrtPriceLimitX96', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, sqrtPriceLimitX96: null })
+            adapter._generateSwapData({ ...baseParams, sqrtPriceLimitX96: null })
           ).rejects.toThrow('sqrtPriceLimitX96 parameter is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, sqrtPriceLimitX96: undefined })
+            adapter._generateSwapData({ ...baseParams, sqrtPriceLimitX96: undefined })
           ).rejects.toThrow('sqrtPriceLimitX96 parameter is required');
         });
 
@@ -10340,7 +10273,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidTypes = [123, true, false, {}, []];
           for (const invalidType of invalidTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, sqrtPriceLimitX96: invalidType })
+              adapter._generateSwapData({ ...baseParams, sqrtPriceLimitX96: invalidType })
             ).rejects.toThrow('sqrtPriceLimitX96 must be a string');
           }
         });
@@ -10349,7 +10282,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidValues = ['abc', '-100', '12.5', ' 123', '123 '];
           for (const invalidValue of invalidValues) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, sqrtPriceLimitX96: invalidValue })
+              adapter._generateSwapData({ ...baseParams, sqrtPriceLimitX96: invalidValue })
             ).rejects.toThrow('sqrtPriceLimitX96 must be a positive numeric string');
           }
         });
@@ -10358,10 +10291,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('Deadline validation', () => {
         it('should throw error for missing deadline', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, deadlineMinutes: null })
+            adapter._generateSwapData({ ...baseParams, deadlineMinutes: null })
           ).rejects.toThrow('Deadline minutes is required');
           await expect(
-            adapter.generateSwapData({ ...baseParams, deadlineMinutes: undefined })
+            adapter._generateSwapData({ ...baseParams, deadlineMinutes: undefined })
           ).rejects.toThrow('Deadline minutes is required');
         });
 
@@ -10369,7 +10302,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidTypes = ['30', true, false, {}, []];
           for (const invalidType of invalidTypes) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, deadlineMinutes: invalidType })
+              adapter._generateSwapData({ ...baseParams, deadlineMinutes: invalidType })
             ).rejects.toThrow('Deadline minutes must be a non-negative number');
           }
         });
@@ -10378,7 +10311,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidValues = [-1, -0.1, NaN, Infinity, -Infinity];
           for (const invalidValue of invalidValues) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, deadlineMinutes: invalidValue })
+              adapter._generateSwapData({ ...baseParams, deadlineMinutes: invalidValue })
             ).rejects.toThrow('Deadline minutes must be a non-negative number');
           }
         });
@@ -10387,10 +10320,10 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       describe('Provider validation', () => {
         it('should throw error for missing provider', async () => {
           await expect(
-            adapter.generateSwapData({ ...baseParams, provider: null })
+            adapter._generateSwapData({ ...baseParams, provider: null })
           ).rejects.toThrow('Invalid provider');
           await expect(
-            adapter.generateSwapData({ ...baseParams, provider: undefined })
+            adapter._generateSwapData({ ...baseParams, provider: undefined })
           ).rejects.toThrow('Invalid provider');
         });
 
@@ -10398,7 +10331,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           const invalidProviders = [{}, [], 'provider', 123, true];
           for (const invalidProvider of invalidProviders) {
             await expect(
-              adapter.generateSwapData({ ...baseParams, provider: invalidProvider })
+              adapter._generateSwapData({ ...baseParams, provider: invalidProvider })
             ).rejects.toThrow('Invalid provider');
           }
         });
@@ -10408,7 +10341,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should throw error when tokenIn and tokenOut are the same', async () => {
         await expect(
-          adapter.generateSwapData({
+          adapter._generateSwapData({
             tokenIn: env.usdcAddress,
             tokenOut: env.usdcAddress, // Same as tokenIn
             fee: 500,
@@ -10429,7 +10362,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const fakeToken2 = '0x0000000000000000000000000000000000000002';
 
         await expect(
-          adapter.generateSwapData({
+          adapter._generateSwapData({
             tokenIn: fakeToken1,
             tokenOut: fakeToken2,
             fee: 500, // Valid fee tier but pool doesn't exist
@@ -10450,7 +10383,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       let baseParams;
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;
@@ -10642,7 +10575,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;
@@ -10951,7 +10884,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       let baseParams;
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;
@@ -11071,7 +11004,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(async () => {
         // Get pool data for test tokens
-        const poolData = await adapter.fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
+        const poolData = await adapter._fetchPoolData(env.usdcAddress, env.wethAddress, 500, env.provider);
 
         // Use real position tick values from test environment
         const { tickLower, tickUpper } = env.testPosition;

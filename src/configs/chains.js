@@ -27,6 +27,14 @@ const chains = {
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3", // V2.0 (V4 support)
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
       },
+      uniswapV4: {
+        poolManagerAddress: "0x360e68faccca8ca495c1b759fd9eee466db9fb32",
+        positionManagerAddress: "0xd88f38f930b7952f2db2432cb002e7abbf3dd869",
+        stateViewAddress: "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
+        quoterAddress: "0x3972c00f7ed4885e145823eb7c655375d275a1c5",
+        // V4 uses UniversalRouter for swaps (shared with V3)
+        universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
+      },
     },
   },
 
@@ -52,6 +60,14 @@ const chains = {
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3", // V2.0 (V4 support) - Same as Arbitrum
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // Same as Arbitrum since it's a fork
       },
+      uniswapV4: {
+        // Same as Arbitrum since it's a fork
+        poolManagerAddress: "0x360e68faccca8ca495c1b759fd9eee466db9fb32",
+        positionManagerAddress: "0xd88f38f930b7952f2db2432cb002e7abbf3dd869",
+        stateViewAddress: "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
+        quoterAddress: "0x3972c00f7ed4885e145823eb7c655375d275a1c5",
+        universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
+      },
     },
   },
 
@@ -76,6 +92,13 @@ const chains = {
         routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
         universalRouterAddress: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", // V2.0 (V4 support)
         quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+      },
+      uniswapV4: {
+        poolManagerAddress: "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        positionManagerAddress: "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e",
+        stateViewAddress: "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
+        quoterAddress: "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203",
+        universalRouterAddress: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
       },
     },
   },

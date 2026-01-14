@@ -32,7 +32,7 @@ This directory contains detailed API documentation for the FUM Library.
 #### Position Management
 - `getPositions()` - Fetch user positions from protocols
 - `calculateFees()` - Calculate uncollected fees
-- `generateSwapData()` - Prepare swap transactions
+- `batchSwapTransactions()` - Prepare batched swap transactions
 
 ## Generated Documentation
 

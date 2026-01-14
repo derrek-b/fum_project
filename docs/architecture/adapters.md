@@ -104,8 +104,8 @@ async generateAddLiquidityData(params)
 // Generate transaction data for creating new position
 async generateCreatePositionData(params)
 
-// Generate transaction data for token swaps
-async generateSwapData(params)
+// Generate batched swap transactions with Permit2
+async batchSwapTransactions(swapInstructions, options)
 ```
 
 #### Transaction Execution
@@ -397,16 +397,16 @@ catch (error) {
 
 ### Validation Patterns
 ```javascript
-async generateSwapData(params) {
+async batchSwapTransactions(swapInstructions, options) {
   // Input validation
-  if (!params.tokenIn || !params.tokenOut) {
-    throw new Error("Token addresses required");
+  if (!Array.isArray(swapInstructions)) {
+    throw new Error("swapInstructions must be an array");
   }
-  
-  if (params.amountIn <= 0) {
-    throw new Error("Amount must be positive");
+
+  if (!options.recipient) {
+    throw new Error("recipient is required");
   }
-  
+
   // ... continue with implementation
 }
 ```

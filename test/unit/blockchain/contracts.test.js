@@ -1148,8 +1148,8 @@ describe('contracts.js - Unit Tests', () => {
       };
 
       // Generate transaction data
-      const swapTx1 = await adapter.generateSwapData(swapParams1);
-      const swapTx2 = await adapter.generateSwapData(swapParams2);
+      const swapTx1 = await adapter._generateSwapData(swapParams1);
+      const swapTx2 = await adapter._generateSwapData(swapParams2);
 
       swapTransactions = [
         {

@@ -450,12 +450,15 @@ Returns route with `methodParameters` containing calldata for Universal Router.
 
 ---
 
-### generateSwapData
+### _generateSwapData (Internal)
 
-Generate swap transaction data using SwapRouter.
+> **⚠️ Internal Method**: This method is for test setup only. For production swaps, use `batchSwapTransactions()`.
+
+Generate swap transaction data using SwapRouter. Used internally by test files to fund wallets with tokens.
 
 ```javascript
-const txData = await adapter.generateSwapData({
+// Test setup only
+const txData = await adapter._generateSwapData({
   tokenIn: '0x...',
   tokenOut: '0x...',
   fee: 500,

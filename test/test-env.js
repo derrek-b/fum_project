@@ -1,31 +1,35 @@
 /**
- * Test Environment
+ * Test Environment - Core Infrastructure
  *
- * Main entry point for setting up the complete test environment.
- * Combines Hardhat node, contract deployment, and test utilities.
+ * Provides the core test environment setup:
+ * - Start Hardhat node with Arbitrum fork
+ * - Deploy FUM contracts (VaultFactory, validators)
+ * - Fund test accounts with ETH
+ * - Snapshot/revert utilities
+ * - Time manipulation
+ *
+ * Platform-specific setup (V3, V4, etc.) is in separate files:
+ * - test/setup/v3-setup.js
+ * - test/setup/v4-setup.js
  */
 
 import { ethers } from 'ethers';
 import { startHardhat, TEST_ACCOUNTS } from './setup/hardhat-config.js';
 import { deployFUMContracts, deployTestVault } from './setup/test-contracts.js';
-import chains from '../src/configs/chains.js';
-import tokens from '../src/configs/tokens.js';
-import { UniswapV3Adapter } from '../src/adapters/index.js';
-import contractData from '../src/artifacts/contracts.js';
-import ERC20_ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const ERC20_ABI = ERC20_ARTIFACT.abi;
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Complete test environment setup
+ * Core test environment setup
+ * Sets up Hardhat node, deploys FUM contracts, and funds test accounts.
+ * Does NOT include platform-specific setup (use v3-setup.js or v4-setup.js for that).
+ *
  * @param {Object} options - Configuration options
- * @returns {Object} Test environment with all utilities
+ * @param {number} options.port - Hardhat node port (default: 8545)
+ * @param {boolean} options.deployContracts - Whether to deploy FUM contracts (default: true)
+ * @param {boolean} options.updateContractsFile - Whether to update contracts.js (default: true)
+ * @param {boolean} options.quiet - Suppress verbose output (default: true)
+ * @returns {Object} Core test environment
  */
-export async function setupTestEnvironment(options = {}) {
+export async function setupCoreEnvironment(options = {}) {
   const {
     port = 8545,
     deployContracts = true,
@@ -42,7 +46,7 @@ export async function setupTestEnvironment(options = {}) {
   let contracts = {};
   let contractAddresses = {};
 
-  // Deploy contracts if requested
+  // Deploy FUM contracts if requested
   if (deployContracts) {
     console.log('📄 Deploying FUM contracts...');
     const deployment = await deployFUMContracts(
@@ -53,211 +57,7 @@ export async function setupTestEnvironment(options = {}) {
     contractAddresses = deployment.addresses;
   }
 
-  // Create a test vault with position and assets
-  let testVault = null;
-  let testPosition = null;
-  let positionTokenId = null;
-  let usdcPerEth = "0"; // Default value if swap doesn't happen
-  let wethAddress, usdcAddress, uniswapV3;
-  let poolData = null;
-
-  if (deployContracts) {
-    console.log('💰 Setting up test vault with assets...');
-    console.log('  - Starting vault creation...');
-
-    // Create vault using the VaultFactory
-    const vaultFactory = contracts.vaultFactory;
-    const tx = await vaultFactory.createVault('Test Vault');
-    const receipt = await tx.wait();
-
-    // Find VaultCreated event to get the vault address
-    const vaultCreatedEvent = receipt.logs.find(log => {
-      try {
-        const parsed = vaultFactory.interface.parseLog(log);
-        return parsed && parsed.name === 'VaultCreated';
-      } catch {
-        return false;
-      }
-    });
-
-    if (!vaultCreatedEvent) {
-      throw new Error('VaultCreated event not found');
-    }
-
-    const vaultAddress = vaultFactory.interface.parseLog(vaultCreatedEvent).args[1];
-    console.log(`  - Created vault at: ${vaultAddress}`);
-
-    // Get vault contract instance
-    const vaultAbi = contractData.PositionVault.abi;
-    testVault = new ethers.Contract(vaultAddress, vaultAbi, hardhat.signers[0]);
-
-    // Get chain config for our forked network
-    const chainConfig = chains[1337];
-    uniswapV3 = chainConfig.platformAddresses.uniswapV3;
-
-    // Create adapter for interacting with Uniswap
-    const adapter = new UniswapV3Adapter(1337);
-
-    // Setup tokens - we'll need WETH and USDC
-    const owner = hardhat.signers[0];
-
-    // 1. Wrap 10 ETH to WETH
-    console.log('  - Wrapping 10 ETH to WETH...');
-    const WETH_ABI = [
-      'function deposit() payable',
-      'function withdraw(uint256 amount)',
-      ...ERC20_ABI // Include all standard ERC20 functions
-    ];
-
-    // Get WETH address from ETH token config (wethAddresses for wrapped version)
-    wethAddress = tokens.ETH.wethAddresses[1337];
-    const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
-
-    const wrapTx = await weth.deposit({ value: ethers.utils.parseEther('10') });
-    await wrapTx.wait();
-    console.log('  - WETH wrapped successfully');
-
-    // 2. Swap 2 WETH for USDC
-    console.log('  - Swapping 2 WETH for USDC...');
-
-    // First approve router to spend WETH
-    const approveTx = await weth.approve(uniswapV3.routerAddress, ethers.utils.parseEther('2'));
-    await approveTx.wait();
-
-    // Get USDC address from tokens config
-    usdcAddress = tokens.USDC.addresses[1337];
-
-    // Create swap params
-    const swapParams = {
-      tokenIn: wethAddress,
-      tokenOut: usdcAddress,
-      fee: 500, // 0.05% fee pool
-      recipient: owner.address,
-      amountIn: ethers.utils.parseEther('2').toString(),
-      slippageTolerance: 1, // 1% slippage
-      sqrtPriceLimitX96: "0",
-      provider: hardhat.provider,
-      deadlineMinutes: 2  // 2 minutes for L2
-    };
-
-    const swapData = await adapter.generateSwapData(swapParams);
-    const swapTx = await owner.sendTransaction({
-      to: swapData.to,
-      data: swapData.data,
-      value: swapData.value,
-    });
-    await swapTx.wait();
-    console.log('  - Swap completed successfully');
-
-    // 3. Get current balances
-    const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, owner);
-    const wethBalance = await weth.balanceOf(owner.address);
-    const usdcBalance = await usdc.balanceOf(owner.address);
-
-    console.log(`  - WETH balance: ${ethers.utils.formatEther(wethBalance)} WETH`);
-    console.log(`  - USDC balance: ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
-
-    // Calculate USDC per ETH price from our 2 ETH swap
-    usdcPerEth = (parseFloat(ethers.utils.formatUnits(usdcBalance, 6)) / 2).toString();
-    console.log(`  - Current price: 1 ETH = ${usdcPerEth} USDC`);
-
-    // 4. Create a position using 20% of assets
-    console.log('  - Creating Uniswap V3 position...');
-
-    // Approve position manager to spend tokens
-    const wethAmount = wethBalance.div(5); // 20% of WETH
-    const usdcAmount = usdcBalance.div(5); // 20% of USDC
-
-    await (await weth.approve(uniswapV3.positionManagerAddress, wethAmount)).wait();
-    await (await usdc.approve(uniswapV3.positionManagerAddress, usdcAmount)).wait();
-
-    // Get current pool data to center position around current tick
-    poolData = await adapter.fetchPoolData(wethAddress, usdcAddress, 500, hardhat.provider);
-
-    // Create position centered around current tick
-    const tickSpacing = 10; // 0.05% fee tier has 10 tick spacing
-    const tickLower = Math.floor(poolData.tick / tickSpacing) * tickSpacing - tickSpacing * 10;
-    const tickUpper = Math.floor(poolData.tick / tickSpacing) * tickSpacing + tickSpacing * 10;
-
-    const POSITION_MANAGER_ABI = [
-      'function mint(tuple(address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, address recipient, uint256 deadline)) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
-      'function safeTransferFrom(address from, address to, uint256 tokenId) external'
-    ];
-
-    const positionManager = new ethers.Contract(uniswapV3.positionManagerAddress, POSITION_MANAGER_ABI, owner);
-
-    // Sort tokens to match pool order
-    const [token0, token1, amount0Desired, amount1Desired] =
-      wethAddress.toLowerCase() < usdcAddress.toLowerCase()
-        ? [wethAddress, usdcAddress, wethAmount, usdcAmount]
-        : [usdcAddress, wethAddress, usdcAmount, wethAmount];
-
-    const mintParams = {
-      token0,
-      token1,
-      fee: 500,
-      tickLower,
-      tickUpper,
-      amount0Desired,
-      amount1Desired,
-      amount0Min: 0,
-      amount1Min: 0,
-      recipient: owner.address,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
-    };
-
-    // Get tokenId and amounts directly from mint function return values
-    const mintResult = await positionManager.callStatic.mint(mintParams);
-    const [tokenId, liquidity, amount0, amount1] = mintResult;
-    positionTokenId = tokenId;
-    console.log(`  - Position will have ID: ${positionTokenId}`);
-    console.log(`  - Position liquidity: ${liquidity}`);
-    console.log(`  - Amount0 deposited: ${amount0} WETH`);
-    console.log(`  - Amount1 deposited: ${amount1} USDC`);
-
-    // Now execute the actual mint transaction
-    const mintTx = await positionManager.mint(mintParams);
-    await mintTx.wait();
-    console.log(`  - Created position NFT with ID: ${positionTokenId}`);
-
-    // 5. Transfer most assets to vault (keep some for second position in tests)
-    console.log('  - Transferring assets to vault...');
-
-    // Transfer 60% of remaining WETH to vault, keep 40% in owner wallet
-    const remainingWeth = await weth.balanceOf(owner.address);
-    if (remainingWeth.gt(0)) {
-      const wethToTransfer = remainingWeth.mul(60).div(100);
-      await (await weth.transfer(vaultAddress, wethToTransfer)).wait();
-    }
-
-    // Transfer 60% of remaining USDC to vault, keep 40% in owner wallet
-    const remainingUsdc = await usdc.balanceOf(owner.address);
-    if (remainingUsdc.gt(0)) {
-      const usdcToTransfer = remainingUsdc.mul(60).div(100);
-      await (await usdc.transfer(vaultAddress, usdcToTransfer)).wait();
-    }
-
-    // Transfer position NFT to vault (vault can receive ERC721)
-    if (positionTokenId) {
-      await (await positionManager.safeTransferFrom(owner.address, vaultAddress, positionTokenId)).wait();
-    }
-
-    console.log('  ✅ Test vault setup complete!');
-
-    testPosition = {
-      tokenId: positionTokenId,
-      liquidity: liquidity.toString(),
-      tickLower,
-      tickUpper,
-      token0,
-      token1,
-      fee: 500,
-      amount0: amount0.toString(),
-      amount1: amount1.toString()
-    };
-  }
-
-  // Fund additional test accounts for use in tests
+  // Fund additional test accounts
   console.log('💰 Funding test accounts...');
   for (let i = 1; i < Math.min(5, hardhat.signers.length); i++) {
     const tx = await hardhat.signers[0].sendTransaction({
@@ -269,7 +69,7 @@ export async function setupTestEnvironment(options = {}) {
   }
   console.log('  ✅ Test accounts funded!');
 
-  // Create test environment object
+  // Create core environment object
   const env = {
     // Hardhat utilities
     provider: hardhat.provider,
@@ -280,25 +80,6 @@ export async function setupTestEnvironment(options = {}) {
     // Contract instances
     contracts,
     contractAddresses,
-
-    // Test vault and position
-    testVault,
-    testPosition,
-    positionTokenId,
-
-    // Token addresses
-    wethAddress,
-    usdcAddress,
-
-    // Uniswap V3 addresses
-    uniswapV3,
-
-    // Pool data for tick calculations
-    poolData,
-
-    // Price data from setup swap
-    usdcPerEth, // USDC per ETH price as string
-
 
     // Helper functions
     async createVault(params = {}) {
@@ -313,8 +94,8 @@ export async function setupTestEnvironment(options = {}) {
         executor: hardhat.signers[1].address,
         strategist: hardhat.signers[2].address,
         feeRecipient: hardhat.signers[3].address,
-        performanceFee: 1000, // 10%
-        managementFee: 200,   // 2%
+        performanceFee: 1000,
+        managementFee: 200,
         ...params,
       };
 
@@ -367,9 +148,8 @@ export async function setupTestEnvironment(options = {}) {
     },
   };
 
-  console.log('✅ Test environment ready!');
+  console.log('✅ Core test environment ready!');
 
-  // Log useful information
   if (!quiet) {
     console.log('\n📊 Test Environment Summary:');
     console.log(`- RPC URL: http://localhost:${port}`);
@@ -383,12 +163,27 @@ export async function setupTestEnvironment(options = {}) {
 }
 
 /**
+ * Complete test environment setup (V3) - BACKWARDS COMPATIBLE
+ *
+ * This is the original setupTestEnvironment that includes V3-specific setup.
+ * New code should use setupV3TestEnvironment from './setup/v3-setup.js' directly.
+ *
+ * @param {Object} options - Configuration options
+ * @returns {Object} Test environment with V3 utilities
+ */
+export async function setupTestEnvironment(options = {}) {
+  // Import dynamically to avoid circular dependency
+  const { setupV3TestEnvironment } = await import('./setup/v3-setup.js');
+  return setupV3TestEnvironment(options);
+}
+
+/**
  * Quick setup for unit tests that don't need full environment
  * @param {Object} options - Configuration options
  * @returns {Object} Minimal test environment
  */
 export async function quickTestSetup(options = {}) {
-  return setupTestEnvironment({
+  return setupCoreEnvironment({
     deployContracts: false,
     quiet: true,
     ...options,
