@@ -3097,11 +3097,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from closing positions
    * @param {Object} positionMetadata - Metadata for closed positions
    *   { [tokenId]: { position, poolMetadata, token0Data, token1Data, adapter } }
-   * @returns {Object} Parsed closure data
+   * @param {Object} [options] - Optional settings (unused in V3, included for API compatibility)
+   * @returns {Promise<Object>} Parsed closure data
    *   { principalByPosition: { [tokenId]: { amount0, amount1 } },
    *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
    */
-  parseClosureReceipt(receipt, positionMetadata) {
+  async parseClosureReceipt(receipt, positionMetadata, options = {}) {
     // Validate receipt
     if (receipt === null || receipt === undefined) {
       throw new Error("Receipt parameter is required");
@@ -3182,10 +3183,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from collect execution
    * @param {Object} positionMetadata - Metadata for positions keyed by tokenId
    *   { [tokenId]: { token0Data, token1Data } }
-   * @returns {Object} Parsed fee data
+   * @param {Object} [options] - Optional settings (unused in V3, included for API compatibility)
+   * @returns {Promise<Object>} Parsed fee data
    *   { feesByPosition: { [tokenId]: { token0: BigNumber, token1: BigNumber, metadata } } }
    */
-  parseCollectReceipt(receipt, positionMetadata) {
+  async parseCollectReceipt(receipt, positionMetadata, options = {}) {
     // Validate receipt
     if (receipt === null || receipt === undefined) {
       throw new Error("Receipt parameter is required");

@@ -8043,7 +8043,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         // 7. Call parseClosureReceipt
-        const result = adapter.parseClosureReceipt(receipt, positionMetadata);
+        const result = await adapter.parseClosureReceipt(receipt, positionMetadata);
 
         // 8. Verify structure
         expect(result).toBeDefined();
@@ -8075,7 +8075,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.feesByPosition[positionId].metadata.token1Data.symbol).toBe('WETH');
       }, 90000);
 
-      it('should return empty objects when no matching positions in metadata', () => {
+      it('should return empty objects when no matching positions in metadata', async () => {
         // Create a mock receipt with DecreaseLiquidity and Collect events for tokenId "12345"
         // but pass metadata for a DIFFERENT tokenId "999999999"
         const decreaseLiquidityTopic = adapter.positionManagerInterface.getEventTopic('DecreaseLiquidity');
@@ -8117,13 +8117,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
 
         // Parse - should return empty since no matching IDs
-        const result = adapter.parseClosureReceipt(mockReceipt, positionMetadata);
+        const result = await adapter.parseClosureReceipt(mockReceipt, positionMetadata);
 
         expect(result.principalByPosition).toEqual({});
         expect(result.feesByPosition).toEqual({});
       });
 
-      it('should handle empty receipt logs', () => {
+      it('should handle empty receipt logs', async () => {
         const emptyReceipt = { logs: [] };
         const positionMetadata = {
           '12345': {
@@ -8133,7 +8133,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseClosureReceipt(emptyReceipt, positionMetadata);
+        const result = await adapter.parseClosureReceipt(emptyReceipt, positionMetadata);
 
         expect(result.principalByPosition).toEqual({});
         expect(result.feesByPosition).toEqual({});
@@ -8141,28 +8141,28 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
 
     describe('Error Cases', () => {
-      it('should throw for null receipt', () => {
-        expect(() => adapter.parseClosureReceipt(null, {})).toThrow('Receipt parameter is required');
+      it('should throw for null receipt', async () => {
+        await expect(adapter.parseClosureReceipt(null, {})).rejects.toThrow('Receipt parameter is required');
       });
 
-      it('should throw for undefined receipt', () => {
-        expect(() => adapter.parseClosureReceipt(undefined, {})).toThrow('Receipt parameter is required');
+      it('should throw for undefined receipt', async () => {
+        await expect(adapter.parseClosureReceipt(undefined, {})).rejects.toThrow('Receipt parameter is required');
       });
 
-      it('should throw for receipt without logs', () => {
-        expect(() => adapter.parseClosureReceipt({}, {})).toThrow('Receipt must have logs property');
+      it('should throw for receipt without logs', async () => {
+        await expect(adapter.parseClosureReceipt({}, {})).rejects.toThrow('Receipt must have logs property');
       });
 
-      it('should throw for null positionMetadata', () => {
-        expect(() => adapter.parseClosureReceipt({ logs: [] }, null)).toThrow('Position metadata parameter is required');
+      it('should throw for null positionMetadata', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, null)).rejects.toThrow('Position metadata parameter is required');
       });
 
-      it('should throw for undefined positionMetadata', () => {
-        expect(() => adapter.parseClosureReceipt({ logs: [] }, undefined)).toThrow('Position metadata parameter is required');
+      it('should throw for undefined positionMetadata', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, undefined)).rejects.toThrow('Position metadata parameter is required');
       });
 
-      it('should throw for array positionMetadata', () => {
-        expect(() => adapter.parseClosureReceipt({ logs: [] }, [])).toThrow('Position metadata must be an object');
+      it('should throw for array positionMetadata', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, [])).rejects.toThrow('Position metadata must be an object');
       });
     });
   });
@@ -8190,7 +8190,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     };
 
     describe('Success Cases', () => {
-      it('should parse single position Collect event', () => {
+      it('should parse single position Collect event', async () => {
         const tokenId = '12345';
         const mockLog = createMockCollectLog(tokenId, '1000000', '500000000000000000');
 
@@ -8202,7 +8202,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
         expect(result.feesByPosition).toBeDefined();
         expect(result.feesByPosition[tokenId]).toBeDefined();
@@ -8211,7 +8211,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.feesByPosition[tokenId].metadata).toEqual(positionMetadata[tokenId]);
       });
 
-      it('should handle multiple positions in single receipt', () => {
+      it('should handle multiple positions in single receipt', async () => {
         const tokenId1 = '12345';
         const tokenId2 = '67890';
         const mockLog1 = createMockCollectLog(tokenId1, '1000000', '500000000000000000');
@@ -8229,14 +8229,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
         expect(Object.keys(result.feesByPosition)).toHaveLength(2);
         expect(result.feesByPosition[tokenId1].token0.toString()).toBe('1000000');
         expect(result.feesByPosition[tokenId2].token0.toString()).toBe('2000000');
       });
 
-      it('should return empty feesByPosition when no matching tokenIds in metadata', () => {
+      it('should return empty feesByPosition when no matching tokenIds in metadata', async () => {
         const mockLog = createMockCollectLog('12345', '1000000', '500000000000000000');
 
         const receipt = { logs: [mockLog] };
@@ -8247,12 +8247,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
         expect(result.feesByPosition).toEqual({});
       });
 
-      it('should ignore non-Collect events in receipt', () => {
+      it('should ignore non-Collect events in receipt', async () => {
         const tokenId = '12345';
         const mockCollectLog = createMockCollectLog(tokenId, '1000000', '500000000000000000');
 
@@ -8271,13 +8271,13 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
         expect(Object.keys(result.feesByPosition)).toHaveLength(1);
         expect(result.feesByPosition[tokenId]).toBeDefined();
       });
 
-      it('should handle empty receipt logs array', () => {
+      it('should handle empty receipt logs array', async () => {
         const receipt = { logs: [] };
         const positionMetadata = {
           '12345': {
@@ -8286,35 +8286,35 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           }
         };
 
-        const result = adapter.parseCollectReceipt(receipt, positionMetadata);
+        const result = await adapter.parseCollectReceipt(receipt, positionMetadata);
 
         expect(result.feesByPosition).toEqual({});
       });
     });
 
     describe('Error Cases', () => {
-      it('should throw for null receipt', () => {
-        expect(() => adapter.parseCollectReceipt(null, {})).toThrow('Receipt parameter is required');
+      it('should throw for null receipt', async () => {
+        await expect(adapter.parseCollectReceipt(null, {})).rejects.toThrow('Receipt parameter is required');
       });
 
-      it('should throw for undefined receipt', () => {
-        expect(() => adapter.parseCollectReceipt(undefined, {})).toThrow('Receipt parameter is required');
+      it('should throw for undefined receipt', async () => {
+        await expect(adapter.parseCollectReceipt(undefined, {})).rejects.toThrow('Receipt parameter is required');
       });
 
-      it('should throw for receipt without logs', () => {
-        expect(() => adapter.parseCollectReceipt({}, {})).toThrow('Receipt must have logs property');
+      it('should throw for receipt without logs', async () => {
+        await expect(adapter.parseCollectReceipt({}, {})).rejects.toThrow('Receipt must have logs property');
       });
 
-      it('should throw for null positionMetadata', () => {
-        expect(() => adapter.parseCollectReceipt({ logs: [] }, null)).toThrow('Position metadata parameter is required');
+      it('should throw for null positionMetadata', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, null)).rejects.toThrow('Position metadata parameter is required');
       });
 
-      it('should throw for undefined positionMetadata', () => {
-        expect(() => adapter.parseCollectReceipt({ logs: [] }, undefined)).toThrow('Position metadata parameter is required');
+      it('should throw for undefined positionMetadata', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, undefined)).rejects.toThrow('Position metadata parameter is required');
       });
 
-      it('should throw for array positionMetadata', () => {
-        expect(() => adapter.parseCollectReceipt({ logs: [] }, [])).toThrow('Position metadata must be an object');
+      it('should throw for array positionMetadata', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, [])).rejects.toThrow('Position metadata must be an object');
       });
     });
   });

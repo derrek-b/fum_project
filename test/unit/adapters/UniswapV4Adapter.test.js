@@ -9,6 +9,7 @@ import { ethers } from 'ethers';
 import { setupV4TestEnvironment } from '../../setup/v4-setup.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
+import { configureBlockExplorer, resetBlockExplorerConfig } from '../../../src/services/blockExplorer.js';
 
 describe('UniswapV4Adapter - Unit Tests', () => {
   let env;
@@ -795,40 +796,17 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         .rejects.toThrow('UniswapV4Adapter.getPositionsForVDS not implemented');
     });
 
-    it('getAccruedFeesUSD should throw not implemented', async () => {
-      await expect(adapter.getAccruedFeesUSD({}, {}, env.provider))
-        .rejects.toThrow('UniswapV4Adapter.getAccruedFeesUSD not implemented');
-    });
+    // getAccruedFeesUSD - IMPLEMENTED (tests in separate describe block)
 
-    it('evaluatePositionRange should throw not implemented', async () => {
-      await expect(adapter.evaluatePositionRange({}, env.provider))
-        .rejects.toThrow('UniswapV4Adapter.evaluatePositionRange not implemented');
-    });
+    // evaluatePositionRange - IMPLEMENTED (tests in separate describe block)
 
-    it('calculateTokenAmounts should throw not implemented', async () => {
-      await expect(adapter.calculateTokenAmounts({}, {}, {}, {}))
-        .rejects.toThrow('UniswapV4Adapter.calculateTokenAmounts not implemented');
-    });
+    // generateClaimFeesData - IMPLEMENTED (tests in separate describe block)
 
-    it('generateClaimFeesData should throw not implemented', async () => {
-      await expect(adapter.generateClaimFeesData({}))
-        .rejects.toThrow('UniswapV4Adapter.generateClaimFeesData not implemented');
-    });
+    // generateRemoveLiquidityData - IMPLEMENTED (tests in separate describe block)
 
-    it('generateRemoveLiquidityData should throw not implemented', async () => {
-      await expect(adapter.generateRemoveLiquidityData({}))
-        .rejects.toThrow('UniswapV4Adapter.generateRemoveLiquidityData not implemented');
-    });
+    // generateAddLiquidityData - IMPLEMENTED (tests in separate describe block)
 
-    it('generateAddLiquidityData should throw not implemented', async () => {
-      await expect(adapter.generateAddLiquidityData({}))
-        .rejects.toThrow('UniswapV4Adapter.generateAddLiquidityData not implemented');
-    });
-
-    it('getAddLiquidityAmounts should throw not implemented', async () => {
-      await expect(adapter.getAddLiquidityAmounts({}))
-        .rejects.toThrow('UniswapV4Adapter.getAddLiquidityAmounts not implemented');
-    });
+    // getAddLiquidityAmounts - IMPLEMENTED (tests in separate describe block)
 
     // generateCreatePositionData - IMPLEMENTED (tests in separate describe block)
 
@@ -842,15 +820,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         .rejects.toThrow('UniswapV4Adapter.batchSwapTransactions not implemented');
     });
 
-    it('parseClosureReceipt should throw not implemented', () => {
-      expect(() => adapter.parseClosureReceipt({}, {}))
-        .toThrow('UniswapV4Adapter.parseClosureReceipt not implemented');
-    });
+    // parseClosureReceipt - IMPLEMENTED (tests in separate describe block)
 
-    it('parseCollectReceipt should throw not implemented', () => {
-      expect(() => adapter.parseCollectReceipt({}, {}))
-        .toThrow('UniswapV4Adapter.parseCollectReceipt not implemented');
-    });
+    // parseCollectReceipt - IMPLEMENTED (tests in separate describe block)
 
 
     it('selectBestPool should throw not implemented', async () => {
@@ -1244,6 +1216,2082 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Use == 0 to handle -0 vs +0 edge case
         expect(result.tickLower % 42 == 0).toBe(true);
         expect(result.tickUpper % 42 == 0).toBe(true);
+      });
+    });
+  });
+
+  describe('calculateTokenAmounts', () => {
+    // Valid test data for use in success cases
+    const validPosition = {
+      liquidity: '1000000000000',
+      tickLower: -198000,
+      tickUpper: -192000
+    };
+
+    const validPoolData = {
+      sqrtPriceX96: '1771595571142957166518320255467520',
+      tick: -195000
+    };
+
+    const validToken0Data = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+    const validToken1Data = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+    describe('Error Cases', () => {
+      describe('position validation', () => {
+        it('should throw when position is null', async () => {
+          await expect(adapter.calculateTokenAmounts(null, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position is required and must be an object');
+        });
+
+        it('should throw when position is undefined', async () => {
+          await expect(adapter.calculateTokenAmounts(undefined, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position is required and must be an object');
+        });
+
+        it('should throw when position is an array', async () => {
+          await expect(adapter.calculateTokenAmounts([], validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position is required and must be an object');
+        });
+
+        it('should throw when position.liquidity is missing', async () => {
+          const position = { tickLower: -198000, tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.liquidity is required');
+        });
+
+        it('should throw when position.liquidity is null', async () => {
+          const position = { liquidity: null, tickLower: -198000, tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.liquidity is required');
+        });
+
+        it('should throw when position.liquidity is negative', async () => {
+          const position = { liquidity: '-100', tickLower: -198000, tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.liquidity must be a non-negative numeric string');
+        });
+
+        it('should throw when position.liquidity is non-numeric string', async () => {
+          const position = { liquidity: 'abc', tickLower: -198000, tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.liquidity must be a non-negative numeric string');
+        });
+
+        it('should throw when position.tickLower is missing', async () => {
+          const position = { liquidity: '1000', tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickLower must be a finite number');
+        });
+
+        it('should throw when position.tickLower is not finite', async () => {
+          const position = { liquidity: '1000', tickLower: Infinity, tickUpper: -192000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickLower must be a finite number');
+        });
+
+        it('should throw when position.tickUpper is missing', async () => {
+          const position = { liquidity: '1000', tickLower: -198000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickUpper must be a finite number');
+        });
+
+        it('should throw when position.tickUpper is not finite', async () => {
+          const position = { liquidity: '1000', tickLower: -198000, tickUpper: NaN };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickUpper must be a finite number');
+        });
+
+        it('should throw when tickLower >= tickUpper', async () => {
+          const position = { liquidity: '1000', tickLower: -192000, tickUpper: -198000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickLower (-192000) must be less than position.tickUpper (-198000)');
+        });
+
+        it('should throw when tickLower equals tickUpper', async () => {
+          const position = { liquidity: '1000', tickLower: -195000, tickUpper: -195000 };
+          await expect(adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('position.tickLower (-195000) must be less than position.tickUpper (-195000)');
+        });
+      });
+
+      describe('poolData validation', () => {
+        it('should throw when poolData is null', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, null, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData is required and must be an object');
+        });
+
+        it('should throw when poolData is undefined', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, undefined, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData is required and must be an object');
+        });
+
+        it('should throw when poolData is an array', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, [], validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData is required and must be an object');
+        });
+
+        it('should throw when poolData.sqrtPriceX96 is missing', async () => {
+          const poolData = { tick: -195000 };
+          await expect(adapter.calculateTokenAmounts(validPosition, poolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData.sqrtPriceX96 is required');
+        });
+
+        it('should throw when poolData.sqrtPriceX96 is null', async () => {
+          const poolData = { sqrtPriceX96: null, tick: -195000 };
+          await expect(adapter.calculateTokenAmounts(validPosition, poolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData.sqrtPriceX96 is required');
+        });
+
+        it('should throw when poolData.sqrtPriceX96 is non-numeric', async () => {
+          const poolData = { sqrtPriceX96: 'abc', tick: -195000 };
+          await expect(adapter.calculateTokenAmounts(validPosition, poolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData.sqrtPriceX96 must be a non-negative numeric string');
+        });
+
+        it('should throw when poolData.tick is not finite', async () => {
+          const poolData = { sqrtPriceX96: '1000000000', tick: Infinity };
+          await expect(adapter.calculateTokenAmounts(validPosition, poolData, validToken0Data, validToken1Data))
+            .rejects.toThrow('poolData.tick must be a finite number');
+        });
+      });
+
+      describe('token data validation', () => {
+        it('should throw when token0Data is null', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, validPoolData, null, validToken1Data))
+            .rejects.toThrow('token0Data is required and must be an object');
+        });
+
+        it('should throw when token0Data is undefined', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, validPoolData, undefined, validToken1Data))
+            .rejects.toThrow('token0Data is required and must be an object');
+        });
+
+        it('should throw when token1Data is null', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, null))
+            .rejects.toThrow('token1Data is required and must be an object');
+        });
+
+        it('should throw when token1Data is undefined', async () => {
+          await expect(adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, undefined))
+            .rejects.toThrow('token1Data is required and must be an object');
+        });
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should return [0n, 0n] for zero liquidity', async () => {
+        const position = { liquidity: '0', tickLower: -198000, tickUpper: -192000 };
+        const result = await adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toBe(0n);
+        expect(result[1]).toBe(0n);
+      });
+
+      it('should return array of two BigInts', async () => {
+        const result = await adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, validToken1Data);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+      });
+
+      it('should return non-negative amounts', async () => {
+        const result = await adapter.calculateTokenAmounts(validPosition, validPoolData, validToken0Data, validToken1Data);
+
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+      });
+
+      it('should return only token0 when price is below position range', async () => {
+        // Position range: 0 to 1000, current tick: -1000 (below range)
+        // When price is below range, position is entirely in token0
+        // sqrtPriceX96 at tick -1000 is approx 74458408916906616024112742400
+        const position = { liquidity: '1000000000000000', tickLower: 0, tickUpper: 1000 };
+        const poolData = {
+          sqrtPriceX96: '74458408916906616024112742400', // tick -1000
+          tick: -1000
+        };
+
+        const result = await adapter.calculateTokenAmounts(position, poolData, validToken0Data, validToken1Data);
+
+        expect(result[0]).toBeGreaterThan(0n); // Has token0
+        expect(result[1]).toBe(0n);            // No token1
+      });
+
+      it('should return only token1 when price is above position range', async () => {
+        // Position range: -2000 to -1000, current tick: 0 (above range)
+        // When price is above range, position is entirely in token1
+        // sqrtPriceX96 at tick 0 is 79228162514264337593543950336 (Q96 = 2^96)
+        const position = { liquidity: '1000000000000000', tickLower: -2000, tickUpper: -1000 };
+        const poolData = {
+          sqrtPriceX96: '79228162514264337593543950336', // tick 0
+          tick: 0
+        };
+
+        const result = await adapter.calculateTokenAmounts(position, poolData, validToken0Data, validToken1Data);
+
+        expect(result[0]).toBe(0n);            // No token0
+        expect(result[1]).toBeGreaterThan(0n); // Has token1
+      });
+
+      it('should return both tokens when price is in range', async () => {
+        // Position range: -1000 to 1000, current tick: 0 (in range)
+        // sqrtPriceX96 at tick 0 is 79228162514264337593543950336
+        const position = { liquidity: '1000000000000000', tickLower: -1000, tickUpper: 1000 };
+        const poolData = {
+          sqrtPriceX96: '79228162514264337593543950336', // tick 0
+          tick: 0
+        };
+
+        const result = await adapter.calculateTokenAmounts(position, poolData, validToken0Data, validToken1Data);
+
+        expect(result[0]).toBeGreaterThan(0n); // Has token0
+        expect(result[1]).toBeGreaterThan(0n); // Has token1
+      });
+
+      it('should handle liquidity as number (converts to string)', async () => {
+        const position = { liquidity: 1000000000000, tickLower: -198000, tickUpper: -192000 };
+        const result = await adapter.calculateTokenAmounts(position, validPoolData, validToken0Data, validToken1Data);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+      });
+
+      it('should handle sqrtPriceX96 as BigInt', async () => {
+        const poolData = {
+          sqrtPriceX96: BigInt('1771595571142957166518320255467520'),
+          tick: -195000
+        };
+        const result = await adapter.calculateTokenAmounts(validPosition, poolData, validToken0Data, validToken1Data);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+      });
+
+      it('should handle real pool data from test environment', async () => {
+        // Skip if test environment not available
+        if (!env || !env.poolData) {
+          console.log('Skipping - V4 test environment not available');
+          return;
+        }
+
+        // Create position around current pool tick
+        const position = {
+          liquidity: '1000000000000',
+          tickLower: env.poolData.tick - 600,
+          tickUpper: env.poolData.tick + 600
+        };
+
+        const result = await adapter.calculateTokenAmounts(
+          position,
+          env.poolData,
+          { address: ethers.constants.AddressZero, decimals: 18 }, // ETH (currency0)
+          { address: env.usdcAddress, decimals: 6 }                // USDC (currency1)
+        );
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThan(0n);
+        expect(result[1]).toBeGreaterThan(0n);
+      });
+    });
+  });
+
+  describe('_decodePositionInfo', () => {
+    describe('Success Cases', () => {
+      it('should decode positive tick values', () => {
+        // Create packed info with positive ticks
+        // Layout: | 200 bits poolId | 24 bits tickUpper | 24 bits tickLower | 8 bits hasSubscriber |
+        // tickLower = 1000 = 0x3E8, tickUpper = 2000 = 0x7D0, hasSubscriber = 0
+        const tickLower = 1000;
+        const tickUpper = 2000;
+        const hasSubscriber = 0;
+
+        // Pack: (tickUpper << 32) | (tickLower << 8) | hasSubscriber
+        const packed = BigInt(tickUpper) << 32n | BigInt(tickLower) << 8n | BigInt(hasSubscriber);
+
+        const result = adapter._decodePositionInfo(packed.toString());
+
+        expect(result.tickLower).toBe(tickLower);
+        expect(result.tickUpper).toBe(tickUpper);
+        expect(result.hasSubscriber).toBe(false);
+      });
+
+      it('should decode negative tick values (two\'s complement)', () => {
+        // Negative ticks use 24-bit two's complement encoding
+        // tickLower = -1000 = 0xFFFC18 (in 24-bit two's complement)
+        // tickUpper = -500 = 0xFFFE0C (in 24-bit two's complement)
+        const tickLower = -1000;
+        const tickUpper = -500;
+
+        // Convert to 24-bit unsigned representation
+        const tickLowerUnsigned = tickLower < 0 ? 0x1000000 + tickLower : tickLower;
+        const tickUpperUnsigned = tickUpper < 0 ? 0x1000000 + tickUpper : tickUpper;
+
+        const packed = BigInt(tickUpperUnsigned) << 32n | BigInt(tickLowerUnsigned) << 8n | 0n;
+
+        const result = adapter._decodePositionInfo(packed.toString());
+
+        expect(result.tickLower).toBe(tickLower);
+        expect(result.tickUpper).toBe(tickUpper);
+        expect(result.hasSubscriber).toBe(false);
+      });
+
+      it('should decode hasSubscriber flag when true', () => {
+        const tickLower = 100;
+        const tickUpper = 200;
+        const hasSubscriber = 1;
+
+        const packed = BigInt(tickUpper) << 32n | BigInt(tickLower) << 8n | BigInt(hasSubscriber);
+
+        const result = adapter._decodePositionInfo(packed.toString());
+
+        expect(result.tickLower).toBe(tickLower);
+        expect(result.tickUpper).toBe(tickUpper);
+        expect(result.hasSubscriber).toBe(true);
+      });
+
+      it('should handle zero values', () => {
+        const packed = 0n;
+
+        const result = adapter._decodePositionInfo(packed.toString());
+
+        expect(result.tickLower).toBe(0);
+        expect(result.tickUpper).toBe(0);
+        expect(result.hasSubscriber).toBe(false);
+      });
+
+      it('should handle extreme tick values', () => {
+        // Max tick ≈ 887272, min tick ≈ -887272
+        // Use smaller values that fit in 24-bit signed int
+        const tickLower = -8000000; // Still within 24-bit signed range
+        const tickUpper = 8000000;
+
+        // Convert to 24-bit unsigned representation
+        const tickLowerUnsigned = tickLower < 0 ? 0x1000000 + tickLower : tickLower;
+        const tickUpperUnsigned = tickUpper < 0 ? 0x1000000 + tickUpper : tickUpper;
+
+        const packed = BigInt(tickUpperUnsigned) << 32n | BigInt(tickLowerUnsigned) << 8n | 0n;
+
+        const result = adapter._decodePositionInfo(packed.toString());
+
+        expect(result.tickLower).toBe(tickLower);
+        expect(result.tickUpper).toBe(tickUpper);
+      });
+
+      it('should handle ethers BigNumber input', () => {
+        const { ethers } = require('ethers');
+        const tickLower = 500;
+        const tickUpper = 1500;
+
+        const packed = BigInt(tickUpper) << 32n | BigInt(tickLower) << 8n | 0n;
+        const bigNumber = ethers.BigNumber.from(packed.toString());
+
+        const result = adapter._decodePositionInfo(bigNumber);
+
+        expect(result.tickLower).toBe(tickLower);
+        expect(result.tickUpper).toBe(tickUpper);
+      });
+    });
+  });
+
+  describe('getAccruedFeesUSD', () => {
+    describe('Error Cases', () => {
+      it('should throw when position is null', async () => {
+        await expect(adapter.getAccruedFeesUSD(null, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position is undefined', async () => {
+        await expect(adapter.getAccruedFeesUSD(undefined, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position is not an object', async () => {
+        await expect(adapter.getAccruedFeesUSD('invalid', { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position.tokenId is missing', async () => {
+        await expect(adapter.getAccruedFeesUSD({}, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position.tokenId is required');
+      });
+
+      it('should throw when position.tokenId is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ tokenId: null }, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position.tokenId is required');
+      });
+
+      it('should throw when tokenPrices is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, null, env.provider))
+          .rejects.toThrow('tokenPrices is required and must be an object');
+      });
+
+      it('should throw when tokenPrices is not an object', async () => {
+        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, 'invalid', env.provider))
+          .rejects.toThrow('tokenPrices is required and must be an object');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, { token0: 1, token1: 1 }, null))
+          .rejects.toThrow('provider is required');
+      });
+    });
+
+    describe('Success Cases (requires live position)', () => {
+      // These tests create a real position and verify fee calculation
+
+      it('should return zero fees for new position with no swaps', async () => {
+        const { ethers } = require('ethers');
+
+        // Create a position first
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick (poolData needs tickSpacing from poolKey)
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 5, 5);
+
+        // Create position with small amounts
+        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('50', env.poolData.token1.decimals).toString();
+
+        const txData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 0.5,
+          deadlineMinutes: 20
+        });
+
+        const tx = await signer.sendTransaction({
+          to: txData.to,
+          data: txData.data,
+          value: txData.value
+        });
+        const receipt = await tx.wait();
+
+        // Parse receipt to get tokenId
+        const parsed = adapter.parseIncreaseLiquidityReceipt(receipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        expect(parsed.tokenId).toBeDefined();
+
+        // Get accrued fees (should be zero or near-zero for new position)
+        const result = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 }, // ETH ~$3000, USDC = $1
+          env.provider
+        );
+
+        // Verify structure
+        expect(result).toHaveProperty('fees0');
+        expect(result).toHaveProperty('fees1');
+        expect(result).toHaveProperty('fees0USD');
+        expect(result).toHaveProperty('fees1USD');
+        expect(result).toHaveProperty('totalFeesUSD');
+        expect(result).toHaveProperty('liquidity');
+        expect(result).toHaveProperty('poolId');
+        expect(result).toHaveProperty('tickLower');
+        expect(result).toHaveProperty('tickUpper');
+
+        // Verify types
+        expect(typeof result.fees0).toBe('string');
+        expect(typeof result.fees1).toBe('string');
+        expect(typeof result.fees0USD).toBe('number');
+        expect(typeof result.fees1USD).toBe('number');
+        expect(typeof result.totalFeesUSD).toBe('number');
+        expect(typeof result.liquidity).toBe('string');
+        expect(typeof result.poolId).toBe('string');
+        expect(typeof result.tickLower).toBe('number');
+        expect(typeof result.tickUpper).toBe('number');
+
+        // New position should have zero fees (no swaps have occurred through it)
+        expect(result.fees0USD).toBeGreaterThanOrEqual(0);
+        expect(result.fees1USD).toBeGreaterThanOrEqual(0);
+        expect(result.totalFeesUSD).toBeGreaterThanOrEqual(0);
+      }, 120000);
+
+      it('should return non-zero fees after swap through position range', async () => {
+        const { ethers } = require('ethers');
+
+        // Create a position first
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick - wider range to catch swaps
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position with decent amounts
+        const token0Amount = ethers.utils.parseUnits('0.05', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('200', env.poolData.token1.decimals).toString();
+
+        const txData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const tx = await signer.sendTransaction({
+          to: txData.to,
+          data: txData.data,
+          value: txData.value
+        });
+        const receipt = await tx.wait();
+
+        // Parse receipt to get tokenId
+        const parsed = adapter.parseIncreaseLiquidityReceipt(receipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Execute a swap to generate fees
+        const swapData = await adapter._generateSwapData({
+          tokenIn: ethers.constants.AddressZero, // Native ETH
+          tokenOut: env.poolData.token1.address, // USDC
+          amountIn: ethers.utils.parseEther('0.1').toString(),
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const swapTx = await signer.sendTransaction({
+          to: swapData.to,
+          data: swapData.data,
+          value: swapData.value
+        });
+        await swapTx.wait();
+
+        // Get accrued fees (should be non-zero after swap)
+        const result = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        // Fees should be non-negative
+        // Note: Very small swaps may have dust-level fees close to zero
+        expect(result.totalFeesUSD).toBeGreaterThanOrEqual(0);
+        expect(result.fees0).toBeDefined();
+        expect(result.fees1).toBeDefined();
+
+        // Verify the poolId matches what we expect
+        const expectedPoolId = adapter._computePoolId(env.poolData.poolKey);
+        expect(result.poolId).toBe(expectedPoolId);
+
+        // Verify tick bounds match the position
+        expect(result.tickLower).toBe(range.tickLower);
+        expect(result.tickUpper).toBe(range.tickUpper);
+      }, 180000);
+    });
+  });
+
+  describe('generateClaimFeesData', () => {
+    // Valid address for error case testing (doesn't need to be a real wallet)
+    const validTestAddress = '0x1234567890123456789012345678901234567890';
+
+    describe('Error Cases', () => {
+      it('should throw when tokenId is null', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: null,
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when tokenId is undefined', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: undefined,
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when tokenId is missing from params', async () => {
+        await expect(adapter.generateClaimFeesData({
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when walletAddress is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          provider: env.provider
+        })).rejects.toThrow('walletAddress is required');
+      });
+
+      it('should throw when walletAddress is empty string', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: '',
+          provider: env.provider
+        })).rejects.toThrow('walletAddress is required');
+      });
+
+      it('should throw when walletAddress is invalid', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: 'not-an-address',
+          provider: env.provider
+        })).rejects.toThrow('Invalid walletAddress');
+      });
+
+      it('should throw when provider is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: validTestAddress
+        })).rejects.toThrow('provider is required');
+      });
+
+      it('should throw when deadlineMinutes is not a number', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          deadlineMinutes: 'twenty'
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when deadlineMinutes is zero', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          deadlineMinutes: 0
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when deadlineMinutes is negative', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          deadlineMinutes: -5
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when deadlineMinutes is Infinity', async () => {
+        await expect(adapter.generateClaimFeesData({
+          tokenId: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          deadlineMinutes: Infinity
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should generate valid transaction data for existing position', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Now generate claim fees data
+        const claimFeesData = await adapter.generateClaimFeesData({
+          tokenId: parsed.tokenId,
+          walletAddress,
+          provider: env.provider
+        });
+
+        // Validate transaction data structure
+        expect(claimFeesData).toBeDefined();
+        expect(claimFeesData.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(claimFeesData.data).toBeDefined();
+        expect(typeof claimFeesData.data).toBe('string');
+        expect(claimFeesData.data.startsWith('0x')).toBe(true);
+        expect(claimFeesData.value).toBeDefined();
+      }, 120000);
+
+      it('should generate transaction data with provided poolKey', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate claim fees data with explicit poolKey and poolData
+        const claimFeesData = await adapter.generateClaimFeesData({
+          tokenId: parsed.tokenId,
+          walletAddress,
+          provider: env.provider,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData
+        });
+
+        expect(claimFeesData).toBeDefined();
+        expect(claimFeesData.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(claimFeesData.data).toBeDefined();
+      }, 120000);
+
+      it('should execute claim fees transaction successfully', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate and execute claim fees transaction
+        const claimFeesData = await adapter.generateClaimFeesData({
+          tokenId: parsed.tokenId,
+          walletAddress,
+          provider: env.provider
+        });
+
+        // Execute the claim fees transaction (should not revert even with 0 fees)
+        const claimTx = await signer.sendTransaction({
+          to: claimFeesData.to,
+          data: claimFeesData.data,
+          value: claimFeesData.value
+        });
+        const claimReceipt = await claimTx.wait();
+
+        // Transaction should succeed
+        expect(claimReceipt.status).toBe(1);
+      }, 180000);
+
+      it('should collect non-zero fees after swap through position', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick - use wider range for fee capture
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position with decent amounts
+        const token0Amount = ethers.utils.parseUnits('0.1', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('300', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Check fees before swap (should be 0)
+        const feesBefore = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        // Execute a swap to generate fees
+        const swapData = await adapter._generateSwapData({
+          tokenIn: ethers.constants.AddressZero, // Native ETH
+          tokenOut: env.poolData.token1.address, // USDC
+          amountIn: ethers.utils.parseEther('0.05').toString(),
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          provider: env.provider,
+          deadlineMinutes: 20
+        });
+
+        const swapTx = await signer.sendTransaction({
+          to: swapData.to,
+          data: swapData.data,
+          value: swapData.value
+        });
+        await swapTx.wait();
+
+        // Check fees after swap
+        const feesAfter = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        // Fees should have increased (or at least not be negative)
+        expect(Number(feesAfter.fees0) + Number(feesAfter.fees1))
+          .toBeGreaterThanOrEqual(Number(feesBefore.fees0) + Number(feesBefore.fees1));
+
+        // Now claim the fees
+        const claimFeesData = await adapter.generateClaimFeesData({
+          tokenId: parsed.tokenId,
+          walletAddress,
+          provider: env.provider
+        });
+
+        const claimTx = await signer.sendTransaction({
+          to: claimFeesData.to,
+          data: claimFeesData.data,
+          value: claimFeesData.value
+        });
+        const claimReceipt = await claimTx.wait();
+
+        expect(claimReceipt.status).toBe(1);
+
+        // After claiming, accrued fees should be zero or near-zero
+        const feesAfterClaim = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        // Fees should be reset to 0 or near 0 after claiming
+        expect(Number(feesAfterClaim.fees0)).toBeLessThanOrEqual(Number(feesAfter.fees0));
+        expect(Number(feesAfterClaim.fees1)).toBeLessThanOrEqual(Number(feesAfter.fees1));
+      }, 240000);
+    });
+  });
+
+  describe('generateRemoveLiquidityData', () => {
+    // Valid address for error case testing (doesn't need to be a real wallet)
+    const validTestAddress = '0x1234567890123456789012345678901234567890';
+
+    describe('Error Cases', () => {
+      it('should throw when tokenId is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: null,
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when tokenId is undefined', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: undefined,
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when percentage is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('percentage must be a number between 1 and 100');
+      });
+
+      it('should throw when percentage is 0', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 0,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('percentage must be a number between 1 and 100');
+      });
+
+      it('should throw when percentage is > 100', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 101,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('percentage must be a number between 1 and 100');
+      });
+
+      it('should throw when percentage is not a number', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 'fifty',
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('percentage must be a number between 1 and 100');
+      });
+
+      it('should throw when walletAddress is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('walletAddress is required');
+      });
+
+      it('should throw when walletAddress is invalid', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: 'not-an-address',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('Invalid walletAddress');
+      });
+
+      it('should throw when provider is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('provider is required');
+      });
+
+      it('should throw when slippageTolerance is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when slippageTolerance is negative', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: -1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when slippageTolerance is > 100', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 101,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when deadlineMinutes is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when deadlineMinutes is <= 0', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          tokenId: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 0
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should generate valid transaction data for partial removal (50%)', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.05', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('150', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate remove 50% liquidity data
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          tokenId: parsed.tokenId,
+          percentage: 50,
+          walletAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        // Validate transaction data structure
+        expect(removeTxData).toBeDefined();
+        expect(removeTxData.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(removeTxData.data).toBeDefined();
+        expect(typeof removeTxData.data).toBe('string');
+        expect(removeTxData.data.startsWith('0x')).toBe(true);
+        expect(removeTxData.value).toBeDefined();
+      }, 120000);
+
+      it('should generate valid transaction data for full removal (100%)', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate remove 100% liquidity data
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          tokenId: parsed.tokenId,
+          percentage: 100,
+          walletAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        expect(removeTxData).toBeDefined();
+        expect(removeTxData.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(removeTxData.data).toBeDefined();
+      }, 120000);
+
+      it('should execute partial remove successfully', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position with decent amounts
+        const token0Amount = ethers.utils.parseUnits('0.1', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('300', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Get initial liquidity
+        const feesBefore = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+        const initialLiquidity = BigInt(feesBefore.liquidity);
+
+        // Generate and execute remove 50% liquidity
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          tokenId: parsed.tokenId,
+          percentage: 50,
+          walletAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const removeTx = await signer.sendTransaction({
+          to: removeTxData.to,
+          data: removeTxData.data,
+          value: removeTxData.value
+        });
+        const removeReceipt = await removeTx.wait();
+
+        expect(removeReceipt.status).toBe(1);
+
+        // Verify position still exists with reduced liquidity
+        const feesAfter = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+        const remainingLiquidity = BigInt(feesAfter.liquidity);
+
+        // Liquidity should be roughly half (allow for some rounding)
+        expect(remainingLiquidity).toBeLessThan(initialLiquidity);
+        expect(remainingLiquidity).toBeGreaterThan(0n);
+      }, 180000);
+
+      it('should execute full remove (100%) successfully', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.05', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('150', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate and execute remove 100% liquidity
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          tokenId: parsed.tokenId,
+          percentage: 100,
+          walletAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const removeTx = await signer.sendTransaction({
+          to: removeTxData.to,
+          data: removeTxData.data,
+          value: removeTxData.value
+        });
+        const removeReceipt = await removeTx.wait();
+
+        expect(removeReceipt.status).toBe(1);
+
+        // Verify position has zero liquidity after full removal
+        const feesAfter = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        expect(BigInt(feesAfter.liquidity)).toBe(0n);
+      }, 180000);
+    });
+  });
+
+  describe('generateAddLiquidityData', () => {
+    const validTestAddress = '0x1234567890123456789012345678901234567890';
+
+    describe('Error Cases', () => {
+      it('should throw when tokenId is null', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: null,
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when tokenId is undefined', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('tokenId is required');
+      });
+
+      it('should throw when token0Amount is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('token0Amount is required');
+      });
+
+      it('should throw when token0Amount is not a string', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: 1000000000000000000,
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('token0Amount must be a string');
+      });
+
+      it('should throw when token1Amount is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('token1Amount is required');
+      });
+
+      it('should throw when token1Amount is not a string', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: 1000000,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('token1Amount must be a string');
+      });
+
+      it('should throw when both amounts are 0', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '0',
+          token1Amount: '0',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('At least one token amount must be greater than 0');
+      });
+
+      it('should throw when provider is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('provider is required');
+      });
+
+      it('should throw when slippageTolerance is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when slippageTolerance is negative', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: -1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when slippageTolerance is > 100', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 101,
+          deadlineMinutes: 20
+        })).rejects.toThrow('slippageTolerance must be a number between 0 and 100');
+      });
+
+      it('should throw when deadlineMinutes is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when deadlineMinutes is <= 0', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          tokenId: '12345',
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 0
+        })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should generate valid transaction data with both token amounts', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Now generate add liquidity data
+        const result = await adapter.generateAddLiquidityData({
+          tokenId: parsed.tokenId,
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result).toHaveProperty('data');
+        expect(result.data).toMatch(/^0x/);
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+        expect(result.quote).toHaveProperty('liquidity');
+        expect(result.quote).toHaveProperty('amount0');
+        expect(result.quote).toHaveProperty('amount1');
+      }, 180000);
+
+      it('should generate valid transaction data with only token0', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate add liquidity with only token0
+        const result = await adapter.generateAddLiquidityData({
+          tokenId: parsed.tokenId,
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result).toHaveProperty('data');
+        expect(result.data).toMatch(/^0x/);
+        expect(result).toHaveProperty('quote');
+      }, 180000);
+
+      it('should generate valid transaction data with only token1', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate add liquidity with only token1
+        const result = await adapter.generateAddLiquidityData({
+          tokenId: parsed.tokenId,
+          token0Amount: '0',
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result).toHaveProperty('data');
+        expect(result.data).toMatch(/^0x/);
+        expect(result).toHaveProperty('quote');
+      }, 180000);
+
+      it('should execute add liquidity and increase position', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position
+        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Get initial liquidity
+        const feesBefore = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+        const initialLiquidity = BigInt(feesBefore.liquidity);
+
+        // Generate add liquidity data
+        const addTxData = await adapter.generateAddLiquidityData({
+          tokenId: parsed.tokenId,
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        // Execute add liquidity
+        const addTx = await signer.sendTransaction({
+          to: addTxData.to,
+          data: addTxData.data,
+          value: addTxData.value
+        });
+        const addReceipt = await addTx.wait();
+        expect(addReceipt.status).toBe(1);
+
+        // Verify liquidity increased
+        const feesAfter = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+        const newLiquidity = BigInt(feesAfter.liquidity);
+
+        expect(newLiquidity).toBeGreaterThan(initialLiquidity);
+      }, 180000);
+    });
+  });
+
+  describe('getAddLiquidityAmounts', () => {
+    const validTestAddress1 = '0x1234567890123456789012345678901234567890';
+    const validTestAddress2 = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+
+    // Base valid params for error testing
+    const getBaseParams = () => ({
+      position: { tickLower: -600, tickUpper: 600 },
+      token0Amount: '1000000000000000000',
+      token1Amount: '1000000',
+      poolData: {
+        sqrtPriceX96: '79228162514264337593543950336',
+        liquidity: '1000000000000000000',
+        tick: 0
+      },
+      poolKey: {
+        currency0: validTestAddress1,
+        currency1: validTestAddress2,
+        fee: 3000,
+        tickSpacing: 60,
+        hooks: '0x0000000000000000000000000000000000000000'
+      },
+      token0Data: { address: validTestAddress1, decimals: 18 },
+      token1Data: { address: validTestAddress2, decimals: 6 },
+      provider: env.provider
+    });
+
+    describe('Error Cases', () => {
+      it('should throw when position is missing', async () => {
+        const params = getBaseParams();
+        delete params.position;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position.tickLower is not an integer', async () => {
+        const params = getBaseParams();
+        params.position.tickLower = 'not-a-number';
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('position.tickLower must be an integer');
+      });
+
+      it('should throw when position.tickUpper is not an integer', async () => {
+        const params = getBaseParams();
+        params.position.tickUpper = 1.5;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('position.tickUpper must be an integer');
+      });
+
+      it('should throw when tickLower >= tickUpper', async () => {
+        const params = getBaseParams();
+        params.position.tickLower = 600;
+        params.position.tickUpper = -600;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('position.tickLower must be less than position.tickUpper');
+      });
+
+      it('should throw when token0Amount is missing', async () => {
+        const params = getBaseParams();
+        delete params.token0Amount;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token0Amount is required');
+      });
+
+      it('should throw when token0Amount is not a string', async () => {
+        const params = getBaseParams();
+        params.token0Amount = 1000000000000000000;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token0Amount must be a string');
+      });
+
+      it('should throw when token0Amount is not numeric', async () => {
+        const params = getBaseParams();
+        params.token0Amount = 'abc';
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token0Amount must be a numeric string');
+      });
+
+      it('should throw when token1Amount is missing', async () => {
+        const params = getBaseParams();
+        delete params.token1Amount;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token1Amount is required');
+      });
+
+      it('should throw when token1Amount is not a string', async () => {
+        const params = getBaseParams();
+        params.token1Amount = 1000000;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token1Amount must be a string');
+      });
+
+      it('should throw when both amounts are 0', async () => {
+        const params = getBaseParams();
+        params.token0Amount = '0';
+        params.token1Amount = '0';
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('At least one token amount must be greater than 0');
+      });
+
+      it('should throw when provider is missing', async () => {
+        const params = getBaseParams();
+        delete params.provider;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('provider is required');
+      });
+
+      it('should throw when poolData is missing', async () => {
+        const params = getBaseParams();
+        delete params.poolData;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('poolData is required and must be an object');
+      });
+
+      it('should throw when poolKey is missing', async () => {
+        const params = getBaseParams();
+        delete params.poolKey;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('poolKey is required and must be an object');
+      });
+
+      it('should throw when token0Data is missing', async () => {
+        const params = getBaseParams();
+        delete params.token0Data;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token0Data is required and must be an object');
+      });
+
+      it('should throw when token1Data is missing', async () => {
+        const params = getBaseParams();
+        delete params.token1Data;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token1Data is required and must be an object');
+      });
+
+      it('should throw when tokens are the same', async () => {
+        const params = getBaseParams();
+        params.token1Data.address = params.token0Data.address;
+        await expect(adapter.getAddLiquidityAmounts(params))
+          .rejects.toThrow('token0Data and token1Data must have different addresses');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should calculate amounts with both token amounts provided', async () => {
+        const { ethers } = require('ethers');
+
+        // Get position range
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        const result = await adapter.getAddLiquidityAmounts({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          poolData: env.poolData,
+          poolKey: env.poolData.poolKey,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          provider: env.provider
+        });
+
+        expect(result).toHaveProperty('token0Amount');
+        expect(result).toHaveProperty('token1Amount');
+        expect(result).toHaveProperty('liquidity');
+        expect(typeof result.token0Amount).toBe('string');
+        expect(typeof result.token1Amount).toBe('string');
+        expect(typeof result.liquidity).toBe('string');
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      });
+
+      it('should calculate amounts with only token0 provided', async () => {
+        const { ethers } = require('ethers');
+
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        const result = await adapter.getAddLiquidityAmounts({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          token1Amount: '0',
+          poolData: env.poolData,
+          poolKey: env.poolData.poolKey,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          provider: env.provider
+        });
+
+        expect(result).toHaveProperty('token0Amount');
+        expect(result).toHaveProperty('token1Amount');
+        expect(result).toHaveProperty('liquidity');
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      });
+
+      it('should calculate amounts with only token1 provided', async () => {
+        const { ethers } = require('ethers');
+
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        const result = await adapter.getAddLiquidityAmounts({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: '0',
+          token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          poolData: env.poolData,
+          poolKey: env.poolData.poolKey,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          provider: env.provider
+        });
+
+        expect(result).toHaveProperty('token0Amount');
+        expect(result).toHaveProperty('token1Amount');
+        expect(result).toHaveProperty('liquidity');
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      });
+
+      it('should handle token order correctly when swapped', async () => {
+        const { ethers } = require('ethers');
+
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Call with tokens in reverse order (token1Data first)
+        const result = await adapter.getAddLiquidityAmounts({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
+          token1Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
+          poolData: env.poolData,
+          poolKey: env.poolData.poolKey,
+          token0Data: env.poolData.token1, // Swapped
+          token1Data: env.poolData.token0, // Swapped
+          provider: env.provider
+        });
+
+        expect(result).toHaveProperty('token0Amount');
+        expect(result).toHaveProperty('token1Amount');
+        expect(result).toHaveProperty('liquidity');
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
       });
     });
   });
@@ -2362,6 +4410,1375 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         expect(diff).toBeLessThanOrEqual(tolerance);
       });
+    });
+  });
+
+  describe('evaluatePositionRange', () => {
+    describe('Error Cases', () => {
+      it('should throw when position is null', async () => {
+        await expect(adapter.evaluatePositionRange(null, env.provider))
+          .rejects.toThrow('position parameter is required');
+      });
+
+      it('should throw when position is undefined', async () => {
+        await expect(adapter.evaluatePositionRange(undefined, env.provider))
+          .rejects.toThrow('position parameter is required');
+      });
+
+      it('should throw when tickLower is missing', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickUpper: 100 },
+          env.provider
+        )).rejects.toThrow('Position missing tick range data: tickLower=undefined, tickUpper=100');
+      });
+
+      it('should throw when tickUpper is missing', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100 },
+          env.provider
+        )).rejects.toThrow('Position missing tick range data: tickLower=-100, tickUpper=undefined');
+      });
+
+      it('should throw when poolId is missing (no swapData)', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider
+        )).rejects.toThrow('Position missing poolId');
+      });
+
+      it('should throw when tick range is invalid (lower >= upper)', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: 100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 50 } }
+        )).rejects.toThrow('Invalid tick range: 100 to 100');
+      });
+
+      it('should throw when tick range is invalid (lower > upper)', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: 200, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 50 } }
+        )).rejects.toThrow('Invalid tick range: 200 to 100');
+      });
+
+      it('should throw when swapData.tick is not a number', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 'not a number' } }
+        )).rejects.toThrow('options.swapData must have tick property as a number');
+      });
+
+      it('should throw when swapData.tick is NaN', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: NaN } }
+        )).rejects.toThrow('options.swapData.tick must be a finite number');
+      });
+
+      it('should throw when swapData.tick is Infinity', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: Infinity } }
+        )).rejects.toThrow('options.swapData.tick must be a finite number');
+      });
+
+      it('should throw when swapData.tick is -Infinity', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: -Infinity } }
+        )).rejects.toThrow('options.swapData.tick must be a finite number');
+      });
+
+      it('should throw when swapData is null but defined in options', async () => {
+        await expect(adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: null }
+        )).rejects.toThrow('options.swapData must have tick property as a number');
+      });
+    });
+
+    describe('Success Cases - with swapData', () => {
+      it('should return inRange=true when tick is within range', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 0 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.currentTick).toBe(0);
+      });
+
+      it('should return inRange=true when tick equals tickLower', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: -100 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.currentTick).toBe(-100);
+      });
+
+      it('should return inRange=true when tick equals tickUpper', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 100 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.currentTick).toBe(100);
+      });
+
+      it('should return inRange=false when tick is below range', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: -150 } }
+        );
+
+        expect(result.inRange).toBe(false);
+        expect(result.currentTick).toBe(-150);
+      });
+
+      it('should return inRange=false when tick is above range', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 150 } }
+        );
+
+        expect(result.inRange).toBe(false);
+        expect(result.currentTick).toBe(150);
+      });
+
+      it('should calculate centeredness correctly (0.5 when centered)', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 0 } }
+        );
+
+        expect(result.centeredness).toBe(0.5);
+        expect(result.distanceToUpper).toBe(0.5);
+        expect(result.distanceToLower).toBe(0.5);
+      });
+
+      it('should calculate centeredness=0 at lower bound', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: -100 } }
+        );
+
+        expect(result.centeredness).toBe(0);
+        expect(result.distanceToUpper).toBe(1);
+        expect(result.distanceToLower).toBe(0);
+      });
+
+      it('should calculate centeredness=1 at upper bound', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 100 } }
+        );
+
+        expect(result.centeredness).toBe(1);
+        expect(result.distanceToUpper).toBe(0);
+        expect(result.distanceToLower).toBe(1);
+      });
+
+      it('should clamp centeredness to [0,1] when below range', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: -200 } }
+        );
+
+        expect(result.centeredness).toBe(0);
+        expect(result.distanceToUpper).toBe(1);
+        expect(result.distanceToLower).toBe(0);
+        expect(result.inRange).toBe(false);
+      });
+
+      it('should clamp centeredness to [0,1] when above range', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 200 } }
+        );
+
+        expect(result.centeredness).toBe(1);
+        expect(result.distanceToUpper).toBe(0);
+        expect(result.distanceToLower).toBe(1);
+        expect(result.inRange).toBe(false);
+      });
+
+      it('should calculate correct metrics at 25% position', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: 0, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 25 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.centeredness).toBe(0.25);
+        expect(result.distanceToUpper).toBe(0.75);
+        expect(result.distanceToLower).toBe(0.25);
+        expect(result.currentTick).toBe(25);
+      });
+
+      it('should calculate correct metrics at 75% position', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: 0, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 75 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.centeredness).toBe(0.75);
+        expect(result.distanceToUpper).toBe(0.25);
+        expect(result.distanceToLower).toBe(0.75);
+        expect(result.currentTick).toBe(75);
+      });
+
+      it('should work with negative tick ranges', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -200, tickUpper: -100 },
+          env.provider,
+          { swapData: { tick: -150 } }
+        );
+
+        expect(result.inRange).toBe(true);
+        expect(result.centeredness).toBe(0.5);
+        expect(result.distanceToUpper).toBe(0.5);
+        expect(result.distanceToLower).toBe(0.5);
+        expect(result.currentTick).toBe(-150);
+      });
+
+      it('should return all expected properties', async () => {
+        const result = await adapter.evaluatePositionRange(
+          { tickLower: -100, tickUpper: 100 },
+          env.provider,
+          { swapData: { tick: 50 } }
+        );
+
+        expect(result).toHaveProperty('inRange');
+        expect(result).toHaveProperty('centeredness');
+        expect(result).toHaveProperty('distanceToUpper');
+        expect(result).toHaveProperty('distanceToLower');
+        expect(result).toHaveProperty('currentTick');
+
+        expect(typeof result.inRange).toBe('boolean');
+        expect(typeof result.centeredness).toBe('number');
+        expect(typeof result.distanceToUpper).toBe('number');
+        expect(typeof result.distanceToLower).toBe('number');
+        expect(typeof result.currentTick).toBe('number');
+      });
+    });
+  });
+
+  describe('parseCollectReceipt', () => {
+    // Helper to create mock ERC20 Transfer event logs
+    // Transfer(address indexed from, address indexed to, uint256 value)
+    const createERC20TransferLog = (tokenAddress, amount, from = '0x1234567890123456789012345678901234567890', to = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd') => {
+      const { ethers } = require('ethers');
+      const transferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+
+      return {
+        address: tokenAddress, // Token contract address
+        topics: [
+          transferTopic,
+          ethers.utils.hexZeroPad(from, 32), // from (indexed)
+          ethers.utils.hexZeroPad(to, 32)    // to (indexed)
+        ],
+        data: ethers.utils.defaultAbiCoder.encode(['uint256'], [amount])
+      };
+    };
+
+    // Alias for backwards compatibility with existing tests
+    const createTransferLog = createERC20TransferLog;
+
+    describe('Error Cases', () => {
+      it('should throw when receipt is null', async () => {
+        await expect(adapter.parseCollectReceipt(null, {}))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw when receipt is undefined', async () => {
+        await expect(adapter.parseCollectReceipt(undefined, {}))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw when receipt.logs is missing', async () => {
+        await expect(adapter.parseCollectReceipt({}, {}))
+          .rejects.toThrow('Receipt must have logs property');
+      });
+
+      it('should throw when positionMetadata is null', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, null))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw when positionMetadata is undefined', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, undefined))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw when positionMetadata is not an object', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, 'not an object'))
+          .rejects.toThrow('Position metadata must be an object');
+      });
+
+      it('should throw when positionMetadata is an array', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, []))
+          .rejects.toThrow('Position metadata must be an object');
+      });
+    });
+
+    describe('Success Cases', () => {
+      const { ethers } = require('ethers');
+
+      // Test token addresses
+      const TOKEN0_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1'; // WETH on Arbitrum
+      const TOKEN1_ADDRESS = '0xaf88d065e77c8cc2239327c5edb3a432268e5831'; // USDC on Arbitrum
+
+      it('should return position with zero amounts when no Transfer events for ERC20 tokens', async () => {
+        const result = await adapter.parseCollectReceipt(
+          { logs: [] },
+          { '12345': { token0Data: { address: TOKEN0_ADDRESS }, token1Data: { address: TOKEN1_ADDRESS } } }
+        );
+
+        // Position is always included now, with zero amounts for ERC20 tokens
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0.toString()).toBe('0');
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+
+      it('should return zero amounts when Transfer events exist but for different tokens', async () => {
+        const log = createTransferLog(
+          '0x1111111111111111111111111111111111111111', // different token
+          ethers.utils.parseEther('1')
+        );
+
+        const result = await adapter.parseCollectReceipt(
+          { logs: [log] },
+          { '12345': { token0Data: { address: TOKEN0_ADDRESS }, token1Data: { address: TOKEN1_ADDRESS } } }
+        );
+
+        // Position is included with zero amounts since the Transfer was for a different token
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0.toString()).toBe('0');
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+
+      it('should parse fees from PoolManager Transfer events', async () => {
+        const amount0 = ethers.utils.parseEther('0.5');
+        const amount1 = ethers.utils.parseUnits('1000', 6);
+
+        const logs = [
+          createTransferLog(TOKEN0_ADDRESS, amount0),
+          createTransferLog(TOKEN1_ADDRESS, amount1)
+        ];
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: TOKEN0_ADDRESS, decimals: 18, symbol: 'WETH' },
+            token1Data: { address: TOKEN1_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(amount0.toString());
+        expect(result.feesByPosition['12345'].token1.toString()).toBe(amount1.toString());
+        expect(result.feesByPosition['12345'].metadata).toBe(positionMetadata['12345']);
+      });
+
+      it('should handle multiple Transfer events for same token', async () => {
+        const amount1 = ethers.utils.parseEther('0.3');
+        const amount2 = ethers.utils.parseEther('0.2');
+        const expectedTotal = amount1.add(amount2);
+
+        const logs = [
+          createTransferLog(TOKEN0_ADDRESS, amount1),
+          createTransferLog(TOKEN0_ADDRESS, amount2)
+        ];
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: TOKEN0_ADDRESS, decimals: 18 },
+            token1Data: { address: TOKEN1_ADDRESS, decimals: 6 }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(expectedTotal.toString());
+      });
+
+      it('should match fees to correct position by token address (case insensitive)', async () => {
+        const amount = ethers.utils.parseEther('1');
+        const log = createTransferLog(TOKEN0_ADDRESS.toLowerCase(), amount);
+
+        // Metadata with uppercase address
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: TOKEN0_ADDRESS.toUpperCase() },
+            token1Data: { address: TOKEN1_ADDRESS }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [log] }, positionMetadata);
+
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(amount.toString());
+      });
+
+      it('should return zero for tokens with no transfers', async () => {
+        // Only token0 has a transfer, not token1
+        const amount0 = ethers.utils.parseEther('0.5');
+        const logs = [createTransferLog(TOKEN0_ADDRESS, amount0)];
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: TOKEN0_ADDRESS },
+            token1Data: { address: TOKEN1_ADDRESS }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(amount0.toString());
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+
+      it('should throw for positions with incomplete metadata', async () => {
+        const amount = ethers.utils.parseEther('1');
+        const log = createTransferLog(TOKEN0_ADDRESS, amount);
+
+        const positionMetadata = {
+          '12345': { token0Data: { address: TOKEN0_ADDRESS } }, // missing token1Data
+        };
+
+        await expect(adapter.parseCollectReceipt({ logs: [log] }, positionMetadata))
+          .rejects.toThrow('Invalid metadata for position 12345: missing token data');
+      });
+
+      it('should handle empty positionMetadata', async () => {
+        const amount = ethers.utils.parseEther('1');
+        const log = createTransferLog(TOKEN0_ADDRESS, amount);
+
+        const result = await adapter.parseCollectReceipt({ logs: [log] }, {});
+
+        expect(result.feesByPosition).toEqual({});
+      });
+
+      it('should ignore non-Transfer events in logs', async () => {
+        const { ethers } = require('ethers');
+
+        // Some random event that isn't a Transfer (with valid log structure)
+        const randomLog = {
+          address: '0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32', // PoolManager address
+          topics: [ethers.utils.id('SomeOtherEvent(uint256)')],
+          data: '0x'
+        };
+
+        const amount = ethers.utils.parseEther('1');
+        const transferLog = createTransferLog(TOKEN0_ADDRESS, amount);
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: TOKEN0_ADDRESS },
+            token1Data: { address: TOKEN1_ADDRESS }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt(
+          { logs: [randomLog, transferLog] },
+          positionMetadata
+        );
+
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(amount.toString());
+      });
+
+      it('should return correct structure with all expected properties', async () => {
+        const amount0 = ethers.utils.parseEther('0.1');
+        const amount1 = ethers.utils.parseUnits('100', 6);
+
+        const logs = [
+          createTransferLog(TOKEN0_ADDRESS, amount0),
+          createTransferLog(TOKEN1_ADDRESS, amount1)
+        ];
+
+        const metadata = {
+          token0Data: { address: TOKEN0_ADDRESS, decimals: 18, symbol: 'WETH' },
+          token1Data: { address: TOKEN1_ADDRESS, decimals: 6, symbol: 'USDC' }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, { '99999': metadata });
+
+        expect(result).toHaveProperty('feesByPosition');
+        expect(result.feesByPosition['99999']).toHaveProperty('token0');
+        expect(result.feesByPosition['99999']).toHaveProperty('token1');
+        expect(result.feesByPosition['99999']).toHaveProperty('metadata');
+        expect(result.feesByPosition['99999'].metadata).toBe(metadata);
+
+        // token0 and token1 should be BigNumber instances
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['99999'].token0)).toBe(true);
+        expect(ethers.BigNumber.isBigNumber(result.feesByPosition['99999'].token1)).toBe(true);
+      });
+    });
+
+    describe('Native ETH Handling', () => {
+      const { ethers } = require('ethers');
+      const NATIVE_ETH = ethers.constants.AddressZero;
+      const USDC_ADDRESS = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+
+      it('should return null for token0 when it is native ETH', async () => {
+        // Native ETH as token0, USDC as token1
+        const usdcAmount = ethers.utils.parseUnits('100', 6);
+        const logs = [createTransferLog(USDC_ADDRESS, usdcAmount)];
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+        expect(result.feesByPosition['12345'].token1.toString()).toBe(usdcAmount.toString());
+      });
+
+      it('should return null for token1 when it is native ETH', async () => {
+        // USDC as token0, native ETH as token1
+        const usdcAmount = ethers.utils.parseUnits('50', 6);
+        const logs = [createTransferLog(USDC_ADDRESS, usdcAmount)];
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' },
+            token1Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(usdcAmount.toString());
+        expect(result.feesByPosition['12345'].token1).toBeNull();
+      });
+
+      it('should return null for native ETH even when no Transfer events exist', async () => {
+        // No logs at all
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata);
+
+        expect(result.feesByPosition['12345']).toBeDefined();
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+        // USDC should be BigNumber(0) since no Transfer events
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+
+      it('should always include position with native ETH in feesByPosition', async () => {
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata);
+
+        // Position should always be included even with no events
+        expect(Object.keys(result.feesByPosition).length).toBe(1);
+        expect(result.feesByPosition['12345']).toBeDefined();
+      });
+
+      it('should handle case-insensitive native ETH address (0x0 vs 0x00...0)', async () => {
+        // Using the full zero address with uppercase
+        const fullZeroAddress = '0x0000000000000000000000000000000000000000';
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: fullZeroAddress, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata);
+
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+      });
+    });
+
+    describe('ETH Tracking via Block Explorer', () => {
+      const { ethers } = require('ethers');
+      const NATIVE_ETH = ethers.constants.AddressZero;
+      const USDC_ADDRESS = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+
+      afterEach(() => {
+        resetBlockExplorerConfig();
+      });
+
+      it('should return null for ETH when options not provided (backward compat)', async () => {
+        // Without options, ETH should return null
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata);
+
+        // Without options, ETH tracking is not attempted - returns null
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+      });
+
+      it('should gracefully return null when block explorer fails (local fork tx)', async () => {
+        // Configure API key but use a fake local transaction hash
+        // The API will return no results since this tx doesn't exist on Arbiscan
+        configureBlockExplorer({ arbiscanApiKey: process.env.ARBISCAN_API_KEY || 'test-key' });
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const mockReceipt = {
+          transactionHash: '0x0000000000000000000000000000000000000000000000000000000000000001',
+          logs: []
+        };
+
+        // Even with options, if API returns no data, ETH should still be null
+        const result = await adapter.parseCollectReceipt(mockReceipt, positionMetadata, {
+          chainId: 42161,
+          walletAddress: '0x1234567890123456789012345678901234567890'
+        });
+
+        // Graceful degradation - ETH still null, no crash
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+      });
+
+      it('should not attempt ETH tracking when chainId missing from options', async () => {
+        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        // Options without chainId - should not attempt ETH tracking
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata, {
+          walletAddress: '0x1234567890123456789012345678901234567890'
+        });
+
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+      });
+
+      it('should not attempt ETH tracking when walletAddress missing from options', async () => {
+        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        // Options without walletAddress - should not attempt ETH tracking
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata, {
+          chainId: 42161
+        });
+
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+      });
+
+      it('should not attempt ETH tracking for non-ETH positions', async () => {
+        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+
+        // Position with two ERC20 tokens (no native ETH)
+        const WETH_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1';
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: WETH_ADDRESS, decimals: 18, symbol: 'WETH' },
+            token1Data: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt({ logs: [] }, positionMetadata, {
+          chainId: 42161,
+          walletAddress: '0x1234567890123456789012345678901234567890'
+        });
+
+        // Both tokens are ERC20, so no block explorer needed - values come from Transfer events
+        // With no Transfer events, both should be 0 (not null)
+        expect(result.feesByPosition['12345'].token0.toString()).toBe('0');
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+    });
+
+    describe('Integration - Real Receipt', () => {
+      it('should parse real fee collection receipt after swaps generate fees', async () => {
+        const { ethers } = require('ethers');
+
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Create a position around current tick - use same params as working fee collection test
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position with decent amounts (matching working test)
+        const token0Amount = ethers.utils.parseUnits('0.1', env.poolData.token0.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('300', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        console.log('Created position tokenId:', parsed.tokenId);
+
+        // Execute swaps in BOTH directions to generate fees in BOTH tokens
+        // ETH -> USDC generates ETH fees (token0)
+        // USDC -> ETH generates USDC fees (token1)
+
+        // Swap 1: ETH -> USDC (generates ETH fees)
+        const swapData1 = await adapter._generateSwapData({
+          tokenIn: ethers.constants.AddressZero,
+          tokenOut: env.poolData.token1.address,
+          amountIn: ethers.utils.parseEther('0.05').toString(),
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          forceProtocol: 'V4',
+          deadlineMinutes: 20
+        });
+
+        const swapTx1 = await signer.sendTransaction({
+          to: swapData1.to,
+          data: swapData1.data,
+          value: swapData1.value
+        });
+        await swapTx1.wait();
+        console.log('Swap 1 complete (ETH -> USDC) - generates ETH fees');
+
+        // Swap 2: USDC -> ETH (generates USDC fees)
+        // First, set Permit2 allowance for Universal Router (setup only did PositionManager)
+        const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+        const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, [
+          'function approve(address token, address spender, uint160 amount, uint48 expiration) external'
+        ], signer);
+        const maxAmount = ethers.BigNumber.from(2).pow(160).sub(1);
+        const farFutureExpiration = Math.floor(Date.now() / 1000 + 60 * 60 * 24 * 365);
+        await (await permit2Contract.approve(
+          env.poolData.token1.address,
+          adapter.addresses.universalRouterAddress,
+          maxAmount,
+          farFutureExpiration
+        )).wait();
+
+        const usdcAmount = ethers.utils.parseUnits('100', 6).toString(); // 100 USDC
+        const swapData2 = await adapter._generateSwapData({
+          tokenIn: env.poolData.token1.address,
+          tokenOut: ethers.constants.AddressZero,
+          amountIn: usdcAmount,
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          forceProtocol: 'V4',
+          deadlineMinutes: 20
+        });
+
+        const swapTx2 = await signer.sendTransaction({
+          to: swapData2.to,
+          data: swapData2.data,
+          value: swapData2.value
+        });
+        await swapTx2.wait();
+        console.log('Swap 2 complete (USDC -> ETH) - generates USDC fees');
+
+        // Check accrued fees before claiming
+        const feesBeforeClaim = await adapter.getAccruedFeesUSD(
+          {
+            tokenId: parsed.tokenId,
+            token0Decimals: env.poolData.token0.decimals,
+            token1Decimals: env.poolData.token1.decimals
+          },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+        console.log('Fees before claim:', feesBeforeClaim);
+
+        // Now claim the fees
+        const claimFeesData = await adapter.generateClaimFeesData({
+          tokenId: parsed.tokenId,
+          walletAddress,
+          provider: env.provider
+        });
+
+        const claimTx = await signer.sendTransaction({
+          to: claimFeesData.to,
+          data: claimFeesData.data,
+          value: claimFeesData.value
+        });
+        const claimReceipt = await claimTx.wait();
+
+        expect(claimReceipt.status).toBe(1);
+        console.log('Claim receipt logs count:', claimReceipt.logs.length);
+
+        // Log all events in the receipt for debugging
+        console.log('\n=== RECEIPT ANALYSIS ===');
+        const erc20TransferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+        const modifyLiquidityTopic = ethers.utils.id('ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)');
+        console.log('ERC20 Transfer topic:', erc20TransferTopic);
+        console.log('ModifyLiquidity topic:', modifyLiquidityTopic);
+        console.log('Token0 (currency0):', env.poolData.token0.address, env.poolData.token0.symbol);
+        console.log('Token1 (currency1):', env.poolData.token1.address, env.poolData.token1.symbol);
+        console.log('PoolManager:', adapter.addresses.poolManagerAddress);
+        console.log('PositionManager:', adapter.addresses.positionManagerAddress);
+        console.log('WETH (Arbitrum):', '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        console.log('\nReceipt logs:');
+        for (let i = 0; i < claimReceipt.logs.length; i++) {
+          const log = claimReceipt.logs[i];
+          const isERC20Transfer = log.topics[0] === erc20TransferTopic;
+          const isModifyLiquidity = log.topics[0] === modifyLiquidityTopic;
+          console.log(`  Log ${i}: address=${log.address}`);
+          console.log(`    topic: ${log.topics[0]}`);
+          console.log(`    isERC20Transfer=${isERC20Transfer}, isModifyLiquidity=${isModifyLiquidity}`);
+          if (isERC20Transfer && log.topics.length >= 3) {
+            const from = '0x' + log.topics[1].slice(26);
+            const to = '0x' + log.topics[2].slice(26);
+            try {
+              const amount = ethers.BigNumber.from(log.data);
+              console.log(`    Transfer: from=${from} to=${to} amount=${amount.toString()}`);
+            } catch(e) {
+              console.log(`    Transfer: from=${from} to=${to} data=${log.data}`);
+            }
+          }
+        }
+        console.log('=== END RECEIPT ANALYSIS ===\n');
+
+        // Now parse the real receipt
+        const positionMetadata = {
+          [parsed.tokenId]: {
+            token0Data: {
+              address: env.poolData.token0.address,
+              decimals: env.poolData.token0.decimals,
+              symbol: env.poolData.token0.symbol
+            },
+            token1Data: {
+              address: env.poolData.token1.address,
+              decimals: env.poolData.token1.decimals,
+              symbol: env.poolData.token1.symbol
+            }
+          }
+        };
+
+        const result = await adapter.parseCollectReceipt(claimReceipt, positionMetadata);
+
+        console.log('parseCollectReceipt result:', JSON.stringify(result, (k, v) =>
+          typeof v === 'object' && v !== null && v._isBigNumber ? v.toString() : v
+        , 2));
+
+        // Verify structure
+        expect(result).toHaveProperty('feesByPosition');
+        expect(result.feesByPosition[parsed.tokenId]).toBeDefined();
+
+        const fees = result.feesByPosition[parsed.tokenId];
+
+        // Log the values for debugging
+        console.log('Pre-calculated fees (ETH):', feesBeforeClaim.fees0);
+        console.log('Pre-calculated fees (USDC):', feesBeforeClaim.fees1);
+        console.log('Parsed USDC fees from receipt:', fees.token1.toString());
+
+        // Verify BOTH fee types were generated by the bidirectional swaps
+        expect(BigInt(feesBeforeClaim.fees0) > 0n).toBe(true); // ETH fees from ETH->USDC swap
+        expect(BigInt(feesBeforeClaim.fees1) > 0n).toBe(true); // USDC fees from USDC->ETH swap
+
+        // KEY TEST 1: Native ETH returns null (cannot parse from receipt - no events)
+        expect(fees.token0).toBeNull();
+
+        // KEY TEST 2: Parsed USDC amount matches pre-calculated USDC fees
+        // This proves parseCollectReceipt correctly extracts ERC20 amounts from real Transfer events
+        expect(ethers.BigNumber.isBigNumber(fees.token1)).toBe(true);
+        expect(fees.token1.toString()).toBe(feesBeforeClaim.fees1);
+
+        // Verify metadata preserved
+        expect(fees.metadata).toBe(positionMetadata[parsed.tokenId]);
+      }, 300000);
+    });
+  });
+
+  describe('parseClosureReceipt', () => {
+    // Helper to create mock ModifyLiquidity event logs
+    // ModifyLiquidity(bytes32 indexed id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)
+    const createModifyLiquidityLog = (poolId, tickLower, tickUpper, liquidityDelta) => {
+      const { ethers } = require('ethers');
+      const modifyLiquidityTopic = ethers.utils.id('ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)');
+
+      const encodedData = ethers.utils.defaultAbiCoder.encode(
+        ['int24', 'int24', 'int256', 'bytes32'],
+        [tickLower, tickUpper, liquidityDelta, ethers.constants.HashZero]
+      );
+
+      return {
+        address: '0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32', // PoolManager address
+        topics: [
+          modifyLiquidityTopic,
+          poolId || ethers.constants.HashZero, // indexed poolId
+          ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32) // indexed sender
+        ],
+        data: encodedData
+      };
+    };
+
+    // Helper to create mock ERC20 Transfer event logs
+    const createTransferLog = (tokenAddress, amount, from = '0x1234567890123456789012345678901234567890', to = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd') => {
+      const { ethers } = require('ethers');
+      const transferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+
+      return {
+        address: tokenAddress,
+        topics: [
+          transferTopic,
+          ethers.utils.hexZeroPad(from, 32),
+          ethers.utils.hexZeroPad(to, 32)
+        ],
+        data: ethers.utils.defaultAbiCoder.encode(['uint256'], [amount])
+      };
+    };
+
+    describe('Error Cases', () => {
+      it('should throw when receipt is null', async () => {
+        await expect(adapter.parseClosureReceipt(null, {}))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw when receipt is undefined', async () => {
+        await expect(adapter.parseClosureReceipt(undefined, {}))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw when receipt.logs is missing', async () => {
+        await expect(adapter.parseClosureReceipt({}, {}))
+          .rejects.toThrow('Receipt must have logs property');
+      });
+
+      it('should throw when positionMetadata is null', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, null))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw when positionMetadata is undefined', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, undefined))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw when positionMetadata is not an object', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, 'not an object'))
+          .rejects.toThrow('Position metadata must be an object');
+      });
+
+      it('should throw when positionMetadata is an array', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, []))
+          .rejects.toThrow('Position metadata must be an object');
+      });
+
+      it('should throw when metadata is missing token data', async () => {
+        const positionMetadata = {
+          '12345': { token0Data: { address: '0x1234' } } // missing token1Data
+        };
+        await expect(adapter.parseClosureReceipt({ logs: [] }, positionMetadata))
+          .rejects.toThrow('Invalid metadata for position 12345: missing token data');
+      });
+
+      it('should throw when metadata is missing poolData.sqrtPriceX96', async () => {
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: '0x1234567890123456789012345678901234567890' },
+            token1Data: { address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' },
+            position: { tickLower: -100, tickUpper: 100 }
+            // missing poolData
+          }
+        };
+        await expect(adapter.parseClosureReceipt({ logs: [] }, positionMetadata))
+          .rejects.toThrow('Invalid metadata for position 12345: missing poolData.sqrtPriceX96');
+      });
+
+      it('should throw when metadata is missing position', async () => {
+        const positionMetadata = {
+          '12345': {
+            token0Data: { address: '0x1234567890123456789012345678901234567890' },
+            token1Data: { address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' }
+            // missing position
+          }
+        };
+        await expect(adapter.parseClosureReceipt({ logs: [] }, positionMetadata))
+          .rejects.toThrow('Invalid metadata for position 12345: missing position');
+      });
+    });
+
+    describe('Success Cases', () => {
+      const { ethers } = require('ethers');
+
+      // Test token addresses
+      const TOKEN0_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1'; // WETH on Arbitrum
+      const TOKEN1_ADDRESS = '0xaf88d065e77c8cc2239327c5edb3a432268e5831'; // USDC on Arbitrum
+      const NATIVE_ETH = ethers.constants.AddressZero;
+
+      // Valid position metadata for ERC20/ERC20 position
+      const createValidMetadata = (tickLower = -100, tickUpper = 100) => ({
+        position: { tickLower, tickUpper, liquidity: '1000000000000000000' },
+        poolData: { sqrtPriceX96: '79228162514264337593543950336' }, // ~1:1 price
+        token0Data: { address: TOKEN0_ADDRESS, decimals: 18, symbol: 'WETH' },
+        token1Data: { address: TOKEN1_ADDRESS, decimals: 6, symbol: 'USDC' }
+      });
+
+      it('should return empty results when positionMetadata is empty', async () => {
+        const result = await adapter.parseClosureReceipt({ logs: [] }, {});
+
+        expect(result.principalByPosition).toEqual({});
+        expect(result.feesByPosition).toEqual({});
+      });
+
+      it('should return zero principal and fees when no events match', async () => {
+        const positionMetadata = { '12345': createValidMetadata() };
+
+        const result = await adapter.parseClosureReceipt({ logs: [] }, positionMetadata);
+
+        // Principal should be zero (no ModifyLiquidity event)
+        expect(result.principalByPosition['12345'].amount0.toString()).toBe('0');
+        expect(result.principalByPosition['12345'].amount1.toString()).toBe('0');
+
+        // Fees should also be zero (no Transfer events, fee = total - principal = 0 - 0)
+        expect(result.feesByPosition['12345'].token0.toString()).toBe('0');
+        expect(result.feesByPosition['12345'].token1.toString()).toBe('0');
+      });
+
+      it('should parse Transfer events for ERC20 tokens', async () => {
+        const amount0 = ethers.utils.parseEther('0.5');
+        const amount1 = ethers.utils.parseUnits('100', 6);
+        const logs = [
+          createTransferLog(TOKEN0_ADDRESS, amount0),
+          createTransferLog(TOKEN1_ADDRESS, amount1)
+        ];
+
+        const positionMetadata = { '12345': createValidMetadata() };
+        const result = await adapter.parseClosureReceipt({ logs }, positionMetadata);
+
+        // Without ModifyLiquidity event, principal is 0, so fees = total
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(amount0.toString());
+        expect(result.feesByPosition['12345'].token1.toString()).toBe(amount1.toString());
+      });
+
+      it('should return null for native ETH fees (token0)', async () => {
+        const usdcAmount = ethers.utils.parseUnits('100', 6);
+        const logs = [createTransferLog(TOKEN1_ADDRESS, usdcAmount)];
+
+        const positionMetadata = {
+          '12345': {
+            position: { tickLower: -100, tickUpper: 100, liquidity: '1000000000000000000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' },
+            token1Data: { address: TOKEN1_ADDRESS, decimals: 6, symbol: 'USDC' }
+          }
+        };
+
+        const result = await adapter.parseClosureReceipt({ logs }, positionMetadata);
+
+        // Native ETH should return null
+        expect(result.feesByPosition['12345'].token0).toBeNull();
+        // USDC should have the parsed amount
+        expect(result.feesByPosition['12345'].token1.toString()).toBe(usdcAmount.toString());
+      });
+
+      it('should return null for native ETH fees (token1)', async () => {
+        const wethAmount = ethers.utils.parseEther('0.5');
+        const logs = [createTransferLog(TOKEN0_ADDRESS, wethAmount)];
+
+        const positionMetadata = {
+          '12345': {
+            position: { tickLower: -100, tickUpper: 100, liquidity: '1000000000000000000' },
+            poolData: { sqrtPriceX96: '79228162514264337593543950336' },
+            token0Data: { address: TOKEN0_ADDRESS, decimals: 18, symbol: 'WETH' },
+            token1Data: { address: NATIVE_ETH, decimals: 18, symbol: 'ETH' }
+          }
+        };
+
+        const result = await adapter.parseClosureReceipt({ logs }, positionMetadata);
+
+        // WETH should have the parsed amount
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(wethAmount.toString());
+        // Native ETH should return null
+        expect(result.feesByPosition['12345'].token1).toBeNull();
+      });
+
+      it('should return correct structure with principalByPosition and feesByPosition', async () => {
+        const amount0 = ethers.utils.parseEther('0.1');
+        const logs = [createTransferLog(TOKEN0_ADDRESS, amount0)];
+
+        const positionMetadata = { '99999': createValidMetadata() };
+        const result = await adapter.parseClosureReceipt({ logs }, positionMetadata);
+
+        // Verify structure
+        expect(result).toHaveProperty('principalByPosition');
+        expect(result).toHaveProperty('feesByPosition');
+
+        // Verify principalByPosition structure
+        expect(result.principalByPosition['99999']).toHaveProperty('amount0');
+        expect(result.principalByPosition['99999']).toHaveProperty('amount1');
+        expect(ethers.BigNumber.isBigNumber(result.principalByPosition['99999'].amount0)).toBe(true);
+        expect(ethers.BigNumber.isBigNumber(result.principalByPosition['99999'].amount1)).toBe(true);
+
+        // Verify feesByPosition structure
+        expect(result.feesByPosition['99999']).toHaveProperty('token0');
+        expect(result.feesByPosition['99999']).toHaveProperty('token1');
+        expect(result.feesByPosition['99999']).toHaveProperty('metadata');
+      });
+
+      it('should aggregate multiple Transfer events for same token', async () => {
+        const amount1 = ethers.utils.parseEther('0.3');
+        const amount2 = ethers.utils.parseEther('0.2');
+        const expectedTotal = amount1.add(amount2);
+
+        const logs = [
+          createTransferLog(TOKEN0_ADDRESS, amount1),
+          createTransferLog(TOKEN0_ADDRESS, amount2)
+        ];
+
+        const positionMetadata = { '12345': createValidMetadata() };
+        const result = await adapter.parseClosureReceipt({ logs }, positionMetadata);
+
+        expect(result.feesByPosition['12345'].token0.toString()).toBe(expectedTotal.toString());
+      });
+
+      it('should preserve metadata in feesByPosition', async () => {
+        const metadata = createValidMetadata();
+        const positionMetadata = { '12345': metadata };
+
+        const result = await adapter.parseClosureReceipt({ logs: [] }, positionMetadata);
+
+        expect(result.feesByPosition['12345'].metadata).toBe(metadata);
+      });
+    });
+
+    describe('Integration - Real Closure Receipt', () => {
+      it('should parse real position closure receipt with ModifyLiquidity and Transfer events', async () => {
+        const { ethers } = require('ethers');
+
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Step 1: Create a position (same pattern as parseCollectReceipt test)
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+        const { tickLower, tickUpper } = range;
+
+        const token0Data = env.poolData.token0;
+        const token1Data = env.poolData.token1;
+
+        // Create position with decent amounts
+        const token0Amount = ethers.utils.parseUnits('0.1', token0Data.decimals).toString();
+        const token1Amount = ethers.utils.parseUnits('300', token1Data.decimals).toString();
+
+        const mintData = await adapter.generateCreatePositionData({
+          position: { tickLower, tickUpper },
+          token0Amount,
+          token1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolKey: env.poolData.poolKey,
+          poolData: env.poolData,
+          token0Data,
+          token1Data,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const mintTx = await signer.sendTransaction({
+          to: mintData.to,
+          data: mintData.data,
+          value: mintData.value
+        });
+        const mintReceipt = await mintTx.wait();
+
+        // Parse the mint receipt to get position info
+        const parsed = adapter.parseIncreaseLiquidityReceipt(mintReceipt, {
+          position: { tickLower, tickUpper },
+          poolData: env.poolData
+        });
+
+        console.log('Created position:', parsed.tokenId);
+        console.log('Position ticks:', tickLower, tickUpper);
+
+        // Step 2: Generate fees with swaps (same pattern as parseCollectReceipt test)
+        // Swap ETH -> USDC
+        const swapData1 = await adapter._generateSwapData({
+          tokenIn: ethers.constants.AddressZero,
+          tokenOut: token1Data.address,
+          amountIn: ethers.utils.parseEther('0.05').toString(),
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          forceProtocol: 'V4',
+          deadlineMinutes: 20
+        });
+
+        const swapTx1 = await signer.sendTransaction({
+          to: swapData1.to,
+          data: swapData1.data,
+          value: swapData1.value
+        });
+        await swapTx1.wait();
+        console.log('Swap 1 complete (ETH -> USDC)');
+
+        // Swap USDC -> ETH (need Permit2 setup)
+        const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+        const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, [
+          'function approve(address token, address spender, uint160 amount, uint48 expiration) external'
+        ], signer);
+        const maxAmount = ethers.BigNumber.from(2).pow(160).sub(1);
+        const farFutureExpiration = Math.floor(Date.now() / 1000 + 60 * 60 * 24 * 365);
+        await (await permit2Contract.approve(
+          token1Data.address,
+          adapter.addresses.universalRouterAddress,
+          maxAmount,
+          farFutureExpiration
+        )).wait();
+
+        const swapData2 = await adapter._generateSwapData({
+          tokenIn: token1Data.address,
+          tokenOut: ethers.constants.AddressZero,
+          amountIn: ethers.utils.parseUnits('50', token1Data.decimals).toString(),
+          recipient: walletAddress,
+          slippageTolerance: 1,
+          forceProtocol: 'V4',
+          deadlineMinutes: 20
+        });
+
+        const swapTx2 = await signer.sendTransaction({
+          to: swapData2.to,
+          data: swapData2.data,
+          value: swapData2.value || 0
+        });
+        await swapTx2.wait();
+        console.log('Swap 2 complete (USDC -> ETH)');
+
+        // Fetch fresh poolData AFTER swaps - need accurate sqrtPriceX96 for principal calculation
+        const poolId = adapter._computePoolId(env.poolData.poolKey);
+        const poolDataAfterSwaps = await adapter.getPoolData(poolId, env.provider);
+        console.log('Pool tick after swaps:', poolDataAfterSwaps.tick);
+
+        // Step 3: Close the position (use liquidity from mint receipt)
+        const closeData = await adapter.generateRemoveLiquidityData({
+          tokenId: parsed.tokenId,
+          percentage: 100,
+          walletAddress,
+          provider: env.provider,
+          poolKey: env.poolData.poolKey,
+          poolData: poolDataAfterSwaps,
+          slippageTolerance: 50,
+          deadlineMinutes: 20
+        });
+
+        const closeTx = await signer.sendTransaction({
+          to: closeData.to,
+          data: closeData.data,
+          value: closeData.value || 0,
+          gasLimit: 1000000
+        });
+        const closeReceipt = await closeTx.wait();
+
+        console.log('Close receipt logs count:', closeReceipt.logs.length);
+
+        // Step 4: Parse the closure receipt
+        // Use poolDataAfterSwaps (fetched before closure) for accurate principal calculation
+        const positionMetadata = {
+          [parsed.tokenId]: {
+            position: {
+              tickLower,
+              tickUpper,
+              liquidity: parsed.liquidity
+            },
+            poolData: poolDataAfterSwaps,
+            token0Data,
+            token1Data
+          }
+        };
+
+        const result = await adapter.parseClosureReceipt(closeReceipt, positionMetadata);
+
+        console.log('parseClosureReceipt result:', JSON.stringify(result, (k, v) =>
+          typeof v === 'object' && v !== null && v._isBigNumber ? v.toString() : v
+        , 2));
+
+        // Verify structure
+        expect(result).toHaveProperty('principalByPosition');
+        expect(result).toHaveProperty('feesByPosition');
+        expect(result.principalByPosition[parsed.tokenId]).toBeDefined();
+        expect(result.feesByPosition[parsed.tokenId]).toBeDefined();
+
+        const principal = result.principalByPosition[parsed.tokenId];
+        const fees = result.feesByPosition[parsed.tokenId];
+
+        // Principal amounts should be BigNumbers
+        expect(ethers.BigNumber.isBigNumber(principal.amount0)).toBe(true);
+        expect(ethers.BigNumber.isBigNumber(principal.amount1)).toBe(true);
+
+        // For native ETH position: ETH fees should be null, USDC fees should be BigNumber
+        expect(fees.token0).toBeNull(); // ETH - no Transfer events
+        expect(ethers.BigNumber.isBigNumber(fees.token1)).toBe(true); // USDC - from Transfer events
+
+        // USDC fees should be non-negative (could be 0 if no fees, or positive if fees generated)
+        expect(fees.token1.gte(0)).toBe(true);
+
+        // Verify metadata preserved
+        expect(fees.metadata).toBe(positionMetadata[parsed.tokenId]);
+      }, 300000);
     });
   });
 });

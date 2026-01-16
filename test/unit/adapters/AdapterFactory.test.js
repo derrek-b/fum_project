@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import AdapterFactory from '../../../src/adapters/AdapterFactory.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
+import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 
 // Create a mock provider for testing
 const mockProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
@@ -43,31 +44,48 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result).toHaveProperty('failures');
         expect(Array.isArray(result.adapters)).toBe(true);
         expect(Array.isArray(result.failures)).toBe(true);
-        expect(result.adapters.length).toBe(1);
+        expect(result.adapters.length).toBe(2);
         expect(result.failures.length).toBe(0);
-        expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
-        expect(result.adapters[0].chainId).toBe(42161);
-        expect(result.adapters[0].platformId).toBe('uniswapV3');
+
+        // Check for both V3 and V4 adapters
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeDefined();
+        expect(v4Adapter).toBeDefined();
+        expect(v3Adapter.chainId).toBe(42161);
+        expect(v4Adapter.chainId).toBe(42161);
       });
 
       it('should return adapters for Ethereum mainnet (1)', () => {
         const result = AdapterFactory.getAdaptersForChain(1, mockProvider);
 
         expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(1);
+        expect(result.adapters.length).toBe(2);
         expect(result.failures.length).toBe(0);
-        expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
-        expect(result.adapters[0].chainId).toBe(1);
+
+        // Check for both V3 and V4 adapters
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeDefined();
+        expect(v4Adapter).toBeDefined();
+        expect(v3Adapter.chainId).toBe(1);
+        expect(v4Adapter.chainId).toBe(1);
       });
 
       it('should return adapters for local test chain (1337)', () => {
         const result = AdapterFactory.getAdaptersForChain(1337, mockProvider);
 
         expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(1);
+        expect(result.adapters.length).toBe(2);
         expect(result.failures.length).toBe(0);
-        expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
-        expect(result.adapters[0].chainId).toBe(1337);
+
+        // Check for both V3 and V4 adapters
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeDefined();
+        expect(v4Adapter).toBeDefined();
+        expect(v3Adapter.chainId).toBe(1337);
+        expect(v4Adapter.chainId).toBe(1337);
       });
 
       it('should throw error for unsupported chain', () => {
@@ -80,12 +98,15 @@ describe('AdapterFactory - Unit Tests', () => {
         // Register a failing adapter
         AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
 
-        // Test with a chain that has uniswapV3
+        // Test with a chain that has uniswapV3 and uniswapV4
         const result = AdapterFactory.getAdaptersForChain(42161, mockProvider);
 
-        // Should still get the working uniswapV3 adapter
-        expect(result.adapters.length).toBe(1);
-        expect(result.adapters[0]).toBeInstanceOf(UniswapV3Adapter);
+        // Should still get the working uniswapV3 and uniswapV4 adapters
+        expect(result.adapters.length).toBe(2);
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeDefined();
+        expect(v4Adapter).toBeDefined();
 
         // No failures because failing adapter isn't configured for this chain
         expect(result.failures.length).toBe(0);

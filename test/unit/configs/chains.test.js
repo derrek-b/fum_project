@@ -86,6 +86,7 @@ function validateNativeCurrency(chainId, nativeCurrency) {
  */
 const REQUIRED_PLATFORM_ADDRESSES = {
   uniswapV3: ['factoryAddress', 'positionManagerAddress', 'routerAddress', 'universalRouterAddress', 'quoterAddress'],
+  uniswapV4: ['poolManagerAddress', 'positionManagerAddress', 'stateViewAddress', 'quoterAddress', 'universalRouterAddress'],
   // Add more platforms as they are implemented:
   // sushiswap: ['factoryAddress', 'positionManagerAddress', 'routerAddress'],
 };

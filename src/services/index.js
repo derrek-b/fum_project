@@ -5,3 +5,6 @@ export * from './coingecko.js';
 
 // Re-export everything from theGraph service
 export * from './theGraph.js';
+
+// Re-export everything from blockExplorer service
+export * from './blockExplorer.js';
