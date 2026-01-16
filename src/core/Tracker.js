@@ -117,6 +117,10 @@ export default class Tracker {
       await this.handleFeeDistributionFailed(data);
     });
 
+    this.eventManager.subscribe('FeeTrackingFailed', async (data) => {
+      await this.handleFeeTrackingFailed(data);
+    });
+
     this.eventManager.subscribe('PositionRebalanced', async (data) => {
       await this.handlePositionRebalanced(data);
     });
@@ -225,6 +229,7 @@ export default class Tracker {
           transactionCount: 0,
           wrapUnwrapCount: 0,
           trackingErrorCount: 0,
+          feeTrackingFailureCount: 0,
           blacklistCount: priorBlacklistCount,
           retryCount: priorRetryCount
         },
@@ -392,6 +397,46 @@ export default class Tracker {
         eventType: 'FeeDistributionFailed',
         timestamp,
         error: trackError.message
+      });
+    }
+  }
+
+  /**
+   * Handle fee tracking failure - fees exist but amounts unknown for native ETH
+   * @private
+   */
+  async handleFeeTrackingFailed(data) {
+    const { vaultAddress, transactionHash, timestamp } = data;
+
+    if (!this.vaultMetadata.has(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} not tracked yet, skipping fee tracking failure event`);
+      return;
+    }
+
+    try {
+      const { failures, reason } = data;
+      this.log(`Fee tracking failed for vault ${vaultAddress}: ${failures.length} position(s)`);
+
+      await this.appendTransaction(vaultAddress, {
+        type: 'FeeTrackingFailed',
+        vaultAddress,
+        transactionHash,
+        failures,
+        reason,
+        timestamp
+      });
+
+      const metadata = this.vaultMetadata.get(vaultAddress);
+      metadata.aggregates.feeTrackingFailureCount += failures.length;
+      metadata.metadata.lastUpdated = timestamp;
+
+      await this.saveMetadata(vaultAddress, metadata);
+    } catch (error) {
+      await this.logTrackingError(vaultAddress, {
+        eventType: 'FeeTrackingFailed',
+        transactionHash,
+        timestamp,
+        error: error.message
       });
     }
   }
@@ -686,6 +731,7 @@ export default class Tracker {
             transactionCount: 0,
             wrapUnwrapCount: 0,
             trackingErrorCount: 0,
+            feeTrackingFailureCount: 0,
             blacklistCount: 1
           },
           failedDistributions: [],
@@ -765,6 +811,7 @@ export default class Tracker {
             transactionCount: 0,
             wrapUnwrapCount: 0,
             trackingErrorCount: 0,
+            feeTrackingFailureCount: 0,
             blacklistCount: 0,
             retryCount: 1
           },

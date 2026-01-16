@@ -150,7 +150,7 @@ describe('Emergency Exit - Swap Event Trigger', () => {
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
 
-    const initialPoolData = await adapter.fetchPoolData(
+    const initialPoolData = await adapter._fetchPoolData(
       usdcAddress,
       wethAddress,
       500,
@@ -181,7 +181,7 @@ describe('Emergency Exit - Swap Event Trigger', () => {
     }
 
     // Get new pool state
-    const newPoolData = await adapter.fetchPoolData(
+    const newPoolData = await adapter._fetchPoolData(
       usdcAddress,
       wethAddress,
       500,
@@ -389,7 +389,7 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
           // Get current pool tick for baseline
           const wethAddress = getTokenAddressForTest('WETH', 1337);
           const usdcAddress = getTokenAddressForTest('USDC', 1337);
-          const poolData = await adapter.fetchPoolData(
+          const poolData = await adapter._fetchPoolData(
             usdcAddress,
             wethAddress,
             500,
@@ -420,7 +420,7 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
 
-    const initialPoolData = await adapter.fetchPoolData(
+    const initialPoolData = await adapter._fetchPoolData(
       usdcAddress,
       wethAddress,
       500,
@@ -447,7 +447,7 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
       }
     }
 
-    const newPoolData = await adapter.fetchPoolData(
+    const newPoolData = await adapter._fetchPoolData(
       usdcAddress,
       wethAddress,
       500,

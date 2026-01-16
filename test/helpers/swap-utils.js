@@ -94,7 +94,7 @@ export async function setupSwapWallet(testEnv, options = {}) {
       deadlineMinutes: 2
     };
 
-    const swapData = await adapter.generateSwapData(swapParams);
+    const swapData = await adapter._generateSwapData(swapParams);
     const swapTx = await swapWallet.sendTransaction({
       to: swapData.to,
       data: swapData.data,
@@ -142,7 +142,7 @@ export async function executeSwap(testEnv, params) {
   await approveTx.wait();
 
   // Generate swap data
-  const swapData = await adapter.generateSwapData({
+  const swapData = await adapter._generateSwapData({
     tokenIn,
     tokenOut,
     fee,
@@ -206,7 +206,7 @@ export async function executeSwapsUntilCondition(testEnv, params) {
     swapCount++;
 
     // Get current tick
-    const poolData = await adapter.fetchPoolData(
+    const poolData = await adapter._fetchPoolData(
       tokenIn,
       tokenOut,
       fee,
@@ -240,7 +240,7 @@ export async function executeSwapsUntilCondition(testEnv, params) {
  */
 export async function getPoolTick(testEnv, token0, token1, fee = 500) {
   const adapter = new UniswapV3Adapter(1337);
-  const poolData = await adapter.fetchPoolData(token0, token1, fee, testEnv.hardhatServer.provider);
+  const poolData = await adapter._fetchPoolData(token0, token1, fee, testEnv.hardhatServer.provider);
   return poolData.tick;
 }
 
@@ -254,7 +254,7 @@ export async function getPoolTick(testEnv, token0, token1, fee = 500) {
  */
 export async function getPoolData(testEnv, token0, token1, fee = 500) {
   const adapter = new UniswapV3Adapter(1337);
-  return adapter.fetchPoolData(token0, token1, fee, testEnv.hardhatServer.provider);
+  return adapter._fetchPoolData(token0, token1, fee, testEnv.hardhatServer.provider);
 }
 
 /**

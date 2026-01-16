@@ -307,8 +307,9 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(service.eventManager.adapters).toBeDefined();
       expect(service.eventManager.adapters).toBeInstanceOf(Map);
       expect(service.eventManager.adapters).toBe(service.adapters); // Same reference
-      expect(service.eventManager.adapters.size).toBe(1);
+      expect(service.eventManager.adapters.size).toBe(2); // V3 + V4
       expect(service.eventManager.adapters.has('uniswapV3')).toBe(true);
+      expect(service.eventManager.adapters.has('uniswapV4')).toBe(true);
 
       expect(service.eventManager.vaultDataService).toBeDefined();
       expect(service.eventManager.vaultDataService).toBe(service.vaultDataService); // Same reference

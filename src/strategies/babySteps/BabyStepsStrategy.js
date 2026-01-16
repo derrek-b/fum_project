@@ -551,6 +551,27 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Check if tokens are native ETH (platform-agnostic via token data)
     const token0IsNative = token0Data.isNative === true;
     const token1IsNative = token1Data.isNative === true;
+    const hasNativeToken = token0IsNative || token1IsNative;
+
+    // Pre-calculate fees before collection
+    // - Required for native tokens (V4 ETH transfers don't emit events)
+    // - Serves as fallback if receipt parsing fails
+    // If this fails, abort collection (fees stay in position, retry next cycle)
+    let expectedFeesResult;
+    try {
+      expectedFeesResult = await retryRpcCall(
+        () => adapter.getAccruedFeesUSD(
+          position,  // Pass full position object with fee growth fields
+          { token0: 0, token1: 0 },  // prices not needed, we use raw fees0/fees1
+          this.provider
+        ),
+        'getAccruedFeesUSD',
+        { log: (msg) => this.log(msg) }
+      );
+    } catch (error) {
+      this.log(`⚠️ COLLECTION_ABORTED: Position ${positionId} - pre-calculation failed, will retry next cycle`);
+      throw error;
+    }
 
     this.log(`Generating claim fees transaction for position ${positionId}`);
 
@@ -587,14 +608,40 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     };
 
-    // Parse the collect receipt
-    const { feesByPosition } = adapter.parseCollectReceipt(txResult.receipt, positionMetadata);
+    // Parse the collect receipt, with fallback to pre-calculated fees if parsing fails
+    let feesByPosition;
+    try {
+      const { feesByPosition: parsedFees } = await retryRpcCall(
+        () => adapter.parseCollectReceipt(
+          txResult.receipt,
+          positionMetadata,
+          { chainId: this.chainId, walletAddress: vault.address }
+        ),
+        'parseCollectReceipt',
+        { log: (msg) => this.log(msg) }
+      );
+
+      // Fill in null values with pre-calculated fees (for native ETH positions)
+      feesByPosition = hasNativeToken
+        ? this._fillMissingFees(parsedFees, {
+            [positionId]: { fees0: expectedFeesResult.fees0, fees1: expectedFeesResult.fees1 }
+          })
+        : parsedFees;
+    } catch (parseError) {
+      // Transaction succeeded but parsing failed - use pre-calculated fees as fallback
+      this.log(`⚠️ PARSER_FALLBACK: Position ${positionId} - ${parseError.message}, using pre-calculated fees`);
+      feesByPosition = {
+        [positionId]: {
+          token0: ethers.BigNumber.from(expectedFeesResult.fees0),
+          token1: ethers.BigNumber.from(expectedFeesResult.fees1),
+          metadata: positionMetadata[positionId]
+        }
+      };
+    }
 
     // Log collected amounts
-    if (feesByPosition[positionId]) {
-      const fees = feesByPosition[positionId];
-      this.log(`Collected fees - ${token0Data.symbol}: ${ethers.utils.formatUnits(fees.token0, token0Data.decimals)}, ${token1Data.symbol}: ${ethers.utils.formatUnits(fees.token1, token1Data.decimals)}`);
-    }
+    const fees = feesByPosition[positionId];
+    this.log(`Collected fees - ${token0Data.symbol}: ${ethers.utils.formatUnits(fees.token0, token0Data.decimals)}, ${token1Data.symbol}: ${ethers.utils.formatUnits(fees.token1, token1Data.decimals)}`);
 
     // Aggregate fees (single position but using standard flow)
     const aggregatedFees = this.aggregateFeesFromPositions(feesByPosition);
@@ -1011,6 +1058,7 @@ export default class BabyStepsStrategy extends StrategyBase {
   async closePositions(vault, positions) {
     const transactions = [];
     const positionMetadata = {};
+    const expectedFeesByPosition = {};  // Store pre-calc results for native ETH fallback
 
     // Generate transaction data for each position to close
     for (const [positionId, position] of Object.entries(positions)) {
@@ -1035,20 +1083,50 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Fetch fresh pool data
       const poolData = await retryRpcCall(
-        () => adapter.getPoolData(position.pool, {}, this.provider),
+        () => adapter.getPoolData(position.pool, this.provider),
         'getPoolData',
         { log: (msg) => this.log(msg) }
       );
 
+      // Check if position has native ETH (V4 native ETH transfers emit no events)
+      const token0IsNative = token0Data.address === ethers.constants.AddressZero;
+      const token1IsNative = token1Data.address === ethers.constants.AddressZero;
+      const hasNativeToken = token0IsNative || token1IsNative;
+
+      // Pre-calc fees for native ETH positions (required - parser returns null for native ETH)
+      if (hasNativeToken) {
+        try {
+          const feesResult = await retryRpcCall(
+            () => adapter.getAccruedFeesUSD(
+              position,  // Pass full position object with fee growth fields
+              { token0: 0, token1: 0 },  // prices not needed, we use raw fees0/fees1
+              this.provider
+            ),
+            'getAccruedFeesUSD',
+            { log: (msg) => this.log(msg) }
+          );
+          expectedFeesByPosition[positionId] = {
+            fees0: feesResult.fees0,
+            fees1: feesResult.fees1
+          };
+        } catch (error) {
+          // Log warning but proceed - will emit FeeTrackingFailed later
+          this.log(`⚠️ Pre-calc failed for position ${positionId}: ${error.message}`);
+          expectedFeesByPosition[positionId] = null;  // Mark as failed
+        }
+      }
+
       this.log(`Adding position ${positionId} to close batch: ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol} on ${poolMetadata.platform}`);
 
-      // Store metadata for event parsing
+      // Store metadata for event parsing (includes poolData for principal calculation)
       positionMetadata[positionId] = {
         position,
         poolMetadata,
+        poolData,        // Fresh pool data with sqrtPriceX96 for principal calculation
         token0Data,
         token1Data,
-        adapter
+        adapter,
+        hasNativeToken   // Track for fee fallback logic
       };
 
       // Generate close position transaction data (100% removal)
@@ -1096,11 +1174,77 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Each adapter parses only its positions from the receipt
     const principalByPosition = {};
     const feesByPosition = {};
+    const feeTrackingFailures = [];  // Track positions where fee tracking failed
 
     for (const [adapter, platformMetadata] of metadataByAdapter) {
-      const result = adapter.parseClosureReceipt(txResult.receipt, platformMetadata);
+      const result = await retryRpcCall(
+        () => adapter.parseClosureReceipt(
+          txResult.receipt,
+          platformMetadata,
+          { chainId: this.chainId, walletAddress: vault.address }
+        ),
+        'parseClosureReceipt',
+        { log: (msg) => this.log(msg) }
+      );
       Object.assign(principalByPosition, result.principalByPosition);
-      Object.assign(feesByPosition, result.feesByPosition);
+
+      // Process fees with fallback logic for native ETH positions
+      for (const [positionId, feeData] of Object.entries(result.feesByPosition)) {
+        const metadata = platformMetadata[positionId];
+
+        if (metadata.hasNativeToken) {
+          const expected = expectedFeesByPosition[positionId];
+
+          if (expected) {
+            // Pre-calc succeeded - fill in null values with pre-calculated fees
+            feesByPosition[positionId] = {
+              token0: feeData.token0 !== null
+                ? feeData.token0
+                : ethers.BigNumber.from(expected.fees0),
+              token1: feeData.token1 !== null
+                ? feeData.token1
+                : ethers.BigNumber.from(expected.fees1),
+              metadata: feeData.metadata
+            };
+          } else {
+            // Pre-calc failed - substitute 0 for null, flag for FeeTrackingFailed event
+            feesByPosition[positionId] = {
+              token0: feeData.token0 !== null ? feeData.token0 : ethers.BigNumber.from(0),
+              token1: feeData.token1 !== null ? feeData.token1 : ethers.BigNumber.from(0),
+              metadata: feeData.metadata
+            };
+
+            // Track which token(s) couldn't be tracked for event emission
+            feeTrackingFailures.push({
+              positionId,
+              token0Failed: feeData.token0 === null,
+              token1Failed: feeData.token1 === null,
+              token0Address: metadata.token0Data.address,
+              token1Address: metadata.token1Data.address,
+              token0Symbol: metadata.token0Data.symbol,
+              token1Symbol: metadata.token1Data.symbol
+            });
+          }
+        } else {
+          // ERC20-only position - use parsed fees directly
+          feesByPosition[positionId] = feeData;
+        }
+      }
+    }
+
+    // Emit FeeTrackingFailed event if any positions couldn't be tracked
+    if (feeTrackingFailures.length > 0) {
+      this.eventManager.emit('FeeTrackingFailed', {
+        vaultAddress: vault.address,
+        transactionHash: txResult.receipt.transactionHash,
+        failures: feeTrackingFailures,
+        reason: 'pre_calculation_failed_for_native_eth',
+        timestamp: Date.now(),
+        log: {
+          level: 'warn',
+          message: `Fee tracking failed for ${feeTrackingFailures.length} position(s) - fees remain in vault`
+        }
+      });
     }
 
     // Build detailed closure data for event
@@ -1205,6 +1349,40 @@ export default class BabyStepsStrategy extends StrategyBase {
         message: `Collected $${totalUSD.toFixed(2)} in fees from ${positionIds.length} position(s)`
       }
     });
+  }
+
+  /**
+   * Fill in null fee values with pre-calculated expected fees
+   *
+   * Used when receipt parsing cannot determine amounts (e.g., native ETH in V4).
+   * V4 sends native ETH via assembly call() which emits no Transfer events,
+   * so the parser returns null. This method fills those nulls with the
+   * pre-calculated amounts from getAccruedFeesUSD.
+   *
+   * @param {Object} feesByPosition - Parsed fees from parseCollectReceipt (may contain nulls)
+   *   { [positionId]: { token0: BigNumber|null, token1: BigNumber|null, metadata } }
+   * @param {Object} expectedFeesByPosition - Pre-calculated fees from getAccruedFeesUSD
+   *   { [positionId]: { fees0: string, fees1: string } }
+   * @returns {Object} Complete feesByPosition with nulls replaced by expected values
+   */
+  _fillMissingFees(feesByPosition, expectedFeesByPosition) {
+    const result = {};
+
+    for (const [positionId, feeData] of Object.entries(feesByPosition)) {
+      const expected = expectedFeesByPosition[positionId];
+
+      result[positionId] = {
+        token0: feeData.token0 !== null
+          ? feeData.token0
+          : ethers.BigNumber.from(expected.fees0),
+        token1: feeData.token1 !== null
+          ? feeData.token1
+          : ethers.BigNumber.from(expected.fees1),
+        metadata: feeData.metadata
+      };
+    }
+
+    return result;
   }
 
   /**
@@ -1779,7 +1957,10 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // 8d. Parse receipt for actual amounts consumed
-    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
+    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt, {
+      position,
+      poolData: targetPool
+    });
 
     this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 
@@ -2174,7 +2355,10 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // 11d. Parse receipt for actual amounts consumed and new position ID
-    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt);
+    const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt, {
+      position,
+      poolData: targetPool
+    });
 
     this.log(`✅ Position created: ID ${receiptData.tokenId}, ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 

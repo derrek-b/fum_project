@@ -510,7 +510,7 @@ class VaultDataService {
         let freshPoolData;
         if (!poolData[position.pool]) {
           freshPoolData = await retryRpcCall(
-            () => adapter.getPoolData(position.pool, {}, this.provider),
+            () => adapter.getPoolData(position.pool, this.provider),
             `getPoolData(${position.pool.slice(0, 10)})`
           );
           poolData[position.pool] = freshPoolData;

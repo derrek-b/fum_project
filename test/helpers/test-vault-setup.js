@@ -212,7 +212,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
       deadlineMinutes: 2
     };
 
-    const swapData = await adapter.generateSwapData(swapParams);
+    const swapData = await adapter._generateSwapData(swapParams);
     const swapTx = await owner.sendTransaction({
       to: swapData.to,
       data: swapData.data,
@@ -254,7 +254,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
         : [token1Address, token0Address, positionConfig.token1, positionConfig.token0];
 
     // Get pool data for tick calculations
-    const poolData = await adapter.fetchPoolData(token0Address, token1Address, positionConfig.fee, hardhat.provider);
+    const poolData = await adapter._fetchPoolData(token0Address, token1Address, positionConfig.fee, hardhat.provider);
     const currentTick = poolData.tick;
     const tickSpacing = positionConfig.fee === 500 ? 10 : positionConfig.fee === 3000 ? 60 : 200;
 
@@ -379,7 +379,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
 
       // Find the adapter and pool address
       const adapter = new UniswapV3Adapter(1337, hardhat.provider);
-      const poolAddress = await adapter.getPoolAddress(
+      const poolAddress = await adapter._getPoolAddress(
         getTokenAddressForTest(pool.token0, 1337),
         getTokenAddressForTest(pool.token1, 1337),
         pool.fee,
@@ -405,7 +405,7 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
           provider: hardhat.provider
         };
 
-        const swapData = await adapter.generateSwapData(swapParams);
+        const swapData = await adapter._generateSwapData(swapParams);
 
         // Approve SwapRouter to spend tokenIn
         const tokenInContract = new ethers.Contract(

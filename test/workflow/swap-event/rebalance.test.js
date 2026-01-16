@@ -183,7 +183,7 @@ describe('Position Rebalancing', () => {
         });
 
         // Get current tick
-        const poolData = await adapter.fetchPoolData(
+        const poolData = await adapter._fetchPoolData(
           usdcAddress,
           wethAddress,
           500,
@@ -296,7 +296,7 @@ describe('Position Rebalancing', () => {
         });
 
         // Get current tick
-        const poolData = await adapter.fetchPoolData(
+        const poolData = await adapter._fetchPoolData(
           usdcAddress,
           wethAddress,
           500,
