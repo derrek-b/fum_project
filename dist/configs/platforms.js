@@ -51,27 +51,33 @@ const platforms = {
     // Platform-specific features
     features: {
       concentratedLiquidity: true,
-      multipleFeeTiers: true,
       hooks: true,              // V4 hooks system
       nativeETH: true,          // Native ETH support without wrapping
       flashAccounting: true,    // Gas-efficient batching
       dynamicFees: true,        // Fees can be modified by hooks
+      flexibleFees: true,       // Fee is an independent PoolKey parameter (not fixed tiers)
+      flexibleTickSpacing: true // tickSpacing is an independent PoolKey parameter
     },
-    // Supported fee tiers with tick spacing (same as V3)
-    // Note: V4 allows custom fee tiers via hooks, but these are the standard ones
-    feeTiers: {
-      100: { spacing: 1 },    // 0.01% fee = 1 tick spacing
-      500: { spacing: 10 },   // 0.05% fee = 10 tick spacing
-      3000: { spacing: 60 },  // 0.3% fee = 60 tick spacing
-      10000: { spacing: 200 } // 1% fee = 200 tick spacing
-    },
+    // V4 Note: Unlike V3, fee and tickSpacing are independent PoolKey parameters.
+    // Pools can have any fee (up to 1,000,000 = 100%) and any tickSpacing.
+    // Dynamic fees use fee = 0x800000 with actual fee set by hooks.
     // Same tick bounds as V3 (concentrated liquidity math unchanged)
     minTick: -887272,
     maxTick: 887272,
-    // The Graph subgraph IDs - TODO: Add when V4 subgraphs are available
+    // The Graph subgraph IDs for V4
     subgraphs: {
-      // 1: { id: "...", queryType: "uniswapV4" },
-      // 42161: { id: "...", queryType: "uniswapV4" },
+      1: {
+        id: "6XvRX3WHSvzBVTiPdF66XSBVbxWuHqijWANbjJxRDyzr",
+        queryType: "uniswapV4"
+      },      // Ethereum mainnet
+      42161: {
+        id: "G5TsTKNi8yhPSV7kycaE23oWbqv9zzNqR49FoEQjzq1r",
+        queryType: "uniswapV4"
+      },   // Arbitrum One
+      1337: {
+        id: "G5TsTKNi8yhPSV7kycaE23oWbqv9zzNqR49FoEQjzq1r",
+        queryType: "uniswapV4"
+      }    // Local fork (uses Arbitrum subgraph)
     },
   },
   // Add other platforms here as needed

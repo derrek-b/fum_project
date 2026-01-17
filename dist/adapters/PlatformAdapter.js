@@ -323,11 +323,14 @@ export default class PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from closing positions
    * @param {Object} positionMetadata - Metadata for closed positions
    *   { [tokenId]: { position, poolMetadata, token0Data, token1Data, adapter } }
-   * @returns {Object} Parsed closure data
+   * @param {Object} [options] - Optional settings (platform-specific)
+   * @param {number} [options.chainId] - Chain ID for block explorer (V4 native ETH tracking)
+   * @param {string} [options.walletAddress] - Wallet address for ETH tracking
+   * @returns {Promise<Object>} Parsed closure data
    *   { principalByPosition: { [tokenId]: { amount0, amount1 } },
    *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
    */
-  parseClosureReceipt(receipt, positionMetadata) {
+  async parseClosureReceipt(receipt, positionMetadata, options = {}) {
     throw new Error("parseClosureReceipt must be implemented by subclasses");
   }
 
@@ -342,10 +345,13 @@ export default class PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from collect execution
    * @param {Object} positionMetadata - Metadata for positions keyed by tokenId
    *   { [tokenId]: { token0Data, token1Data } }
-   * @returns {Object} Parsed fee data
+   * @param {Object} [options] - Optional settings (platform-specific)
+   * @param {number} [options.chainId] - Chain ID for block explorer (V4 native ETH tracking)
+   * @param {string} [options.walletAddress] - Wallet address for ETH tracking
+   * @returns {Promise<Object>} Parsed fee data
    *   { feesByPosition: { [tokenId]: { token0: BigNumber, token1: BigNumber, metadata } } }
    */
-  parseCollectReceipt(receipt, positionMetadata) {
+  async parseCollectReceipt(receipt, positionMetadata, options = {}) {
     throw new Error("parseCollectReceipt must be implemented by subclasses");
   }
 

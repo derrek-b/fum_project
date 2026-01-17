@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-14T01:00:14.655Z
+Generated on: 2026-01-16T20:46:17.928Z
 
 ## Table of Contents
 
@@ -50,6 +50,7 @@ Adapter system for DeFi platforms
 - `registerAdapter` (variable)
 - `PlatformAdapter` (class) (from `./PlatformAdapter.js`)
 - `UniswapV3Adapter` (class) (from `./UniswapV3Adapter.js`)
+- `UniswapV4Adapter` (class) (from `./UniswapV4Adapter.js`)
 
 ---
 
@@ -105,10 +106,13 @@ Uniswap V4 Platform Adapter
 - from `../helpers/chainHelpers.js`
 - from `../helpers/platformHelpers.js`
 - from `../helpers/tokenHelpers.js`
+- from `../services/blockExplorer.js`
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
+- from `@uniswap/router-sdk`
 - from `@uniswap/sdk-core`
 - from `@uniswap/smart-order-router`
+- from `@uniswap/universal-router-sdk`
 - from `@uniswap/universal-router/artifacts/contracts/UniversalRouter.sol/UniversalRouter.json`
 - from `@uniswap/v3-sdk`
 - from `@uniswap/v4-core/out/PoolManager.sol/PoolManager.json`
@@ -426,6 +430,7 @@ FUM Library - Main Entry Point
 
 **Imports:**
 - from `./helpers/chainHelpers.js`
+- from `./services/blockExplorer.js`
 - from `./services/coingecko.js`
 - from `fum_library`
 
@@ -435,6 +440,23 @@ FUM Library - Main Entry Point
 ---
 
 ## services Module
+
+### blockExplorer.js
+
+@module services/blockExplorer
+
+**Path:** `src/services/blockExplorer.js`
+
+**Imports:**
+- from `ethers`
+
+**Exports:**
+- `configureBlockExplorer` (function)
+- `getBlockExplorerConfig` (function)
+- `resetBlockExplorerConfig` (function)
+- `getBlockExplorerService` (function)
+
+---
 
 ### coingecko.js
 
@@ -463,6 +485,7 @@ FUM Library - Main Entry Point
 **Exports:**
 - re-exports from `./coingecko.js`
 - re-exports from `./theGraph.js`
+- re-exports from `./blockExplorer.js`
 
 ---
 

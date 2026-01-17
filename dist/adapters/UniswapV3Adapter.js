@@ -1310,7 +1310,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const { token0, token1, fee, tickLower, tickUpper } = positionData;
 
           // Fetch pool data (which includes token data and canonical pool address)
-          const poolData = await this.fetchPoolData(token0, token1, Number(fee), provider);
+          const poolData = await this._fetchPoolData(token0, token1, Number(fee), provider);
           const poolAddress = poolData.poolAddress;
 
           // Cache pool data using canonical pool address
@@ -3097,11 +3097,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from closing positions
    * @param {Object} positionMetadata - Metadata for closed positions
    *   { [tokenId]: { position, poolMetadata, token0Data, token1Data, adapter } }
-   * @returns {Object} Parsed closure data
+   * @param {Object} [options] - Optional settings (unused in V3, included for API compatibility)
+   * @returns {Promise<Object>} Parsed closure data
    *   { principalByPosition: { [tokenId]: { amount0, amount1 } },
    *     feesByPosition: { [tokenId]: { token0, token1, metadata } } }
    */
-  parseClosureReceipt(receipt, positionMetadata) {
+  async parseClosureReceipt(receipt, positionMetadata, options = {}) {
     // Validate receipt
     if (receipt === null || receipt === undefined) {
       throw new Error("Receipt parameter is required");
@@ -3182,10 +3183,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} receipt - Transaction receipt from collect execution
    * @param {Object} positionMetadata - Metadata for positions keyed by tokenId
    *   { [tokenId]: { token0Data, token1Data } }
-   * @returns {Object} Parsed fee data
+   * @param {Object} [options] - Optional settings (unused in V3, included for API compatibility)
+   * @returns {Promise<Object>} Parsed fee data
    *   { feesByPosition: { [tokenId]: { token0: BigNumber, token1: BigNumber, metadata } } }
    */
-  parseCollectReceipt(receipt, positionMetadata) {
+  async parseCollectReceipt(receipt, positionMetadata, options = {}) {
     // Validate receipt
     if (receipt === null || receipt === undefined) {
       throw new Error("Receipt parameter is required");
@@ -4714,7 +4716,13 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Transaction data with to, data, and value
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
-  async generateSwapData(params) {
+  /**
+   * @private
+   * Internal method for generating swap transaction data.
+   * Used by test setup files to fund wallets with tokens.
+   * For production swaps, use batchSwapTransactions instead.
+   */
+  async _generateSwapData(params) {
     const {
       tokenIn,
       tokenOut,

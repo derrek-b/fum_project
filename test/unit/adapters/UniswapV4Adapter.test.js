@@ -4,12 +4,13 @@
  * Tests using Hardhat fork of Arbitrum - no mocks, real blockchain interactions.
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 import { setupV4TestEnvironment } from '../../setup/v4-setup.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { configureBlockExplorer, resetBlockExplorerConfig } from '../../../src/services/blockExplorer.js';
+import { getTokenAddress, getWethAddress } from '../../../src/helpers/tokenHelpers.js';
 
 describe('UniswapV4Adapter - Unit Tests', () => {
   let env;
@@ -780,63 +781,100 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         console.log(`Swapped 0.1 ETH for ${ethers.utils.formatUnits(usdcReceived, 6)} USDC`);
       }, 120000); // 2 minute timeout
     });
-  });
 
-  describe('Stub Methods (Not Yet Implemented)', () => {
-    // These tests verify that unimplemented methods throw appropriate errors
-    // Remove these as methods get implemented
+    describe('Permit2 Support', () => {
+      it('should throw when permit2Signature is provided but permit2Nonce is missing', async () => {
+        await expect(adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',
+          // permit2Nonce missing
+          permit2Deadline: Math.floor(Date.now() / 1000) + 1800
+        })).rejects.toThrow('permit2Nonce must be a non-negative number');
+      }, 60000);
 
-    it('evaluatePriceMovement should throw not implemented', () => {
-      expect(() => adapter.evaluatePriceMovement({}, 0, {}, {}))
-        .toThrow('UniswapV4Adapter.evaluatePriceMovement not implemented');
-    });
+      it('should throw when permit2Signature is provided but permit2Deadline is missing', async () => {
+        await expect(adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',
+          permit2Nonce: 0
+          // permit2Deadline missing
+        })).rejects.toThrow('permit2Deadline must be a positive number');
+      }, 60000);
 
-    it('getPositionsForVDS should throw not implemented', async () => {
-      await expect(adapter.getPositionsForVDS('0x123', env.provider))
-        .rejects.toThrow('UniswapV4Adapter.getPositionsForVDS not implemented');
-    });
+      it('should throw when permit2Nonce is negative', async () => {
+        await expect(adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',
+          permit2Nonce: -1,
+          permit2Deadline: Math.floor(Date.now() / 1000) + 1800
+        })).rejects.toThrow('permit2Nonce must be a non-negative number');
+      }, 60000);
 
-    // getAccruedFeesUSD - IMPLEMENTED (tests in separate describe block)
+      it('should throw when permit2Deadline is zero or negative', async () => {
+        await expect(adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',
+          permit2Nonce: 0,
+          permit2Deadline: 0
+        })).rejects.toThrow('permit2Deadline must be a positive number');
 
-    // evaluatePositionRange - IMPLEMENTED (tests in separate describe block)
+        await expect(adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',
+          permit2Nonce: 0,
+          permit2Deadline: -100
+        })).rejects.toThrow('permit2Deadline must be a positive number');
+      }, 60000);
 
-    // generateClaimFeesData - IMPLEMENTED (tests in separate describe block)
+      it('should skip Permit2 wrapping for native ETH even when Permit2 params provided', async () => {
+        // Native ETH doesn't need Permit2, so even if params are provided, they should be ignored
+        const result = await adapter._generateSwapData({
+          tokenIn: NATIVE_ETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890',
+          permit2Signature: '0x1234',  // Should be ignored
+          permit2Nonce: 0,
+          permit2Deadline: Math.floor(Date.now() / 1000) + 1800
+        });
 
-    // generateRemoveLiquidityData - IMPLEMENTED (tests in separate describe block)
+        // Should succeed without using Permit2
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result.value).toBe(ethers.utils.parseEther('0.01').toString());
+      }, 60000);
 
-    // generateAddLiquidityData - IMPLEMENTED (tests in separate describe block)
+      it('should not require Permit2 params for ERC20 when not provided', async () => {
+        // ERC20 without Permit2 params should work (caller handles approval separately)
+        const result = await adapter._generateSwapData({
+          tokenIn: WETH,
+          tokenOut: USDC,
+          amountIn: ethers.utils.parseEther('0.01').toString(),
+          recipient: '0x1234567890123456789012345678901234567890'
+          // No Permit2 params - calldata won't be wrapped
+        });
 
-    // getAddLiquidityAmounts - IMPLEMENTED (tests in separate describe block)
-
-    // generateCreatePositionData - IMPLEMENTED (tests in separate describe block)
-
-    it('getBestSwapQuote should throw not implemented', async () => {
-      await expect(adapter.getBestSwapQuote({}))
-        .rejects.toThrow('UniswapV4Adapter.getBestSwapQuote not implemented');
-    });
-
-    it('batchSwapTransactions should throw not implemented', async () => {
-      await expect(adapter.batchSwapTransactions([], {}))
-        .rejects.toThrow('UniswapV4Adapter.batchSwapTransactions not implemented');
-    });
-
-    // parseClosureReceipt - IMPLEMENTED (tests in separate describe block)
-
-    // parseCollectReceipt - IMPLEMENTED (tests in separate describe block)
-
-
-    it('selectBestPool should throw not implemented', async () => {
-      await expect(adapter.selectBestPool('WETH', 'USDC', env.provider, 1337))
-        .rejects.toThrow('UniswapV4Adapter.selectBestPool not implemented');
-    });
-
-    // getPositionRange - IMPLEMENTED (tests in separate describe block)
-    // extractPositionBounds - IMPLEMENTED (tests in separate describe block)
-    // getPoolCurrent - IMPLEMENTED (tests in separate describe block)
-
-    it('getPoolKeyFromId should throw not implemented', async () => {
-      await expect(adapter.getPoolKeyFromId('0x123', env.provider))
-        .rejects.toThrow('UniswapV4Adapter.getPoolKeyFromId not implemented');
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result.value).toBe('0');
+      }, 60000);
     });
   });
 
@@ -5779,6 +5817,1191 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify metadata preserved
         expect(fees.metadata).toBe(positionMetadata[parsed.tokenId]);
       }, 300000);
+    });
+  });
+
+  describe('getBestSwapQuote', () => {
+    // Use WETH address for ERC20 tests (Arbitrum WETH)
+    const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+
+    describe('Success Cases', () => {
+      it('should return best quote using AlphaRouter with EXACT_INPUT', async () => {
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(), // 1 ETH
+          isAmountIn: true
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should return an object with amountIn, amountOut, route, and methodParameters
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote).toHaveProperty('amountIn');
+        expect(bestQuote).toHaveProperty('amountOut');
+        expect(bestQuote).toHaveProperty('route');
+
+        // Amount in should match input
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
+
+        // Amount out should be positive
+        expect(typeof bestQuote.amountOut).toBe('string');
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+
+        // Route should be defined and have expected properties
+        expect(bestQuote.route).toBeDefined();
+        expect(bestQuote.route.quote).toBeDefined();
+        expect(bestQuote.route.route).toBeDefined();
+      }, 60000); // First AlphaRouter call may take longer to warm up
+
+      it('should return valid quote for different amounts with EXACT_INPUT', async () => {
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should still return a valid quote
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
+        expect(bestQuote.amountOut).toBeDefined();
+        expect(bestQuote.route).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should return consistent results across multiple calls with EXACT_INPUT', async () => {
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('0.25').toString(),
+          isAmountIn: true
+        };
+
+        const quote1 = await adapter.getBestSwapQuote(quoteParams);
+        const quote2 = await adapter.getBestSwapQuote(quoteParams);
+
+        // Results should be very close (allow for minor price fluctuations in live pools)
+        // Within 0.1% tolerance
+        const amount1 = BigInt(quote1.amountOut);
+        const amount2 = BigInt(quote2.amountOut);
+        const diff = amount1 > amount2 ? amount1 - amount2 : amount2 - amount1;
+        const tolerance = amount1 / 1000n; // 0.1%
+
+        expect(diff).toBeLessThanOrEqual(tolerance);
+      });
+
+      it('should return best quote using AlphaRouter with EXACT_OUTPUT', async () => {
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseUnits('2000', 6).toString(), // 2000 USDC
+          isAmountIn: false
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        // Should return an object with amountIn, amountOut, route, and methodParameters
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote).toHaveProperty('amountIn');
+        expect(bestQuote).toHaveProperty('amountOut');
+        expect(bestQuote).toHaveProperty('route');
+
+        // Amount out should match input (EXACT_OUTPUT mode)
+        expect(bestQuote.amountOut).toBe(quoteParams.amount);
+
+        // Amount in should be positive
+        expect(typeof bestQuote.amountIn).toBe('string');
+        expect(BigInt(bestQuote.amountIn)).toBeGreaterThan(0n);
+
+        // Route should be defined and have expected properties
+        expect(bestQuote.route).toBeDefined();
+        expect(bestQuote.route.quote).toBeDefined();
+        expect(bestQuote.route.route).toBeDefined();
+      });
+    });
+
+    describe('Native ETH Support', () => {
+      it('should return quote for native ETH → ERC20 swap (EXACT_INPUT)', async () => {
+        const quoteParams = {
+          // No tokenInAddress needed for native ETH
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true,
+          tokenInIsNative: true,
+          tokenOutIsNative: false
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should return quote for ERC20 → native ETH swap (EXACT_INPUT)', async () => {
+        const quoteParams = {
+          tokenInAddress: env.usdcAddress,
+          // No tokenOutAddress needed for native ETH
+          amount: ethers.utils.parseUnits('2000', 6).toString(),
+          isAmountIn: true,
+          tokenInIsNative: false,
+          tokenOutIsNative: true
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+
+        expect(bestQuote).toBeDefined();
+        expect(bestQuote.amountIn).toBe(quoteParams.amount);
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should default tokenInIsNative and tokenOutIsNative to false', async () => {
+        // Existing tests don't pass these params - they should still work
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
+          // Note: no tokenInIsNative or tokenOutIsNative
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+        expect(bestQuote).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+
+      it('should skip tokenInAddress validation when tokenInIsNative is true', async () => {
+        // These would fail validation if tokenInIsNative wasn't true
+        const invalidAddresses = [null, undefined, '', 'not-an-address'];
+
+        for (const invalidAddr of invalidAddresses) {
+          const quoteParams = {
+            tokenInAddress: invalidAddr,
+            tokenOutAddress: env.usdcAddress,
+            amount: ethers.utils.parseEther('1').toString(),
+            isAmountIn: true,
+            tokenInIsNative: true  // Should skip tokenIn validation
+          };
+
+          const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+          expect(bestQuote).toBeDefined();
+          expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+        }
+      });
+
+      it('should skip tokenOutAddress validation when tokenOutIsNative is true', async () => {
+        // These would fail validation if tokenOutIsNative wasn't true
+        const invalidAddresses = [null, undefined, '', 'not-an-address'];
+
+        for (const invalidAddr of invalidAddresses) {
+          const quoteParams = {
+            tokenInAddress: env.usdcAddress,
+            tokenOutAddress: invalidAddr,
+            amount: ethers.utils.parseUnits('2000', 6).toString(),
+            isAmountIn: true,
+            tokenOutIsNative: true  // Should skip tokenOut validation
+          };
+
+          const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+          expect(bestQuote).toBeDefined();
+          expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+        }
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid tokenInAddress when not native', async () => {
+        const baseParams = {
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
+        };
+
+        // Missing (and tokenInIsNative is false by default)
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: null })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: 'invalid-address' })
+        ).rejects.toThrow('Invalid tokenIn address');
+
+        // Array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: [] })
+        ).rejects.toThrow('TokenIn address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenInAddress: {} })
+        ).rejects.toThrow('TokenIn address parameter is required');
+      });
+
+      it('should throw error for invalid tokenOutAddress', async () => {
+        const baseParams = {
+          tokenInAddress: WETH,
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
+        };
+
+        // Missing
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: null })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        // Invalid address
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: 'Claude is awesome!' })
+        ).rejects.toThrow('Invalid tokenOut address');
+
+        // Array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: [] })
+        ).rejects.toThrow('TokenOut address parameter is required');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, tokenOutAddress: {} })
+        ).rejects.toThrow('TokenOut address parameter is required');
+      });
+
+      it('should throw error for invalid amount', async () => {
+        const baseParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          isAmountIn: true
+        };
+
+        // Missing
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: null })
+        ).rejects.toThrow('Amount parameter is required');
+
+        // Not a string
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: 123 })
+        ).rejects.toThrow('Amount must be a string');
+
+        // Array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: [] })
+        ).rejects.toThrow('Amount must be a string');
+
+        // Object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: {} })
+        ).rejects.toThrow('Amount must be a string');
+
+        // Invalid string
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: 'Claude is awesome!' })
+        ).rejects.toThrow('Amount must be a positive numeric string');
+
+        // Zero
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, amount: '0' })
+        ).rejects.toThrow('Amount cannot be zero');
+      });
+
+      it('should throw error for invalid isAmountIn', async () => {
+        const baseParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString()
+        };
+
+        // Missing
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: null })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - string
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: 'true' })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - number
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: 1 })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - array
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: [] })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+
+        // Not a boolean - object
+        await expect(
+          adapter.getBestSwapQuote({ ...baseParams, isAmountIn: {} })
+        ).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+      });
+
+      it('should throw error when token not found in config', async () => {
+        const fakeToken1 = '0x0000000000000000000000000000000000000001';
+        const fakeToken2 = '0x0000000000000000000000000000000000000002';
+
+        await expect(
+          adapter.getBestSwapQuote({
+            tokenInAddress: fakeToken1,
+            tokenOutAddress: fakeToken2,
+            amount: ethers.utils.parseEther('1').toString(),
+            isAmountIn: true
+          })
+        ).rejects.toThrow(/No token found at address/);
+      });
+    });
+
+    describe('Performance', () => {
+      it('should execute AlphaRouter routing efficiently', async () => {
+        const startTime = Date.now();
+
+        const quoteParams = {
+          tokenInAddress: WETH,
+          tokenOutAddress: env.usdcAddress,
+          amount: ethers.utils.parseEther('1').toString(),
+          isAmountIn: true
+        };
+
+        const bestQuote = await adapter.getBestSwapQuote(quoteParams);
+        const endTime = Date.now();
+
+        // Should complete in reasonable time
+        expect(endTime - startTime).toBeLessThan(10000); // 10 seconds max (AlphaRouter may be slower)
+
+        // Should still return valid result
+        expect(bestQuote).toBeDefined();
+        expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
+      });
+    });
+  });
+
+  describe('batchSwapTransactions', () => {
+    describe('Validation Error Cases', () => {
+      const mockSigner = { _signTypedData: () => Promise.resolve('0x') };
+
+      it('should throw error for missing signer', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 })
+        ).rejects.toThrow('signer is required');
+      });
+
+      it('should throw error for missing provider', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 })
+        ).rejects.toThrow('provider is required');
+      });
+
+      it('should throw error for missing chainId', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 })
+        ).rejects.toThrow('chainId is required');
+      });
+
+      it('should throw error for missing recipient', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, slippageTolerance: 0.5 })
+        ).rejects.toThrow('recipient is required');
+      });
+
+      it('should throw error for missing slippageTolerance', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890' })
+        ).rejects.toThrow('slippageTolerance is required');
+      });
+
+      it('should throw error for non-array swapInstructions', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions('not an array', options)
+        ).rejects.toThrow('swapInstructions must be an array');
+
+        await expect(
+          adapter.batchSwapTransactions({}, options)
+        ).rejects.toThrow('swapInstructions must be an array');
+      });
+
+      it('should throw error for empty swapInstructions array', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([], options)
+        ).rejects.toThrow('swapInstructions cannot be empty');
+      });
+
+      it('should throw error when instruction is missing tokenIn', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenOut: { symbol: 'USDC' }, amount: '1000' }], options)
+        ).rejects.toThrow('tokenIn with symbol is required');
+      });
+
+      it('should throw error when instruction is missing tokenOut', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, amount: '1000' }], options)
+        ).rejects.toThrow('tokenOut with symbol is required');
+      });
+
+      it('should throw error when instruction is missing amount', async () => {
+        const options = { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234567890123456789012345678901234567890', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, tokenOut: { symbol: 'USDC' } }], options)
+        ).rejects.toThrow('amount is required');
+      });
+    });
+
+    // Note: Full integration tests for batchSwapTransactions require:
+    // - Real token balances
+    // - Valid Permit2 approval
+    // - Real swap routes
+    // These are covered in fum_automation integration tests
+  });
+
+  describe('selectBestPool', () => {
+    // Note: The Graph API key is configured via configureTheGraph in test setup
+
+    describe('Parameter Validation', () => {
+      it('should throw error for invalid tokenASymbol values', async () => {
+        await expect(adapter.selectBestPool(
+          null, 'USDC', env.provider, 1337
+        )).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          undefined, 'USDC', env.provider, 1337
+        )).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          '', 'USDC', env.provider, 1337
+        )).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          123, 'USDC', env.provider, 1337
+        )).rejects.toThrow('tokenASymbol parameter is required and must be a string');
+      });
+
+      it('should throw error for invalid tokenBSymbol values', async () => {
+        await expect(adapter.selectBestPool(
+          'WETH', null, env.provider, 1337
+        )).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          'WETH', undefined, env.provider, 1337
+        )).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          'WETH', '', env.provider, 1337
+        )).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 123, env.provider, 1337
+        )).rejects.toThrow('tokenBSymbol parameter is required and must be a string');
+      });
+
+      it('should throw error for invalid provider values', async () => {
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', null, 1337
+        )).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', undefined, 1337
+        )).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', {}, 1337
+        )).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', 'not-a-provider', 1337
+        )).rejects.toThrow('provider parameter is required and must be an ethers provider instance');
+      });
+
+      it('should throw error for invalid chainId values', async () => {
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', env.provider, null
+        )).rejects.toThrow('chainId parameter is required and must be a number');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', env.provider, undefined
+        )).rejects.toThrow('chainId parameter is required and must be a number');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', env.provider, '1337'
+        )).rejects.toThrow('chainId parameter is required and must be a number');
+      });
+
+      it('should throw error for unknown token symbols', async () => {
+        await expect(adapter.selectBestPool(
+          'UNKNOWN_TOKEN', 'USDC', env.provider, 1337
+        )).rejects.toThrow('Token UNKNOWN_TOKEN not found');
+
+        await expect(adapter.selectBestPool(
+          'WETH', 'UNKNOWN_TOKEN', env.provider, 1337
+        )).rejects.toThrow('Token UNKNOWN_TOKEN not found');
+      });
+    });
+
+    describe('Success Cases', () => {
+      // Note: These tests use real API calls to The Graph
+      // They may return empty results if no V4 pools exist for the token pair
+      // V4 is newer so pools may be limited
+
+      it('should search for WETH/USDC pools on Arbitrum', async () => {
+        const apiKey = process.env.THEGRAPH_API_KEY;
+        if (!apiKey) {
+          console.log('Skipping - THEGRAPH_API_KEY not set');
+          return;
+        }
+
+        // Use Arbitrum mainnet for real subgraph query
+        const arbitrumProvider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
+
+        try {
+          const result = await adapter.selectBestPool('WETH', 'USDC', arbitrumProvider, 42161);
+
+          // If pools found, verify structure
+          expect(result).toHaveProperty('bestPool');
+          expect(result).toHaveProperty('poolsDiscovered');
+          expect(result).toHaveProperty('poolsActive');
+          expect(result.poolsDiscovered).toBeGreaterThanOrEqual(result.poolsActive);
+          expect(result.poolsActive).toBeGreaterThan(0);
+
+          // Verify bestPool has expected properties
+          expect(result.bestPool).toHaveProperty('id');
+          expect(result.bestPool).toHaveProperty('liquidity');
+          expect(result.bestPool).toHaveProperty('feeTier');
+        } catch (error) {
+          // No pools is acceptable for V4 (new protocol)
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No V4 WETH/USDC pools exist on Arbitrum yet');
+            return;
+          }
+          throw error;
+        }
+      }, 30000); // 30s timeout for API calls
+
+      it('should handle native ETH symbol', async () => {
+        const apiKey = process.env.THEGRAPH_API_KEY;
+        if (!apiKey) {
+          console.log('Skipping - THEGRAPH_API_KEY not set');
+          return;
+        }
+
+        const arbitrumProvider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
+
+        try {
+          // ETH (native) should resolve to AddressZero for V4
+          const result = await adapter.selectBestPool('ETH', 'USDC', arbitrumProvider, 42161);
+
+          expect(result).toHaveProperty('bestPool');
+          expect(result).toHaveProperty('poolsDiscovered');
+          expect(result).toHaveProperty('poolsActive');
+        } catch (error) {
+          // No pools is acceptable
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No V4 ETH/USDC pools exist on Arbitrum yet');
+            return;
+          }
+          throw error;
+        }
+      }, 30000);
+
+      it('should sort tokens correctly regardless of input order', async () => {
+        const apiKey = process.env.THEGRAPH_API_KEY;
+        if (!apiKey) {
+          console.log('Skipping - THEGRAPH_API_KEY not set');
+          return;
+        }
+
+        const arbitrumProvider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
+
+        try {
+          // Try both orderings - should get same result
+          const resultAB = await adapter.selectBestPool('WETH', 'USDC', arbitrumProvider, 42161);
+          const resultBA = await adapter.selectBestPool('USDC', 'WETH', arbitrumProvider, 42161);
+
+          // Should find the same pools regardless of order
+          expect(resultAB.poolsDiscovered).toBe(resultBA.poolsDiscovered);
+          expect(resultAB.bestPool.id).toBe(resultBA.bestPool.id);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No V4 pools exist for token pair yet');
+            return;
+          }
+          throw error;
+        }
+      }, 60000); // 60s for two API calls
+    });
+
+    describe('Error Cases', () => {
+      it('should throw when token is not available on chain', async () => {
+        // WBTC may not be available on all chains
+        await expect(adapter.selectBestPool(
+          'WETH', 'USDC', env.provider, 999999
+        )).rejects.toThrow(/not available on chain/);
+      });
+    });
+  });
+
+  describe('_tickToPrice', () => {
+    describe('Success Cases', () => {
+      it('should calculate price for tick 0 (1:1 ratio)', () => {
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+        const ethToken = {
+          address: getWethAddress(1337),
+          decimals: 18,
+          symbol: 'ETH'
+        };
+
+        // Tick 0 = 1:1 price ratio - use USDC/WETH to get a readable price around 1e12
+        const tick = 0;
+
+        const price = adapter._tickToPrice(tick, usdcToken, ethToken);
+
+        // Should return a Price object
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        // Tick 0 with USDC(6 decimals)/WETH(18 decimals) gives 1e-12 (1 USDC = 1e-12 WETH)
+        const priceNum = parseFloat(price.toSignificant(18));
+        expect(priceNum).toBeCloseTo(1e-12, 15); // 1e-12 with high precision
+      });
+
+      it('should calculate price for positive tick', () => {
+        const ethToken = {
+          address: getWethAddress(1337),
+          decimals: 18,
+          symbol: 'ETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Positive tick = higher price
+        const tick = 200000; // Arbitrary positive tick
+
+        const price = adapter._tickToPrice(tick, ethToken, usdcToken);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        const priceNum = parseFloat(price.toSignificant(6));
+        expect(priceNum).toBeGreaterThan(0);
+        expect(Number.isFinite(priceNum)).toBe(true);
+      });
+
+      it('should calculate price for negative tick', () => {
+        const ethToken = {
+          address: getWethAddress(1337),
+          decimals: 18,
+          symbol: 'ETH'
+        };
+        const usdcToken = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        // Negative tick = lower price
+        const tick = -200000; // Arbitrary negative tick
+
+        const price = adapter._tickToPrice(tick, ethToken, usdcToken);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+
+        const priceNum = parseFloat(price.toSignificant(18));
+        expect(priceNum).toBeGreaterThan(0);
+        expect(Number.isFinite(priceNum)).toBe(true);
+      });
+
+      it('should handle inverted token pairs consistently', () => {
+        const tokenA = {
+          address: getWethAddress(1337),
+          decimals: 18,
+          symbol: 'ETH'
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6,
+          symbol: 'USDC'
+        };
+
+        const tick = 100000;
+
+        const priceAB = adapter._tickToPrice(tick, tokenA, tokenB);
+        const priceBA = adapter._tickToPrice(tick, tokenB, tokenA);
+
+        const priceABNum = parseFloat(priceAB.toSignificant(18));
+        const priceBANum = parseFloat(priceBA.toSignificant(18));
+
+        // Prices should be reciprocals (within small tolerance)
+        const product = priceABNum * priceBANum;
+        expect(product).toBeGreaterThan(0.99);
+        expect(product).toBeLessThan(1.01);
+      });
+
+      it('should work with minimal token metadata', () => {
+        const tokenA = {
+          address: getWethAddress(1337),
+          decimals: 18
+          // No symbol or name
+        };
+        const tokenB = {
+          address: getTokenAddress('USDC', 1337),
+          decimals: 6
+          // No symbol or name
+        };
+
+        const tick = 0;
+
+        const price = adapter._tickToPrice(tick, tokenA, tokenB);
+
+        expect(price).toBeDefined();
+        expect(typeof price).toBe('object');
+        expect(parseFloat(price.toSignificant(18))).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      const validTokenA = {
+        address: getWethAddress(1337),
+        decimals: 18,
+        symbol: 'ETH'
+      };
+      const validTokenB = {
+        address: getTokenAddress('USDC', 1337),
+        decimals: 6,
+        symbol: 'USDC'
+      };
+
+      it('should throw error for invalid tick values', () => {
+        expect(() => adapter._tickToPrice('not-a-number', validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter._tickToPrice(null, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter._tickToPrice(undefined, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter._tickToPrice(NaN, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter._tickToPrice(Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+        expect(() => adapter._tickToPrice(-Infinity, validTokenA, validTokenB))
+          .toThrow('Invalid tick value');
+      });
+
+      it('should throw error for missing token information', () => {
+        const validTick = 0;
+
+        expect(() => adapter._tickToPrice(validTick, null, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter._tickToPrice(validTick, undefined, validTokenB))
+          .toThrow('Missing required token information');
+        expect(() => adapter._tickToPrice(validTick, validTokenA, null))
+          .toThrow('Missing required token information');
+        expect(() => adapter._tickToPrice(validTick, validTokenA, undefined))
+          .toThrow('Missing required token information');
+      });
+
+      it('should throw error for missing token addresses', () => {
+        const validTick = 0;
+        const tokenMissingAddress = { decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter._tickToPrice(validTick, tokenMissingAddress, validTokenB))
+          .toThrow('baseToken.address is required');
+        expect(() => adapter._tickToPrice(validTick, validTokenA, tokenMissingAddress))
+          .toThrow('quoteToken.address is required');
+      });
+
+      it('should throw error for invalid token addresses', () => {
+        const validTick = 0;
+        const invalidAddressToken = { address: 'invalid-address', decimals: 18, symbol: 'TEST' };
+
+        expect(() => adapter._tickToPrice(validTick, invalidAddressToken, validTokenB))
+          .toThrow('Invalid baseToken.address: invalid-address');
+        expect(() => adapter._tickToPrice(validTick, validTokenA, invalidAddressToken))
+          .toThrow('Invalid quoteToken.address: invalid-address');
+      });
+
+      it('should throw error when base and quote tokens have the same address', () => {
+        const validTick = 0;
+        const sameToken = {
+          address: getWethAddress(1337),
+          decimals: 18,
+          symbol: 'ETH'
+        };
+
+        expect(() => adapter._tickToPrice(validTick, sameToken, sameToken))
+          .toThrow('Base and quote token addresses cannot be the same');
+      });
+
+      it('should throw error for invalid baseToken decimals', () => {
+        const validTick = 0;
+
+        const invalidTokens = [
+          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter._tickToPrice(validTick, invalidToken, validTokenB))
+            .toThrow('baseToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+
+      it('should throw error for invalid quoteToken decimals', () => {
+        const validTick = 0;
+
+        const invalidTokens = [
+          { address: getTokenAddress('USDC', 1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: NaN, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: -1, symbol: 'TEST' },
+          { address: getTokenAddress('USDC', 1337), decimals: 256, symbol: 'TEST' }
+        ];
+
+        invalidTokens.forEach(invalidToken => {
+          expect(() => adapter._tickToPrice(validTick, validTokenA, invalidToken))
+            .toThrow('quoteToken.decimals must be a finite number between 0 and 255');
+        });
+      });
+    });
+  });
+
+  describe('evaluatePriceMovement', () => {
+    // Mock token data for testing
+    const mockToken0Data = {
+      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+      symbol: 'USDC',
+      decimals: 6
+    };
+
+    const mockToken1Data = {
+      address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+      symbol: 'WETH',
+      decimals: 18
+    };
+
+    describe('Success Cases', () => {
+      it('should calculate zero price movement when ticks are equal', () => {
+        const swapData = { tick: 100 };
+        const baseline = 100;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.priceMovementPercent).toBe(0);
+        expect(result.direction).toBe('up'); // Equal means 'up' (>= comparison)
+      });
+
+      it('should return price movement as a percentage', () => {
+        const swapData = { tick: 1000 };
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(typeof result.priceMovementPercent).toBe('number');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+
+      it('should return up direction when price increases', () => {
+        // Higher tick = higher price for token0/token1
+        const swapData = { tick: 1000 };
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.direction).toBe('up');
+      });
+
+      it('should return down direction when price decreases', () => {
+        // Lower tick = lower price for token0/token1
+        const swapData = { tick: 0 };
+        const baseline = 1000;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result.direction).toBe('down');
+      });
+
+      it('should return baselinePrice and currentPrice as strings', () => {
+        const swapData = { tick: 100 };
+        const baseline = 50;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(typeof result.baselinePrice).toBe('string');
+        expect(typeof result.currentPrice).toBe('string');
+      });
+
+      it('should handle negative ticks', () => {
+        const swapData = { tick: -50000 };
+        const baseline = -45000;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result).toHaveProperty('direction');
+        expect(result.priceMovementPercent).toBeGreaterThanOrEqual(0);
+      });
+
+      it('should calculate absolute percentage (always positive)', () => {
+        const swapDataUp = { tick: 1000 };
+        const swapDataDown = { tick: -1000 };
+        const baseline = 0;
+
+        const resultUp = adapter.evaluatePriceMovement(swapDataUp, baseline, mockToken0Data, mockToken1Data);
+        const resultDown = adapter.evaluatePriceMovement(swapDataDown, baseline, mockToken0Data, mockToken1Data);
+
+        expect(resultUp.priceMovementPercent).toBeGreaterThanOrEqual(0);
+        expect(resultDown.priceMovementPercent).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw error for null swapData', () => {
+        expect(() => adapter.evaluatePriceMovement(null, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw error for undefined swapData', () => {
+        expect(() => adapter.evaluatePriceMovement(undefined, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw error for swapData without tick', () => {
+        expect(() => adapter.evaluatePriceMovement({}, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData must have tick property as a number');
+      });
+
+      it('should throw error for swapData with non-number tick', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: '100' }, 100, mockToken0Data, mockToken1Data))
+          .toThrow('swapData must have tick property as a number');
+      });
+
+      it('should throw error for null baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, null, mockToken0Data, mockToken1Data))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw error for undefined baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, undefined, mockToken0Data, mockToken1Data))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw error for non-number baseline', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, '100', mockToken0Data, mockToken1Data))
+          .toThrow('baseline must be a number (tick value)');
+      });
+
+      it('should throw error for missing token0Data', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, null, mockToken1Data))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for token0Data missing address', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, { symbol: 'USDC', decimals: 6 }, mockToken1Data))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for missing token1Data', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, null))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw error for token1Data missing decimals', () => {
+        expect(() => adapter.evaluatePriceMovement({ tick: 100 }, 100, mockToken0Data, { address: '0x123', symbol: 'WETH' }))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+    });
+
+    describe('Edge Cases', () => {
+      it('should handle maximum tick values', () => {
+        const swapData = { tick: 887272 }; // Max tick
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+
+      it('should handle minimum tick values', () => {
+        const swapData = { tick: -887272 }; // Min tick
+        const baseline = 0;
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, mockToken0Data, mockToken1Data);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('getPositionsForVDS', () => {
+    // Note: The Graph API key is configured via configureTheGraph in test setup
+
+    describe('Success Cases', () => {
+      // These tests use real The Graph queries. Since The Graph indexes mainnet/Arbitrum
+      // (not our local Hardhat fork), tests that need to find positions use Arbitrum mainnet.
+
+      it('should return empty positions for address with no V4 positions', async () => {
+        // Any random address should have no V4 positions
+        const emptyAddress = '0x0000000000000000000000000000000000000001';
+        const result = await adapter.getPositionsForVDS(emptyAddress, env.provider);
+
+        expect(result).toHaveProperty('positions');
+        expect(result).toHaveProperty('poolData');
+        expect(result.positions).toEqual({});
+        expect(result.poolData).toEqual({});
+      });
+
+      it('should return empty positions for vault on local fork (Graph cannot see fork positions)', async () => {
+        // The vault has a position on our local fork, but The Graph indexes mainnet,
+        // not our local fork, so it returns empty
+        const vaultAddress = env.testVault.address;
+        const result = await adapter.getPositionsForVDS(vaultAddress, env.provider);
+
+        expect(result).toHaveProperty('positions');
+        expect(result).toHaveProperty('poolData');
+        // Graph can't see fork positions
+        expect(Object.keys(result.positions).length).toBe(0);
+      });
+
+      // Test with real Arbitrum mainnet positions (requires THEGRAPH_API_KEY env var)
+      it('should return normalized positions from Arbitrum mainnet', async () => {
+        const apiKey = process.env.THEGRAPH_API_KEY;
+        if (!apiKey) {
+          console.log('Skipping real Arbitrum test - THEGRAPH_API_KEY not set');
+          return;
+        }
+
+        // Create an Arbitrum adapter and provider for real mainnet query
+        const arbitrumProvider = new ethers.providers.JsonRpcProvider('https://arb1.arbitrum.io/rpc');
+        const arbitrumAdapter = new UniswapV4Adapter(42161, arbitrumProvider);
+
+        // Use a known address with V4 positions on Arbitrum
+        // This may need to be updated if the address no longer has positions
+        // For now, we'll check any address and verify the structure if positions exist
+        const testAddress = '0x0000000000000000000000000000000000000001';
+
+        try {
+          const result = await arbitrumAdapter.getPositionsForVDS(testAddress, arbitrumProvider);
+
+          // Verify structure regardless of whether positions exist
+          expect(result).toHaveProperty('positions');
+          expect(result).toHaveProperty('poolData');
+          expect(typeof result.positions).toBe('object');
+          expect(typeof result.poolData).toBe('object');
+
+          // If any positions are returned, verify their structure
+          const positionIds = Object.keys(result.positions);
+          if (positionIds.length > 0) {
+            const position = result.positions[positionIds[0]];
+
+            expect(position).toHaveProperty('id');
+            expect(position).toHaveProperty('pool');
+            expect(position).toHaveProperty('tickLower');
+            expect(position).toHaveProperty('tickUpper');
+            expect(position).toHaveProperty('liquidity');
+            expect(position).toHaveProperty('feeGrowthInside0LastX128');
+            expect(position).toHaveProperty('feeGrowthInside1LastX128');
+            expect(position).toHaveProperty('tokensOwed0');
+            expect(position).toHaveProperty('tokensOwed1');
+            expect(position).toHaveProperty('lastUpdated');
+
+            // Verify poolData structure
+            const poolData = result.poolData[position.pool];
+            expect(poolData).toHaveProperty('token0Symbol');
+            expect(poolData).toHaveProperty('token1Symbol');
+            expect(poolData).toHaveProperty('fee');
+            expect(poolData).toHaveProperty('tickSpacing');
+            expect(poolData).toHaveProperty('hooks');
+            expect(poolData).toHaveProperty('platform');
+            expect(poolData.platform).toBe('uniswapV4');
+          }
+        } catch (error) {
+          // Graph API errors are expected if no API key or network issues
+          if (error.message.includes('The Graph')) {
+            console.log('Skipping - The Graph API error:', error.message);
+          } else {
+            throw error;
+          }
+        }
+      }, 30000);
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing address', async () => {
+        await expect(
+          adapter.getPositionsForVDS(null, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+
+        await expect(
+          adapter.getPositionsForVDS(undefined, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+
+        await expect(
+          adapter.getPositionsForVDS('', env.provider)
+        ).rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw error for invalid address', async () => {
+        await expect(
+          adapter.getPositionsForVDS('invalid-address', env.provider)
+        ).rejects.toThrow('Invalid address: invalid-address');
+
+        await expect(
+          adapter.getPositionsForVDS('0x123', env.provider)
+        ).rejects.toThrow('Invalid address: 0x123');
+      });
+
+      it('should throw error for missing provider', async () => {
+        const validAddress = env.testVault.address;
+
+        await expect(
+          adapter.getPositionsForVDS(validAddress, null)
+        ).rejects.toThrow('Valid provider parameter is required');
+
+        await expect(
+          adapter.getPositionsForVDS(validAddress, undefined)
+        ).rejects.toThrow('Valid provider parameter is required');
+
+        await expect(
+          adapter.getPositionsForVDS(validAddress, {})
+        ).rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+  });
+
+  describe('_resolveTokenSymbol', () => {
+    it('should return ETH for AddressZero', () => {
+      const result = adapter._resolveTokenSymbol(ethers.constants.AddressZero);
+      expect(result).toBe('ETH');
+    });
+
+    it('should return token symbol for known tokens', () => {
+      const usdcAddress = getTokenAddress('USDC', 1337);
+      const result = adapter._resolveTokenSymbol(usdcAddress);
+      expect(result).toBe('USDC');
+    });
+
+    it('should return UNKNOWN for unrecognized token addresses', () => {
+      const unknownAddress = '0x1111111111111111111111111111111111111111';
+      const result = adapter._resolveTokenSymbol(unknownAddress);
+      expect(result).toBe('UNKNOWN');
     });
   });
 });

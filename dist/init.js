@@ -4,6 +4,7 @@
  */
 
 import { configureCoingecko } from './services/coingecko.js';
+import { configureBlockExplorer } from './services/blockExplorer.js';
 import { configureChainHelpers } from './helpers/chainHelpers.js';
 
 /**
@@ -15,6 +16,7 @@ import { configureChainHelpers } from './helpers/chainHelpers.js';
  * @param {Object} config - Configuration options
  * @param {string} [config.coingeckoApiKey] - CoinGecko API key for price data
  * @param {string} [config.alchemyApiKey] - Alchemy API key for Arbitrum RPC URLs
+ * @param {string} [config.arbiscanApiKey] - Arbiscan API key for internal transaction data
  *
  * @example
  * // In a Next.js app (_app.js)
@@ -23,6 +25,7 @@ import { configureChainHelpers } from './helpers/chainHelpers.js';
  * initFumLibrary({
  *   coingeckoApiKey: process.env.NEXT_PUBLIC_COINGECKO_API_KEY,
  *   alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+ *   arbiscanApiKey: process.env.NEXT_PUBLIC_ARBISCAN_API_KEY,
  * });
  *
  * @example
@@ -31,13 +34,17 @@ import { configureChainHelpers } from './helpers/chainHelpers.js';
  *
  * initFumLibrary({
  *   coingeckoApiKey: process.env.COINGECKO_API_KEY,
+ *   arbiscanApiKey: process.env.ARBISCAN_API_KEY,
  * });
  */
-export function initFumLibrary({ coingeckoApiKey, alchemyApiKey } = {}) {
+export function initFumLibrary({ coingeckoApiKey, alchemyApiKey, arbiscanApiKey } = {}) {
   if (coingeckoApiKey) {
     configureCoingecko({ apiKey: coingeckoApiKey });
   }
   if (alchemyApiKey) {
     configureChainHelpers({ alchemyApiKey });
+  }
+  if (arbiscanApiKey) {
+    configureBlockExplorer({ arbiscanApiKey });
   }
 }

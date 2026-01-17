@@ -26,13 +26,14 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getBlockExplorerService } from "../services/blockExplorer.js";
 import { getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
-import { getTokenByAddress, getTokenBySymbol, getWethAddress } from "../helpers/tokenHelpers.js";
-import { PERMIT2_ADDRESS } from "../helpers/Permit2Helper.js";
+import { getTokenByAddress, getTokenBySymbol, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { discoverV4Pools, getV4PositionsByOwner } from "../services/theGraph.js";
+import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Token, Percent, CurrencyAmount, TradeType, Ether } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
 import { Protocol } from '@uniswap/router-sdk';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
-import { SqrtPriceMath, TickMath } from '@uniswap/v3-sdk';
+import { SqrtPriceMath, TickMath, tickToPrice } from '@uniswap/v3-sdk';
 import { Pool as V4Pool, Position as V4Position, V4PositionManager } from '@uniswap/v4-sdk';
 import JSBI from "jsbi";
 
@@ -276,20 +277,81 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
-   * Evaluate price movement between current swap state and a baseline
+   * Evaluate price movement between current swap state and a baseline tick
    *
    * V4 note: Uses same tick-based math as V3 since both are concentrated liquidity.
    *
    * @param {Object} swapData - Parsed swap event data from parseSwapEvent()
-   * @param {number|string} baseline - Baseline tick value
+   * @param {number} swapData.tick - Current tick from swap event
+   * @param {number} baseline - Baseline tick value (stored when position was entered)
    * @param {Object} token0Data - Token0 data object
+   * @param {string} token0Data.address - Token contract address
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {number} token0Data.decimals - Token decimals
    * @param {Object} token1Data - Token1 data object
+   * @param {string} token1Data.address - Token contract address
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {number} token1Data.decimals - Token decimals
    * @returns {Object} Price movement evaluation
+   * @returns {number} result.priceMovementPercent - Absolute percentage price movement
+   * @returns {string} result.baselinePrice - Baseline price as human-readable string
+   * @returns {string} result.currentPrice - Current price as human-readable string
+   * @returns {string} result.direction - 'up' or 'down' indicating price direction
+   * @throws {Error} If swapData or baseline is invalid
    */
   evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
-    // TODO: Implement tick-to-price conversion and comparison
-    // Math should be identical to V3 since both use ticks
-    throw new Error("UniswapV4Adapter.evaluatePriceMovement not implemented");
+    // Validate swapData
+    if (!swapData) {
+      throw new Error('swapData parameter is required');
+    }
+
+    if (typeof swapData.tick !== 'number') {
+      throw new Error('swapData must have tick property as a number');
+    }
+
+    // Validate baseline
+    if (baseline === undefined || baseline === null) {
+      throw new Error('baseline parameter is required');
+    }
+
+    if (typeof baseline !== 'number') {
+      throw new Error('baseline must be a number (tick value)');
+    }
+
+    // Validate token data
+    if (!token0Data || !token0Data.address || !token0Data.symbol || token0Data.decimals === undefined) {
+      throw new Error('token0Data must have address, symbol, and decimals properties');
+    }
+
+    if (!token1Data || !token1Data.address || !token1Data.symbol || token1Data.decimals === undefined) {
+      throw new Error('token1Data must have address, symbol, and decimals properties');
+    }
+
+    const currentTick = swapData.tick;
+
+    // Convert ticks to prices using the SDK
+    const baselinePrice = this._tickToPrice(baseline, token0Data, token1Data);
+    const currentPrice = this._tickToPrice(currentTick, token0Data, token1Data);
+
+    // Calculate price movement percentage
+    const baselinePriceValue = parseFloat(baselinePrice.toSignificant(18));
+    const currentPriceValue = parseFloat(currentPrice.toSignificant(18));
+
+    // Avoid division by zero
+    if (baselinePriceValue === 0) {
+      throw new Error('Baseline price is zero, cannot calculate movement');
+    }
+
+    const priceRatio = currentPriceValue / baselinePriceValue;
+    const priceMovementPercent = Math.abs((priceRatio - 1) * 100);
+    const direction = currentPriceValue >= baselinePriceValue ? 'up' : 'down';
+
+    return {
+      priceMovementPercent,
+      baselinePrice: baselinePriceValue.toString(),
+      currentPrice: currentPriceValue.toString(),
+      direction
+    };
   }
 
   // ===========================================================================
@@ -297,23 +359,170 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   // ===========================================================================
 
   /**
+   * Resolve token symbol from currency address
+   *
+   * Handles native ETH (AddressZero) and falls back to UNKNOWN for unrecognized tokens.
+   *
+   * @param {string} currencyAddress - Token/currency address
+   * @returns {string} Token symbol
+   * @private
+   */
+  _resolveTokenSymbol(currencyAddress) {
+    if (currencyAddress === ethers.constants.AddressZero) {
+      return 'ETH';
+    }
+    try {
+      const token = getTokenByAddress(currencyAddress, this.chainId);
+      return token?.symbol || 'UNKNOWN';
+    } catch {
+      return 'UNKNOWN';
+    }
+  }
+
+  /**
    * Get positions formatted for VaultDataService
    *
    * V4 difference: Positions are still NFTs but managed by V4 PositionManager.
    * Position data structure includes PoolKey instead of just pool address.
+   * Uses StateView for position liquidity and fee data.
+   *
+   * Note: V4 PositionManager doesn't implement ERC721Enumerable, so position
+   * enumeration requires The Graph API. This differs from V3 which uses on-chain
+   * tokenOfOwnerByIndex.
    *
    * @param {string} address - Vault address
    * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{positions: Object, poolData: Object}>} Normalized position data
    */
   async getPositionsForVDS(address, provider) {
-    // TODO: Enumerate NFT positions from V4 PositionManager
-    // 1. Get NFT balance: positionManager.balanceOf(address)
-    // 2. For each token: positionManager.tokenOfOwnerByIndex(address, i)
-    // 3. Get position info: positionManager.positions(tokenId)
-    // 4. Extract PoolKey and position range
-    // 5. Normalize to VDS format
-    throw new Error("UniswapV4Adapter.getPositionsForVDS not implemented");
+    // Validate address
+    if (!address) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(address);
+    } catch (error) {
+      throw new Error(`Invalid address: ${address}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      // Get contract instances
+      const positionManagerContract = new ethers.Contract(
+        this.addresses.positionManagerAddress,
+        this.positionManagerABI,
+        provider
+      );
+      const stateViewContract = new ethers.Contract(
+        this.addresses.stateViewAddress,
+        this.stateViewABI,
+        provider
+      );
+
+      // Fetch user's position token IDs using The Graph
+      // V4 PositionManager doesn't implement ERC721Enumerable (no tokenOfOwnerByIndex)
+      const tokenIds = await getV4PositionsByOwner(address, this.chainId);
+
+      if (tokenIds.length === 0) {
+        return { positions: {}, poolData: {} };
+      }
+
+      const positions = {};
+      const poolDataMap = {};
+      const processingErrors = [];
+
+      // Process each position
+      for (const tokenId of tokenIds) {
+        try {
+          // Get pool key and packed position info
+          const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
+
+          // Decode tick bounds from packed info
+          const { tickLower, tickUpper } = this._decodePositionInfo(packedInfo);
+
+          // Compute poolId
+          const normalizedPoolKey = {
+            currency0: poolKey.currency0,
+            currency1: poolKey.currency1,
+            fee: Number(poolKey.fee),
+            tickSpacing: Number(poolKey.tickSpacing),
+            hooks: poolKey.hooks
+          };
+          const poolId = this._computePoolId(normalizedPoolKey);
+
+          // Get position liquidity and fee data from StateView
+          const salt = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
+          const positionInfo = await stateViewContract['getPositionInfo(bytes32,address,int24,int24,bytes32)'](
+            poolId,
+            this.addresses.positionManagerAddress,
+            tickLower,
+            tickUpper,
+            salt
+          );
+
+          const liquidity = positionInfo[0];
+          const feeGrowthInside0LastX128 = positionInfo[1];
+          const feeGrowthInside1LastX128 = positionInfo[2];
+
+          // Skip positions with zero liquidity (closed positions)
+          if (BigInt(liquidity.toString()) === 0n) {
+            continue;
+          }
+
+          // Cache pool metadata if not already cached
+          if (!poolDataMap[poolId]) {
+            poolDataMap[poolId] = {
+              token0Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency0),
+              token1Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency1),
+              fee: normalizedPoolKey.fee,
+              tickSpacing: normalizedPoolKey.tickSpacing,
+              hooks: normalizedPoolKey.hooks,
+              platform: 'uniswapV4'
+            };
+          }
+
+          // Assemble position data
+          positions[tokenId] = {
+            id: tokenId,
+            pool: poolId,
+            tickLower,
+            tickUpper,
+            liquidity: liquidity.toString(),
+            feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
+            feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
+            tokensOwed0: "0", // V4 doesn't track these in the same struct
+            tokensOwed1: "0",
+            lastUpdated: Date.now()
+          };
+
+        } catch (error) {
+          processingErrors.push(`Position ${tokenId}: ${error.message}`);
+        }
+      }
+
+      // If any positions failed to process, throw error with all failures
+      if (processingErrors.length > 0) {
+        throw new Error(`Failed to process ${processingErrors.length} position(s): ${processingErrors.join('; ')}`);
+      }
+
+      return {
+        positions,
+        poolData: poolDataMap
+      };
+
+    } catch (error) {
+      // Re-throw validation errors as-is
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch V4 positions for VDS: ${error.message}`);
+    }
   }
 
   /**
@@ -1783,7 +1992,11 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       recipient,
       slippageTolerance = 0.5,
       deadlineMinutes = 20,
-      forceProtocol
+      forceProtocol,
+      // Optional Permit2 parameters for ERC20 inputs
+      permit2Signature,
+      permit2Nonce,
+      permit2Deadline
     } = params;
 
     // ========================================================================
@@ -1875,22 +2088,67 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     }
 
     // ========================================================================
-    // Build response
+    // Build quote object (shared between wrapped and unwrapped responses)
+    // ========================================================================
+
+    const quote = {
+      amountOut: route.quote.quotient.toString(),
+      amountOutMinimum: route.quoteGasAdjusted.quotient.toString(),
+      gasEstimate: route.estimatedGasUsed.toString(),
+      route: route.route.map(r => ({
+        protocol: r.protocol,
+        pools: r.poolAddresses || r.pools?.map(p => p.address)
+      }))
+    };
+
+    // ========================================================================
+    // Wrap with Permit2 for ERC20 inputs (if signature provided)
+    // ========================================================================
+
+    if (!isNativeIn && permit2Signature) {
+      // Validate Permit2 parameters
+      if (typeof permit2Nonce !== 'number' || permit2Nonce < 0) {
+        throw new Error('permit2Nonce must be a non-negative number when permit2Signature is provided');
+      }
+      if (typeof permit2Deadline !== 'number' || permit2Deadline <= 0) {
+        throw new Error('permit2Deadline must be a positive number when permit2Signature is provided');
+      }
+
+      const permitData = {
+        details: {
+          token: tokenIn,
+          amount: amountIn,
+          expiration: permit2Deadline,
+          nonce: permit2Nonce
+        },
+        spender: this.addresses.universalRouterAddress,
+        sigDeadline: permit2Deadline
+      };
+
+      const wrappedCalldata = wrapWithPermit2(
+        this.universalRouterInterface,
+        route.methodParameters.calldata,
+        permitData,
+        permit2Signature
+      );
+
+      return {
+        to: this.addresses.universalRouterAddress,
+        data: wrappedCalldata,
+        value: '0',
+        quote
+      };
+    }
+
+    // ========================================================================
+    // Return unwrapped response (native ETH or no Permit2)
     // ========================================================================
 
     return {
       to: this.addresses.universalRouterAddress,
       data: route.methodParameters.calldata,
       value: isNativeIn ? amountIn : '0',
-      quote: {
-        amountOut: route.quote.quotient.toString(),
-        amountOutMinimum: route.quoteGasAdjusted.quotient.toString(),
-        gasEstimate: route.estimatedGasUsed.toString(),
-        route: route.route.map(r => ({
-          protocol: r.protocol,
-          pools: r.poolAddresses || r.pools?.map(p => p.address)
-        }))
-      }
+      quote
     };
   }
 
@@ -1904,10 +2162,110 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Quote with { amountIn, amountOut, route, methodParameters? }
    */
   async getBestSwapQuote(params) {
-    // TODO: Implement V4 swap routing
-    // V4 supports native ETH without wrapping
-    // May need to use V4-compatible router
-    throw new Error("UniswapV4Adapter.getBestSwapQuote not implemented");
+    const { tokenInAddress, tokenOutAddress, amount, isAmountIn, tokenInIsNative = false, tokenOutIsNative = false } = params;
+
+    // Validate parameters - skip address validation for native ETH (address not used)
+    if (!tokenInIsNative) {
+      if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+        throw new Error("TokenIn address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenInAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+      }
+    }
+
+    if (!tokenOutIsNative) {
+      if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+        throw new Error("TokenOut address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenOutAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+      }
+    }
+
+    if (!amount) {
+      throw new Error("Amount parameter is required");
+    }
+    if (typeof amount !== 'string') {
+      throw new Error("Amount must be a string");
+    }
+    if (!/^\d+$/.test(amount)) {
+      throw new Error("Amount must be a positive numeric string");
+    }
+    if (amount === '0') {
+      throw new Error("Amount cannot be zero");
+    }
+
+    if (typeof isAmountIn !== 'boolean') {
+      throw new Error("isAmountIn parameter is required and must be a boolean");
+    }
+
+    // Create Currency instances - use Ether for native ETH, Token for ERC20
+    const tokenIn = tokenInIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenInAddress);
+    const tokenOut = tokenOutIsNative
+      ? Ether.onChain(this.alphaRouterChainId)
+      : this._createTokenInstance(tokenOutAddress);
+
+    // Create CurrencyAmount and call AlphaRouter based on amount type
+    let currencyAmount, quoteCurrency, route;
+
+    if (!isAmountIn) {
+      // Amount is desired output (EXACT_OUTPUT), find required input
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenOut, amount);
+      quoteCurrency = tokenIn;
+
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_OUTPUT,
+        undefined, // swapConfig - not needed for quotes only
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_OUTPUT: quote is the required input amount
+      const amountIn = route.quote.quotient.toString();
+      return {
+        amountIn,
+        amountOut: amount,
+        route,
+        methodParameters: route.methodParameters
+      };
+    } else {
+      // Amount is input (EXACT_INPUT), find expected output
+      currencyAmount = CurrencyAmount.fromRawAmount(tokenIn, amount);
+      quoteCurrency = tokenOut;
+
+      route = await this.alphaRouter.route(
+        currencyAmount,
+        quoteCurrency,
+        TradeType.EXACT_INPUT,
+        undefined, // swapConfig - not needed for quotes only
+        undefined  // partialRoutingConfig - use defaults
+      );
+
+      if (!route) {
+        throw new Error(`No route found for token pair ${tokenInAddress}/${tokenOutAddress}`);
+      }
+
+      // For EXACT_INPUT: quote is the expected output amount
+      const amountOut = route.quote.quotient.toString();
+      return {
+        amountIn: amount,
+        amountOut,
+        route,
+        methodParameters: route.methodParameters
+      };
+    }
   }
 
   /**
@@ -1921,9 +2279,139 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} { transactions: Array<{to, data, value}>, metadata: Array }
    */
   async batchSwapTransactions(swapInstructions, options) {
-    // TODO: Implement batched swap generation
-    // V4 flash accounting may allow more efficient batching
-    throw new Error("UniswapV4Adapter.batchSwapTransactions not implemented");
+    const { signer, provider, chainId, recipient, slippageTolerance } = options;
+
+    // Validate required options
+    if (!signer) {
+      throw new Error("signer is required for Permit2 signature generation");
+    }
+    if (!provider) {
+      throw new Error("provider is required");
+    }
+    if (!chainId) {
+      throw new Error("chainId is required");
+    }
+    if (!recipient) {
+      throw new Error("recipient is required");
+    }
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("slippageTolerance is required");
+    }
+
+    // Validate swapInstructions
+    if (!Array.isArray(swapInstructions)) {
+      throw new Error("swapInstructions must be an array");
+    }
+    if (swapInstructions.length === 0) {
+      throw new Error("swapInstructions cannot be empty");
+    }
+
+    const transactions = [];
+    const metadata = [];
+
+    // Create internal nonce tracker for this batch
+    // This handles the Permit2-specific requirement that nonces increment
+    const nonceTracker = new Map();
+
+    for (const instruction of swapInstructions) {
+      // Validate instruction
+      if (!instruction.tokenIn || !instruction.tokenIn.symbol) {
+        throw new Error("tokenIn with symbol is required");
+      }
+      if (!instruction.tokenOut || !instruction.tokenOut.symbol) {
+        throw new Error("tokenOut with symbol is required");
+      }
+      if (!instruction.amount) {
+        throw new Error("amount is required");
+      }
+
+      const { tokenIn, tokenOut, amount, isAmountIn = true } = instruction;
+
+      // Determine token addresses (native ETH uses AddressZero)
+      const tokenInAddress = tokenIn.isNative ? ethers.constants.AddressZero : tokenIn.address;
+      const tokenOutAddress = tokenOut.isNative ? ethers.constants.AddressZero : tokenOut.address;
+
+      let swapData;
+      let quotedAmountIn = amount;
+      let quotedAmountOut;
+
+      if (tokenIn.isNative) {
+        // Native ETH input - no Permit2 needed
+        swapData = await this._generateSwapData({
+          tokenIn: tokenInAddress,
+          tokenOut: tokenOutAddress,
+          amountIn: amount,
+          recipient,
+          slippageTolerance
+        });
+
+        quotedAmountOut = swapData.quote.amountOut;
+      } else {
+        // ERC20 input - requires Permit2 signature
+
+        // Get/track Permit2 nonce
+        let nonce;
+        if (nonceTracker.has(tokenIn.address)) {
+          // Use tracked nonce for batched swaps
+          nonce = nonceTracker.get(tokenIn.address);
+        } else {
+          // Fetch current nonce from Permit2 contract
+          nonce = await getPermit2Nonce(
+            provider,
+            recipient,
+            tokenIn.address,
+            this.addresses.universalRouterAddress
+          );
+        }
+
+        // Update tracker for next swap with same token
+        nonceTracker.set(tokenIn.address, nonce + 1);
+
+        // Generate Permit2 signature
+        const deadline = Math.floor(Date.now() / 1000) + 1800; // 30 minutes
+        const { signature } = await generatePermit2Signature(
+          signer,
+          chainId,
+          tokenIn.address,
+          amount,
+          this.addresses.universalRouterAddress,
+          nonce,
+          deadline
+        );
+
+        // Generate swap data with Permit2 wrapping
+        swapData = await this._generateSwapData({
+          tokenIn: tokenInAddress,
+          tokenOut: tokenOutAddress,
+          amountIn: amount,
+          recipient,
+          slippageTolerance,
+          permit2Signature: signature,
+          permit2Nonce: nonce,
+          permit2Deadline: deadline
+        });
+
+        quotedAmountOut = swapData.quote.amountOut;
+      }
+
+      transactions.push({
+        to: swapData.to,
+        data: swapData.data,
+        value: swapData.value
+      });
+
+      metadata.push({
+        tokenInSymbol: tokenIn.symbol,
+        tokenOutSymbol: tokenOut.symbol,
+        tokenInAddress: tokenIn.address,
+        tokenOutAddress: tokenOut.address,
+        quotedAmountIn,
+        quotedAmountOut,
+        isAmountIn
+      });
+    }
+
+    return { transactions, metadata };
   }
 
   // ===========================================================================
@@ -2662,10 +3150,104 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} { bestPool, poolsDiscovered, poolsActive }
    */
   async selectBestPool(tokenASymbol, tokenBSymbol, provider, chainId) {
-    // TODO: Discover V4 pools
-    // Query for pools by token pair, enumerate different fee tiers and hooks
-    // Filter by liquidity depth
-    throw new Error("UniswapV4Adapter.selectBestPool not implemented");
+    // Validate tokenASymbol
+    if (!tokenASymbol || typeof tokenASymbol !== 'string') {
+      throw new Error("tokenASymbol parameter is required and must be a string");
+    }
+
+    // Validate tokenBSymbol
+    if (!tokenBSymbol || typeof tokenBSymbol !== 'string') {
+      throw new Error("tokenBSymbol parameter is required and must be a string");
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("provider parameter is required and must be an ethers provider instance");
+    }
+
+    // Validate chainId
+    if (chainId === null || chainId === undefined || typeof chainId !== 'number') {
+      throw new Error("chainId parameter is required and must be a number");
+    }
+
+    // Resolve token addresses
+    // V4 supports native ETH (AddressZero) - no need to convert to WETH
+    const resolveTokenData = (symbol) => {
+      if (isNativeToken(symbol)) {
+        return {
+          address: ethers.constants.AddressZero,
+          symbol: 'ETH',
+          decimals: 18,
+          isNative: true
+        };
+      }
+      // Handle WETH specially - it's not in the base tokens config
+      // but is derived from ETH's wethAddresses
+      if (symbol === 'WETH') {
+        const wethAddress = getWethAddress(chainId);
+        return {
+          address: wethAddress,
+          symbol: 'WETH',
+          decimals: 18,
+          isNative: false
+        };
+      }
+      const token = getTokenBySymbol(symbol);
+      if (!token) {
+        throw new Error(`Token ${symbol} not found`);
+      }
+      const address = token.addresses[chainId];
+      if (!address) {
+        throw new Error(`Token ${symbol} not available on chain ${chainId}`);
+      }
+      return {
+        address,
+        symbol,
+        decimals: token.decimals,
+        isNative: false
+      };
+    };
+
+    const tokenAData = resolveTokenData(tokenASymbol);
+    const tokenBData = resolveTokenData(tokenBSymbol);
+
+    // Sort tokens for subgraph query (token0 < token1)
+    const { sortedToken0, sortedToken1 } = this.sortTokens(tokenAData, tokenBData);
+
+    // Query subgraph for V4 pools (vanilla pools only - no hooks)
+    const pools = await discoverV4Pools(
+      sortedToken0.address,
+      sortedToken1.address,
+      chainId
+    );
+
+    if (pools.length === 0) {
+      throw new Error(`No pools found for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName}`);
+    }
+
+    // Filter dead pools (liquidity = 0) - subgraph already filters but double-check
+    const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
+
+    if (activePools.length === 0) {
+      throw new Error(
+        `No active pools for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName} ` +
+        `(${pools.length} pools exist but all have zero liquidity)`
+      );
+    }
+
+    // Pools are already sorted by liquidity from subgraph query (highest first)
+    // But sort again to be certain
+    activePools.sort((a, b) => {
+      const liqA = BigInt(a.liquidity);
+      const liqB = BigInt(b.liquidity);
+      return liqB > liqA ? 1 : liqB < liqA ? -1 : 0;
+    });
+
+    return {
+      bestPool: activePools[0],
+      poolsDiscovered: pools.length,
+      poolsActive: activePools.length
+    };
   }
 
   /**
@@ -3058,6 +3640,88 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
+   * Convert a tick value to a corresponding price using the Uniswap SDK
+   *
+   * V4 note: Uses same tick math as V3 since both are concentrated liquidity.
+   *
+   * @param {number} tick - The tick value
+   * @param {Object} baseToken - Base token (token0 unless inverted)
+   * @param {string} baseToken.address - Token address
+   * @param {number} baseToken.decimals - Token decimals
+   * @param {Object} quoteToken - Quote token (token1 unless inverted)
+   * @param {string} quoteToken.address - Token address
+   * @param {number} quoteToken.decimals - Token decimals
+   * @returns {Price} Uniswap SDK Price object with methods like toFixed(), toSignificant(), etc.
+   */
+  _tickToPrice(tick, baseToken, quoteToken) {
+    if (!Number.isFinite(tick)) {
+      throw new Error("Invalid tick value");
+    }
+
+    if (!baseToken || !quoteToken) {
+      throw new Error("Missing required token information");
+    }
+
+    // Validate addresses
+    if (!baseToken.address) {
+      throw new Error("baseToken.address is required");
+    }
+    if (!quoteToken.address) {
+      throw new Error("quoteToken.address is required");
+    }
+
+    let validatedBaseAddress, validatedQuoteAddress;
+    try {
+      validatedBaseAddress = ethers.utils.getAddress(baseToken.address);
+    } catch (error) {
+      throw new Error(`Invalid baseToken.address: ${baseToken.address}`);
+    }
+
+    try {
+      validatedQuoteAddress = ethers.utils.getAddress(quoteToken.address);
+    } catch (error) {
+      throw new Error(`Invalid quoteToken.address: ${quoteToken.address}`);
+    }
+
+    // Validate tokens are not the same
+    if (validatedBaseAddress.toLowerCase() === validatedQuoteAddress.toLowerCase()) {
+      throw new Error("Base and quote token addresses cannot be the same");
+    }
+
+    // Validate decimals
+    if (!Number.isFinite(baseToken.decimals) || baseToken.decimals < 0 || baseToken.decimals > 255) {
+      throw new Error("baseToken.decimals must be a finite number between 0 and 255");
+    }
+    if (!Number.isFinite(quoteToken.decimals) || quoteToken.decimals < 0 || quoteToken.decimals > 255) {
+      throw new Error("quoteToken.decimals must be a finite number between 0 and 255");
+    }
+
+    try {
+      // Create Token instances
+      const base = new Token(
+        this.chainId,
+        validatedBaseAddress,
+        baseToken.decimals
+      );
+
+      const quote = new Token(
+        this.chainId,
+        validatedQuoteAddress,
+        quoteToken.decimals
+      );
+
+      // Use SDK's tickToPrice function
+      const price = tickToPrice(base, quote, tick);
+
+      // Return the raw Price object - let consumers decide how to format
+      return price;
+    } catch (error) {
+      console.error("Error converting tick to price:", error);
+      throw new Error(`Failed to convert tick to price: ${error.message}`);
+    }
+  }
+
+  /**
    * Sort tokens into the platform's canonical ordering
    *
    * V4 note: Same address-based ordering as V3 (lower address = token0).
@@ -3239,19 +3903,4 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     return { fees0, fees1, liquidity: BigInt(liquidity.toString()) };
   }
 
-  /**
-   * Get PoolKey for a given PoolId
-   *
-   * V4 note: PoolKey must be stored/indexed separately since it cannot be
-   * derived from PoolId alone (hash is not reversible).
-   *
-   * @param {string} poolId - PoolId bytes32
-   * @param {Object} provider - Ethers provider
-   * @returns {Promise<Object>} PoolKey object
-   */
-  async getPoolKeyFromId(poolId, provider) {
-    // TODO: Look up PoolKey from indexer or cache
-    // PoolKeys need to be stored at pool creation time
-    throw new Error("UniswapV4Adapter.getPoolKeyFromId not implemented");
-  }
 }
