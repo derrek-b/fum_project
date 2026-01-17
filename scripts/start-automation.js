@@ -26,7 +26,8 @@ const REQUIRED_VARS = [
   'RETRY_INTERVAL_MS',
   'MAX_FAILURE_DURATION_MS',
   'THEGRAPH_API_KEY',
-  'ALCHEMY_API_KEY'
+  'ALCHEMY_API_KEY',
+  'ARBISCAN_API_KEY'
 ];
 
 // Check if env vars are already set (production) or need to be loaded from file (development)
@@ -100,6 +101,8 @@ async function main() {
     initFumLibrary({
       coingeckoApiKey: process.env.COINGECKO_API_KEY,
       alchemyApiKey: process.env.ALCHEMY_API_KEY,
+      theGraphApiKey: process.env.THEGRAPH_API_KEY,
+      arbiscanApiKey: process.env.ARBISCAN_API_KEY,
     });
 
     console.log("Configuration:");

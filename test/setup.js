@@ -20,6 +20,8 @@ dotenv.config({ path: path.join(__dirname, '../.env.local') });
 initFumLibrary({
   alchemyApiKey: process.env.ALCHEMY_API_KEY,
   coingeckoApiKey: process.env.COINGECKO_API_KEY,
+  theGraphApiKey: process.env.THEGRAPH_API_KEY,
+  arbiscanApiKey: process.env.ARBISCAN_API_KEY,
 });
 
 // Suppress console output during tests (optional)
