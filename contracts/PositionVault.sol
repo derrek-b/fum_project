@@ -304,16 +304,29 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      * @notice Mints new liquidity positions via registered position managers
      * @param targets Array of position manager addresses to call
      * @param data Array of encoded mint calls
+     * @param values Array of ETH values to send with each call (for V4 native ETH positions)
      * @return results Array of success flags for each operation
      */
-    function mint(address[] calldata targets, bytes[] calldata data)
+    function mint(
+        address[] calldata targets,
+        bytes[] calldata data,
+        uint256[] calldata values
+    )
         external
         onlyAuthorized
         nonReentrant
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(values.length == targets.length, "PositionVault: values length mismatch");
         require(targets.length > 0, "PositionVault: empty batch");
+
+        // Validate vault has sufficient ETH balance for native ETH mints
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < values.length; i++) {
+            totalValue += values[i];
+        }
+        require(address(this).balance >= totalValue, "PositionVault: insufficient ETH balance");
 
         results = new bool[](targets.length);
 
@@ -321,7 +334,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             // Validate via factory
             IVaultFactory(factory).validateMint(targets[i], data[i], address(this));
 
-            (bool success, ) = targets[i].call(data[i]);
+            // Execute with value for native ETH positions
+            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "mint");
@@ -335,16 +349,29 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      * @notice Increases liquidity in existing positions
      * @param targets Array of position manager addresses to call
      * @param data Array of encoded increaseLiquidity calls
+     * @param values Array of ETH values to send with each call (for V4 native ETH positions)
      * @return results Array of success flags for each operation
      */
-    function increaseLiquidity(address[] calldata targets, bytes[] calldata data)
+    function increaseLiquidity(
+        address[] calldata targets,
+        bytes[] calldata data,
+        uint256[] calldata values
+    )
         external
         onlyAuthorized
         nonReentrant
         returns (bool[] memory results)
     {
         require(targets.length == data.length, "PositionVault: length mismatch");
+        require(values.length == targets.length, "PositionVault: values length mismatch");
         require(targets.length > 0, "PositionVault: empty batch");
+
+        // Validate vault has sufficient ETH balance for native ETH add liquidity
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < values.length; i++) {
+            totalValue += values[i];
+        }
+        require(address(this).balance >= totalValue, "PositionVault: insufficient ETH balance");
 
         results = new bool[](targets.length);
 
@@ -352,7 +379,8 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             // Validate via factory
             IVaultFactory(factory).validateIncreaseLiquidity(targets[i], data[i], address(this));
 
-            (bool success, ) = targets[i].call(data[i]);
+            // Execute with value for native ETH positions
+            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "addliq");
