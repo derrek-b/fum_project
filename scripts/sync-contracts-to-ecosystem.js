@@ -25,7 +25,8 @@ const CORE_CONTRACTS = [
 // Validator contracts (from validators/ subdirectory)
 const VALIDATOR_CONTRACTS = [
   'UniversalRouterValidator',
-  'UniswapV3PositionValidator'
+  'UniswapV3PositionValidator',
+  'UniswapV4PositionValidator'
 ];
 
 // Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)

@@ -269,7 +269,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     /**
      * @notice Approves spenders to spend vault tokens
      * @param targets Array of token addresses to approve
-     * @param data Array of encoded ERC20.approve(spender, amount) calls
+     * @param data Array of encoded approve calls (ERC20 or Permit2)
      * @return results Array of success flags for each approval
      */
     function approve(address[] calldata targets, bytes[] calldata data)
@@ -288,7 +288,10 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             require(data[i].length >= 68, "PositionVault: invalid approval data");
 
             bytes4 selector = bytes4(data[i][:4]);
-            require(selector == 0x095ea7b3, "PositionVault: not an approve call");
+            require(
+                selector == 0x095ea7b3 || selector == 0x87517c45,
+                "PositionVault: not an approve call"
+            );
 
             (bool success, ) = targets[i].call(data[i]);
             results[i] = success;
@@ -335,11 +338,20 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             IVaultFactory(factory).validateMint(targets[i], data[i], address(this));
 
             // Execute with value for native ETH positions
-            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
+            (bool success, bytes memory returnData) = targets[i].call{value: values[i]}(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "mint");
-            require(success, "PositionVault: mint failed");
+            if (!success) {
+                // Bubble up the revert reason from the position manager
+                if (returnData.length > 0) {
+                    assembly {
+                        revert(add(returnData, 32), mload(returnData))
+                    }
+                } else {
+                    revert("PositionVault: mint failed");
+                }
+            }
         }
 
         return results;
@@ -380,11 +392,20 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
             IVaultFactory(factory).validateIncreaseLiquidity(targets[i], data[i], address(this));
 
             // Execute with value for native ETH positions
-            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
+            (bool success, bytes memory returnData) = targets[i].call{value: values[i]}(data[i]);
             results[i] = success;
 
             emit TransactionExecuted(targets[i], data[i], success, "addliq");
-            require(success, "PositionVault: increaseLiquidity failed");
+            if (!success) {
+                // Bubble up the revert reason from the position manager
+                if (returnData.length > 0) {
+                    assembly {
+                        revert(add(returnData, 32), mload(returnData))
+                    }
+                } else {
+                    revert("PositionVault: increaseLiquidity failed");
+                }
+            }
         }
 
         return results;

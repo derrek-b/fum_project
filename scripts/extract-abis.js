@@ -19,7 +19,8 @@ const contractMapping = {
   'PositionVault.sol': 'PositionVault',
   'VaultFactory.sol': 'VaultFactory',
   'validators/UniversalRouterValidator.sol': 'UniversalRouterValidator',
-  'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator'
+  'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator',
+  'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator'
 };
 
 // List of contracts to extract ABIs from

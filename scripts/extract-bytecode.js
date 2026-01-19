@@ -23,7 +23,8 @@ const CONTRACTS_TO_EXTRACT = [
 // Validators to extract (in validators/ subdirectory)
 const VALIDATORS_TO_EXTRACT = [
   'UniversalRouterValidator',
-  'UniswapV3PositionValidator'
+  'UniswapV3PositionValidator',
+  'UniswapV4PositionValidator'
 ];
 
 // Debug logging
