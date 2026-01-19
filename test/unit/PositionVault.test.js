@@ -10,6 +10,7 @@ describe("PositionVault - 2.0.0", function() {
   let MockToken;
   let MockUniversalRouter;
   let MockNonfungiblePositionManager;
+  let MockPermit2;
   let factory;
   let vault;
   let swapValidator;
@@ -19,6 +20,7 @@ describe("PositionVault - 2.0.0", function() {
   let token2;
   let router;
   let positionManager;
+  let permit2;
   let permit2Address;
   let nonfungiblePositionManagerAddress;
   let owner;
@@ -41,8 +43,11 @@ describe("PositionVault - 2.0.0", function() {
     positionManager = await MockNonfungiblePositionManager.deploy();
     await positionManager.waitForDeployment();
 
-    // Use deterministic address for permit2 (canonical Uniswap address)
-    permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+    // Deploy mock Permit2
+    MockPermit2 = await ethers.getContractFactory("MockPermit2");
+    permit2 = await MockPermit2.deploy();
+    await permit2.waitForDeployment();
+    permit2Address = await permit2.getAddress();
     // Use deployed mock for position manager
     nonfungiblePositionManagerAddress = await positionManager.getAddress();
 
@@ -164,13 +169,13 @@ describe("PositionVault - 2.0.0", function() {
 
     it("should reject mint() with empty arrays", async function() {
       await expect(
-        vault.mint([], [])
+        vault.mint([], [], [])
       ).to.be.revertedWith("PositionVault: empty batch");
     });
 
     it("should reject increaseLiquidity() with empty arrays", async function() {
       await expect(
-        vault.increaseLiquidity([], [])
+        vault.increaseLiquidity([], [], [])
       ).to.be.revertedWith("PositionVault: empty batch");
     });
 
@@ -911,6 +916,34 @@ describe("PositionVault - 2.0.0", function() {
         )
       ).to.be.revertedWith("PositionVault: not an approve call");
     });
+
+    it("should accept Permit2 approve calls (selector 0x87517c45)", async function() {
+      // Encode Permit2 approve call: approve(address token, address spender, uint160 amount, uint48 expiration)
+      const iface = new ethers.Interface([
+        "function approve(address token, address spender, uint160 amount, uint48 expiration)"
+      ]);
+      const tokenAddress = await token.getAddress();
+      const spender = nonfungiblePositionManagerAddress;
+      const amount = 2n ** 160n - 1n; // max uint160
+      const expiration = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
+
+      const permit2ApproveData = iface.encodeFunctionData("approve", [
+        tokenAddress,
+        spender,
+        amount,
+        expiration
+      ]);
+
+      // Verify the selector is 0x87517c45
+      expect(permit2ApproveData.slice(0, 10)).to.equal("0x87517c45");
+
+      // Should succeed - vault accepts Permit2 approve selector
+      await expect(vault.approve(
+        [permit2Address],
+        [permit2ApproveData]
+      )).to.emit(vault, "TransactionExecuted")
+        .withArgs(permit2Address, permit2ApproveData, true, "approval");
+    });
   });
 
   // Test for mint function (create new positions)
@@ -958,7 +991,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.emit(vault, "TransactionExecuted")
         .withArgs(nonfungiblePositionManagerAddress, calldata, true, "mint");
@@ -986,7 +1020,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: mint recipient must be vault");
     });
@@ -1014,7 +1049,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [user1.address], // wrong target
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
@@ -1042,7 +1078,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n, 0n]
         )
       ).to.be.revertedWith("PositionVault: length mismatch");
     });
@@ -1070,7 +1107,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.connect(user1).mint(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("PositionVault: caller is not authorized");
     });
@@ -1100,7 +1138,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.connect(executorWallet).mint(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.emit(vault, "TransactionExecuted")
         .withArgs(nonfungiblePositionManagerAddress, calldata, true, "mint");
@@ -1113,7 +1152,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: invalid mint data");
     });
@@ -1129,9 +1169,207 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.mint(
           [nonfungiblePositionManagerAddress],
-          [fakeCalldata]
+          [fakeCalldata],
+          [0n]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: not a mint call");
+    });
+
+    describe("Mint ETH Value Forwarding (V4 Native ETH)", function() {
+      it("should forward ETH value to position manager for V4 mints", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const tokenAddress = await token.getAddress();
+        const token2Address = await token2.getAddress();
+
+        // Fund vault with ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        // Verify vault has ETH
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(ethers.parseEther("1.0"));
+
+        // Create mint calldata
+        const calldata = encodeMint(
+          tokenAddress,
+          token2Address,
+          3000,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        // Execute mint with ETH value - vault uses its own balance
+        await expect(vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [ethers.parseEther("0.5")]
+        )).to.emit(vault, "TransactionExecuted")
+          .withArgs(nonfungiblePositionManagerAddress, calldata, true, "mint");
+      });
+
+      it("should revert mint if insufficient ETH balance", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const tokenAddress = await token.getAddress();
+        const token2Address = await token2.getAddress();
+
+        // Vault has no ETH initially
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(0n);
+
+        const calldata = encodeMint(
+          tokenAddress,
+          token2Address,
+          3000,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        // Try to mint with 1 ETH value but vault has no ETH
+        await expect(vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [ethers.parseEther("1.0")]
+        )).to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should handle batch mints with mixed ETH values", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const tokenAddress = await token.getAddress();
+        const token2Address = await token2.getAddress();
+
+        // Fund vault with 2 ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("2.0")
+        });
+
+        const calldata1 = encodeMint(
+          tokenAddress,
+          token2Address,
+          3000,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        const calldata2 = encodeMint(
+          tokenAddress,
+          token2Address,
+          500,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        // Execute batch with 0.5 + 1.0 ETH (within vault's 2 ETH balance)
+        await expect(vault.mint(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata1, calldata2],
+          [ethers.parseEther("0.5"), ethers.parseEther("1.0")]
+        )).to.emit(vault, "TransactionExecuted");
+      });
+
+      it("should validate total ETH before any mint execution", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const tokenAddress = await token.getAddress();
+        const token2Address = await token2.getAddress();
+
+        // Fund vault with only 1 ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        const calldata1 = encodeMint(
+          tokenAddress,
+          token2Address,
+          3000,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        const calldata2 = encodeMint(
+          tokenAddress,
+          token2Address,
+          500,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        // Try to use 1.6 ETH total (0.8 + 0.8) but vault only has 1 ETH
+        await expect(vault.mint(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata1, calldata2],
+          [ethers.parseEther("0.8"), ethers.parseEther("0.8")]
+        )).to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should revert if values array length mismatches targets", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const tokenAddress = await token.getAddress();
+        const token2Address = await token2.getAddress();
+
+        const calldata = encodeMint(
+          tokenAddress,
+          token2Address,
+          3000,
+          -887220,
+          887220,
+          ethers.parseEther("1"),
+          ethers.parseEther("1"),
+          0,
+          0,
+          vaultAddress,
+          deadline
+        );
+
+        await expect(vault.mint(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          []  // Empty values array
+        )).to.be.revertedWith("PositionVault: values length mismatch");
+      });
     });
   });
 
@@ -1159,7 +1397,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.increaseLiquidity(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.emit(vault, "TransactionExecuted")
         .withArgs(nonfungiblePositionManagerAddress, calldata, true, "addliq");
@@ -1172,7 +1411,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.increaseLiquidity(
           [user1.address],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("VaultFactory: no validator for position manager");
     });
@@ -1184,7 +1424,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.increaseLiquidity(
           [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n, 0n]
         )
       ).to.be.revertedWith("PositionVault: length mismatch");
     });
@@ -1196,7 +1437,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.connect(user1).increaseLiquidity(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.be.revertedWith("PositionVault: caller is not authorized");
     });
@@ -1211,7 +1453,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.connect(executorWallet).increaseLiquidity(
           [nonfungiblePositionManagerAddress],
-          [calldata]
+          [calldata],
+          [0n]
         )
       ).to.emit(vault, "TransactionExecuted")
         .withArgs(nonfungiblePositionManagerAddress, calldata, true, "addliq");
@@ -1234,7 +1477,8 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.increaseLiquidity(
           [nonfungiblePositionManagerAddress],
-          [collectCalldata]
+          [collectCalldata],
+          [0n]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: not an increaseLiquidity call");
     });
@@ -1245,9 +1489,88 @@ describe("PositionVault - 2.0.0", function() {
       await expect(
         vault.increaseLiquidity(
           [nonfungiblePositionManagerAddress],
-          [shortCalldata]
+          [shortCalldata],
+          [0n]
         )
       ).to.be.revertedWith("UniswapV3PositionValidator: invalid calldata");
+    });
+
+    describe("IncreaseLiquidity ETH Value Forwarding (V4 Native ETH)", function() {
+      it("should forward ETH value to position manager for V4 add liquidity", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+        // Fund vault with ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        // Verify vault has ETH
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(ethers.parseEther("1.0"));
+
+        // Create increaseLiquidity calldata
+        const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+        // Execute with ETH value - vault uses its own balance
+        await expect(vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [ethers.parseEther("0.5")]
+        )).to.emit(vault, "TransactionExecuted")
+          .withArgs(nonfungiblePositionManagerAddress, calldata, true, "addliq");
+      });
+
+      it("should revert increaseLiquidity if insufficient ETH balance", async function() {
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+        // Vault has no ETH initially
+        const vaultAddress = await vault.getAddress();
+        const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+        expect(vaultBalance).to.equal(0n);
+
+        const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+        // Try to add liquidity with 1 ETH value but vault has no ETH
+        await expect(vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          [ethers.parseEther("1.0")]
+        )).to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should validate total ETH before any increaseLiquidity execution", async function() {
+        const vaultAddress = await vault.getAddress();
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+        // Fund vault with only 1 ETH
+        await owner.sendTransaction({
+          to: vaultAddress,
+          value: ethers.parseEther("1.0")
+        });
+
+        const calldata1 = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+        const calldata2 = encodeIncreaseLiquidity(2, 2000, 2000, 0, 0, deadline);
+
+        // Try to use 1.6 ETH total (0.8 + 0.8) but vault only has 1 ETH
+        await expect(vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress, nonfungiblePositionManagerAddress],
+          [calldata1, calldata2],
+          [ethers.parseEther("0.8"), ethers.parseEther("0.8")]
+        )).to.be.revertedWith("PositionVault: insufficient ETH balance");
+      });
+
+      it("should revert if values array length mismatches targets", async function() {
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        const calldata = encodeIncreaseLiquidity(1, 1000, 1000, 0, 0, deadline);
+
+        await expect(vault.increaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [calldata],
+          []  // Empty values array
+        )).to.be.revertedWith("PositionVault: values length mismatch");
+      });
     });
   });
 
