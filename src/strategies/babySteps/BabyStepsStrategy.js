@@ -102,8 +102,6 @@ export default class BabyStepsStrategy extends StrategyBase {
           targetPool.token1
         );
 
-        this.log(`🔍 Baseline check (retry scenario): baseline=${existingBaseline}, movement=${priceMovement.priceMovementPercent.toFixed(2)}%, trigger=${emergencyExitTrigger}%`);
-
         if (priceMovement.priceMovementPercent >= emergencyExitTrigger) {
           this.log(`🚨 EMERGENCY EXIT TRIGGERED during setup for vault ${vault.address}:`);
           this.log(`  Price moved ${priceMovement.priceMovementPercent.toFixed(2)}% while in retry queue (trigger: ${emergencyExitTrigger}%)`);
@@ -272,8 +270,6 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Parse swap event - returns platform-specific data (kept opaque for adapter methods)
     const swapData = adapter.parseSwapEvent(log);
-
-    this.log(`🔍 Swap detected in pool ${poolId}`);
 
     // STEP 2: Validate Baby Steps constraints
     const positionIds = Object.keys(vault.positions);
@@ -470,8 +466,6 @@ export default class BabyStepsStrategy extends StrategyBase {
       return false;
     }
 
-    this.log(`🔍 Checking fees for position ${position.id} with trigger $${reinvestmentTrigger}`);
-
     // Get pool metadata for token symbols
     const poolMetadata = this.poolData[position.pool];
     if (!poolMetadata) {
@@ -578,7 +572,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Generate claim fees transaction
     const claimFeesData = await retryRpcCall(
       () => adapter.generateClaimFeesData({
-        positionId,
+        position,
         provider: this.provider,
         walletAddress: vault.address,
         token0Address: token0Data.address,
@@ -586,7 +580,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         token0Decimals: token0Data.decimals,
         token1Decimals: token1Data.decimals,
         token0IsNative,
-        token1IsNative
+        token1IsNative,
+        poolData: poolMetadata
       }),
       'generateClaimFeesData',
       { log: (msg) => this.log(msg) }
@@ -1847,10 +1842,12 @@ export default class BabyStepsStrategy extends StrategyBase {
     if (currentBufferSwaps.length > 0) {
       try {
         this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
+
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
         const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
+
         const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
         this.eventManager.emit('TokensSwapped', {
           vaultAddress: vault.address,
@@ -1928,8 +1925,15 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 8: Execute increaseLiquidity transaction
     // 8a. Ensure token approvals for position manager
-    const liquidityTarget = adapter.getApprovalTarget('liquidity');
-    await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
+    const approvalTxs = await adapter.getRequiredApprovals(
+      'liquidity',
+      vault.address,
+      [token0Data.address, token1Data.address],
+      this.provider
+    );
+    if (approvalTxs.length > 0) {
+      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
+    }
 
     // 8b. Generate add liquidity transaction data
     const addLiquidityData = await retryRpcCall(
@@ -2244,10 +2248,12 @@ export default class BabyStepsStrategy extends StrategyBase {
     if (currentBufferSwaps.length > 0) {
       try {
         this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
+
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
         const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
+
         const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
         this.eventManager.emit('TokensSwapped', {
           vaultAddress: vault.address,
@@ -2325,8 +2331,15 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 11: Execute mint transaction
     // 11a. Ensure token approvals for position manager
-    const liquidityTarget = adapter.getApprovalTarget('liquidity');
-    await this.ensureApprovals(vault, [token0Data.address, token1Data.address], liquidityTarget);
+    const approvalTxs = await adapter.getRequiredApprovals(
+      'liquidity',
+      vault.address,
+      [token0Data.address, token1Data.address],
+      this.provider
+    );
+    if (approvalTxs.length > 0) {
+      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
+    }
 
     // 11b. Generate CREATE position data (different from addToPosition which uses generateAddLiquidityData)
     const createPositionData = await retryRpcCall(
@@ -2706,8 +2719,17 @@ export default class BabyStepsStrategy extends StrategyBase {
         .filter(i => !i.tokenIn.isNative)  // Native ETH has no contract to approve
         .map(i => i.tokenIn.address)
     )];
-    const swapTarget = adapter.getApprovalTarget('swap');
-    await this.ensureApprovals(vault, tokenInAddresses, swapTarget);
+    if (tokenInAddresses.length > 0) {
+      const approvalTxs = await adapter.getRequiredApprovals(
+        'swap',
+        vault.address,
+        tokenInAddresses,
+        this.provider
+      );
+      if (approvalTxs.length > 0) {
+        await this.executeBatchTransactions(vault, approvalTxs, 'swap token approvals', 'approval');
+      }
+    }
 
     // Generate swap transactions - adapter handles platform-specific auth
     // IMPORTANT: Generate ALL swaps in a single batch to share Permit2 nonce tracker
