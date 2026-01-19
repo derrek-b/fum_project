@@ -12,6 +12,7 @@
 export { initFumLibrary } from './init.js';
 export { configureCoingecko } from './services/coingecko.js';
 export { configureChainHelpers } from './helpers/chainHelpers.js';
+export { configureTheGraph } from './services/theGraph.js';
 
 // Module exports
 export * from './helpers/index.js';

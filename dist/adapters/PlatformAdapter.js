@@ -16,7 +16,7 @@
  * |------------------------------|-------------------------------------|-----------|
  * | calculateTokenAmounts        | VDS.fetchAssetValues                | CONFIRMED |
  * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
- * | getApprovalTarget(opType)    | Strategy.ensureApprovals            | CONFIRMED |x
+ * | getRequiredApprovals         | Strategy.ensureApprovals            | CONFIRMED |
  * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
  * | selectBestPool               | Strategy.initializeVault            | CONFIRMED |
  * | getPoolCurrent               | Strategy.initializeVault            | CONFIRMED |
@@ -419,18 +419,40 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Get the address that tokens should be approved to for operations on this platform
-   * @param {string} [operationType='swap'] - Operation type: 'swap' or 'liquidity'
-   * @returns {string} The approval target address for the specified operation type
-   * @example
-   * // For swaps (Uniswap V3 returns Permit2)
-   * const swapTarget = adapter.getApprovalTarget('swap');
+   * Get required approval transactions for a given operation type
    *
-   * // For liquidity ops (Uniswap V3 returns NFT Position Manager)
-   * const liquidityTarget = adapter.getApprovalTarget('liquidity');
+   * Returns an array of transaction objects that must be executed to grant
+   * sufficient token approvals for the specified operation. Each platform
+   * handles approvals differently:
+   * - V3 Swaps: ERC20 approve to Permit2
+   * - V3 Liquidity: ERC20 approve to NonfungiblePositionManager
+   * - V4 Swaps: ERC20 approve to Permit2
+   * - V4 Liquidity: ERC20 approve to Permit2 + Permit2 allowance to PositionManager
+   *
+   * The method checks current allowances and only returns transactions for
+   * approvals that are actually needed.
+   *
+   * @param {string} operationType - Operation type: 'swap' or 'liquidity'
+   * @param {string} vaultAddress - Address of the vault that needs approvals
+   * @param {Array<string>} tokenAddresses - Array of token addresses to approve
+   * @param {Object} provider - Ethers provider for checking current allowances
+   * @returns {Promise<Array<Object>>} Array of transaction objects { to, data, value }
+   * @example
+   * // Get approval transactions for V4 liquidity operation
+   * const approvalTxs = await adapter.getRequiredApprovals(
+   *   'liquidity',
+   *   vault.address,
+   *   [token0.address, token1.address],
+   *   provider
+   * );
+   *
+   * // Execute each approval transaction
+   * for (const tx of approvalTxs) {
+   *   await executeVaultTransaction(vault, tx);
+   * }
    */
-  getApprovalTarget(operationType) {
-    throw new Error("getApprovalTarget must be implemented by subclasses");
+  async getRequiredApprovals(operationType, vaultAddress, tokenAddresses, provider) {
+    throw new Error("getRequiredApprovals must be implemented by subclasses");
   }
 
   /**

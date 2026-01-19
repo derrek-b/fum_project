@@ -213,25 +213,146 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     });
   });
 
-  describe('getApprovalTarget', () => {
-    it('should return Permit2 address for swap operations', () => {
-      const target = adapter.getApprovalTarget('swap');
-      expect(target).toBeDefined();
-      expect(target).toMatch(/^0x[a-fA-F0-9]{40}$/);
-      // Permit2 has a known address
-      expect(target.toLowerCase()).toBe('0x000000000022d473030f116ddee9f6b43ac78ba3');
+  describe('getRequiredApprovals', () => {
+    const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+    const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+    const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    let testVaultAddress;
+
+    beforeAll(() => {
+      // Use a random address for testing vault
+      testVaultAddress = ethers.Wallet.createRandom().address;
     });
 
-    it('should return Permit2 address by default', () => {
-      const target = adapter.getApprovalTarget();
-      expect(target.toLowerCase()).toBe('0x000000000022d473030f116ddee9f6b43ac78ba3');
+    describe('Success Cases', () => {
+      it('should return ERC20 approve to Permit2 for swap operations', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'swap',
+          testVaultAddress,
+          [USDC_ADDRESS],
+          env.provider
+        );
+
+        expect(Array.isArray(txs)).toBe(true);
+        expect(txs.length).toBe(1);
+        expect(txs[0]).toHaveProperty('to', USDC_ADDRESS);
+        expect(txs[0]).toHaveProperty('data');
+        expect(txs[0]).toHaveProperty('value', '0');
+        // Check that data encodes approve(Permit2, MaxUint256)
+        expect(txs[0].data.startsWith('0x095ea7b3')).toBe(true); // approve selector
+      });
+
+      it('should return both ERC20 and Permit2 allowance txs for liquidity operations', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'liquidity',
+          testVaultAddress,
+          [USDC_ADDRESS],
+          env.provider
+        );
+
+        expect(Array.isArray(txs)).toBe(true);
+        // For V4 liquidity: 1 ERC20 approve + 1 Permit2 allowance per token
+        expect(txs.length).toBe(2);
+
+        // First tx: ERC20 approve to Permit2
+        expect(txs[0].to).toBe(USDC_ADDRESS);
+        expect(txs[0].data.startsWith('0x095ea7b3')).toBe(true); // approve selector
+        expect(txs[0].value).toBe('0');
+
+        // Second tx: Permit2 approve to PositionManager
+        expect(txs[1].to.toLowerCase()).toBe(PERMIT2_ADDRESS.toLowerCase());
+        expect(txs[1].data.startsWith('0x87517c45')).toBe(true); // Permit2 approve selector
+        expect(txs[1].value).toBe('0');
+      });
+
+      it('should handle multiple tokens for liquidity operations', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'liquidity',
+          testVaultAddress,
+          [USDC_ADDRESS, WETH_ADDRESS],
+          env.provider
+        );
+
+        expect(Array.isArray(txs)).toBe(true);
+        // For V4 liquidity with 2 tokens: 2 ERC20 approves + 2 Permit2 allowances
+        expect(txs.length).toBe(4);
+
+        // USDC ERC20 approve
+        expect(txs[0].to).toBe(USDC_ADDRESS);
+        expect(txs[0].data.startsWith('0x095ea7b3')).toBe(true);
+
+        // USDC Permit2 approve
+        expect(txs[1].to.toLowerCase()).toBe(PERMIT2_ADDRESS.toLowerCase());
+        expect(txs[1].data.startsWith('0x87517c45')).toBe(true);
+
+        // WETH ERC20 approve
+        expect(txs[2].to).toBe(WETH_ADDRESS);
+        expect(txs[2].data.startsWith('0x095ea7b3')).toBe(true);
+
+        // WETH Permit2 approve
+        expect(txs[3].to.toLowerCase()).toBe(PERMIT2_ADDRESS.toLowerCase());
+        expect(txs[3].data.startsWith('0x87517c45')).toBe(true);
+      });
+
+      it('should return transaction objects in correct format', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'swap',
+          testVaultAddress,
+          [USDC_ADDRESS],
+          env.provider
+        );
+
+        expect(txs.length).toBeGreaterThan(0);
+        const tx = txs[0];
+        expect(typeof tx.to).toBe('string');
+        expect(tx.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(typeof tx.data).toBe('string');
+        expect(tx.data.startsWith('0x')).toBe(true);
+        expect(tx.value).toBe('0');
+      });
     });
 
-    it('should return PositionManager address for liquidity operations', () => {
-      const target = adapter.getApprovalTarget('liquidity');
-      expect(target).toBeDefined();
-      expect(target).toMatch(/^0x[a-fA-F0-9]{40}$/);
-      expect(target).toBe(adapter.addresses.positionManagerAddress);
+    describe('Error Cases', () => {
+      it('should throw for invalid operationType', async () => {
+        await expect(
+          adapter.getRequiredApprovals('invalid', testVaultAddress, [USDC_ADDRESS], env.provider)
+        ).rejects.toThrow('operationType must be "swap" or "liquidity"');
+      });
+
+      it('should throw for invalid vaultAddress', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', 'invalid', [USDC_ADDRESS], env.provider)
+        ).rejects.toThrow('invalid vaultAddress');
+      });
+
+      it('should throw for empty tokenAddresses array', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, [], env.provider)
+        ).rejects.toThrow('tokenAddresses must be a non-empty array');
+      });
+
+      it('should throw for missing provider', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, [USDC_ADDRESS], null)
+        ).rejects.toThrow('provider is required');
+      });
+
+      it('should throw for invalid token address', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, ['not-an-address'], env.provider)
+        ).rejects.toThrow('invalid token address');
+      });
+
+      it('should skip native ETH (AddressZero) without error', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'liquidity',
+          testVaultAddress,
+          [ethers.constants.AddressZero, USDC_ADDRESS],
+          env.provider
+        );
+        // Should return array (may include USDC approval), not fail on AddressZero
+        expect(Array.isArray(txs)).toBe(true);
+      });
     });
   });
 
@@ -1707,7 +1828,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -1790,7 +1910,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -1861,39 +1980,103 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     const validTestAddress = '0x1234567890123456789012345678901234567890';
 
     describe('Error Cases', () => {
-      it('should throw when tokenId is null', async () => {
+      it('should throw when position is null', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: null,
+          position: null,
           walletAddress: validTestAddress,
           provider: env.provider
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
       });
 
-      it('should throw when tokenId is undefined', async () => {
+      it('should throw when position is undefined', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: undefined,
+          position: undefined,
           walletAddress: validTestAddress,
           provider: env.provider
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
       });
 
-      it('should throw when tokenId is missing from params', async () => {
+      it('should throw when position is missing from params', async () => {
         await expect(adapter.generateClaimFeesData({
           walletAddress: validTestAddress,
           provider: env.provider
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
+      });
+
+      it('should throw when position is a string', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: '12345',
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position is a number', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: 12345,
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position is an array', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: [{ id: '12345' }],
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position.id is null', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: null },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.id is undefined', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: undefined },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.id is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { tickLower: 100, tickUpper: 200 },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.tickLower is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: '12345', tickUpper: 200 },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position.tickLower is required');
+      });
+
+      it('should throw when position.tickUpper is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: '12345', tickLower: 100 },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('position.tickUpper is required');
       });
 
       it('should throw when walletAddress is missing', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           provider: env.provider
         })).rejects.toThrow('walletAddress is required');
       });
 
       it('should throw when walletAddress is empty string', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: '',
           provider: env.provider
         })).rejects.toThrow('walletAddress is required');
@@ -1901,7 +2084,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when walletAddress is invalid', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: 'not-an-address',
           provider: env.provider
         })).rejects.toThrow('Invalid walletAddress');
@@ -1909,14 +2092,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when provider is missing', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress
         })).rejects.toThrow('provider is required');
       });
 
       it('should throw when deadlineMinutes is not a number', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           deadlineMinutes: 'twenty'
@@ -1925,7 +2108,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is zero', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           deadlineMinutes: 0
@@ -1934,7 +2117,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is negative', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           deadlineMinutes: -5
@@ -1943,61 +2126,42 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is Infinity', async () => {
         await expect(adapter.generateClaimFeesData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           deadlineMinutes: Infinity
         })).rejects.toThrow('deadlineMinutes must be a positive number');
       });
+
+      it('should throw when poolData.poolKey is missing', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          poolData: { token0Symbol: 'ETH', token1Symbol: 'USDC' }  // No poolKey
+        })).rejects.toThrow('poolData.poolKey is required');
+      });
+
+      it('should throw when poolData is not provided', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          walletAddress: validTestAddress,
+          provider: env.provider
+        })).rejects.toThrow('poolData is required');
+      });
     });
 
     describe('Success Cases', () => {
       it('should generate valid transaction data for existing position', async () => {
-        const { ethers } = require('ethers');
+        // Get wallet address from environment
+        const walletAddress = await env.signers[0].getAddress();
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Now generate claim fees data
+        // Generate claim fees data using pre-created test position
         const claimFeesData = await adapter.generateClaimFeesData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           walletAddress,
-          provider: env.provider
+          provider: env.provider,
+          poolData: env.poolData
         });
 
         // Validate transaction data structure
@@ -2009,53 +2173,15 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(claimFeesData.value).toBeDefined();
       }, 120000);
 
-      it('should generate transaction data with provided poolKey', async () => {
-        const { ethers } = require('ethers');
+      it('should generate transaction data with provided poolData', async () => {
+        // Get wallet address from environment
+        const walletAddress = await env.signers[0].getAddress();
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Generate claim fees data with explicit poolKey and poolData
+        // Generate claim fees data with explicit poolData
         const claimFeesData = await adapter.generateClaimFeesData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           walletAddress,
           provider: env.provider,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData
         });
 
@@ -2065,59 +2191,22 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 120000);
 
       it('should execute claim fees transaction successfully', async () => {
-        const { ethers } = require('ethers');
+        // Get vault address for walletAddress parameter
+        const vaultAddress = env.testVault.address;
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
+        // Generate claim fees transaction data using pre-created test position
+        const claimFeesData = await adapter.generateClaimFeesData({
+          position: env.testPosition,
+          walletAddress: vaultAddress,
           provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
           poolData: env.poolData
         });
 
-        // Generate and execute claim fees transaction
-        const claimFeesData = await adapter.generateClaimFeesData({
-          tokenId: parsed.tokenId,
-          walletAddress,
-          provider: env.provider
-        });
-
-        // Execute the claim fees transaction (should not revert even with 0 fees)
-        const claimTx = await signer.sendTransaction({
-          to: claimFeesData.to,
-          data: claimFeesData.data,
-          value: claimFeesData.value
-        });
+        // Execute through the vault's collect method (vault owns the position)
+        const claimTx = await env.testVault.collect(
+          [claimFeesData.to],
+          [claimFeesData.data]
+        );
         const claimReceipt = await claimTx.wait();
 
         // Transaction should succeed
@@ -2127,48 +2216,15 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should collect non-zero fees after swap through position', async () => {
         const { ethers } = require('ethers');
 
-        // Get signer from environment
+        // Get signer for swap execution and vault address for claim
         const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
+        const signerAddress = await signer.getAddress();
+        const vaultAddress = env.testVault.address;
 
-        // Get position range around current tick - use wider range for fee capture
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position with decent amounts
-        const token0Amount = ethers.utils.parseUnits('0.1', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('300', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Check fees before swap (should be 0)
+        // Check fees before swap (should be 0 or minimal)
         const feesBefore = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2176,14 +2232,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           env.provider
         );
 
-        // Execute a swap to generate fees
+        // Execute a swap to generate fees (signer can do swaps directly)
         const swapData = await adapter._generateSwapData({
           tokenIn: ethers.constants.AddressZero, // Native ETH
           tokenOut: env.poolData.token1.address, // USDC
           amountIn: ethers.utils.parseEther('0.05').toString(),
-          recipient: walletAddress,
+          recipient: signerAddress,
           slippageTolerance: 1,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           provider: env.provider,
           deadlineMinutes: 20
@@ -2199,7 +2254,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Check fees after swap
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2211,18 +2266,18 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(Number(feesAfter.fees0) + Number(feesAfter.fees1))
           .toBeGreaterThanOrEqual(Number(feesBefore.fees0) + Number(feesBefore.fees1));
 
-        // Now claim the fees
+        // Now claim the fees through the vault (vault owns the position)
         const claimFeesData = await adapter.generateClaimFeesData({
-          tokenId: parsed.tokenId,
-          walletAddress,
-          provider: env.provider
+          position: env.testPosition,
+          walletAddress: vaultAddress,
+          provider: env.provider,
+          poolData: env.poolData
         });
 
-        const claimTx = await signer.sendTransaction({
-          to: claimFeesData.to,
-          data: claimFeesData.data,
-          value: claimFeesData.value
-        });
+        const claimTx = await env.testVault.collect(
+          [claimFeesData.to],
+          [claimFeesData.data]
+        );
         const claimReceipt = await claimTx.wait();
 
         expect(claimReceipt.status).toBe(1);
@@ -2230,7 +2285,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // After claiming, accrued fees should be zero or near-zero
         const feesAfterClaim = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2250,31 +2305,119 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     const validTestAddress = '0x1234567890123456789012345678901234567890';
 
     describe('Error Cases', () => {
-      it('should throw when tokenId is null', async () => {
+      it('should throw when position is null', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: null,
+          position: null,
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
           slippageTolerance: 1,
           deadlineMinutes: 20
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
       });
 
-      it('should throw when tokenId is undefined', async () => {
+      it('should throw when position is undefined', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: undefined,
+          position: undefined,
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
           slippageTolerance: 1,
           deadlineMinutes: 20
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
+      });
+
+      it('should throw when position is a string', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: '12345',
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position is a number', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: 12345,
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position is an array', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: [{ id: '12345' }],
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position must be an object');
+      });
+
+      it('should throw when position.id is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: null },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.id is undefined', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: undefined },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.id is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { tickLower: 100, tickUpper: 200 },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.tickLower is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: '12345', tickUpper: 200 },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.tickLower is required');
+      });
+
+      it('should throw when position.tickUpper is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: '12345', tickLower: 100 },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.tickUpper is required');
       });
 
       it('should throw when percentage is missing', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           slippageTolerance: 1,
@@ -2284,7 +2427,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when percentage is 0', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 0,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2295,7 +2438,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when percentage is > 100', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 101,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2306,7 +2449,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when percentage is not a number', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 'fifty',
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2317,7 +2460,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when walletAddress is missing', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           provider: env.provider,
           slippageTolerance: 1,
@@ -2327,7 +2470,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when walletAddress is invalid', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: 'not-an-address',
           provider: env.provider,
@@ -2338,7 +2481,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when provider is missing', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           slippageTolerance: 1,
@@ -2348,7 +2491,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is missing', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2358,7 +2501,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is negative', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2369,7 +2512,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is > 100', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2380,7 +2523,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is missing', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2390,7 +2533,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is <= 0', async () => {
         await expect(adapter.generateRemoveLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
           walletAddress: validTestAddress,
           provider: env.provider,
@@ -2398,56 +2541,43 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           deadlineMinutes: 0
         })).rejects.toThrow('deadlineMinutes must be a positive number');
       });
+
+      it('should throw when poolData.poolKey is missing', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          poolData: { token0Symbol: 'ETH', token1Symbol: 'USDC' },  // No poolKey
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('poolData.poolKey is required');
+      });
+
+      it('should throw when poolData is not provided', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          percentage: 50,
+          walletAddress: validTestAddress,
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('poolData is required');
+      });
     });
 
     describe('Success Cases', () => {
       it('should generate valid transaction data for partial removal (50%)', async () => {
-        const { ethers } = require('ethers');
+        // Get wallet address from environment
+        const walletAddress = await env.signers[0].getAddress();
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.05', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('150', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Generate remove 50% liquidity data
+        // Generate remove 50% liquidity data using pre-created test position
         const removeTxData = await adapter.generateRemoveLiquidityData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           percentage: 50,
           walletAddress,
           provider: env.provider,
+          poolData: env.poolData,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -2462,52 +2592,16 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 120000);
 
       it('should generate valid transaction data for full removal (100%)', async () => {
-        const { ethers } = require('ethers');
+        // Get wallet address from environment
+        const walletAddress = await env.signers[0].getAddress();
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Generate remove 100% liquidity data
+        // Generate remove 100% liquidity data using pre-created test position
         const removeTxData = await adapter.generateRemoveLiquidityData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           percentage: 100,
           walletAddress,
           provider: env.provider,
+          poolData: env.poolData,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -2518,50 +2612,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 120000);
 
       it('should execute partial remove successfully', async () => {
-        const { ethers } = require('ethers');
+        // Get vault address for walletAddress parameter
+        const vaultAddress = env.testVault.address;
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position with decent amounts
-        const token0Amount = ethers.utils.parseUnits('0.1', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('300', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Get initial liquidity
+        // Get initial liquidity using pre-created test position
         const feesBefore = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2570,21 +2627,22 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         );
         const initialLiquidity = BigInt(feesBefore.liquidity);
 
-        // Generate and execute remove 50% liquidity
+        // Generate remove 50% liquidity data
         const removeTxData = await adapter.generateRemoveLiquidityData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           percentage: 50,
-          walletAddress,
+          walletAddress: vaultAddress,
           provider: env.provider,
+          poolData: env.poolData,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
 
-        const removeTx = await signer.sendTransaction({
-          to: removeTxData.to,
-          data: removeTxData.data,
-          value: removeTxData.value
-        });
+        // Execute through the vault's decreaseLiquidity method (vault owns the position)
+        const removeTx = await env.testVault.decreaseLiquidity(
+          [removeTxData.to],
+          [removeTxData.data]
+        );
         const removeReceipt = await removeTx.wait();
 
         expect(removeReceipt.status).toBe(1);
@@ -2592,7 +2650,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify position still exists with reduced liquidity
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2607,61 +2665,25 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 180000);
 
       it('should execute full remove (100%) successfully', async () => {
-        const { ethers } = require('ethers');
+        // Get vault address for walletAddress parameter
+        const vaultAddress = env.testVault.address;
 
-        // Get signer from environment
-        const signer = env.signers[0];
-        const walletAddress = await signer.getAddress();
-
-        // Get position range around current tick
-        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
-        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
-
-        // Create position
-        const token0Amount = ethers.utils.parseUnits('0.05', env.poolData.token0.decimals).toString();
-        const token1Amount = ethers.utils.parseUnits('150', env.poolData.token1.decimals).toString();
-
-        const createTxData = await adapter.generateCreatePositionData({
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          token0Amount,
-          token1Amount,
-          provider: env.provider,
-          walletAddress,
-          poolKey: env.poolData.poolKey,
-          poolData: env.poolData,
-          token0Data: env.poolData.token0,
-          token1Data: env.poolData.token1,
-          slippageTolerance: 1,
-          deadlineMinutes: 20
-        });
-
-        const createTx = await signer.sendTransaction({
-          to: createTxData.to,
-          data: createTxData.data,
-          value: createTxData.value
-        });
-        const createReceipt = await createTx.wait();
-
-        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
-          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
-          poolData: env.poolData
-        });
-
-        // Generate and execute remove 100% liquidity
+        // Generate remove 100% liquidity data using pre-created test position
         const removeTxData = await adapter.generateRemoveLiquidityData({
-          tokenId: parsed.tokenId,
+          position: env.testPosition,
           percentage: 100,
-          walletAddress,
+          walletAddress: vaultAddress,
           provider: env.provider,
+          poolData: env.poolData,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
 
-        const removeTx = await signer.sendTransaction({
-          to: removeTxData.to,
-          data: removeTxData.data,
-          value: removeTxData.value
-        });
+        // Execute through the vault's decreaseLiquidity method (vault owns the position)
+        const removeTx = await env.testVault.decreaseLiquidity(
+          [removeTxData.to],
+          [removeTxData.data]
+        );
         const removeReceipt = await removeTx.wait();
 
         expect(removeReceipt.status).toBe(1);
@@ -2669,7 +2691,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify position has zero liquidity after full removal
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            tokenId: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2686,30 +2708,41 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     const validTestAddress = '0x1234567890123456789012345678901234567890';
 
     describe('Error Cases', () => {
-      it('should throw when tokenId is null', async () => {
+      it('should throw when position is null', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: null,
+          position: null,
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
           slippageTolerance: 1,
           deadlineMinutes: 20
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
       });
 
-      it('should throw when tokenId is undefined', async () => {
+      it('should throw when position is undefined', async () => {
         await expect(adapter.generateAddLiquidityData({
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
           slippageTolerance: 1,
           deadlineMinutes: 20
-        })).rejects.toThrow('tokenId is required');
+        })).rejects.toThrow('position is required');
+      });
+
+      it('should throw when position.id is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          position: { tickLower: -100, tickUpper: 100 },
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('position.id is required');
       });
 
       it('should throw when token0Amount is missing', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token1Amount: '1000000',
           provider: env.provider,
           slippageTolerance: 1,
@@ -2719,7 +2752,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when token0Amount is not a string', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: 1000000000000000000,
           token1Amount: '1000000',
           provider: env.provider,
@@ -2730,7 +2763,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when token1Amount is missing', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           provider: env.provider,
           slippageTolerance: 1,
@@ -2740,7 +2773,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when token1Amount is not a string', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: 1000000,
           provider: env.provider,
@@ -2751,7 +2784,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when both amounts are 0', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '0',
           token1Amount: '0',
           provider: env.provider,
@@ -2762,7 +2795,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when provider is missing', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           slippageTolerance: 1,
@@ -2772,7 +2805,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is missing', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
@@ -2782,7 +2815,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is negative', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
@@ -2793,7 +2826,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when slippageTolerance is > 100', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
@@ -2804,7 +2837,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is missing', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
@@ -2814,13 +2847,36 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should throw when deadlineMinutes is <= 0', async () => {
         await expect(adapter.generateAddLiquidityData({
-          tokenId: '12345',
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
           token0Amount: '1000000000000000000',
           token1Amount: '1000000',
           provider: env.provider,
           slippageTolerance: 1,
           deadlineMinutes: 0
         })).rejects.toThrow('deadlineMinutes must be a positive number');
+      });
+
+      it('should throw when poolData.poolKey is missing', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          poolData: { token0Symbol: 'ETH', token1Symbol: 'USDC' },  // No poolKey
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('poolData.poolKey is required');
+      });
+
+      it('should throw when poolData is not provided', async () => {
+        await expect(adapter.generateAddLiquidityData({
+          position: { id: '12345', tickLower: -100, tickUpper: 100 },
+          token0Amount: '1000000000000000000',
+          token1Amount: '1000000',
+          provider: env.provider,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        })).rejects.toThrow('poolData is required');
       });
     });
 
@@ -2846,7 +2902,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -2868,10 +2923,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Now generate add liquidity data
         const result = await adapter.generateAddLiquidityData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -2908,7 +2966,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -2930,10 +2987,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Generate add liquidity with only token0
         const result = await adapter.generateAddLiquidityData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           token1Amount: '0',
           provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -2966,7 +3026,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -2988,10 +3047,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Generate add liquidity with only token1
         const result = await adapter.generateAddLiquidityData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           token0Amount: '0',
           token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -3024,7 +3086,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -3058,10 +3119,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Generate add liquidity data
         const addTxData = await adapter.generateAddLiquidityData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
           slippageTolerance: 1,
           deadlineMinutes: 20
         });
@@ -3104,14 +3168,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       poolData: {
         sqrtPriceX96: '79228162514264337593543950336',
         liquidity: '1000000000000000000',
-        tick: 0
-      },
-      poolKey: {
-        currency0: validTestAddress1,
-        currency1: validTestAddress2,
-        fee: 3000,
-        tickSpacing: 60,
-        hooks: '0x0000000000000000000000000000000000000000'
+        tick: 0,
+        poolKey: {
+          currency0: validTestAddress1,
+          currency1: validTestAddress2,
+          fee: 3000,
+          tickSpacing: 60,
+          hooks: '0x0000000000000000000000000000000000000000'
+        }
       },
       token0Data: { address: validTestAddress1, decimals: 18 },
       token1Data: { address: validTestAddress2, decimals: 6 },
@@ -3205,9 +3269,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           .rejects.toThrow('poolData is required and must be an object');
       });
 
-      it('should throw when poolKey is missing', async () => {
+      it('should throw when poolData.poolKey is missing', async () => {
         const params = getBaseParams();
-        delete params.poolKey;
+        delete params.poolData.poolKey;
         await expect(adapter.getAddLiquidityAmounts(params))
           .rejects.toThrow('poolKey is required and must be an object');
       });
@@ -3247,7 +3311,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           poolData: env.poolData,
-          poolKey: env.poolData.poolKey,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
           provider: env.provider
@@ -3273,7 +3336,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token0Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           token1Amount: '0',
           poolData: env.poolData,
-          poolKey: env.poolData.poolKey,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
           provider: env.provider
@@ -3296,7 +3358,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token0Amount: '0',
           token1Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           poolData: env.poolData,
-          poolKey: env.poolData.poolKey,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
           provider: env.provider
@@ -3320,7 +3381,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token0Amount: ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString(),
           token1Amount: ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString(),
           poolData: env.poolData,
-          poolKey: env.poolData.poolKey,
           token0Data: env.poolData.token1, // Swapped
           token1Data: env.poolData.token0, // Swapped
           provider: env.provider
@@ -3698,7 +3758,8 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       fee: 3000,
       sqrtPriceX96: '79228162514264337593543950336', // sqrt(1) * 2^96
       liquidity: '1000000000000000000',
-      tick: 0
+      tick: 0,
+      poolKey: mockPoolKey
     };
 
     const mockToken0Data = {
@@ -3729,7 +3790,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3745,7 +3805,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3761,7 +3820,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3779,7 +3837,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3795,7 +3852,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3811,7 +3867,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '0',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3822,15 +3877,16 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
 
       describe('poolKey validation', () => {
-        it('should throw for missing poolKey', async () => {
+        it('should throw for missing poolData.poolKey', async () => {
+          const poolDataNoPoolKey = { ...mockPoolData };
+          delete poolDataNoPoolKey.poolKey;
           await expect(adapter.generateCreatePositionData({
             position: mockPosition,
             token0Amount: '1000000000000000000',
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: null,
-            poolData: mockPoolData,
+            poolData: poolDataNoPoolKey,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
             slippageTolerance: 0.5,
@@ -3845,8 +3901,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: { ...mockPoolKey, currency0: null },
-            poolData: mockPoolData,
+            poolData: { ...mockPoolData, poolKey: { ...mockPoolKey, currency0: null } },
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
             slippageTolerance: 0.5,
@@ -3861,8 +3916,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: { ...mockPoolKey, currency0: USDC, currency1: WETH }, // Wrong order
-            poolData: mockPoolData,
+            poolData: { ...mockPoolData, poolKey: { ...mockPoolKey, currency0: USDC, currency1: WETH } }, // Wrong order
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
             slippageTolerance: 0.5,
@@ -3879,8 +3933,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: poolKeyNoHooks,
-            poolData: mockPoolData,
+            poolData: { ...mockPoolData, poolKey: poolKeyNoHooks },
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
             slippageTolerance: 0.5,
@@ -3897,7 +3950,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: null,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3913,7 +3965,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: { ...mockPoolData, sqrtPriceX96: null },
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3931,7 +3982,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: null,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3947,7 +3997,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: null,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3963,7 +4012,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: 'not-an-address',
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3981,7 +4029,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -3997,7 +4044,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -4013,7 +4059,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -4029,7 +4074,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: mockToken1Data,
@@ -4047,7 +4091,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: null,
             token1Data: mockToken1Data,
@@ -4063,7 +4106,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             token1Amount: '1000000',
             provider: env.provider,
             walletAddress: validWalletAddress,
-            poolKey: mockPoolKey,
             poolData: mockPoolData,
             token0Data: mockToken0Data,
             token1Data: { ...mockToken1Data, address: NATIVE_ETH }, // Same as token0
@@ -4113,8 +4155,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount: ethers.utils.parseUnits('10', 6).toString(), // 10 USDC
           provider: env.provider,
           walletAddress: validWalletAddress,
-          poolKey: fetchedPoolData.poolKey,
-          poolData: fetchedPoolData,
+          poolData: fetchedPoolData, // poolKey is included in fetchedPoolData
           token0Data: fetchedPoolData.token0,
           token1Data: fetchedPoolData.token1,
           slippageTolerance: 0.5,
@@ -4353,8 +4394,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount: ethers.utils.parseUnits('3', 6).toString(),   // 3 USDC
           provider: env.provider,
           walletAddress: signer.address,
-          poolKey: poolData.poolKey,
-          poolData: poolData,
+          poolData: poolData, // poolKey is inside poolData
           token0Data: poolData.token0,
           token1Data: poolData.token1,
           slippageTolerance: 5, // 5% slippage for test reliability
@@ -4418,8 +4458,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount: ethers.utils.parseUnits('1.5', 6).toString(),
           provider: env.provider,
           walletAddress: signer.address,
-          poolKey: poolData.poolKey,
-          poolData: poolData,
+          poolData: poolData, // poolKey is inside poolData
           token0Data: poolData.token0,
           token1Data: poolData.token1,
           slippageTolerance: 5,
@@ -5200,7 +5239,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data: env.poolData.token0,
           token1Data: env.poolData.token1,
@@ -5291,11 +5329,12 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         );
         console.log('Fees before claim:', feesBeforeClaim);
 
-        // Now claim the fees
+        // Now claim the fees using the position we created
         const claimFeesData = await adapter.generateClaimFeesData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           walletAddress,
-          provider: env.provider
+          provider: env.provider,
+          poolData: env.poolData
         });
 
         const claimTx = await signer.sendTransaction({
@@ -5670,7 +5709,6 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token1Amount,
           provider: env.provider,
           walletAddress,
-          poolKey: env.poolData.poolKey,
           poolData: env.poolData,
           token0Data,
           token1Data,
@@ -5748,16 +5786,17 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Fetch fresh poolData AFTER swaps - need accurate sqrtPriceX96 for principal calculation
         const poolId = adapter._computePoolId(env.poolData.poolKey);
-        const poolDataAfterSwaps = await adapter.getPoolData(poolId, env.provider);
+        const freshPoolData = await adapter.getPoolData(poolId, env.provider);
+        // Merge poolKey into freshPoolData (getPoolData doesn't return poolKey)
+        const poolDataAfterSwaps = { ...freshPoolData, poolKey: env.poolData.poolKey };
         console.log('Pool tick after swaps:', poolDataAfterSwaps.tick);
 
         // Step 3: Close the position (use liquidity from mint receipt)
         const closeData = await adapter.generateRemoveLiquidityData({
-          tokenId: parsed.tokenId,
+          position: { id: parsed.tokenId, tickLower, tickUpper, liquidity: parsed.liquidity },
           percentage: 100,
           walletAddress,
           provider: env.provider,
-          poolKey: env.poolData.poolKey,
           poolData: poolDataAfterSwaps,
           slippageTolerance: 50,
           deadlineMinutes: 20
@@ -6369,9 +6408,35 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           expect(result.poolsActive).toBeGreaterThan(0);
 
           // Verify bestPool has expected properties
-          expect(result.bestPool).toHaveProperty('id');
+          expect(result.bestPool).toHaveProperty('address');
+          expect(result.bestPool).toHaveProperty('poolId');
+          expect(result.bestPool).toHaveProperty('fee');
+          expect(result.bestPool).toHaveProperty('tickSpacing');
           expect(result.bestPool).toHaveProperty('liquidity');
-          expect(result.bestPool).toHaveProperty('feeTier');
+          expect(result.bestPool).toHaveProperty('sqrtPriceX96');
+          expect(result.bestPool).toHaveProperty('tick');
+          expect(result.bestPool).toHaveProperty('hooks');
+          expect(result.bestPool).toHaveProperty('totalValueLockedUSD');
+
+          // Verify token0 structure
+          expect(result.bestPool).toHaveProperty('token0');
+          expect(result.bestPool.token0).toHaveProperty('symbol');
+          expect(result.bestPool.token0).toHaveProperty('address');
+          expect(result.bestPool.token0).toHaveProperty('decimals');
+
+          // Verify token1 structure
+          expect(result.bestPool).toHaveProperty('token1');
+          expect(result.bestPool.token1).toHaveProperty('symbol');
+          expect(result.bestPool.token1).toHaveProperty('address');
+          expect(result.bestPool.token1).toHaveProperty('decimals');
+
+          // Verify poolKey structure
+          expect(result.bestPool).toHaveProperty('poolKey');
+          expect(result.bestPool.poolKey).toHaveProperty('currency0');
+          expect(result.bestPool.poolKey).toHaveProperty('currency1');
+          expect(result.bestPool.poolKey).toHaveProperty('fee');
+          expect(result.bestPool.poolKey).toHaveProperty('tickSpacing');
+          expect(result.bestPool.poolKey).toHaveProperty('hooks');
         } catch (error) {
           // No pools is acceptable for V4 (new protocol)
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
@@ -6930,7 +6995,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
             expect(poolData).toHaveProperty('tickSpacing');
             expect(poolData).toHaveProperty('hooks');
             expect(poolData).toHaveProperty('platform');
+            expect(poolData).toHaveProperty('poolKey');
             expect(poolData.platform).toBe('uniswapV4');
+            // Verify poolKey structure
+            expect(poolData.poolKey).toHaveProperty('currency0');
+            expect(poolData.poolKey).toHaveProperty('currency1');
+            expect(poolData.poolKey).toHaveProperty('fee');
+            expect(poolData.poolKey).toHaveProperty('tickSpacing');
+            expect(poolData.poolKey).toHaveProperty('hooks');
           }
         } catch (error) {
           // Graph API errors are expected if no API key or network issues

@@ -208,7 +208,7 @@ async function setupV4Environment(coreEnv) {
   console.log('  ✅ V4 test environment setup complete!');
 
   const testPosition = {
-    tokenId: positionTokenId,
+    id: positionTokenId.toString(),
     liquidity: createPositionData.quote.liquidity,
     tickLower,
     tickUpper,

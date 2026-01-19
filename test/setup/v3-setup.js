@@ -189,7 +189,7 @@ async function setupV3Environment(coreEnv) {
   console.log('  ✅ V3 test environment setup complete!');
 
   const testPosition = {
-    tokenId: positionTokenId,
+    id: positionTokenId.toString(),
     liquidity: liquidity.toString(),
     tickLower,
     tickUpper,

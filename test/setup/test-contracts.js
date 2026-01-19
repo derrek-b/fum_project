@@ -171,6 +171,7 @@ export async function deployFUMContracts(deployer, config = {}) {
     // Deploy validators (no constructor args)
     contracts.universalRouterValidator = await deployContract(deployer, 'UniversalRouterValidator');
     contracts.v3PositionValidator = await deployContract(deployer, 'UniswapV3PositionValidator');
+    contracts.v4PositionValidator = await deployContract(deployer, 'UniswapV4PositionValidator');
 
     // Register validators with factory
     console.log('Registering validators with factory...');
@@ -185,6 +186,19 @@ export async function deployFUMContracts(deployer, config = {}) {
       contracts.v3PositionValidator.address
     );
     console.log(`  ✅ UniswapV3PositionValidator registered for ${nonfungiblePositionManagerAddress}`);
+
+    // Get V4 position manager address and register V4 validator
+    try {
+      const uniswapV4Addresses = getPlatformAddresses(chainId, 'uniswapV4');
+      const v4PositionManagerAddress = uniswapV4Addresses.positionManagerAddress;
+      await contracts.vaultFactory.setLiquidityValidator(
+        v4PositionManagerAddress,
+        contracts.v4PositionValidator.address
+      );
+      console.log(`  ✅ UniswapV4PositionValidator registered for ${v4PositionManagerAddress}`);
+    } catch (e) {
+      console.log(`  ⚠️ V4 not configured for chainId ${chainId}, skipping V4 validator registration`);
+    }
 
     // Deploy strategies (no constructor args)
     contracts.babySteps = await deployContract(deployer, 'BabyStepsStrategy');
@@ -279,7 +293,8 @@ function mapContractName(contractName) {
     'BabyStepsStrategy': 'bob',
     'PositionVault': 'PositionVault',
     'UniversalRouterValidator': 'UniversalRouterValidator',
-    'UniswapV3PositionValidator': 'UniswapV3PositionValidator'
+    'UniswapV3PositionValidator': 'UniswapV3PositionValidator',
+    'UniswapV4PositionValidator': 'UniswapV4PositionValidator'
   };
 
   return nameMap[contractName] || contractName;

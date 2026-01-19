@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-16T20:46:17.928Z
+Generated on: 2026-01-18T23:20:52.676Z
 
 ## Table of Contents
 
@@ -107,6 +107,7 @@ Uniswap V4 Platform Adapter
 - from `../helpers/platformHelpers.js`
 - from `../helpers/tokenHelpers.js`
 - from `../services/blockExplorer.js`
+- from `../services/theGraph.js`
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
 - from `@uniswap/router-sdk`
@@ -419,6 +420,7 @@ FUM Library - Main Entry Point
 - `initFumLibrary` (variable) (from `./init.js`)
 - `configureCoingecko` (variable) (from `./services/coingecko.js`)
 - `configureChainHelpers` (variable) (from `./helpers/chainHelpers.js`)
+- `configureTheGraph` (variable) (from `./services/theGraph.js`)
 
 ---
 
@@ -432,6 +434,7 @@ FUM Library - Main Entry Point
 - from `./helpers/chainHelpers.js`
 - from `./services/blockExplorer.js`
 - from `./services/coingecko.js`
+- from `./services/theGraph.js`
 - from `fum_library`
 
 **Exports:**
@@ -497,6 +500,10 @@ FUM Library - Main Entry Point
 
 **Imports:**
 - from `../helpers/platformHelpers.js`
+- from `fum_library/services/theGraph`
+
+**Exports:**
+- `configureTheGraph` (function)
 
 ---
 

@@ -5548,7 +5548,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const position = result.positions[positionId];
 
         // Verify we got the exact position ID that was created in test setup
-        expect(positionId).toBe(env.testPosition.tokenId.toString());
+        expect(positionId).toBe(env.testPosition.id);
         expect(positionId).toBe(env.positionTokenId.toString());
 
         // Verify position structure
@@ -5579,7 +5579,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         // Verify position data values match test environment setup
         expect(position.id).toBe(positionId); // ID should match the key
-        expect(position.id).toBe(env.testPosition.tokenId.toString()); // Should match test position ID
+        expect(position.id).toBe(env.testPosition.id); // Should match test position ID
         expect(position.pool).toBe(env.poolData.poolAddress); // Pool address from test env
         expect(position.tickLower).toBe(env.testPosition.tickLower); // Exact tick values from setup
         expect(position.tickUpper).toBe(env.testPosition.tickUpper); // Exact tick values from setup
@@ -7078,7 +7078,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should generate valid transaction data for position fee collection', async () => {
         const params = {
-          positionId: env.positionTokenId.toString(),
+          position: env.testPosition,
           provider: env.provider,
           walletAddress: env.testVault.address,
           token0Address: env.usdcAddress,
@@ -7105,7 +7105,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.data).toMatch(/^0xfc6f7865/); // Function selector for collect
         expect(result.data.length).toBeGreaterThan(10); // Should have substantial calldata
 
-        // Verify the calldata contains our positionId and wallet address
+        // Verify the calldata contains our position ID and wallet address
         const expectedPositionId = env.positionTokenId.toHexString().slice(2).padStart(64, '0');
         const expectedRecipient = (env.testVault.address).slice(2).toLowerCase().padStart(64, '0');
         expect(result.data.toLowerCase()).toContain(expectedPositionId);
@@ -7114,7 +7114,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should be deterministic for same inputs', async () => {
         const params = {
-          positionId: env.positionTokenId.toString(),
+          position: env.testPosition,
           provider: env.provider,
           walletAddress: env.testVault.address,
           token0Address: env.usdcAddress,
@@ -7137,7 +7137,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       beforeEach(() => {
         baseParams = {
-          positionId: '123',
+          position: { id: '123' },
           provider: env.provider,
           walletAddress: env.signers[0].address,
           token0Address: env.usdcAddress,
@@ -7147,40 +7147,70 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         };
       });
 
-      describe('Position ID validation', () => {
+      describe('Position validation', () => {
 
-        it('should throw error for null/undefined positionId', async () => {
+        it('should throw error for null/undefined position', async () => {
           await expect(
-            adapter.generateClaimFeesData({ ...baseParams, positionId: null })
+            adapter.generateClaimFeesData({ ...baseParams, position: null })
+          ).rejects.toThrow('Position parameter is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, position: undefined })
+          ).rejects.toThrow('Position parameter is required');
+        });
+
+        it('should throw error for non-object position', async () => {
+          const invalidTypes = ['123', 123, true, false];
+
+          for (const invalidType of invalidTypes) {
+            await expect(
+              adapter.generateClaimFeesData({ ...baseParams, position: invalidType })
+            ).rejects.toThrow('Position must be an object');
+          }
+        });
+
+        it('should throw error for array position', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, position: [] })
+          ).rejects.toThrow('Position must be an object');
+        });
+
+        it('should throw error for null/undefined position.id', async () => {
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, position: { id: null } })
           ).rejects.toThrow('Position ID is required');
 
           await expect(
-            adapter.generateClaimFeesData({ ...baseParams, positionId: undefined })
+            adapter.generateClaimFeesData({ ...baseParams, position: { id: undefined } })
+          ).rejects.toThrow('Position ID is required');
+
+          await expect(
+            adapter.generateClaimFeesData({ ...baseParams, position: {} })
           ).rejects.toThrow('Position ID is required');
         });
 
-        it('should throw error for non-string positionId', async () => {
+        it('should throw error for non-string position.id', async () => {
           const invalidTypes = [123, true, false, {}, []];
 
           for (const invalidType of invalidTypes) {
             await expect(
-              adapter.generateClaimFeesData({ ...baseParams, positionId: invalidType })
+              adapter.generateClaimFeesData({ ...baseParams, position: { id: invalidType } })
             ).rejects.toThrow('positionId must be a string');
           }
         });
 
-        it('should throw error for non-numeric string positionId', async () => {
+        it('should throw error for non-numeric string position.id', async () => {
           const invalidIds = ['', 'abc', '12abc', '12.5', '-12', '12-34', ' 123', '123 '];
 
           for (const invalidId of invalidIds) {
             await expect(
-              adapter.generateClaimFeesData({ ...baseParams, positionId: invalidId })
+              adapter.generateClaimFeesData({ ...baseParams, position: { id: invalidId } })
             ).rejects.toThrow('positionId must be a numeric string');
           }
         });
 
-        it('should accept leading zeros in positionId', async () => {
-          const result = await adapter.generateClaimFeesData({ ...baseParams, positionId: '00123' });
+        it('should accept leading zeros in position.id', async () => {
+          const result = await adapter.generateClaimFeesData({ ...baseParams, position: { id: '00123' } });
           expect(result).toBeDefined();
           expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
         });
@@ -12093,14 +12123,117 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
-  describe('getApprovalTarget', () => {
-    it('should return the Permit2 address', () => {
-      const approvalTarget = adapter.getApprovalTarget();
-      // Tokens should be approved to Permit2, which the Universal Router pulls from
-      expect(approvalTarget).toBe('0x000000000022D473030F116dDEE9F6B43aC78BA3');
-      expect(approvalTarget).toBeTypeOf('string');
-      expect(approvalTarget.startsWith('0x')).toBe(true);
-      expect(approvalTarget.length).toBe(42);
+  describe('getRequiredApprovals', () => {
+    const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+    const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+    const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+    let testVaultAddress;
+
+    beforeAll(() => {
+      // Use a random address for testing vault
+      testVaultAddress = ethers.Wallet.createRandom().address;
+    });
+
+    describe('Success Cases', () => {
+      it('should return ERC20 approve to Permit2 for swap operations', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'swap',
+          testVaultAddress,
+          [USDC_ADDRESS],
+          env.provider
+        );
+
+        expect(Array.isArray(txs)).toBe(true);
+        expect(txs.length).toBe(1);
+        expect(txs[0]).toHaveProperty('to', USDC_ADDRESS);
+        expect(txs[0]).toHaveProperty('data');
+        expect(txs[0]).toHaveProperty('value', '0');
+        // Check that data encodes approve(Permit2, MaxUint256)
+        expect(txs[0].data.startsWith('0x095ea7b3')).toBe(true); // approve selector
+      });
+
+      it('should return ERC20 approve to PositionManager for liquidity operations', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'liquidity',
+          testVaultAddress,
+          [USDC_ADDRESS, WETH_ADDRESS],
+          env.provider
+        );
+
+        expect(Array.isArray(txs)).toBe(true);
+        expect(txs.length).toBe(2);
+
+        // Both should be ERC20 approves to position manager
+        for (const tx of txs) {
+          expect(tx).toHaveProperty('data');
+          expect(tx).toHaveProperty('value', '0');
+          expect(tx.data.startsWith('0x095ea7b3')).toBe(true); // approve selector
+        }
+
+        // First tx should be for USDC, second for WETH
+        expect(txs[0].to).toBe(USDC_ADDRESS);
+        expect(txs[1].to).toBe(WETH_ADDRESS);
+      });
+
+      it('should return transaction objects in correct format', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'swap',
+          testVaultAddress,
+          [USDC_ADDRESS],
+          env.provider
+        );
+
+        expect(txs.length).toBeGreaterThan(0);
+        const tx = txs[0];
+        expect(typeof tx.to).toBe('string');
+        expect(tx.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(typeof tx.data).toBe('string');
+        expect(tx.data.startsWith('0x')).toBe(true);
+        expect(tx.value).toBe('0');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw for invalid operationType', async () => {
+        await expect(
+          adapter.getRequiredApprovals('invalid', testVaultAddress, [USDC_ADDRESS], env.provider)
+        ).rejects.toThrow('operationType must be "swap" or "liquidity"');
+      });
+
+      it('should throw for invalid vaultAddress', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', 'invalid', [USDC_ADDRESS], env.provider)
+        ).rejects.toThrow('invalid vaultAddress');
+      });
+
+      it('should throw for empty tokenAddresses array', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, [], env.provider)
+        ).rejects.toThrow('tokenAddresses must be a non-empty array');
+      });
+
+      it('should throw for missing provider', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, [USDC_ADDRESS], null)
+        ).rejects.toThrow('provider is required');
+      });
+
+      it('should throw for invalid token address', async () => {
+        await expect(
+          adapter.getRequiredApprovals('swap', testVaultAddress, ['not-an-address'], env.provider)
+        ).rejects.toThrow('invalid token address');
+      });
+
+      it('should skip native ETH (AddressZero) without error', async () => {
+        const txs = await adapter.getRequiredApprovals(
+          'liquidity',
+          testVaultAddress,
+          [ethers.constants.AddressZero, USDC_ADDRESS],
+          env.provider
+        );
+        // Should return array (may include USDC approval), not fail on AddressZero
+        expect(Array.isArray(txs)).toBe(true);
+      });
     });
   });
 

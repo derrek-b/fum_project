@@ -481,7 +481,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
               fee: normalizedPoolKey.fee,
               tickSpacing: normalizedPoolKey.tickSpacing,
               hooks: normalizedPoolKey.hooks,
-              platform: 'uniswapV4'
+              platform: 'uniswapV4',
+              poolKey: normalizedPoolKey
             };
           }
 
@@ -801,7 +802,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * - Can handle native ETH directly
    *
    * @param {Object} params - Parameters for generating claim fees data
-   * @param {string} params.tokenId - Position NFT token ID (required)
+   * @param {Object} params.position - Position object (required)
+   * @param {string|number} params.position.id - Position NFT token ID (required)
    * @param {string} params.walletAddress - Recipient address for claimed fees (required)
    * @param {Object} params.provider - Ethers provider (required)
    * @param {Object} [params.poolKey] - Pool key (optional, fetched from tokenId if not provided)
@@ -817,7 +819,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    */
   async generateClaimFeesData(params) {
     const {
-      tokenId,
+      position,
       walletAddress,
       provider,
       poolKey: providedPoolKey,
@@ -826,9 +828,28 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       hookData = '0x'
     } = params;
 
-    // Validate tokenId
+    // Validate position
+    if (position === null || position === undefined) {
+      throw new Error('position is required');
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position must be an object');
+    }
+
+    // Extract and validate tokenId from position
+    const tokenId = position.id;
     if (tokenId === null || tokenId === undefined) {
-      throw new Error('tokenId is required');
+      throw new Error('position.id is required');
+    }
+
+    // Extract and validate tickLower and tickUpper from position
+    const tickLower = position.tickLower;
+    const tickUpper = position.tickUpper;
+    if (tickLower === null || tickLower === undefined) {
+      throw new Error('position.tickLower is required');
+    }
+    if (tickUpper === null || tickUpper === undefined) {
+      throw new Error('position.tickUpper is required');
     }
 
     // Validate walletAddress
@@ -851,40 +872,17 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
+    // Validate poolData and poolData.poolKey
+    if (!providedPoolData || typeof providedPoolData !== 'object') {
+      throw new Error('poolData is required');
+    }
+    if (!providedPoolData.poolKey || typeof providedPoolData.poolKey !== 'object') {
+      throw new Error('poolData.poolKey is required');
+    }
+
     try {
-      // Get poolKey - either from params or fetch from tokenId
-      let poolKey = providedPoolKey;
-      let tickLower, tickUpper;
-
-      if (!poolKey) {
-        // Fetch PoolKey and position info from tokenId
-        const positionManagerContract = new ethers.Contract(
-          this.addresses.positionManagerAddress,
-          this.positionManagerABI,
-          provider
-        );
-
-        const [fetchedPoolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
-        poolKey = {
-          currency0: fetchedPoolKey.currency0,
-          currency1: fetchedPoolKey.currency1,
-          fee: Number(fetchedPoolKey.fee),
-          tickSpacing: Number(fetchedPoolKey.tickSpacing),
-          hooks: fetchedPoolKey.hooks
-        };
-
-        // Decode tick bounds from packed info
-        const decoded = this._decodePositionInfo(packedInfo);
-        tickLower = decoded.tickLower;
-        tickUpper = decoded.tickUpper;
-      }
-
-      // Get pool data if not provided (needed for V4Pool construction)
-      let poolData = providedPoolData;
-      if (!poolData) {
-        const poolId = this._computePoolId(poolKey);
-        poolData = await this.getPoolData(poolId, provider);
-      }
+      const poolKey = providedPoolData.poolKey;
+      const poolData = providedPoolData;
 
       // Determine if tokens are native ETH
       const isToken0Native = poolKey.currency0 === ethers.constants.AddressZero;
@@ -961,7 +959,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * - Supports burnToken option to burn NFT on 100% removal
    *
    * @param {Object} params - Parameters for removing liquidity
-   * @param {string|number} params.tokenId - Position NFT token ID (required)
+   * @param {Object} params.position - Position object (required)
+   * @param {string|number} params.position.id - Position NFT token ID (required)
    * @param {number} params.percentage - Percentage to remove 1-100 (required)
    * @param {string} params.walletAddress - Recipient address (required)
    * @param {Object} params.provider - Ethers provider (required)
@@ -975,7 +974,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    */
   async generateRemoveLiquidityData(params) {
     const {
-      tokenId,
+      position,
       percentage,
       walletAddress,
       provider,
@@ -989,9 +988,28 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     // === VALIDATION ===
 
-    // tokenId validation
+    // position validation
+    if (position === null || position === undefined) {
+      throw new Error('position is required');
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position must be an object');
+    }
+
+    // Extract and validate tokenId from position
+    const tokenId = position.id;
     if (tokenId === null || tokenId === undefined) {
-      throw new Error('tokenId is required');
+      throw new Error('position.id is required');
+    }
+
+    // Extract and validate tickLower and tickUpper from position
+    const tickLower = position.tickLower;
+    const tickUpper = position.tickUpper;
+    if (tickLower === null || tickLower === undefined) {
+      throw new Error('position.tickLower is required');
+    }
+    if (tickUpper === null || tickUpper === undefined) {
+      throw new Error('position.tickUpper is required');
     }
 
     // percentage validation (1-100)
@@ -1025,37 +1043,19 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
+    // Validate poolData and poolData.poolKey
+    if (!providedPoolData || typeof providedPoolData !== 'object') {
+      throw new Error('poolData is required');
+    }
+    if (!providedPoolData.poolKey || typeof providedPoolData.poolKey !== 'object') {
+      throw new Error('poolData.poolKey is required');
+    }
+
     try {
       // === FETCH POSITION DATA ===
 
-      let poolKey = providedPoolKey;
-      let tickLower, tickUpper;
-
-      if (!poolKey) {
-        const positionManagerContract = new ethers.Contract(
-          this.addresses.positionManagerAddress,
-          this.positionManagerABI,
-          provider
-        );
-        const [fetchedPoolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
-        poolKey = {
-          currency0: fetchedPoolKey.currency0,
-          currency1: fetchedPoolKey.currency1,
-          fee: Number(fetchedPoolKey.fee),
-          tickSpacing: Number(fetchedPoolKey.tickSpacing),
-          hooks: fetchedPoolKey.hooks
-        };
-        const decoded = this._decodePositionInfo(packedInfo);
-        tickLower = decoded.tickLower;
-        tickUpper = decoded.tickUpper;
-      }
-
-      // Get pool data if not provided
-      let poolData = providedPoolData;
-      if (!poolData) {
-        const poolId = this._computePoolId(poolKey);
-        poolData = await this.getPoolData(poolId, provider);
-      }
+      const poolKey = providedPoolData.poolKey;
+      const poolData = providedPoolData;
 
       // Get actual position liquidity from StateView
       const poolId = this._computePoolId(poolKey);
@@ -1065,19 +1065,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         provider
       );
       const salt = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
-
-      // If tickLower/tickUpper not set (poolKey was provided), fetch from position
-      if (tickLower === undefined || tickUpper === undefined) {
-        const positionManagerContract = new ethers.Contract(
-          this.addresses.positionManagerAddress,
-          this.positionManagerABI,
-          provider
-        );
-        const [, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
-        const decoded = this._decodePositionInfo(packedInfo);
-        tickLower = decoded.tickLower;
-        tickUpper = decoded.tickUpper;
-      }
 
       const positionInfo = await stateViewContract['getPositionInfo(bytes32,address,int24,int24,bytes32)'](
         poolId,
@@ -1158,12 +1145,16 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * (same method as create, but with tokenId instead of recipient).
    *
    * @param {Object} params - Parameters for adding liquidity
-   * @param {string|number} params.tokenId - Position NFT token ID (required)
+   * @param {Object} params.position - Position object with id and tick bounds
+   * @param {string} params.position.id - Position NFT token ID (required)
+   * @param {number} params.position.tickLower - Lower tick bound
+   * @param {number} params.position.tickUpper - Upper tick bound
    * @param {string} params.token0Amount - Amount of token0 to add in wei (required)
    * @param {string} params.token1Amount - Amount of token1 to add in wei (required)
    * @param {Object} params.provider - Ethers provider (required)
-   * @param {Object} [params.poolKey] - Pool key (optional, fetched if not provided)
-   * @param {Object} [params.poolData] - Pool data (optional, fetched if not provided)
+   * @param {Object} params.poolData - Pool data with embedded poolKey (required)
+   * @param {Object} params.token0Data - Token0 data (for interface consistency with V3)
+   * @param {Object} params.token1Data - Token1 data (for interface consistency with V3)
    * @param {number} params.slippageTolerance - Slippage 0-100 (required)
    * @param {number} params.deadlineMinutes - Deadline in minutes (required)
    * @param {string} [params.hookData='0x'] - Optional hook data
@@ -1171,12 +1162,13 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    */
   async generateAddLiquidityData(params) {
     const {
-      tokenId,
+      position,
       token0Amount,
       token1Amount,
       provider,
-      poolKey: providedPoolKey,
       poolData: providedPoolData,
+      token0Data,
+      token1Data,
       slippageTolerance,
       deadlineMinutes,
       hookData = '0x'
@@ -1184,10 +1176,19 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     // === VALIDATION ===
 
-    // tokenId validation
-    if (tokenId === null || tokenId === undefined) {
-      throw new Error('tokenId is required');
+    // position validation (V3-compatible interface)
+    if (position === null || position === undefined) {
+      throw new Error('position is required');
     }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position must be an object');
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error('position.id is required');
+    }
+
+    // Extract tokenId from position for V4 SDK calls
+    const tokenId = position.id;
 
     // token0Amount validation
     if (token0Amount === null || token0Amount === undefined) {
@@ -1226,50 +1227,27 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
+    // Validate poolData and poolData.poolKey
+    if (!providedPoolData || typeof providedPoolData !== 'object') {
+      throw new Error('poolData is required');
+    }
+    if (!providedPoolData.poolKey || typeof providedPoolData.poolKey !== 'object') {
+      throw new Error('poolData.poolKey is required');
+    }
+
     try {
       // === FETCH POSITION DATA ===
 
-      let poolKey = providedPoolKey;
-      let tickLower, tickUpper;
+      const poolKey = providedPoolData.poolKey;
 
-      if (!poolKey) {
-        const positionManagerContract = new ethers.Contract(
-          this.addresses.positionManagerAddress,
-          this.positionManagerABI,
-          provider
-        );
-        const [fetchedPoolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
-        poolKey = {
-          currency0: fetchedPoolKey.currency0,
-          currency1: fetchedPoolKey.currency1,
-          fee: Number(fetchedPoolKey.fee),
-          tickSpacing: Number(fetchedPoolKey.tickSpacing),
-          hooks: fetchedPoolKey.hooks
-        };
-        const decoded = this._decodePositionInfo(packedInfo);
-        tickLower = decoded.tickLower;
-        tickUpper = decoded.tickUpper;
-      }
-
-      // Get pool data if not provided
-      let poolData = providedPoolData;
-      if (!poolData) {
-        const poolId = this._computePoolId(poolKey);
-        poolData = await this.getPoolData(poolId, provider);
-      }
-
-      // If tickLower/tickUpper not set, fetch from position
+      // Use tick bounds from position object (V3-compatible interface)
+      const tickLower = position.tickLower;
+      const tickUpper = position.tickUpper;
       if (tickLower === undefined || tickUpper === undefined) {
-        const positionManagerContract = new ethers.Contract(
-          this.addresses.positionManagerAddress,
-          this.positionManagerABI,
-          provider
-        );
-        const [, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
-        const decoded = this._decodePositionInfo(packedInfo);
-        tickLower = decoded.tickLower;
-        tickUpper = decoded.tickUpper;
+        throw new Error('position.tickLower and position.tickUpper are required');
       }
+
+      const poolData = providedPoolData;
 
       // === CREATE SDK OBJECTS ===
 
@@ -1382,13 +1360,34 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       token0Amount,
       token1Amount,
       poolData,
-      poolKey,
       token0Data,
       token1Data,
       provider
     } = params;
 
     // === VALIDATION ===
+
+    // poolData validation (first, since we need to extract poolKey)
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (poolData.sqrtPriceX96 === undefined) {
+      throw new Error('poolData.sqrtPriceX96 is required');
+    }
+    if (poolData.liquidity === undefined) {
+      throw new Error('poolData.liquidity is required');
+    }
+    if (poolData.tick === undefined) {
+      throw new Error('poolData.tick is required');
+    }
+
+    // Extract poolKey from poolData (added by selectBestPool normalization)
+    const poolKey = poolData.poolKey;
+
+    // poolKey validation (V4 specific)
+    if (!poolKey || typeof poolKey !== 'object') {
+      throw new Error('poolKey is required and must be an object');
+    }
 
     // position validation
     if (!position || typeof position !== 'object') {
@@ -1434,25 +1433,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     // provider validation
     if (!provider) {
       throw new Error('provider is required');
-    }
-
-    // poolData validation
-    if (!poolData || typeof poolData !== 'object') {
-      throw new Error('poolData is required and must be an object');
-    }
-    if (poolData.sqrtPriceX96 === undefined) {
-      throw new Error('poolData.sqrtPriceX96 is required');
-    }
-    if (poolData.liquidity === undefined) {
-      throw new Error('poolData.liquidity is required');
-    }
-    if (poolData.tick === undefined) {
-      throw new Error('poolData.tick is required');
-    }
-
-    // poolKey validation (V4 specific)
-    if (!poolKey || typeof poolKey !== 'object') {
-      throw new Error('poolKey is required and must be an object');
     }
     if (!poolKey.currency0) {
       throw new Error('poolKey.currency0 is required');
@@ -1618,7 +1598,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       token1Amount,
       provider,
       walletAddress,
-      poolKey,
       poolData,
       token0Data,
       token1Data,
@@ -1630,6 +1609,73 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     // =====================================================================
     // Input Validation
     // =====================================================================
+
+    // Validate poolData first (needed to extract poolKey)
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+
+    // Extract poolKey from poolData (added by selectBestPool normalization)
+    const poolKey = poolData.poolKey;
+
+    // Validate poolKey (V4-specific requirement)
+    if (poolKey === null || poolKey === undefined) {
+      throw new Error("PoolKey parameter is required for V4");
+    }
+    if (typeof poolKey !== 'object' || Array.isArray(poolKey)) {
+      throw new Error("PoolKey must be an object");
+    }
+    if (!poolKey.currency0 || !poolKey.currency1) {
+      throw new Error("PoolKey must have currency0 and currency1");
+    }
+    if (poolKey.fee === undefined || poolKey.fee === null) {
+      throw new Error("PoolKey must have fee");
+    }
+    if (poolKey.tickSpacing === undefined || poolKey.tickSpacing === null) {
+      throw new Error("PoolKey must have tickSpacing");
+    }
+    if (!poolKey.hooks) {
+      throw new Error("PoolKey must have hooks (use ethers.constants.AddressZero for no hooks)");
+    }
+    // Validate address ordering
+    if (poolKey.currency0.toLowerCase() >= poolKey.currency1.toLowerCase()) {
+      throw new Error("PoolKey currency0 must be less than currency1 (addresses must be sorted)");
+    }
+
+    // Continue validating poolData fields
+    if (poolData.fee === null || poolData.fee === undefined) {
+      throw new Error("Pool data fee is required");
+    }
+    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
+      throw new Error("Pool data fee must be a non-negative finite number");
+    }
+    if (!poolData.sqrtPriceX96) {
+      throw new Error("Pool data sqrtPriceX96 is required");
+    }
+    if (typeof poolData.sqrtPriceX96 !== 'string') {
+      throw new Error("Pool data sqrtPriceX96 must be a string");
+    }
+    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
+      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
+    }
+    if (!poolData.liquidity) {
+      throw new Error("Pool data liquidity is required");
+    }
+    if (typeof poolData.liquidity !== 'string') {
+      throw new Error("Pool data liquidity must be a string");
+    }
+    if (!/^\d+$/.test(poolData.liquidity)) {
+      throw new Error("Pool data liquidity must be a positive numeric string");
+    }
+    if (poolData.tick === null || poolData.tick === undefined) {
+      throw new Error("Pool data tick is required");
+    }
+    if (!Number.isFinite(poolData.tick)) {
+      throw new Error("Pool data tick must be a finite number");
+    }
 
     // Validate position
     if (position === null || position === undefined) {
@@ -1695,68 +1741,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       ethers.utils.getAddress(walletAddress);
     } catch (error) {
       throw new Error(`Invalid wallet address: ${walletAddress}`);
-    }
-
-    // Validate poolKey (V4-specific requirement)
-    if (poolKey === null || poolKey === undefined) {
-      throw new Error("PoolKey parameter is required for V4");
-    }
-    if (typeof poolKey !== 'object' || Array.isArray(poolKey)) {
-      throw new Error("PoolKey must be an object");
-    }
-    if (!poolKey.currency0 || !poolKey.currency1) {
-      throw new Error("PoolKey must have currency0 and currency1");
-    }
-    if (poolKey.fee === undefined || poolKey.fee === null) {
-      throw new Error("PoolKey must have fee");
-    }
-    if (poolKey.tickSpacing === undefined || poolKey.tickSpacing === null) {
-      throw new Error("PoolKey must have tickSpacing");
-    }
-    if (!poolKey.hooks) {
-      throw new Error("PoolKey must have hooks (use ethers.constants.AddressZero for no hooks)");
-    }
-    // Validate address ordering
-    if (poolKey.currency0.toLowerCase() >= poolKey.currency1.toLowerCase()) {
-      throw new Error("PoolKey currency0 must be less than currency1 (addresses must be sorted)");
-    }
-
-    // Validate poolData
-    if (poolData === null || poolData === undefined) {
-      throw new Error("Pool data parameter is required");
-    }
-    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
-      throw new Error("Pool data must be an object");
-    }
-    if (poolData.fee === null || poolData.fee === undefined) {
-      throw new Error("Pool data fee is required");
-    }
-    if (!Number.isFinite(poolData.fee) || poolData.fee < 0) {
-      throw new Error("Pool data fee must be a non-negative finite number");
-    }
-    if (!poolData.sqrtPriceX96) {
-      throw new Error("Pool data sqrtPriceX96 is required");
-    }
-    if (typeof poolData.sqrtPriceX96 !== 'string') {
-      throw new Error("Pool data sqrtPriceX96 must be a string");
-    }
-    if (!/^\d+$/.test(poolData.sqrtPriceX96)) {
-      throw new Error("Pool data sqrtPriceX96 must be a positive numeric string");
-    }
-    if (!poolData.liquidity) {
-      throw new Error("Pool data liquidity is required");
-    }
-    if (typeof poolData.liquidity !== 'string') {
-      throw new Error("Pool data liquidity must be a string");
-    }
-    if (!/^\d+$/.test(poolData.liquidity)) {
-      throw new Error("Pool data liquidity must be a positive numeric string");
-    }
-    if (poolData.tick === null || poolData.tick === undefined) {
-      throw new Error("Pool data tick is required");
-    }
-    if (!Number.isFinite(poolData.tick)) {
-      throw new Error("Pool data tick must be a finite number");
     }
 
     // Validate token0Data
@@ -3215,15 +3199,59 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     const { sortedToken0, sortedToken1 } = this.sortTokens(tokenAData, tokenBData);
 
     // Query subgraph for V4 pools (vanilla pools only - no hooks)
-    const pools = await discoverV4Pools(
+    const rawPools = await discoverV4Pools(
       sortedToken0.address,
       sortedToken1.address,
       chainId
     );
 
-    if (pools.length === 0) {
+    if (rawPools.length === 0) {
       throw new Error(`No pools found for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName}`);
     }
+
+    // Normalize pool data structure to match expected interface
+    // Subgraph returns: id, feeTier, tick (string), sqrtPrice, token0.id, token1.id
+    // Expected:        address, fee, tick (number), sqrtPriceX96, token0.address, token1.address
+    const pools = rawPools.map(pool => {
+      const fee = parseInt(pool.feeTier, 10);
+      const tickSpacing = parseInt(pool.tickSpacing, 10);
+      const token0Address = pool.token0.id;
+      const token1Address = pool.token1.id;
+      const hooks = pool.hooks || ethers.constants.AddressZero;
+
+      return {
+        // V4 uses poolId (bytes32 hash) - expose as both 'address' and 'poolId' for compatibility
+        address: pool.id,
+        poolId: pool.id,
+        // Normalize field names
+        fee,
+        tickSpacing,
+        liquidity: pool.liquidity,
+        sqrtPriceX96: pool.sqrtPrice,
+        tick: parseInt(pool.tick, 10),
+        hooks,
+        totalValueLockedUSD: pool.totalValueLockedUSD,
+        // Normalize token structure
+        token0: {
+          symbol: pool.token0.symbol,
+          address: token0Address,
+          decimals: parseInt(pool.token0.decimals, 10)
+        },
+        token1: {
+          symbol: pool.token1.symbol,
+          address: token1Address,
+          decimals: parseInt(pool.token1.decimals, 10)
+        },
+        // V4-specific: Include poolKey for contract interactions
+        poolKey: {
+          currency0: token0Address,
+          currency1: token1Address,
+          fee,
+          tickSpacing,
+          hooks
+        }
+      };
+    });
 
     // Filter dead pools (liquidity = 0) - subgraph already filters but double-check
     const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
@@ -3747,20 +3775,169 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get the address that tokens should be approved to for operations
+   * Get required approval transactions for a given operation type
    *
    * For Uniswap V4:
-   * - Swaps: Tokens approved to Permit2 (UniversalRouter pulls via Permit2)
-   * - Liquidity: Tokens approved directly to V4 PositionManager
+   * - Swaps: ERC20 approve to Permit2 (UniversalRouter pulls via Permit2)
+   * - Liquidity: ERC20 approve to Permit2 + Permit2 allowance to PositionManager
+   *   (V4 PositionManager uses permit2.transferFrom, requiring the two-step approval)
    *
-   * @param {string} [operationType='swap'] - 'swap' or 'liquidity'
-   * @returns {string} Approval target address
+   * @param {string} operationType - Operation type: 'swap' or 'liquidity'
+   * @param {string} vaultAddress - Address of the vault that needs approvals
+   * @param {Array<string>} tokenAddresses - Array of token addresses to approve
+   * @param {Object} provider - Ethers provider for checking current allowances
+   * @returns {Promise<Array<Object>>} Array of transaction objects { to, data, value }
    */
-  getApprovalTarget(operationType = 'swap') {
-    if (operationType === 'liquidity') {
-      return this.addresses.positionManagerAddress;
+  async getRequiredApprovals(operationType, vaultAddress, tokenAddresses, provider) {
+    if (!operationType || !['swap', 'liquidity'].includes(operationType)) {
+      throw new Error('getRequiredApprovals: operationType must be "swap" or "liquidity"');
     }
-    return PERMIT2_ADDRESS;
+    if (!vaultAddress || !ethers.utils.isAddress(vaultAddress)) {
+      throw new Error('getRequiredApprovals: invalid vaultAddress');
+    }
+    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
+      throw new Error('getRequiredApprovals: tokenAddresses must be a non-empty array');
+    }
+    if (!provider) {
+      throw new Error('getRequiredApprovals: provider is required');
+    }
+
+    const transactions = [];
+
+    // For V4, all operations go through Permit2 for ERC20 approval
+    for (const tokenAddress of tokenAddresses) {
+      // Skip native ETH - no ERC20 approval needed
+      if (tokenAddress === ethers.constants.AddressZero) {
+        continue;
+      }
+
+      if (!ethers.utils.isAddress(tokenAddress)) {
+        throw new Error(`getRequiredApprovals: invalid token address ${tokenAddress}`);
+      }
+
+      // Step 1: Check if ERC20 approval to Permit2 is needed
+      const needsERC20Approval = await this._checkNeedsERC20Approval(vaultAddress, tokenAddress, PERMIT2_ADDRESS, provider);
+      if (needsERC20Approval) {
+        transactions.push(this._encodeERC20Approve(tokenAddress, PERMIT2_ADDRESS));
+      }
+
+      // Step 2: For liquidity operations, also need Permit2 allowance to PositionManager
+      if (operationType === 'liquidity') {
+        const needsPermit2Allowance = await this._checkNeedsPermit2Allowance(
+          vaultAddress,
+          tokenAddress,
+          this.addresses.positionManagerAddress,
+          provider
+        );
+        if (needsPermit2Allowance) {
+          // Set expiration to 1 year from now
+          const expiration = Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60);
+          transactions.push(this._encodePermit2Approve(tokenAddress, this.addresses.positionManagerAddress, expiration));
+        }
+      }
+    }
+
+    return transactions;
+  }
+
+  /**
+   * Check if an ERC20 approval is needed
+   *
+   * Returns true if current allowance is less than half of MaxUint256.
+   * This threshold ensures we don't need to re-approve frequently.
+   *
+   * @param {string} vaultAddress - Address that owns the tokens
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address that will spend tokens
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<boolean>} True if approval is needed
+   * @private
+   */
+  async _checkNeedsERC20Approval(vaultAddress, tokenAddress, spender, provider) {
+    const token = new ethers.Contract(tokenAddress, this.erc20ABI, provider);
+    const allowance = await token.allowance(vaultAddress, spender);
+    // Renew approval if less than half of max (avoid frequent re-approvals)
+    return allowance.lt(ethers.constants.MaxUint256.div(2));
+  }
+
+  /**
+   * Encode an ERC20 approve transaction
+   *
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address to approve
+   * @returns {Object} Transaction object { to, data, value }
+   * @private
+   */
+  _encodeERC20Approve(tokenAddress, spender) {
+    const data = this.erc20Interface.encodeFunctionData('approve', [
+      spender,
+      ethers.constants.MaxUint256
+    ]);
+    return {
+      to: tokenAddress,
+      data: data,
+      value: '0'
+    };
+  }
+
+  /**
+   * Check if a Permit2 allowance is needed
+   *
+   * Returns true if current Permit2 allowance amount is 0 or if the
+   * expiration is less than 1 hour from now.
+   *
+   * @param {string} vaultAddress - Address that owns the tokens
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address that will spend via Permit2
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<boolean>} True if Permit2 allowance is needed
+   * @private
+   */
+  async _checkNeedsPermit2Allowance(vaultAddress, tokenAddress, spender, provider) {
+    const permit2Abi = [
+      'function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)'
+    ];
+    const permit2 = new ethers.Contract(PERMIT2_ADDRESS, permit2Abi, provider);
+    const [amount, expiration] = await permit2.allowance(vaultAddress, tokenAddress, spender);
+    const now = Math.floor(Date.now() / 1000);
+    // Renew if amount is 0 or expiration is less than 1 hour from now
+    return amount.eq(0) || expiration < now + 3600;
+  }
+
+  /**
+   * Encode a Permit2 approve transaction
+   *
+   * Uses Permit2's approve() function to grant allowance to a spender.
+   * This is the on-chain equivalent of the signed permit approach.
+   *
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address to grant Permit2 allowance to
+   * @param {number} expiration - Unix timestamp when allowance expires
+   * @returns {Object} Transaction object { to, data, value }
+   * @private
+   */
+  _encodePermit2Approve(tokenAddress, spender, expiration) {
+    // Permit2 approve function signature:
+    // approve(address token, address spender, uint160 amount, uint48 expiration)
+    const permit2Interface = new ethers.utils.Interface([
+      'function approve(address token, address spender, uint160 amount, uint48 expiration)'
+    ]);
+
+    // Use max uint160 for amount (2^160 - 1)
+    const maxUint160 = ethers.BigNumber.from(2).pow(160).sub(1);
+
+    const data = permit2Interface.encodeFunctionData('approve', [
+      tokenAddress,
+      spender,
+      maxUint160,
+      expiration
+    ]);
+
+    return {
+      to: PERMIT2_ADDRESS,
+      data: data,
+      value: '0'
+    };
   }
 
   // ===========================================================================

@@ -109,18 +109,97 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get the address that tokens should be approved to for operations on this platform
+   * Get required approval transactions for a given operation type
+   *
    * For Uniswap V3:
-   * - Swaps: Tokens approved to Permit2 (Universal Router pulls via Permit2)
-   * - Liquidity: Tokens approved directly to NFT Position Manager
-   * @param {string} [operationType='swap'] - Operation type: 'swap' or 'liquidity'
-   * @returns {string} The approval target address for the specified operation type
+   * - Swaps: ERC20 approve to Permit2 (Universal Router pulls via Permit2)
+   * - Liquidity: ERC20 approve directly to NFT Position Manager
+   *
+   * @param {string} operationType - Operation type: 'swap' or 'liquidity'
+   * @param {string} vaultAddress - Address of the vault that needs approvals
+   * @param {Array<string>} tokenAddresses - Array of token addresses to approve
+   * @param {Object} provider - Ethers provider for checking current allowances
+   * @returns {Promise<Array<Object>>} Array of transaction objects { to, data, value }
    */
-  getApprovalTarget(operationType) {
-    if (operationType === 'liquidity') {
-      return this.addresses.positionManagerAddress;
+  async getRequiredApprovals(operationType, vaultAddress, tokenAddresses, provider) {
+    if (!operationType || !['swap', 'liquidity'].includes(operationType)) {
+      throw new Error('getRequiredApprovals: operationType must be "swap" or "liquidity"');
     }
-    return PERMIT2_ADDRESS;
+    if (!vaultAddress || !ethers.utils.isAddress(vaultAddress)) {
+      throw new Error('getRequiredApprovals: invalid vaultAddress');
+    }
+    if (!Array.isArray(tokenAddresses) || tokenAddresses.length === 0) {
+      throw new Error('getRequiredApprovals: tokenAddresses must be a non-empty array');
+    }
+    if (!provider) {
+      throw new Error('getRequiredApprovals: provider is required');
+    }
+
+    const transactions = [];
+
+    // Determine the spender based on operation type
+    const spender = operationType === 'liquidity'
+      ? this.addresses.positionManagerAddress
+      : PERMIT2_ADDRESS;
+
+    // Check each token and add approval tx if needed
+    for (const tokenAddress of tokenAddresses) {
+      // Skip native ETH - no ERC20 approval needed
+      if (tokenAddress === ethers.constants.AddressZero) {
+        continue;
+      }
+
+      if (!ethers.utils.isAddress(tokenAddress)) {
+        throw new Error(`getRequiredApprovals: invalid token address ${tokenAddress}`);
+      }
+
+      const needsApproval = await this._checkNeedsERC20Approval(vaultAddress, tokenAddress, spender, provider);
+      if (needsApproval) {
+        transactions.push(this._encodeERC20Approve(tokenAddress, spender));
+      }
+    }
+
+    return transactions;
+  }
+
+  /**
+   * Check if an ERC20 approval is needed
+   *
+   * Returns true if current allowance is less than half of MaxUint256.
+   * This threshold ensures we don't need to re-approve frequently.
+   *
+   * @param {string} vaultAddress - Address that owns the tokens
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address that will spend tokens
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<boolean>} True if approval is needed
+   * @private
+   */
+  async _checkNeedsERC20Approval(vaultAddress, tokenAddress, spender, provider) {
+    const token = new ethers.Contract(tokenAddress, this.erc20ABI, provider);
+    const allowance = await token.allowance(vaultAddress, spender);
+    // Renew approval if less than half of max (avoid frequent re-approvals)
+    return allowance.lt(ethers.constants.MaxUint256.div(2));
+  }
+
+  /**
+   * Encode an ERC20 approve transaction
+   *
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} spender - Address to approve
+   * @returns {Object} Transaction object { to, data, value }
+   * @private
+   */
+  _encodeERC20Approve(tokenAddress, spender) {
+    const data = this.erc20Interface.encodeFunctionData('approve', [
+      spender,
+      ethers.constants.MaxUint256
+    ]);
+    return {
+      to: tokenAddress,
+      data: data,
+      value: '0'
+    };
   }
 
   /**
@@ -2641,24 +2720,33 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.token1Decimals - Token1 decimals
    * @param {boolean} [params.token0IsNative=false] - Whether token0 is native ETH (triggers unwrapWETH9)
    * @param {boolean} [params.token1IsNative=false] - Whether token1 is native ETH (triggers unwrapWETH9)
+   * @param {Object} [params.poolData] - Pool data (accepted for V4 compatibility, not used by V3)
    * @returns {Object} Transaction data object with `to`, `data`, `value` properties
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateClaimFeesData(params) {
     const {
-      positionId, provider, walletAddress,
+      position, provider, walletAddress,
       token0Address, token1Address,
       token0Decimals, token1Decimals,
       token0IsNative = false,
-      token1IsNative = false
+      token1IsNative = false,
+      poolData  // Accepted for V4 compatibility, not used by V3
     } = params;
 
-    // Input validation
+    // Position object validation
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+
+    // Extract and validate position.id
+    const positionId = position.id;
     if (positionId === null || positionId === undefined) {
       throw new Error("Position ID is required");
     }
-
-    // Validate positionId is a numeric string
     if (typeof positionId !== 'string') {
       throw new Error('positionId must be a string');
     }
