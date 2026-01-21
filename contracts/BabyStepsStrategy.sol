@@ -26,7 +26,6 @@ contract BabyStepsStrategy is StrategyBase {
     uint16 private constant CONS_REINVESTMENT_RATIO = 3000;          // 30.00%
     uint16 private constant CONS_MAX_SLIPPAGE = 50;                  // 0.50%
     uint16 private constant CONS_EMERGENCY_EXIT_TRIGGER = 1000;      // 10.00%
-    uint16 private constant CONS_MAX_UTILIZATION = 9000;             // 90.00%
     bool private constant CONS_FEE_REINVESTMENT = true;              // Fee reinvestment enabled
 
     // Moderate template values - MEDIUM ranges, moderate rebalances
@@ -36,7 +35,6 @@ contract BabyStepsStrategy is StrategyBase {
     uint16 private constant MOD_REINVESTMENT_RATIO = 5000;           // 50.00%
     uint16 private constant MOD_MAX_SLIPPAGE = 50;                   // 0.50%
     uint16 private constant MOD_EMERGENCY_EXIT_TRIGGER = 1000;       // 10.00%
-    uint16 private constant MOD_MAX_UTILIZATION = 9000;              // 90.00%
 
     // Aggressive template values - TIGHTER ranges, frequent rebalances
     uint16 private constant AGG_TARGET_RANGE_UPPER = 300;            // 3.00%
@@ -45,7 +43,6 @@ contract BabyStepsStrategy is StrategyBase {
     uint16 private constant AGG_REINVESTMENT_RATIO = 9000;           // 90.00%
     uint16 private constant AGG_MAX_SLIPPAGE = 50;                   // 0.50%
     uint16 private constant AGG_EMERGENCY_EXIT_TRIGGER = 1000;       // 10.00%
-    uint16 private constant AGG_MAX_UTILIZATION = 9000;              // 90.00%
 
     // Stablecoin template values - VERY TIGHT ranges for stablecoins
     uint16 private constant STBL_TARGET_RANGE_UPPER = 20;            // 0.20%
@@ -54,7 +51,6 @@ contract BabyStepsStrategy is StrategyBase {
     uint16 private constant STBL_REINVESTMENT_RATIO = 10000;         // 100.00%
     uint16 private constant STBL_MAX_SLIPPAGE = 20;                  // 0.20%
     uint16 private constant STBL_EMERGENCY_EXIT_TRIGGER = 100;       // 1.00%
-    uint16 private constant STBL_MAX_UTILIZATION = 9000;             // 90.00%
 
     // ==================== Parameter Storage ====================
     // Range Parameters
@@ -69,7 +65,6 @@ contract BabyStepsStrategy is StrategyBase {
     // Risk Management
     mapping(address => uint16) public maxSlippage;              // Basis points
     mapping(address => uint16) public emergencyExitTrigger;     // Basis points
-    mapping(address => uint16) public maxUtilization;           // Basis points
 
     /**
      * @dev Constructor
@@ -233,28 +228,6 @@ contract BabyStepsStrategy is StrategyBase {
     }
 
     /**
-     * @dev Get max utilization value with template fallback
-     * @param vault Address of the vault
-     * @return Parameter value
-     */
-    function getMaxUtilization(address vault) public view returns (uint16) {
-        // Check if parameter is customized
-        if (_isCustomized(vault, 7)) {
-            return maxUtilization[vault];
-        }
-
-        // Return template value
-        uint8 template = selectedTemplate[vault];
-        if (template == TEMPLATE_CONSERVATIVE) return CONS_MAX_UTILIZATION;
-        if (template == TEMPLATE_MODERATE) return MOD_MAX_UTILIZATION;
-        if (template == TEMPLATE_AGGRESSIVE) return AGG_MAX_UTILIZATION;
-        if (template == TEMPLATE_STABLECOIN) return STBL_MAX_UTILIZATION;
-
-        // Default value if no template or TEMPLATE_NONE
-        return MOD_MAX_UTILIZATION;
-    }
-
-    /**
      * @dev Get all parameters for a vault in a single call (with template fallbacks)
      * @param vault Address of the vault
      * @return ABI-encoded parameters
@@ -268,7 +241,7 @@ contract BabyStepsStrategy is StrategyBase {
             getFeeReinvestment(vault), getReinvestmentTrigger(vault), getReinvestmentRatio(vault),
 
             // Risk Management
-            getMaxSlippage(vault), getEmergencyExitTrigger(vault), getMaxUtilization(vault)
+            getMaxSlippage(vault), getEmergencyExitTrigger(vault)
         );
     }
 
@@ -317,19 +290,16 @@ contract BabyStepsStrategy is StrategyBase {
      * @dev Update risk management parameters
      * @param slippage Maximum acceptable slippage in basis points
      * @param exitTrigger Price change that triggers emergency exit in basis points
-     * @param utilization Maximum vault utilization in basis points
      */
     function setRiskParameters(
         uint16 slippage,
-        uint16 exitTrigger,
-        uint16 utilization
+        uint16 exitTrigger
     ) external onlyAuthorizedVault {
         maxSlippage[msg.sender] = slippage;
         emergencyExitTrigger[msg.sender] = exitTrigger;
-        maxUtilization[msg.sender] = utilization;
 
         // Update customization bitmap
-        _markCustomized((1 << 5) | (1 << 6) | (1 << 7));
+        _markCustomized((1 << 5) | (1 << 6));
 
         emit ParameterUpdated(msg.sender, "riskParameters");
     }
