@@ -29,7 +29,6 @@ describe("BabyStepsStrategy", function () {
   const CONS_REINVESTMENT_RATIO = 3000;           // 30.00%
   const CONS_MAX_SLIPPAGE = 50;                   // 0.50%
   const CONS_EMERGENCY_EXIT_TRIGGER = 1000;       // 10.00%
-  const CONS_MAX_UTILIZATION = 9000;              // 90.00%
   const CONS_FEE_REINVESTMENT = true;
 
   // Moderate template values
@@ -39,7 +38,6 @@ describe("BabyStepsStrategy", function () {
   const MOD_REINVESTMENT_RATIO = 5000;            // 50.00%
   const MOD_MAX_SLIPPAGE = 50;                    // 0.50%
   const MOD_EMERGENCY_EXIT_TRIGGER = 1000;        // 10.00%
-  const MOD_MAX_UTILIZATION = 9000;               // 90.00%
   const MOD_FEE_REINVESTMENT = true;
 
   // Aggressive template values
@@ -49,7 +47,6 @@ describe("BabyStepsStrategy", function () {
   const AGG_REINVESTMENT_RATIO = 9000;            // 90.00%
   const AGG_MAX_SLIPPAGE = 50;                    // 0.50%
   const AGG_EMERGENCY_EXIT_TRIGGER = 1000;        // 10.00%
-  const AGG_MAX_UTILIZATION = 9000;               // 90.00%
 
   // Stablecoin template values
   const STBL_TARGET_RANGE_UPPER = 20;             // 0.20%
@@ -58,14 +55,13 @@ describe("BabyStepsStrategy", function () {
   const STBL_REINVESTMENT_RATIO = 10000;          // 100.00%
   const STBL_MAX_SLIPPAGE = 20;                   // 0.20%
   const STBL_EMERGENCY_EXIT_TRIGGER = 100;        // 1.00%
-  const STBL_MAX_UTILIZATION = 9000;              // 90.00%
 
   // Strategy function interface for encoding calls
   const strategyInterface = new ethers.Interface([
     "function selectTemplate(uint8 template)",
     "function setRangeParameters(uint16 upperRange, uint16 lowerRange)",
     "function setFeeParameters(bool reinvest, uint256 trigger, uint16 ratio)",
-    "function setRiskParameters(uint16 slippage, uint16 exitTrigger, uint16 utilization)"
+    "function setRiskParameters(uint16 slippage, uint16 exitTrigger)"
   ]);
 
   // Helper to execute strategy calls through vault
@@ -124,7 +120,6 @@ describe("BabyStepsStrategy", function () {
       // Risk parameters
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(MOD_MAX_SLIPPAGE);
       expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(MOD_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(MOD_MAX_UTILIZATION);
     });
   });
 
@@ -141,7 +136,6 @@ describe("BabyStepsStrategy", function () {
       expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(CONS_REINVESTMENT_RATIO);
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(CONS_MAX_SLIPPAGE);
       expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(CONS_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(CONS_MAX_UTILIZATION);
     });
   });
 
@@ -157,7 +151,6 @@ describe("BabyStepsStrategy", function () {
       expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(AGG_REINVESTMENT_RATIO);
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(AGG_MAX_SLIPPAGE);
       expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(AGG_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(AGG_MAX_UTILIZATION);
     });
   });
 
@@ -173,7 +166,6 @@ describe("BabyStepsStrategy", function () {
       expect(await strategy.getReinvestmentRatio(vault1Address)).to.equal(STBL_REINVESTMENT_RATIO);
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(STBL_MAX_SLIPPAGE);
       expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(STBL_EMERGENCY_EXIT_TRIGGER);
-      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(STBL_MAX_UTILIZATION);
     });
   });
 
@@ -203,13 +195,11 @@ describe("BabyStepsStrategy", function () {
     it("Should set risk parameters", async function () {
       const slippage = 40;
       const exitTrigger = 1200;
-      const utilization = 7000;
 
-      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [slippage, exitTrigger, utilization]);
+      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [slippage, exitTrigger]);
 
       expect(await strategy.getMaxSlippage(vault1Address)).to.equal(slippage);
       expect(await strategy.getEmergencyExitTrigger(vault1Address)).to.equal(exitTrigger);
-      expect(await strategy.getMaxUtilization(vault1Address)).to.equal(utilization);
     });
 
     it("Should emit ParameterUpdated event", async function () {
@@ -242,8 +232,8 @@ describe("BabyStepsStrategy", function () {
   });
 
   describe("getAllParameters", function () {
-    // ABI types for decoding getAllParameters bytes (8 params after removing rebalanceThresholds)
-    const PARAM_TYPES = ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16', 'uint16'];
+    // ABI types for decoding getAllParameters bytes (7 params after removing maxUtilization)
+    const PARAM_TYPES = ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16'];
 
     it("Should return bytes that can be decoded to all parameters", async function () {
       await executeOnStrategy(vault1Contract, user1, "selectTemplate", [TEMPLATE_MODERATE]);
@@ -253,7 +243,7 @@ describe("BabyStepsStrategy", function () {
       // Decode the bytes
       const params = ethers.AbiCoder.defaultAbiCoder().decode(PARAM_TYPES, rawBytes);
 
-      // Verify all 8 parameters are returned in correct order
+      // Verify all 7 parameters are returned in correct order
       expect(params[0]).to.equal(MOD_TARGET_RANGE_UPPER);       // targetRangeUpper
       expect(params[1]).to.equal(MOD_TARGET_RANGE_LOWER);       // targetRangeLower
       expect(params[2]).to.equal(MOD_FEE_REINVESTMENT);         // feeReinvestment
@@ -261,7 +251,6 @@ describe("BabyStepsStrategy", function () {
       expect(params[4]).to.equal(MOD_REINVESTMENT_RATIO);       // reinvestmentRatio
       expect(params[5]).to.equal(MOD_MAX_SLIPPAGE);             // maxSlippage
       expect(params[6]).to.equal(MOD_EMERGENCY_EXIT_TRIGGER);   // emergencyExitTrigger
-      expect(params[7]).to.equal(MOD_MAX_UTILIZATION);          // maxUtilization
     });
 
     it("Should include custom values mixed with template values", async function () {
@@ -269,7 +258,8 @@ describe("BabyStepsStrategy", function () {
 
       // Set custom risk parameters
       const customSlippage = 75;
-      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [customSlippage, 1500, 8000]);
+      const customExitTrigger = 1500;
+      await executeOnStrategy(vault1Contract, user1, "setRiskParameters", [customSlippage, customExitTrigger]);
 
       const rawBytes = await strategy.getAllParameters(vault1Address);
       const params = ethers.AbiCoder.defaultAbiCoder().decode(PARAM_TYPES, rawBytes);
@@ -279,8 +269,7 @@ describe("BabyStepsStrategy", function () {
 
       // Custom values
       expect(params[5]).to.equal(customSlippage);
-      expect(params[6]).to.equal(1500);
-      expect(params[7]).to.equal(8000);
+      expect(params[6]).to.equal(customExitTrigger);
     });
 
     it("Should return valid hex bytes string", async function () {
