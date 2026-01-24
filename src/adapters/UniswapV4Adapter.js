@@ -34,7 +34,7 @@ import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
 import { Protocol } from '@uniswap/router-sdk';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import { SqrtPriceMath, TickMath, tickToPrice } from '@uniswap/v3-sdk';
-import { Pool as V4Pool, Position as V4Position, V4PositionManager } from '@uniswap/v4-sdk';
+import { Pool as V4Pool, Position as V4Position, V4PositionManager, V4PositionPlanner } from '@uniswap/v4-sdk';
 import JSBI from "jsbi";
 
 // Import V4 ABIs from Uniswap packages (Foundry output structure)
@@ -527,6 +527,113 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
+   * Fetch a single position by tokenId (no Graph dependency)
+   * Used for immediate cache updates after position creation
+   *
+   * @param {string|number} tokenId - The position NFT token ID
+   * @param {ethers.Provider} provider - Ethers provider
+   * @returns {Promise<{position: Object, poolData: Object}>} Position and pool metadata
+   * @throws {Error} If tokenId or provider is invalid, or position not found
+   */
+  async getPositionById(tokenId, provider) {
+    // Parameter validation
+    if (tokenId === null || tokenId === undefined || tokenId === '') {
+      throw new Error('TokenId parameter is required');
+    }
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error('Valid provider parameter is required');
+    }
+
+    try {
+      const positionManagerContract = new ethers.Contract(
+        this.addresses.positionManagerAddress,
+        this.positionManagerABI,
+        provider
+      );
+
+      const stateViewContract = new ethers.Contract(
+        this.addresses.stateViewAddress,
+        this.stateViewABI,
+        provider
+      );
+
+      // Step 1: Get pool key and packed position info
+      const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
+
+      // Check if position exists - V4 returns zeroed data for burned/non-existent positions
+      if (poolKey.currency0 === ethers.constants.AddressZero &&
+          poolKey.currency1 === ethers.constants.AddressZero) {
+        throw new Error(`Position ${tokenId} not found or has been burned`);
+      }
+
+      // Step 2: Decode tick bounds from packed info
+      const { tickLower, tickUpper } = this._decodePositionInfo(packedInfo);
+
+      // Step 3: Normalize pool key and compute pool ID
+      const normalizedPoolKey = {
+        currency0: poolKey.currency0,
+        currency1: poolKey.currency1,
+        fee: Number(poolKey.fee),
+        tickSpacing: Number(poolKey.tickSpacing),
+        hooks: poolKey.hooks
+      };
+      const poolId = this._computePoolId(normalizedPoolKey);
+
+      // Step 4: Get position liquidity and fee data from StateView
+      const salt = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
+      const positionInfo = await stateViewContract['getPositionInfo(bytes32,address,int24,int24,bytes32)'](
+        poolId,
+        this.addresses.positionManagerAddress,
+        tickLower,
+        tickUpper,
+        salt
+      );
+
+      const liquidity = positionInfo[0];
+      const feeGrowthInside0LastX128 = positionInfo[1];
+      const feeGrowthInside1LastX128 = positionInfo[2];
+
+      // Step 5: Resolve token symbols
+      const token0Symbol = this._resolveTokenSymbol(normalizedPoolKey.currency0);
+      const token1Symbol = this._resolveTokenSymbol(normalizedPoolKey.currency1);
+
+      return {
+        position: {
+          id: String(tokenId),
+          pool: poolId,
+          tickLower,
+          tickUpper,
+          liquidity: liquidity.toString(),
+          feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
+          tokensOwed0: "0",  // V4 doesn't track these in position struct
+          tokensOwed1: "0",
+          lastUpdated: Date.now()
+        },
+        poolData: {
+          [poolId]: {
+            token0Symbol,
+            token1Symbol,
+            fee: normalizedPoolKey.fee,
+            tickSpacing: normalizedPoolKey.tickSpacing,
+            hooks: normalizedPoolKey.hooks,
+            platform: 'uniswapV4',
+            poolKey: normalizedPoolKey
+          }
+        }
+      };
+    } catch (error) {
+      // Re-throw validation errors as-is
+      if (error.message.includes('TokenId parameter') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('not found or has been burned')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch V4 position ${tokenId}: ${error.message}`);
+    }
+  }
+
+  /**
    * Calculate accrued (uncollected) fees for a position in USD
    *
    * V4 difference from V3:
@@ -535,29 +642,25 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * - salt = bytes32(tokenId), owner = PositionManager address
    *
    * @param {Object} position - Position object
-   * @param {string|number} position.tokenId - NFT token ID (required)
+   * @param {string|number} position.id - NFT token ID (required)
    * @param {number} [position.token0Decimals=18] - Token0 decimals
    * @param {number} [position.token1Decimals=6] - Token1 decimals
    * @param {Object} tokenPrices - { token0: number, token1: number } USD prices
    * @param {Object} provider - Ethers provider
-   * @returns {Promise<Object>} Accrued fees breakdown
-   * @returns {string} result.fees0 - Token0 fees as string (raw units)
-   * @returns {string} result.fees1 - Token1 fees as string (raw units)
-   * @returns {number} result.fees0USD - Token0 fees in USD
-   * @returns {number} result.fees1USD - Token1 fees in USD
-   * @returns {number} result.totalFeesUSD - Total fees in USD
-   * @returns {string} result.liquidity - Position liquidity
-   * @returns {string} result.poolId - Pool identifier
-   * @returns {number} result.tickLower - Position lower tick
-   * @returns {number} result.tickUpper - Position upper tick
+   * @returns {Promise<Object>} Accrued fees breakdown (V3-compatible format)
+   * @returns {number} result.totalUSD - Total fees in USD
+   * @returns {number} result.token0Fees - Token0 fees (formatted, not raw)
+   * @returns {number} result.token1Fees - Token1 fees (formatted, not raw)
+   * @returns {number} result.token0USD - Token0 fees in USD
+   * @returns {number} result.token1USD - Token1 fees in USD
    */
   async getAccruedFeesUSD(position, tokenPrices, provider) {
     // Validate inputs
     if (!position || typeof position !== 'object') {
       throw new Error('position is required and must be an object');
     }
-    if (position.tokenId === undefined || position.tokenId === null) {
-      throw new Error('position.tokenId is required');
+    if (position.id === undefined || position.id === null) {
+      throw new Error('position.id is required');
     }
     if (!tokenPrices || typeof tokenPrices !== 'object') {
       throw new Error('tokenPrices is required and must be an object');
@@ -573,7 +676,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       provider
     );
 
-    const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(position.tokenId);
+    const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(position.id);
 
     // Decode tick bounds from packed info
     const { tickLower, tickUpper } = this._decodePositionInfo(packedInfo);
@@ -583,27 +686,31 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     // Calculate uncollected fees
     const { fees0, fees1, liquidity } = await this._calculateUncollectedFees(
-      position.tokenId, poolId, tickLower, tickUpper, provider
+      position.id, poolId, tickLower, tickUpper, provider
     );
 
     // Get token decimals (from position or defaults)
     const token0Decimals = position.token0Decimals ?? 18;
     const token1Decimals = position.token1Decimals ?? 6;
 
-    // Convert to USD
-    const fees0USD = Number(fees0) / (10 ** token0Decimals) * (tokenPrices.token0 ?? 0);
-    const fees1USD = Number(fees1) / (10 ** token1Decimals) * (tokenPrices.token1 ?? 0);
+    // Format fees (match V3 adapter format)
+    const token0Fees = Number(fees0) / (10 ** token0Decimals);
+    const token1Fees = Number(fees1) / (10 ** token1Decimals);
 
+    // Convert to USD
+    const token0USD = token0Fees * (tokenPrices.token0 ?? 0);
+    const token1USD = token1Fees * (tokenPrices.token1 ?? 0);
+    const totalUSD = token0USD + token1USD;
+
+    // Return in V3-compatible format for strategy compatibility
     return {
-      fees0: fees0.toString(),
-      fees1: fees1.toString(),
-      fees0USD,
-      fees1USD,
-      totalFeesUSD: fees0USD + fees1USD,
-      liquidity: liquidity.toString(),
-      poolId,
-      tickLower,
-      tickUpper
+      totalUSD,
+      token0Fees,
+      token1Fees,
+      token0USD,
+      token1USD,
+      fees0: fees0.toString(),  // Raw amount for fallback/native ETH handling
+      fees1: fees1.toString()   // Raw amount for fallback/native ETH handling
     };
   }
 
@@ -882,7 +989,13 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     try {
       const poolKey = providedPoolData.poolKey;
-      const poolData = providedPoolData;
+
+      // Fetch current pool state (sqrtPriceX96, liquidity, tick change with every swap)
+      const poolId = position.pool;
+      if (!poolId) {
+        throw new Error('position.pool is required to fetch pool state');
+      }
+      const poolData = await this.getPoolData(poolId, provider);
 
       // Determine if tokens are native ETH
       const isToken0Native = poolKey.currency0 === ethers.constants.AddressZero;
@@ -1043,7 +1156,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
-    // Validate poolData and poolData.poolKey
+    // Validate poolData.poolKey (required for V4)
     if (!providedPoolData || typeof providedPoolData !== 'object') {
       throw new Error('poolData is required');
     }
@@ -1052,10 +1165,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     }
 
     try {
-      // === FETCH POSITION DATA ===
-
       const poolKey = providedPoolData.poolKey;
-      const poolData = providedPoolData;
+      const poolData = providedPoolData;  // Strategy provides fresh pool data
 
       // Get actual position liquidity from StateView
       const poolId = this._computePoolId(poolKey);
@@ -1109,6 +1220,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       // === GENERATE REMOVE CALLDATA ===
 
       const deadline = Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
+      // slippageTolerance is a percentage (e.g., 5 = 5%), convert to basis points
       const slippagePercent = new Percent(Math.floor(slippageTolerance * 100), 10000);
       const liquidityPercentage = new Percent(percentage, 100);
 
@@ -1273,29 +1385,48 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         poolData.tick
       );
 
-      // Create position from amounts (same pattern as generateCreatePositionData)
+      // === APPLY SLIPPAGE BEFORE POSITION CALCULATION ===
+      //
+      // Same approach as generateCreatePositionData:
+      // - Use input amounts as hard caps (amount0Max/amount1Max)
+      // - Apply slippage to reduce amounts for position calculation
+      // - This gives headroom: if price moves, more tokens can be used up to balance
+
+      // Store input amounts as balances (these become our hard caps)
+      const balance0 = JSBI.BigInt(token0Amount);
+      const balance1 = JSBI.BigInt(token1Amount);
+
+      // Apply slippage to reduce amounts for position calculation
+      // e.g., 5% slippage → use 95% of balance for position calculation
+      const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
+      const slippageDivisor = JSBI.BigInt(10000);
+
+      const forPosition0 = JSBI.divide(JSBI.multiply(balance0, slippageMultiplier), slippageDivisor);
+      const forPosition1 = JSBI.divide(JSBI.multiply(balance1, slippageMultiplier), slippageDivisor);
+
+      // Create position from reduced amounts
       let v4Position;
-      if (token0Amount === '0') {
+      if (JSBI.equal(forPosition0, JSBI.BigInt(0))) {
         v4Position = V4Position.fromAmount1({
           pool: v4Pool,
           tickLower,
           tickUpper,
-          amount1: token1Amount
+          amount1: forPosition1
         });
-      } else if (token1Amount === '0') {
+      } else if (JSBI.equal(forPosition1, JSBI.BigInt(0))) {
         v4Position = V4Position.fromAmount0({
           pool: v4Pool,
           tickLower,
           tickUpper,
-          amount0: token0Amount
+          amount0: forPosition0
         });
       } else {
         v4Position = V4Position.fromAmounts({
           pool: v4Pool,
           tickLower,
           tickUpper,
-          amount0: token0Amount,
-          amount1: token1Amount,
+          amount0: forPosition0,
+          amount1: forPosition1,
           useFullPrecision: true
         });
       }
@@ -1303,18 +1434,54 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       // === GENERATE ADD LIQUIDITY CALLDATA ===
 
       const deadline = Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
-      const slippagePercent = new Percent(Math.floor(slippageTolerance * 100), 10000);
 
-      // IncreaseLiquidityOptions - uses tokenId instead of recipient
-      const increaseLiquidityOptions = {
-        tokenId: tokenId.toString(),
-        slippageTolerance: slippagePercent,
-        deadline: deadline.toString(),
-        hookData,
-        ...(isToken0Native && { useNative: Ether.onChain(this.chainId) })
-      };
+      // Use full balances as max amounts - this is our hard cap
+      const amount0Max = balance0;
+      const amount1Max = balance1;
 
-      const { calldata, value } = V4PositionManager.addCallParameters(v4Position, increaseLiquidityOptions);
+      // 🔍 DEBUG: Log slippage info
+      console.log(`🔍 [V4 generateAddLiquidityData] Position Debug:`);
+      console.log(`   tokenId: ${tokenId}`);
+      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
+      console.log(`   Balances: balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
+      console.log(`   For position calc: forPosition0=${forPosition0.toString()}, forPosition1=${forPosition1.toString()}`);
+      console.log(`   mintAmounts: amount0=${v4Position.mintAmounts.amount0.toString()}, amount1=${v4Position.mintAmounts.amount1.toString()}`);
+      console.log(`   amount0Max: ${amount0Max.toString()} (= full balance, hard cap)`);
+      console.log(`   amount1Max: ${amount1Max.toString()} (= full balance, hard cap)`);
+
+      // Build calldata using V4PositionPlanner directly
+      const planner = new V4PositionPlanner();
+
+      // Add INCREASE_LIQUIDITY action
+      planner.addIncrease(
+        tokenId,                       // existing position token ID
+        v4Position.liquidity,          // liquidity to add (JSBI)
+        amount0Max,                    // full balance as hard cap
+        amount1Max,                    // full balance as hard cap
+        hookData                       // hookData
+      );
+
+      // Add SETTLE_PAIR action (user pays tokens to the pool)
+      planner.addSettlePair(v4Pool.currency0, v4Pool.currency1);
+
+      // Add SWEEP for native ETH (return unused ETH to sender)
+      if (isToken0Native) {
+        // Need to get the wallet address for sweep - use position owner
+        const positionManagerContract = new ethers.Contract(
+          this.addresses.positionManagerAddress,
+          this.positionManagerABI,
+          provider
+        );
+        const owner = await positionManagerContract.ownerOf(tokenId);
+        planner.addSweep(v4Pool.currency0, owner);
+      }
+
+      // Encode the final calldata
+      const unlockData = planner.finalize();
+      const calldata = V4PositionManager.encodeModifyLiquidities(unlockData, deadline.toString());
+
+      // Set value for native ETH (hex string of amount0Max)
+      const value = isToken0Native ? ('0x' + amount0Max.toString(16)) : '0x0';
 
       return {
         to: this.addresses.positionManagerAddress,
@@ -1323,7 +1490,10 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         quote: {
           liquidity: v4Position.liquidity.toString(),
           amount0: v4Position.amount0.quotient.toString(),
-          amount1: v4Position.amount1.quotient.toString()
+          amount1: v4Position.amount1.quotient.toString(),
+          // Max amounts used in transaction (for verification/debugging)
+          amount0Max: amount0Max.toString(),
+          amount1Max: amount1Max.toString()
         }
       };
 
@@ -1847,32 +2017,41 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         []  // Empty ticks array - not needed for position creation
       );
 
-      // Determine amounts in sorted order
-      let amount0, amount1;
+      // Determine balances in sorted order (these become our hard caps)
+      let balance0, balance1;
       if (tokensSwapped) {
-        amount0 = JSBI.BigInt(token1Amount);
-        amount1 = JSBI.BigInt(token0Amount);
+        balance0 = JSBI.BigInt(token1Amount);
+        balance1 = JSBI.BigInt(token0Amount);
       } else {
-        amount0 = JSBI.BigInt(token0Amount);
-        amount1 = JSBI.BigInt(token1Amount);
+        balance0 = JSBI.BigInt(token0Amount);
+        balance1 = JSBI.BigInt(token1Amount);
       }
 
-      // Create V4 Position using the SDK
+      // Apply slippage to reduce amounts for position calculation
+      // This leaves headroom for price movement during execution
+      // e.g., 5% slippage → use 95% of balance for position calculation
+      const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
+      const slippageDivisor = JSBI.BigInt(10000);
+
+      const forPosition0 = JSBI.divide(JSBI.multiply(balance0, slippageMultiplier), slippageDivisor);
+      const forPosition1 = JSBI.divide(JSBI.multiply(balance1, slippageMultiplier), slippageDivisor);
+
+      // Create V4 Position using the SDK with reduced amounts
       let v4Position;
-      if (JSBI.equal(amount1, JSBI.BigInt(0))) {
+      if (JSBI.equal(forPosition1, JSBI.BigInt(0))) {
         v4Position = V4Position.fromAmount0({
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
-          amount0,
+          amount0: forPosition0,
           useFullPrecision: true,
         });
-      } else if (JSBI.equal(amount0, JSBI.BigInt(0))) {
+      } else if (JSBI.equal(forPosition0, JSBI.BigInt(0))) {
         v4Position = V4Position.fromAmount1({
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
-          amount1,
+          amount1: forPosition1,
           useFullPrecision: true,
         });
       } else {
@@ -1880,36 +2059,68 @@ export default class UniswapV4Adapter extends PlatformAdapter {
           pool,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
-          amount0,
-          amount1,
+          amount0: forPosition0,
+          amount1: forPosition1,
           useFullPrecision: true,
         });
       }
 
       // =====================================================================
-      // Generate Transaction Data using V4PositionManager
+      // Generate Transaction Data using V4PositionPlanner
       // =====================================================================
+      //
+      // We use the input token balances as amount0Max/amount1Max (hard caps).
+      // The position was calculated with reduced amounts (slippage buffer),
+      // so mintAmounts < balances, giving headroom for price movement.
 
       // Calculate deadline timestamp
       const deadline = Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
 
-      // Create MintOptions for V4PositionManager
-      // slippageTolerance is in percentage (e.g., 0.5 for 0.5%), convert to Percent
-      const slippagePercent = new Percent(Math.floor(slippageTolerance * 100), 10000);
+      // Use full balances as max amounts - this is our hard cap
+      const amount0Max = balance0;
+      const amount1Max = balance1;
 
-      const mintOptions = {
-        recipient: walletAddress,
-        slippageTolerance: slippagePercent,
-        deadline: deadline.toString(),
-        hookData: hookData,
-        // Must set useNative when one of the currencies is native ETH
-        // This tells the SDK to expect ETH payment and generates correct calldata
-        ...(isToken0Native && { useNative: Ether.onChain(this.chainId) })
-      };
+      // 🔍 DEBUG: Log position info
+      console.log(`🔍 [V4 generateCreatePositionData] Position Debug:`);
+      console.log(`   Position tick range: ${position.tickLower} to ${position.tickUpper} (pool tick: ${poolData.tick})`);
+      console.log(`   Range width: ${position.tickUpper - position.tickLower} ticks`);
+      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
+      console.log(`   isToken0Native: ${isToken0Native}`);
+      console.log(`   Balances (SDK order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
+      console.log(`   For position calc: forPosition0=${forPosition0.toString()}, forPosition1=${forPosition1.toString()}`);
+      console.log(`   mintAmounts: amount0=${v4Position.mintAmounts.amount0.toString()}, amount1=${v4Position.mintAmounts.amount1.toString()}`);
+      console.log(`   amount0Max: ${amount0Max.toString()} (= full balance, hard cap)`);
+      console.log(`   amount1Max: ${amount1Max.toString()} (= full balance, hard cap)`);
 
-      // Use V4PositionManager.addCallParameters to generate calldata
-      // This encodes MINT_POSITION + SETTLE_PAIR (+ SWEEP for native ETH)
-      const { calldata, value } = V4PositionManager.addCallParameters(v4Position, mintOptions);
+      // Build calldata using V4PositionPlanner directly
+      const planner = new V4PositionPlanner();
+
+      // Add MINT_POSITION action
+      planner.addMint(
+        pool,                          // Pool object
+        position.tickLower,            // tickLower
+        position.tickUpper,            // tickUpper
+        v4Position.liquidity,          // liquidity (JSBI)
+        amount0Max,                    // OUR amount0Max (simple slippage)
+        amount1Max,                    // OUR amount1Max (simple slippage)
+        walletAddress,                 // recipient
+        hookData                       // hookData
+      );
+
+      // Add SETTLE_PAIR action (user pays tokens to the pool)
+      planner.addSettlePair(pool.currency0, pool.currency1);
+
+      // Add SWEEP for native ETH (return unused ETH to sender)
+      if (isToken0Native) {
+        planner.addSweep(pool.currency0, walletAddress);
+      }
+
+      // Encode the final calldata
+      const unlockData = planner.finalize();
+      const calldata = V4PositionManager.encodeModifyLiquidities(unlockData, deadline.toString());
+
+      // Set value for native ETH (hex string of amount0Max)
+      const value = isToken0Native ? ('0x' + amount0Max.toString(16)) : '0x0';
 
       // Build quote object for return (amounts in caller's token order)
       const mintAmount0 = v4Position.mintAmounts.amount0.toString();
@@ -1923,6 +2134,9 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         // Also include SDK-sorted amounts for reference
         sortedMintAmount0: mintAmount0,
         sortedMintAmount1: mintAmount1,
+        // Max amounts used in transaction (for verification/debugging)
+        amount0Max: tokensSwapped ? amount1Max.toString() : amount0Max.toString(),
+        amount1Max: tokensSwapped ? amount0Max.toString() : amount1Max.toString(),
         tokensSwapped,
         sortedToken0,
         sortedToken1
@@ -3209,9 +3423,10 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error(`No pools found for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName}`);
     }
 
-    // Normalize pool data structure to match expected interface
-    // Subgraph returns: id, feeTier, tick (string), sqrtPrice, token0.id, token1.id
-    // Expected:        address, fee, tick (number), sqrtPriceX96, token0.address, token1.address
+    // Normalize pool data structure - include static metadata only
+    // Subgraph returns: id, feeTier, tick (STALE), sqrtPrice (STALE), liquidity (STALE), token0.id, token1.id
+    // We keep: poolId, fee, tickSpacing, hooks, poolKey, TVL (for ranking)
+    // We fetch fresh: tick, sqrtPriceX96, liquidity (from on-chain after selection)
     const pools = rawPools.map(pool => {
       const fee = parseInt(pool.feeTier, 10);
       const tickSpacing = parseInt(pool.tickSpacing, 10);
@@ -3223,15 +3438,12 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         // V4 uses poolId (bytes32 hash) - expose as both 'address' and 'poolId' for compatibility
         address: pool.id,
         poolId: pool.id,
-        // Normalize field names
+        // Static metadata from subgraph
         fee,
         tickSpacing,
-        liquidity: pool.liquidity,
-        sqrtPriceX96: pool.sqrtPrice,
-        tick: parseInt(pool.tick, 10),
         hooks,
         totalValueLockedUSD: pool.totalValueLockedUSD,
-        // Normalize token structure
+        // Token metadata
         token0: {
           symbol: pool.token0.symbol,
           address: token0Address,
@@ -3250,29 +3462,39 @@ export default class UniswapV4Adapter extends PlatformAdapter {
           tickSpacing,
           hooks
         }
+        // NOTE: NOT including tick, sqrtPriceX96, liquidity from subgraph - will fetch fresh below
       };
     });
 
-    // Filter dead pools (liquidity = 0) - subgraph already filters but double-check
-    const activePools = pools.filter(pool => BigInt(pool.liquidity) > 0n);
+    // Filter dead pools and sort by TVL from subgraph
+    const activePools = pools.filter(pool => parseFloat(pool.totalValueLockedUSD || '0') > 0);
 
     if (activePools.length === 0) {
       throw new Error(
         `No active pools for ${tokenASymbol}/${tokenBSymbol} on ${this.platformName} ` +
-        `(${pools.length} pools exist but all have zero liquidity)`
+        `(${pools.length} pools exist but all have zero TVL)`
       );
     }
 
-    // Pools are already sorted by liquidity from subgraph query (highest first)
-    // But sort again to be certain
+    // Sort by TVL (highest first)
     activePools.sort((a, b) => {
-      const liqA = BigInt(a.liquidity);
-      const liqB = BigInt(b.liquidity);
-      return liqB > liqA ? 1 : liqB < liqA ? -1 : 0;
+      const tvlA = parseFloat(a.totalValueLockedUSD || '0');
+      const tvlB = parseFloat(b.totalValueLockedUSD || '0');
+      return tvlB - tvlA;
     });
 
+    // Fetch FRESH on-chain state for the best pool
+    const bestPoolMetadata = activePools[0];
+    const freshPoolState = await this.getPoolData(bestPoolMetadata.address, provider);
+
+    // Merge fresh state with subgraph metadata
+    const bestPool = {
+      ...bestPoolMetadata,  // Static metadata (poolKey, fee, tickSpacing, hooks, TVL)
+      ...freshPoolState     // Fresh on-chain state (tick, sqrtPriceX96, liquidity, feeGrowth)
+    };
+
     return {
-      bestPool: activePools[0],
+      bestPool,
       poolsDiscovered: pools.length,
       poolsActive: activePools.length
     };

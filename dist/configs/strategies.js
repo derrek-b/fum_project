@@ -99,7 +99,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 10.0,
           targetRangeLower: 10.0,
-          maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
@@ -113,7 +112,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 5.0,
           targetRangeLower: 5.0,
-          maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
@@ -127,7 +125,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 3.0,
           targetRangeLower: 3.0,
-          maxUtilization: 90,
           maxSlippage: 0.5,
           emergencyExitTrigger: 10,
           feeReinvestment: true,
@@ -141,7 +138,6 @@ const strategies = {
         defaults: {
           targetRangeUpper: 0.2,
           targetRangeLower: 0.2,
-          maxUtilization: 90,
           maxSlippage: 0.2,
           emergencyExitTrigger: 1.0,
           feeReinvestment: true,
@@ -159,8 +155,7 @@ const strategies = {
           reinvestmentTrigger: 50.00,
           reinvestmentRatio: 50,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 10,
-          maxUtilization: 90
+          emergencyExitTrigger: 10
         }
       }
     },
@@ -250,18 +245,6 @@ const strategies = {
         min: 1,
         max: 50,
         step: 1,
-        suffix: "%",
-        group: 2,
-        contractGroup: "risk"
-      },
-      maxUtilization: {
-        name: "Max Utilization",
-        description: "Maximum percentage of vault assets that can be deployed across all positions",
-        type: "percent",
-        defaultValue: 80,
-        min: 10,
-        max: 100,
-        step: 5,
         suffix: "%",
         group: 2,
         contractGroup: "risk"

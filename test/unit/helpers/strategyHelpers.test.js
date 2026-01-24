@@ -31,10 +31,10 @@ import strategies from '../../../src/configs/strategies.js';
 
 // Helper to encode Bob strategy parameters as hex bytes
 const encodeBobParams = (params) => {
-  const [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger, maxUtilization] = params;
+  const [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger] = params;
   return ethers.utils.defaultAbiCoder.encode(
-    ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16', 'uint16'],
-    [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger, maxUtilization]
+    ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16'],
+    [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger]
   );
 };
 
@@ -417,12 +417,11 @@ describe('Strategy Helpers', () => {
         expect(Array.isArray(result)).toBe(false);
 
         // Should have defaults for all parameters
-        expect(Object.keys(result)).toHaveLength(8);
+        expect(Object.keys(result)).toHaveLength(7);
 
         // Test specific values (matching bob conservative template in strategies.js)
         expect(result.targetRangeUpper).toBe(10.0);
         expect(result.targetRangeLower).toBe(10.0);
-        expect(result.maxUtilization).toBe(90);
         expect(result.maxSlippage).toBe(0.5);
         expect(result.emergencyExitTrigger).toBe(10);
         expect(result.feeReinvestment).toBe(true);
@@ -435,7 +434,7 @@ describe('Strategy Helpers', () => {
 
         // Should return the defaults defined in the custom template
         expect(typeof result).toBe('object');
-        expect(Object.keys(result)).toHaveLength(8);
+        expect(Object.keys(result)).toHaveLength(7);
 
         // Custom template has its own defined defaults
         expect(result.targetRangeUpper).toBe(5.0);
@@ -583,7 +582,7 @@ describe('Strategy Helpers', () => {
         expect(Array.isArray(result)).toBe(false);
 
         // Should have defaults for all parameters in bob strategy (8 params after removing rebalanceThresholds)
-        expect(Object.keys(result)).toHaveLength(8);
+        expect(Object.keys(result)).toHaveLength(7);
 
         // Test specific parameter defaultValues for bob strategy (from parameters section)
         expect(result.targetRangeUpper).toBe(5.0);
@@ -593,7 +592,6 @@ describe('Strategy Helpers', () => {
         expect(result.reinvestmentRatio).toBe(80);
         expect(result.maxSlippage).toBe(0.5);
         expect(result.emergencyExitTrigger).toBe(15);
-        expect(result.maxUtilization).toBe(80);
       });
 
       it('should extract defaultValue from parameter definitions', () => {
@@ -791,10 +789,9 @@ describe('Strategy Helpers', () => {
         const result = getStrategyParametersByGroup('bob', 2);
 
         const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toHaveLength(3);
+        expect(parameterKeys).toHaveLength(2);
         expect(parameterKeys).toContain('maxSlippage');
         expect(parameterKeys).toContain('emergencyExitTrigger');
-        expect(parameterKeys).toContain('maxUtilization');
 
         // All should belong to group 2
         Object.values(result).forEach(param => {
@@ -947,10 +944,9 @@ describe('Strategy Helpers', () => {
         const result = getStrategyParametersByContractGroup('bob', 'risk');
 
         const parameterKeys = Object.keys(result);
-        expect(parameterKeys).toHaveLength(3);
+        expect(parameterKeys).toHaveLength(2);
         expect(parameterKeys).toContain('maxSlippage');
         expect(parameterKeys).toContain('emergencyExitTrigger');
-        expect(parameterKeys).toContain('maxUtilization');
 
         // All should belong to risk contract group
         Object.values(result).forEach(param => {
@@ -1113,8 +1109,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1134,8 +1129,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 1000, // Conditional parameter - should be validated
           reinvestmentRatio: 90, // Conditional parameter - should be validated
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1151,8 +1145,7 @@ describe('Strategy Helpers', () => {
           feeReinvestment: false, // Condition not met
           // reinvestmentTrigger and reinvestmentRatio not provided - should be skipped
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1219,8 +1212,7 @@ describe('Strategy Helpers', () => {
           targetRangeLower: expect.stringContaining('is required'),
           feeReinvestment: expect.stringContaining('is required'),
           maxSlippage: expect.stringContaining('is required'),
-          emergencyExitTrigger: expect.stringContaining('is required'),
-          maxUtilization: expect.stringContaining('is required')
+          emergencyExitTrigger: expect.stringContaining('is required')
         });
       });
 
@@ -1232,8 +1224,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1250,8 +1241,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1298,8 +1288,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 20000, // Out of range (max 10000)
           reinvestmentRatio: 150, // Out of range (max 100)
           maxSlippage: 0.5,
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -1317,8 +1306,7 @@ describe('Strategy Helpers', () => {
           reinvestmentTrigger: 5000,
           reinvestmentRatio: 80,
           maxSlippage: "",
-          emergencyExitTrigger: 15,
-          maxUtilization: 80
+          emergencyExitTrigger: 15
         };
 
         const result = validateStrategyParams('bob', params);
@@ -2941,8 +2929,8 @@ describe('Strategy Helpers', () => {
     describe('Success Cases', () => {
       describe('Bob Strategy', () => {
         it('should map Bob strategy parameters correctly', () => {
-          // Bob: [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger, maxUtilization]
-          const rawBytes = encodeBobParams([1000, 1000, true, 5000, 8000, 50, 1000, 9000]);
+          // Bob: [targetRangeUpper, targetRangeLower, feeReinvestment, reinvestmentTrigger, reinvestmentRatio, maxSlippage, emergencyExitTrigger]
+          const rawBytes = encodeBobParams([1000, 1000, true, 5000, 8000, 50, 1000]);
           const result = mapStrategyParameters('bob', rawBytes);
 
           expect(result).toEqual({
@@ -2952,20 +2940,19 @@ describe('Strategy Helpers', () => {
             reinvestmentTrigger: '50.0',
             reinvestmentRatio: 80,
             maxSlippage: 0.5,
-            emergencyExitTrigger: 10,
-            maxUtilization: 90
+            emergencyExitTrigger: 10
           });
         });
 
         it('should handle Bob strategy with false boolean parameter', () => {
-          const rawBytes = encodeBobParams([1000, 1000, false, 5000, 8000, 50, 1000, 9000]);
+          const rawBytes = encodeBobParams([1000, 1000, false, 5000, 8000, 50, 1000]);
           const result = mapStrategyParameters('bob', rawBytes);
 
           expect(result.feeReinvestment).toBe(false);
         });
 
         it('should convert basis points to percentages correctly for Bob', () => {
-          const rawBytes = encodeBobParams([500, 500, true, 5000, 5000, 50, 1000, 9000]);
+          const rawBytes = encodeBobParams([500, 500, true, 5000, 5000, 50, 1000]);
           const result = mapStrategyParameters('bob', rawBytes);
 
           expect(result.targetRangeUpper).toBe(5);
@@ -2973,7 +2960,6 @@ describe('Strategy Helpers', () => {
           expect(result.reinvestmentRatio).toBe(50);
           expect(result.maxSlippage).toBe(0.5);
           expect(result.emergencyExitTrigger).toBe(10);
-          expect(result.maxUtilization).toBe(90);
         });
       });
 

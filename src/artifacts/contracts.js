@@ -394,25 +394,6 @@
             "type": "address"
           }
         ],
-        "name": "getMaxUtilization",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          }
-        ],
         "name": "getReinvestmentRatio",
         "outputs": [
           {
@@ -503,25 +484,6 @@
           }
         ],
         "name": "maxSlippage",
-        "outputs": [
-          {
-            "internalType": "uint16",
-            "name": "",
-            "type": "uint16"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "address",
-            "name": "",
-            "type": "address"
-          }
-        ],
-        "name": "maxUtilization",
         "outputs": [
           {
             "internalType": "uint16",
@@ -687,11 +649,6 @@
           {
             "internalType": "uint16",
             "name": "exitTrigger",
-            "type": "uint16"
-          },
-          {
-            "internalType": "uint16",
-            "name": "utilization",
             "type": "uint16"
           }
         ],

@@ -16,6 +16,7 @@
  * |------------------------------|-------------------------------------|-----------|
  * | calculateTokenAmounts        | VDS.fetchAssetValues                | CONFIRMED |
  * | getPositionsForVDS           | VDS.fetchPositions                  | CONFIRMED |
+ * | getPositionById              | Strategy.createNewPosition          | CONFIRMED |
  * | getRequiredApprovals         | Strategy.ensureApprovals            | CONFIRMED |
  * | getPoolData                  | VDS.fetchAssetValues                | CONFIRMED |
  * | selectBestPool               | Strategy.initializeVault            | CONFIRMED |
@@ -146,6 +147,34 @@ export default class PlatformAdapter {
    */
   async getPositionsForVDS(address, provider) {
     throw new Error("getPositionsForVDS must be implemented by subclasses");
+  }
+
+  /**
+   * Fetch a single position by tokenId directly from on-chain (no Graph dependency)
+   *
+   * Used after creating/modifying positions when we have the tokenId from the receipt
+   * but The Graph hasn't indexed it yet. Returns both position and poolData for
+   * cache updates.
+   *
+   * @param {string|number} tokenId - The position NFT token ID
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{position: Object, poolData: Object}>} Position and pool metadata
+   * @returns {Object} result.position - Position data matching getPositionsForVDS format
+   * @returns {string} result.position.id - Token ID as string
+   * @returns {string} result.position.pool - Pool identifier (address for V3, bytes32 for V4)
+   * @returns {number} result.position.tickLower - Lower tick bound
+   * @returns {number} result.position.tickUpper - Upper tick bound
+   * @returns {string} result.position.liquidity - Position liquidity (wei string)
+   * @returns {string} result.position.feeGrowthInside0LastX128 - Fee growth tracker
+   * @returns {string} result.position.feeGrowthInside1LastX128 - Fee growth tracker
+   * @returns {string} result.position.tokensOwed0 - Uncollected token0 fees
+   * @returns {string} result.position.tokensOwed1 - Uncollected token1 fees
+   * @returns {number} result.position.lastUpdated - Timestamp of fetch
+   * @returns {Object} result.poolData - Pool metadata keyed by pool identifier
+   * @throws {Error} If tokenId is invalid, position not found, or has been burned
+   */
+  async getPositionById(tokenId, provider) {
+    throw new Error("getPositionById must be implemented by subclasses");
   }
 
   /**

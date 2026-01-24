@@ -17,7 +17,7 @@ const chains = {
     blockExplorerUrls: ["https://arbiscan.io"],
     executorAddress: "0x42d9df99e78ba0573b2990d6177d6eef7145c8e6",
     minDeploymentForGas: 10,
-    minBufferSwapValue: 0.10,
+    minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
       uniswapV3: {
@@ -50,7 +50,7 @@ const chains = {
     blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
     executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
     minDeploymentForGas: 10,
-    minBufferSwapValue: 0.10,
+    minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
       uniswapV3: {
@@ -83,7 +83,7 @@ const chains = {
     blockExplorerUrls: ["https://etherscan.io"],
     executorAddress: "0x0",
     minDeploymentForGas: 100,
-    minBufferSwapValue: 1.00,
+    minSwapValue: 1.00,
     transactionDeadlineMinutes: 20,
     platformAddresses: {
       uniswapV3: {

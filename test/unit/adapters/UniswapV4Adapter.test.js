@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
+import JSBI from 'jsbi';
 import { setupV4TestEnvironment } from '../../setup/v4-setup.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
@@ -1778,28 +1779,28 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           .rejects.toThrow('position is required and must be an object');
       });
 
-      it('should throw when position.tokenId is missing', async () => {
+      it('should throw when position.id is missing', async () => {
         await expect(adapter.getAccruedFeesUSD({}, { token0: 1, token1: 1 }, env.provider))
-          .rejects.toThrow('position.tokenId is required');
+          .rejects.toThrow('position.id is required');
       });
 
-      it('should throw when position.tokenId is null', async () => {
-        await expect(adapter.getAccruedFeesUSD({ tokenId: null }, { token0: 1, token1: 1 }, env.provider))
-          .rejects.toThrow('position.tokenId is required');
+      it('should throw when position.id is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: null }, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position.id is required');
       });
 
       it('should throw when tokenPrices is null', async () => {
-        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, null, env.provider))
+        await expect(adapter.getAccruedFeesUSD({ id: 1 }, null, env.provider))
           .rejects.toThrow('tokenPrices is required and must be an object');
       });
 
       it('should throw when tokenPrices is not an object', async () => {
-        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, 'invalid', env.provider))
+        await expect(adapter.getAccruedFeesUSD({ id: 1 }, 'invalid', env.provider))
           .rejects.toThrow('tokenPrices is required and must be an object');
       });
 
       it('should throw when provider is null', async () => {
-        await expect(adapter.getAccruedFeesUSD({ tokenId: 1 }, { token0: 1, token1: 1 }, null))
+        await expect(adapter.getAccruedFeesUSD({ id: 1 }, { token0: 1, token1: 1 }, null))
           .rejects.toThrow('provider is required');
       });
     });
@@ -1853,7 +1854,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Get accrued fees (should be zero or near-zero for new position)
         const result = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            id: parsed.tokenId,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -1861,32 +1862,29 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           env.provider
         );
 
-        // Verify structure
+        // Verify structure - V3-compatible format
+        expect(result).toHaveProperty('totalUSD');
+        expect(result).toHaveProperty('token0Fees');
+        expect(result).toHaveProperty('token1Fees');
+        expect(result).toHaveProperty('token0USD');
+        expect(result).toHaveProperty('token1USD');
+        // Raw values for fallback/native ETH handling
         expect(result).toHaveProperty('fees0');
         expect(result).toHaveProperty('fees1');
-        expect(result).toHaveProperty('fees0USD');
-        expect(result).toHaveProperty('fees1USD');
-        expect(result).toHaveProperty('totalFeesUSD');
-        expect(result).toHaveProperty('liquidity');
-        expect(result).toHaveProperty('poolId');
-        expect(result).toHaveProperty('tickLower');
-        expect(result).toHaveProperty('tickUpper');
 
         // Verify types
+        expect(typeof result.totalUSD).toBe('number');
+        expect(typeof result.token0Fees).toBe('number');
+        expect(typeof result.token1Fees).toBe('number');
+        expect(typeof result.token0USD).toBe('number');
+        expect(typeof result.token1USD).toBe('number');
         expect(typeof result.fees0).toBe('string');
         expect(typeof result.fees1).toBe('string');
-        expect(typeof result.fees0USD).toBe('number');
-        expect(typeof result.fees1USD).toBe('number');
-        expect(typeof result.totalFeesUSD).toBe('number');
-        expect(typeof result.liquidity).toBe('string');
-        expect(typeof result.poolId).toBe('string');
-        expect(typeof result.tickLower).toBe('number');
-        expect(typeof result.tickUpper).toBe('number');
 
-        // New position should have zero fees (no swaps have occurred through it)
-        expect(result.fees0USD).toBeGreaterThanOrEqual(0);
-        expect(result.fees1USD).toBeGreaterThanOrEqual(0);
-        expect(result.totalFeesUSD).toBeGreaterThanOrEqual(0);
+        // New position should have zero or minimal fees (no swaps have occurred through it)
+        expect(result.token0USD).toBeGreaterThanOrEqual(0);
+        expect(result.token1USD).toBeGreaterThanOrEqual(0);
+        expect(result.totalUSD).toBeGreaterThanOrEqual(0);
       }, 120000);
 
       it('should return non-zero fees after swap through position range', async () => {
@@ -1950,7 +1948,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Get accrued fees (should be non-zero after swap)
         const result = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            id: parsed.tokenId,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -1960,17 +1958,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Fees should be non-negative
         // Note: Very small swaps may have dust-level fees close to zero
-        expect(result.totalFeesUSD).toBeGreaterThanOrEqual(0);
+        expect(result.totalUSD).toBeGreaterThanOrEqual(0);
         expect(result.fees0).toBeDefined();
         expect(result.fees1).toBeDefined();
-
-        // Verify the poolId matches what we expect
-        const expectedPoolId = adapter._computePoolId(env.poolData.poolKey);
-        expect(result.poolId).toBe(expectedPoolId);
-
-        // Verify tick bounds match the position
-        expect(result.tickLower).toBe(range.tickLower);
-        expect(result.tickUpper).toBe(range.tickUpper);
       }, 180000);
     });
   });
@@ -2224,7 +2214,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Check fees before swap (should be 0 or minimal)
         const feesBefore = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2254,7 +2244,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Check fees after swap
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2285,7 +2275,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // After claiming, accrued fees should be zero or near-zero
         const feesAfterClaim = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2618,7 +2608,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Get initial liquidity using pre-created test position
         const feesBefore = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2650,7 +2640,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify position still exists with reduced liquidity
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -2691,7 +2681,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify position has zero liquidity after full removal
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: env.testPosition.id,
+            id: env.testPosition.id,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -3065,6 +3055,96 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('quote');
       }, 180000);
 
+      it('should use input balances as max amounts (slippage headroom)', async () => {
+        const { ethers } = require('ethers');
+
+        // Get signer from environment
+        const signer = env.signers[0];
+        const walletAddress = await signer.getAddress();
+
+        // Get position range around current tick
+        const poolDataWithTickSpacing = { ...env.poolData, tickSpacing: env.poolData.poolKey.tickSpacing };
+        const range = adapter.getPositionRange(poolDataWithTickSpacing, 10, 10);
+
+        // Create position first
+        const createToken0Amount = ethers.utils.parseUnits('0.02', env.poolData.token0.decimals).toString();
+        const createToken1Amount = ethers.utils.parseUnits('60', env.poolData.token1.decimals).toString();
+
+        const createTxData = await adapter.generateCreatePositionData({
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: createToken0Amount,
+          token1Amount: createToken1Amount,
+          provider: env.provider,
+          walletAddress,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const createTx = await signer.sendTransaction({
+          to: createTxData.to,
+          data: createTxData.data,
+          value: createTxData.value
+        });
+        const createReceipt = await createTx.wait();
+
+        const parsed = adapter.parseIncreaseLiquidityReceipt(createReceipt, {
+          position: { tickLower: range.tickLower, tickUpper: range.tickUpper },
+          poolData: env.poolData
+        });
+
+        // Generate add liquidity with specific amounts
+        const addToken0Amount = ethers.utils.parseUnits('0.01', env.poolData.token0.decimals).toString();
+        const addToken1Amount = ethers.utils.parseUnits('30', env.poolData.token1.decimals).toString();
+
+        const result = await adapter.generateAddLiquidityData({
+          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
+          token0Amount: addToken0Amount,
+          token1Amount: addToken1Amount,
+          provider: env.provider,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 5,
+          deadlineMinutes: 20
+        });
+
+        // Verify quote includes amountMax values (should equal input balances)
+        expect(result.quote).toHaveProperty('amount0Max');
+        expect(result.quote).toHaveProperty('amount1Max');
+
+        // amountMax should equal the input token amounts (our balances are the max)
+        const inputAmount0 = BigInt(addToken0Amount);
+        const inputAmount1 = BigInt(addToken1Amount);
+        const amount0Max = BigInt(result.quote.amount0Max);
+        const amount1Max = BigInt(result.quote.amount1Max);
+
+        // The max amounts should equal our input balances
+        expect(amount0Max).toBe(inputAmount0);
+        expect(amount1Max).toBe(inputAmount1);
+
+        console.log(`Balance-as-max verification (addLiquidity):`);
+        console.log(`  inputAmount0: ${inputAmount0}, amount0Max: ${amount0Max}`);
+        console.log(`  inputAmount1: ${inputAmount1}, amount1Max: ${amount1Max}`);
+
+        // Execute the transaction to verify it succeeds
+        const tx = await signer.sendTransaction({
+          to: result.to,
+          data: result.data,
+          value: result.value,
+          gasLimit: 1000000
+        });
+        const receipt = await tx.wait();
+
+        // Verify transaction succeeded
+        expect(receipt.status).toBe(1);
+
+        // Verify quote liquidity is positive
+        expect(BigInt(result.quote.liquidity)).toBeGreaterThan(0n);
+      }, 180000);
+
       it('should execute add liquidity and increase position', async () => {
         const { ethers } = require('ethers');
 
@@ -3108,7 +3188,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Get initial liquidity
         const feesBefore = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            id: parsed.tokenId,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -3142,7 +3222,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Verify liquidity increased
         const feesAfter = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            id: parsed.tokenId,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -4245,7 +4325,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result).toHaveProperty('data');
       });
 
-      it('should execute successfully and create a position', async () => {
+      it('should execute successfully with input balances as max amounts', async () => {
         const signer = env.signers[0];
 
         // Use smaller amounts for execution test
@@ -4254,10 +4334,28 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           token0Amount: ethers.utils.parseEther('0.001').toString(), // 0.001 ETH
           token1Amount: ethers.utils.parseUnits('3', 6).toString(),   // 3 USDC
           walletAddress: signer.address,
-          slippageTolerance: 5 // Higher slippage for test reliability
+          slippageTolerance: 5
         };
 
         const txData = await adapter.generateCreatePositionData(execParams);
+
+        // Verify quote includes amountMax values (should equal input balances)
+        expect(txData.quote).toHaveProperty('amount0Max');
+        expect(txData.quote).toHaveProperty('amount1Max');
+
+        // amountMax should equal the input token amounts (our balances are the max)
+        const inputAmount0 = BigInt(execParams.token0Amount);
+        const inputAmount1 = BigInt(execParams.token1Amount);
+        const amount0Max = BigInt(txData.quote.amount0Max);
+        const amount1Max = BigInt(txData.quote.amount1Max);
+
+        // The max amounts should equal our input balances
+        expect(amount0Max).toBe(inputAmount0);
+        expect(amount1Max).toBe(inputAmount1);
+
+        console.log(`Balance-as-max verification:`);
+        console.log(`  inputAmount0: ${inputAmount0}, amount0Max: ${amount0Max}`);
+        console.log(`  inputAmount1: ${inputAmount1}, amount1Max: ${amount1Max}`);
 
         // Execute the transaction
         const tx = await signer.sendTransaction({
@@ -4277,11 +4375,20 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         console.log(`Position created - Liquidity: ${txData.quote.liquidity}, ETH: ${ethers.utils.formatEther(txData.quote.mintAmount0)}, USDC: ${ethers.utils.formatUnits(txData.quote.mintAmount1, 6)}`);
       }, 120000);
 
-      it('should execute with only native ETH (no USDC)', async () => {
+      it('should execute with only native ETH (no USDC) using out-of-range position', async () => {
         const signer = env.signers[0];
+
+        // For a position that only needs token0 (ETH), the tick range must be
+        // ABOVE the current tick. In that case, only ETH is deposited.
+        const TICK_SPACING = 10;
+        const currentTick = baseParams.poolData.tick;
+        // Position entirely above current price - only needs token0 (ETH)
+        const tickLower = Math.ceil(currentTick / TICK_SPACING) * TICK_SPACING + TICK_SPACING * 5;
+        const tickUpper = tickLower + TICK_SPACING * 10;
 
         const execParams = {
           ...baseParams,
+          position: { tickLower, tickUpper },
           token0Amount: ethers.utils.parseEther('0.002').toString(),
           token1Amount: '0',
           walletAddress: signer.address,
@@ -5320,7 +5427,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // Check accrued fees before claiming
         const feesBeforeClaim = await adapter.getAccruedFeesUSD(
           {
-            tokenId: parsed.tokenId,
+            id: parsed.tokenId,
             token0Decimals: env.poolData.token0.decimals,
             token1Decimals: env.poolData.token1.decimals
           },
@@ -7054,6 +7161,145 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+  });
+
+  describe('getPositionById', () => {
+    describe('Success Cases', () => {
+      it('should return position and pool data for valid tokenId', async () => {
+        // Use the position created in test setup
+        const tokenId = env.positionTokenId;
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        // Verify structure
+        expect(result).toHaveProperty('position');
+        expect(result).toHaveProperty('poolData');
+
+        // Verify position fields
+        const position = result.position;
+        expect(position.id).toBe(String(tokenId));
+        expect(position).toHaveProperty('pool');
+        expect(position).toHaveProperty('tickLower');
+        expect(position).toHaveProperty('tickUpper');
+        expect(position).toHaveProperty('liquidity');
+        expect(position).toHaveProperty('feeGrowthInside0LastX128');
+        expect(position).toHaveProperty('feeGrowthInside1LastX128');
+        expect(position).toHaveProperty('tokensOwed0');
+        expect(position).toHaveProperty('tokensOwed1');
+        expect(position).toHaveProperty('lastUpdated');
+
+        // Verify poolData fields (V4 specific)
+        const poolData = Object.values(result.poolData)[0];
+        expect(poolData).toHaveProperty('token0Symbol');
+        expect(poolData).toHaveProperty('token1Symbol');
+        expect(poolData).toHaveProperty('fee');
+        expect(poolData).toHaveProperty('tickSpacing');
+        expect(poolData).toHaveProperty('hooks');
+        expect(poolData).toHaveProperty('platform');
+        expect(poolData).toHaveProperty('poolKey');
+        expect(poolData.platform).toBe('uniswapV4');
+
+        // Verify poolKey structure
+        expect(poolData.poolKey).toHaveProperty('currency0');
+        expect(poolData.poolKey).toHaveProperty('currency1');
+        expect(poolData.poolKey).toHaveProperty('fee');
+        expect(poolData.poolKey).toHaveProperty('tickSpacing');
+        expect(poolData.poolKey).toHaveProperty('hooks');
+      });
+
+      it('should return position with correct tick bounds', async () => {
+        const tokenId = env.positionTokenId;
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        // Tick bounds should be numbers
+        expect(typeof result.position.tickLower).toBe('number');
+        expect(typeof result.position.tickUpper).toBe('number');
+        // Upper tick should be greater than lower tick
+        expect(result.position.tickUpper).toBeGreaterThan(result.position.tickLower);
+      });
+
+      it('should return position with liquidity as string', async () => {
+        const tokenId = env.positionTokenId;
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        expect(typeof result.position.liquidity).toBe('string');
+        // Should be parseable as BigNumber
+        expect(() => ethers.BigNumber.from(result.position.liquidity)).not.toThrow();
+      });
+
+      it('should return poolId (bytes32) as pool identifier', async () => {
+        const tokenId = env.positionTokenId;
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        // V4 uses poolId (bytes32) not pool address
+        expect(result.position.pool).toMatch(/^0x[a-fA-F0-9]{64}$/);
+        // poolData should be keyed by same poolId
+        expect(result.poolData).toHaveProperty(result.position.pool);
+      });
+
+      it('should handle string tokenId', async () => {
+        const tokenId = String(env.positionTokenId);
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        expect(result.position.id).toBe(tokenId);
+        expect(result).toHaveProperty('poolData');
+      });
+
+      it('should handle numeric tokenId', async () => {
+        const tokenId = Number(env.positionTokenId);
+        const result = await adapter.getPositionById(tokenId, env.provider);
+
+        expect(result.position.id).toBe(String(tokenId));
+        expect(result).toHaveProperty('poolData');
+      });
+
+      it('should return lastUpdated as recent timestamp', async () => {
+        const before = Date.now();
+        const result = await adapter.getPositionById(env.positionTokenId, env.provider);
+        const after = Date.now();
+
+        expect(result.position.lastUpdated).toBeGreaterThanOrEqual(before);
+        expect(result.position.lastUpdated).toBeLessThanOrEqual(after);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null tokenId', async () => {
+        await expect(adapter.getPositionById(null, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw error for undefined tokenId', async () => {
+        await expect(adapter.getPositionById(undefined, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw error for empty string tokenId', async () => {
+        await expect(adapter.getPositionById('', env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw error for null provider', async () => {
+        await expect(adapter.getPositionById(env.positionTokenId, null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw error for undefined provider', async () => {
+        await expect(adapter.getPositionById(env.positionTokenId, undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw error for invalid provider object', async () => {
+        await expect(adapter.getPositionById(env.positionTokenId, {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw error for non-existent tokenId', async () => {
+        const nonExistentId = '999999999999';
+        // V4 returns zeroed data for non-existent positions (doesn't revert like V3)
+        await expect(adapter.getPositionById(nonExistentId, env.provider))
+          .rejects.toThrow('not found or has been burned');
       });
     });
   });

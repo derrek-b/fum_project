@@ -1076,7 +1076,7 @@ export function mapStrategyParameters(strategyId, rawBytes) {
     if (strategyIdLower === 'bob') {
       // Decode bytes to typed values
       const params = ethers.utils.defaultAbiCoder.decode(
-        ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16', 'uint16'],
+        ['uint16', 'uint16', 'bool', 'uint256', 'uint16', 'uint16', 'uint16'],
         rawBytes
       );
 
@@ -1092,8 +1092,7 @@ export function mapStrategyParameters(strategyId, rawBytes) {
 
         // Risk Management
         maxSlippage: parseInt(params[5]) / 100,
-        emergencyExitTrigger: parseInt(params[6]) / 100,
-        maxUtilization: parseInt(params[7]) / 100
+        emergencyExitTrigger: parseInt(params[6]) / 100
       };
     }
     else if (strategyIdLower === 'parris') {

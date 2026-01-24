@@ -563,6 +563,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    */
   _createSlippagePercent(slippageTolerance) {
     const validatedSlippage = this._validateSlippageTolerance(slippageTolerance);
+    // slippageTolerance is a percentage (e.g., 5 = 5%)
+    // Convert to basis points: 5 * 100 = 500, then Percent(500, 10_000) = 5%
     return new Percent(Math.floor(validatedSlippage * 100), 10_000);
   }
 
@@ -1506,6 +1508,75 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Fetch a single position by tokenId (no Graph dependency)
+   * Used for immediate cache updates after position creation
+   *
+   * @param {string|number} tokenId - The position NFT token ID
+   * @param {ethers.Provider} provider - Ethers provider
+   * @returns {Promise<{position: Object, poolData: Object}>} Position and pool metadata
+   * @throws {Error} If tokenId or provider is invalid, or position not found
+   */
+  async getPositionById(tokenId, provider) {
+    // Parameter validation
+    if (tokenId === null || tokenId === undefined || tokenId === '') {
+      throw new Error('TokenId parameter is required');
+    }
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error('Valid provider parameter is required');
+    }
+
+    try {
+      // Get position manager contract
+      const positionManager = this._getPositionManager(provider);
+
+      // Direct on-chain call - contract reverts with "Invalid token ID" for burned/non-existent positions
+      const positionData = await positionManager.positions(tokenId);
+
+      // Get pool address
+      const poolAddress = await this._getPoolAddress(
+        positionData.token0,
+        positionData.token1,
+        positionData.fee,
+        provider
+      );
+
+      // Resolve token symbols
+      const token0Info = getTokenByAddress(positionData.token0, this.chainId);
+      const token1Info = getTokenByAddress(positionData.token1, this.chainId);
+
+      return {
+        position: {
+          id: String(tokenId),
+          pool: poolAddress,
+          tickLower: positionData.tickLower,
+          tickUpper: positionData.tickUpper,
+          liquidity: positionData.liquidity.toString(),
+          feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+          tokensOwed0: positionData.tokensOwed0.toString(),
+          tokensOwed1: positionData.tokensOwed1.toString(),
+          lastUpdated: Date.now()
+        },
+        poolData: {
+          [poolAddress]: {
+            token0Symbol: token0Info.symbol,
+            token1Symbol: token1Info.symbol,
+            fee: positionData.fee,
+            platform: 'uniswapV3'
+          }
+        }
+      };
+    } catch (error) {
+      // Re-throw validation errors as-is
+      if (error.message.includes('TokenId parameter') ||
+          error.message.includes('Valid provider')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch position ${tokenId}: ${error.message}`);
+    }
+  }
+
+  /**
    * Check if a position is in range (active)
    * @param {number} currentTick - Current tick of the pool
    * @param {number} tickLower - Lower tick of the position
@@ -2334,7 +2405,9 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       token0Fees,
       token1Fees,
       token0USD,
-      token1USD
+      token1USD,
+      fees0: token0FeesRaw.toString(),  // Raw amount for fallback/native ETH handling
+      fees1: token1FeesRaw.toString()   // Raw amount for fallback/native ETH handling
     };
   }
 
@@ -3786,32 +3859,77 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
       const positionManagerAddress = this.addresses.positionManagerAddress;
 
-      // Use getAddLiquidityQuote to calculate the position
+      // =====================================================================
+      // Apply Slippage BEFORE Position Calculation (same approach as V4)
+      // =====================================================================
+      //
+      // We calculate position from reduced amounts to get conservative liquidity,
+      // then set Desired = full balances (what we're willing to provide) and
+      // Min = mintAmounts from conservative calc (floor protection).
+      //
+      // This gives headroom: if price moves favorably, more can be deposited.
+      // The Min protects against getting too little liquidity.
+
+      // Store input amounts as balances (these become our Desired caps)
+      const balance0 = BigInt(token0Amount);
+      const balance1 = BigInt(token1Amount);
+
+      // Apply slippage to reduce amounts for position calculation
+      // e.g., 5% slippage → use 95% of balance for position calculation
+      const slippageMultiplier = BigInt(Math.floor((100 - slippageTolerance) * 100));
+      const slippageDivisor = BigInt(10000);
+
+      const forPosition0 = (balance0 * slippageMultiplier / slippageDivisor).toString();
+      const forPosition1 = (balance1 * slippageMultiplier / slippageDivisor).toString();
+
+      // Calculate position from reduced amounts to get conservative mintAmounts
       const quote = await this.getAddLiquidityQuote({
         position,
-        token0Amount,
-        token1Amount,
+        token0Amount: forPosition0,
+        token1Amount: forPosition1,
         provider,
         poolData,
         token0Data,
         token1Data
       });
 
-      // Extract the calculated position and metadata
-      const { position: positionToIncreaseBy, tokensSwapped, sortedToken0, sortedToken1 } = quote;
+      // Extract the calculated position and token swap info
+      const { position: positionToIncreaseBy, tokensSwapped } = quote;
 
-      // Create AddLiquidityOptions
-      const addLiquidityOptions = {
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
+      // Calldata expects amounts in SORTED token order (pool's token0/token1)
+      // If tokensSwapped, caller's token0 is pool's token1 and vice versa
+      const amount0Desired = tokensSwapped ? balance1 : balance0;
+      const amount1Desired = tokensSwapped ? balance0 : balance1;
+
+      // Use mintAmounts from conservative position as Min (floor protection)
+      // mintAmounts are already in sorted order from SDK
+      const amount0Min = positionToIncreaseBy.mintAmounts.amount0;
+      const amount1Min = positionToIncreaseBy.mintAmounts.amount1;
+
+      // 🔍 DEBUG: Log slippage info
+      console.log(`🔍 [V3 generateAddLiquidityData] Position Debug:`);
+      console.log(`   tokenId: ${position.id}`);
+      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
+      console.log(`   tokensSwapped: ${tokensSwapped}`);
+      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
+      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
+      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
+      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
+      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
+      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
+      // Encode the increaseLiquidity function directly
+      const calldata = this.positionManagerInterface.encodeFunctionData('increaseLiquidity', [{
         tokenId: position.id,
-      };
+        amount0Desired: amount0Desired.toString(),
+        amount1Desired: amount1Desired.toString(),
+        amount0Min: amount0Min.toString(),
+        amount1Min: amount1Min.toString(),
+        deadline: this._createDeadline(deadlineMinutes)
+      }]);
 
-      // Generate the calldata using the SDK
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        positionToIncreaseBy,
-        addLiquidityOptions
-      );
+      // V3 uses WETH, not native ETH, so value is always 0
+      const value = '0x00';
 
       // Return transaction data with calculated amounts
       return {
@@ -5395,32 +5513,81 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       }
       const positionManagerAddress = this.addresses.positionManagerAddress;
 
-      // Use getAddLiquidityQuote to calculate the position
+      // =====================================================================
+      // Apply Slippage BEFORE Position Calculation (same approach as V4)
+      // =====================================================================
+      //
+      // We calculate position from reduced amounts to get conservative liquidity,
+      // then set Desired = full balances (what we're willing to provide) and
+      // Min = mintAmounts from conservative calc (floor protection).
+      //
+      // This gives headroom: if price moves favorably, more can be deposited.
+      // The Min protects against getting too little liquidity.
+
+      // Store input amounts as balances (these become our Desired caps)
+      const balance0 = BigInt(token0Amount);
+      const balance1 = BigInt(token1Amount);
+
+      // Apply slippage to reduce amounts for position calculation
+      // e.g., 5% slippage → use 95% of balance for position calculation
+      const slippageMultiplier = BigInt(Math.floor((100 - slippageTolerance) * 100));
+      const slippageDivisor = BigInt(10000);
+
+      const forPosition0 = (balance0 * slippageMultiplier / slippageDivisor).toString();
+      const forPosition1 = (balance1 * slippageMultiplier / slippageDivisor).toString();
+
+      // Calculate position from reduced amounts to get conservative mintAmounts
       const quote = await this.getAddLiquidityQuote({
         position,
-        token0Amount,
-        token1Amount,
+        token0Amount: forPosition0,
+        token1Amount: forPosition1,
         provider,
         poolData,
         token0Data,
         token1Data
       });
 
-      // Extract the calculated position and metadata
-      const { position: newPosition, tokensSwapped, sortedToken0, sortedToken1 } = quote;
+      // Extract the calculated position, metadata, and token swap info
+      const { position: newPosition, tokensSwapped } = quote;
 
-      // Create MintOptions (for new position)
-      const mintOptions = {
+      // Calldata expects amounts in SORTED token order (pool's token0/token1)
+      // If tokensSwapped, caller's token0 is pool's token1 and vice versa
+      const amount0Desired = tokensSwapped ? balance1 : balance0;
+      const amount1Desired = tokensSwapped ? balance0 : balance1;
+
+      // Use mintAmounts from conservative position as Min (floor protection)
+      // mintAmounts are already in sorted order from SDK
+      const amount0Min = newPosition.mintAmounts.amount0;
+      const amount1Min = newPosition.mintAmounts.amount1;
+
+      // 🔍 DEBUG: Log slippage info
+      console.log(`🔍 [V3 generateCreatePositionData] Position Debug:`);
+      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
+      console.log(`   tokensSwapped: ${tokensSwapped}`);
+      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
+      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
+      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
+      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
+      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
+      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
+      // Encode the mint function directly using the position manager interface
+      const calldata = this.positionManagerInterface.encodeFunctionData('mint', [{
+        token0: newPosition.pool.token0.address,
+        token1: newPosition.pool.token1.address,
+        fee: newPosition.pool.fee,
+        tickLower: newPosition.tickLower,
+        tickUpper: newPosition.tickUpper,
+        amount0Desired: amount0Desired.toString(),
+        amount1Desired: amount1Desired.toString(),
+        amount0Min: amount0Min.toString(),
+        amount1Min: amount1Min.toString(),
         recipient: walletAddress,
-        deadline: this._createDeadline(deadlineMinutes), // Use provided deadline
-        slippageTolerance: this._createSlippagePercent(slippageTolerance), // Use standardized slippage
-      };
+        deadline: this._createDeadline(deadlineMinutes)
+      }]);
 
-      // Generate the calldata using the SDK
-      const { calldata, value } = NonfungiblePositionManager.addCallParameters(
-        newPosition,
-        mintOptions
-      );
+      // V3 uses WETH, not native ETH, so value is always 0
+      const value = '0x00';
 
       // Return transaction data with calculated amounts
       return {

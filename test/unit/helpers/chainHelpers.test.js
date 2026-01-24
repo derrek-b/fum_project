@@ -16,7 +16,7 @@ import {
   getPlatformAddresses,
   lookupChainPlatformIds,
   getMinDeploymentForGas,
-  getMinBufferSwapValue,
+  getMinSwapValue,
   getTransactionDeadlineMinutes,
   configureChainHelpers
 } from '../../../src/helpers/chainHelpers.js';
@@ -625,39 +625,39 @@ describe('Chain Helpers', () => {
     });
   });
 
-  describe('getMinBufferSwapValue', () => {
+  describe('getMinSwapValue', () => {
     describe('Success Cases', () => {
       it('should return a number for valid chains', () => {
-        expect(typeof getMinBufferSwapValue(1)).toBe('number');
-        expect(typeof getMinBufferSwapValue(42161)).toBe('number');
-        expect(typeof getMinBufferSwapValue(1337)).toBe('number');
+        expect(typeof getMinSwapValue(1)).toBe('number');
+        expect(typeof getMinSwapValue(42161)).toBe('number');
+        expect(typeof getMinSwapValue(1337)).toBe('number');
       });
 
       it('should return expected values for each chain', () => {
-        expect(getMinBufferSwapValue(42161)).toBe(0.10);  // Arbitrum
-        expect(getMinBufferSwapValue(1337)).toBe(0.10);   // Local
-        expect(getMinBufferSwapValue(1)).toBe(1.00);      // Ethereum
+        expect(getMinSwapValue(42161)).toBe(0.10);  // Arbitrum
+        expect(getMinSwapValue(1337)).toBe(0.10);   // Local
+        expect(getMinSwapValue(1)).toBe(1.00);      // Ethereum
       });
 
       it('should return values >= 0', () => {
-        expect(getMinBufferSwapValue(1)).toBeGreaterThanOrEqual(0);
-        expect(getMinBufferSwapValue(42161)).toBeGreaterThanOrEqual(0);
-        expect(getMinBufferSwapValue(1337)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(1)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(42161)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(1337)).toBeGreaterThanOrEqual(0);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for unsupported chain', () => {
-        expect(() => getMinBufferSwapValue(999999)).toThrow('Chain 999999 is not supported');
+        expect(() => getMinSwapValue(999999)).toThrow('Chain 999999 is not supported');
       });
 
-      it('should throw error when minBufferSwapValue is not configured', async () => {
+      it('should throw error when minSwapValue is not configured', async () => {
         vi.doMock('../../../src/configs/chains.js', () => ({
           default: {
             777: {
               name: 'Test Chain',
               rpcUrl: 'http://localhost:8545',
-              // minBufferSwapValue intentionally missing
+              // minSwapValue intentionally missing
             }
           }
         }));
@@ -665,18 +665,18 @@ describe('Chain Helpers', () => {
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
 
-        expect(() => chainHelpers.getMinBufferSwapValue(777)).toThrow('No minimum buffer swap value configured for chain 777');
+        expect(() => chainHelpers.getMinSwapValue(777)).toThrow('No minimum swap value configured for chain 777');
 
         vi.doUnmock('../../../src/configs/chains.js');
         vi.resetModules();
       });
 
       it('should validate chainId parameter', () => {
-        expect(() => getMinBufferSwapValue(null)).toThrow('chainId parameter is required');
-        expect(() => getMinBufferSwapValue(undefined)).toThrow('chainId parameter is required');
-        expect(() => getMinBufferSwapValue('1')).toThrow('chainId must be a number');
-        expect(() => getMinBufferSwapValue(0)).toThrow('chainId must be greater than 0');
-        expect(() => getMinBufferSwapValue(-1)).toThrow('chainId must be greater than 0');
+        expect(() => getMinSwapValue(null)).toThrow('chainId parameter is required');
+        expect(() => getMinSwapValue(undefined)).toThrow('chainId parameter is required');
+        expect(() => getMinSwapValue('1')).toThrow('chainId must be a number');
+        expect(() => getMinSwapValue(0)).toThrow('chainId must be greater than 0');
+        expect(() => getMinSwapValue(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

@@ -379,32 +379,32 @@ export function getMinDeploymentForGas(chainId) {
 }
 
 /**
- * Get minimum buffer swap value for a specific chain
+ * Get minimum swap value for a specific chain
  * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {number} Minimum buffer swap value in USD - swaps below this threshold are skipped
+ * @returns {number} Minimum swap value in USD - swaps below this threshold are skipped
  * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
  * @throws {Error} If chain is not supported
- * @throws {Error} If no minimum buffer swap value is configured for the chain
+ * @throws {Error} If no minimum swap value is configured for the chain
  * @example
- * // Get minimum buffer swap value for Arbitrum (low gas)
- * const minValue = getMinBufferSwapValue(42161);
+ * // Get minimum swap value for Arbitrum (low gas)
+ * const minValue = getMinSwapValue(42161);
  * // Returns: 0.10 (USD)
  *
  * @example
- * // Get minimum buffer swap value for Ethereum (high gas)
- * const minValue = getMinBufferSwapValue(1);
+ * // Get minimum swap value for Ethereum (high gas)
+ * const minValue = getMinSwapValue(1);
  * // Returns: 1.00 (USD)
  *
  * @example
  * // Use in strategy logic to skip dust swaps
- * const minSwapValue = getMinBufferSwapValue(chainId);
+ * const minSwapValue = getMinSwapValue(chainId);
  * if (tokenUSDValue < minSwapValue) {
  *   // Skip this swap - not economically rational
  * }
  * @since 1.0.0
  */
-export function getMinBufferSwapValue(chainId) {
+export function getMinSwapValue(chainId) {
   validateChainId(chainId);
 
   const config = chains[chainId];
@@ -412,11 +412,11 @@ export function getMinBufferSwapValue(chainId) {
     throw new Error(`Chain ${chainId} is not supported`);
   }
 
-  if (typeof config.minBufferSwapValue !== 'number' || !Number.isFinite(config.minBufferSwapValue) || config.minBufferSwapValue < 0) {
-    throw new Error(`No minimum buffer swap value configured for chain ${chainId}`);
+  if (typeof config.minSwapValue !== 'number' || !Number.isFinite(config.minSwapValue) || config.minSwapValue < 0) {
+    throw new Error(`No minimum swap value configured for chain ${chainId}`);
   }
 
-  return config.minBufferSwapValue;
+  return config.minSwapValue;
 }
 
 /**

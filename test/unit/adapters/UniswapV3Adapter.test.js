@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
+import JSBI from 'jsbi';
 import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
@@ -5385,6 +5386,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const tokenPrices = { token0: 1, token1: 1 }; // Simplified prices
         const result = await adapter.getAccruedFeesUSD(position, tokenPrices, env.provider);
 
+        // Check formatted values (for display)
         expect(result).toHaveProperty('totalUSD');
         expect(result).toHaveProperty('token0Fees');
         expect(result).toHaveProperty('token1Fees');
@@ -5396,6 +5398,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(typeof result.token0USD).toBe('number');
         expect(typeof result.token1USD).toBe('number');
         expect(result.totalUSD).toBeGreaterThanOrEqual(0);
+
+        // Check raw values (for fallback/native ETH handling)
+        expect(result).toHaveProperty('fees0');
+        expect(result).toHaveProperty('fees1');
+        expect(typeof result.fees0).toBe('string');
+        expect(typeof result.fees1).toBe('string');
       });
 
       it('should correctly convert fees to USD using token prices', async () => {
@@ -5838,6 +5846,114 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+  });
+
+  describe('getPositionById', () => {
+    describe('Success Cases', () => {
+      it('should return position and pool data for valid tokenId', async () => {
+        const result = await adapter.getPositionById(env.positionTokenId, env.provider);
+
+        // Verify structure
+        expect(result).toHaveProperty('position');
+        expect(result).toHaveProperty('poolData');
+
+        // Verify position fields
+        const position = result.position;
+        expect(position.id).toBe(env.positionTokenId.toString());
+        expect(position).toHaveProperty('pool');
+        expect(position).toHaveProperty('tickLower');
+        expect(position).toHaveProperty('tickUpper');
+        expect(position).toHaveProperty('liquidity');
+        expect(position).toHaveProperty('feeGrowthInside0LastX128');
+        expect(position).toHaveProperty('feeGrowthInside1LastX128');
+        expect(position).toHaveProperty('tokensOwed0');
+        expect(position).toHaveProperty('tokensOwed1');
+        expect(position).toHaveProperty('lastUpdated');
+        expect(typeof position.lastUpdated).toBe('number');
+
+        // Verify only expected fields in position
+        const expectedPositionFields = [
+          'id', 'pool', 'tickLower', 'tickUpper', 'liquidity', 'lastUpdated',
+          'feeGrowthInside0LastX128', 'feeGrowthInside1LastX128', 'tokensOwed0', 'tokensOwed1'
+        ];
+        expect(Object.keys(position).sort()).toEqual(expectedPositionFields.sort());
+
+        // Verify poolData fields
+        const poolAddresses = Object.keys(result.poolData);
+        expect(poolAddresses.length).toBe(1);
+        const poolData = result.poolData[poolAddresses[0]];
+        expect(poolData).toHaveProperty('token0Symbol');
+        expect(poolData).toHaveProperty('token1Symbol');
+        expect(poolData).toHaveProperty('fee');
+        expect(poolData).toHaveProperty('platform');
+        expect(poolData.platform).toBe('uniswapV3');
+
+        // Verify only expected fields in poolData
+        const expectedPoolFields = ['token0Symbol', 'token1Symbol', 'fee', 'platform'];
+        expect(Object.keys(poolData).sort()).toEqual(expectedPoolFields.sort());
+      });
+
+      it('should match data from getPositionsForVDS for same position', async () => {
+        // Compare single position fetch vs batch fetch
+        const singleResult = await adapter.getPositionById(env.positionTokenId, env.provider);
+        const batchResult = await adapter.getPositionsForVDS(env.testVault.address, env.provider);
+
+        const batchPosition = batchResult.positions[env.positionTokenId.toString()];
+
+        // Position data should match
+        expect(singleResult.position.id).toBe(batchPosition.id);
+        expect(singleResult.position.pool).toBe(batchPosition.pool);
+        expect(singleResult.position.tickLower).toBe(batchPosition.tickLower);
+        expect(singleResult.position.tickUpper).toBe(batchPosition.tickUpper);
+        expect(singleResult.position.liquidity).toBe(batchPosition.liquidity);
+        expect(singleResult.position.feeGrowthInside0LastX128).toBe(batchPosition.feeGrowthInside0LastX128);
+        expect(singleResult.position.feeGrowthInside1LastX128).toBe(batchPosition.feeGrowthInside1LastX128);
+
+        // Pool data should match
+        const singlePoolData = Object.values(singleResult.poolData)[0];
+        const batchPoolData = batchResult.poolData[singleResult.position.pool];
+        expect(singlePoolData.token0Symbol).toBe(batchPoolData.token0Symbol);
+        expect(singlePoolData.token1Symbol).toBe(batchPoolData.token1Symbol);
+        expect(singlePoolData.fee).toBe(batchPoolData.fee);
+      });
+
+      it('should handle string tokenId', async () => {
+        const result = await adapter.getPositionById(env.positionTokenId.toString(), env.provider);
+        expect(result.position.id).toBe(env.positionTokenId.toString());
+      });
+
+      it('should handle numeric tokenId', async () => {
+        const result = await adapter.getPositionById(Number(env.positionTokenId), env.provider);
+        expect(result.position.id).toBe(env.positionTokenId.toString());
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing tokenId', async () => {
+        await expect(adapter.getPositionById(null, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+        await expect(adapter.getPositionById(undefined, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+        await expect(adapter.getPositionById('', env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw error for missing provider', async () => {
+        await expect(adapter.getPositionById(env.positionTokenId, null))
+          .rejects.toThrow('Valid provider parameter is required');
+        await expect(adapter.getPositionById(env.positionTokenId, undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+        await expect(adapter.getPositionById(env.positionTokenId, {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw error for non-existent tokenId', async () => {
+        const nonExistentId = '999999999999';
+        // Contract reverts with "Invalid token ID" for non-existent/burned positions
+        await expect(adapter.getPositionById(nonExistentId, env.provider))
+          .rejects.toThrow();
       });
     });
   });
@@ -10472,6 +10588,46 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(result.data.length).toBeGreaterThan(10);
       });
 
+      it('should use input balances as Desired and conservative amounts as Min (slippage headroom)', async () => {
+        // Use 5% slippage for clear verification
+        const params = { ...baseParams, slippageTolerance: 5 };
+        const result = await adapter.generateAddLiquidityData(params);
+
+        // Decode the calldata to verify amounts
+        const decoded = adapter.positionManagerInterface.decodeFunctionData('increaseLiquidity', result.data);
+        const callParams = decoded[0]; // First element is the params tuple
+
+        // Note: Calldata amounts are in SORTED token order (by address), which may differ
+        // from caller's input order. We verify the relationship between Desired and Min.
+        const amount0Desired = BigInt(callParams.amount0Desired.toString());
+        const amount1Desired = BigInt(callParams.amount1Desired.toString());
+        const amount0Min = BigInt(callParams.amount0Min.toString());
+        const amount1Min = BigInt(callParams.amount1Min.toString());
+
+        // Check that tokensSwapped info is available in quote
+        expect(result.quote).toHaveProperty('tokensSwapped');
+        const tokensSwapped = result.quote.tokensSwapped;
+
+        // Get input amounts in sorted order to match calldata
+        const sortedInput0 = tokensSwapped ? BigInt(params.token1Amount) : BigInt(params.token0Amount);
+        const sortedInput1 = tokensSwapped ? BigInt(params.token0Amount) : BigInt(params.token1Amount);
+
+        // Desired amounts should equal input balances (full amounts) in sorted order
+        expect(amount0Desired).toBe(sortedInput0);
+        expect(amount1Desired).toBe(sortedInput1);
+
+        // Min amounts should be less than Desired (conservative floor protection)
+        expect(amount0Min).toBeLessThan(amount0Desired);
+        expect(amount1Min).toBeLessThan(amount1Desired);
+
+        console.log(`Balance-as-desired verification (V3 addLiquidity):`);
+        console.log(`  tokensSwapped: ${tokensSwapped}`);
+        console.log(`  sortedInput0: ${sortedInput0}, amount0Desired: ${amount0Desired}`);
+        console.log(`  sortedInput1: ${sortedInput1}, amount1Desired: ${amount1Desired}`);
+        console.log(`  amount0Min: ${amount0Min} (floor protection, < Desired)`);
+        console.log(`  amount1Min: ${amount1Min} (floor protection, < Desired)`);
+      });
+
       it('should generate valid transaction data for adding both token amounts', async () => {
         const result = await adapter.generateAddLiquidityData(baseParams);
 
@@ -10971,6 +11127,46 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
         // Data should contain mint function and have substantial calldata
         expect(result.data.length).toBeGreaterThan(10);
+      });
+
+      it('should use input balances as Desired and conservative amounts as Min (slippage headroom)', async () => {
+        // Use 5% slippage for clear verification
+        const params = { ...baseParams, slippageTolerance: 5 };
+        const result = await adapter.generateCreatePositionData(params);
+
+        // Decode the calldata to verify amounts
+        const decoded = adapter.positionManagerInterface.decodeFunctionData('mint', result.data);
+        const callParams = decoded[0]; // First element is the params tuple
+
+        // Note: Calldata amounts are in SORTED token order (by address), which may differ
+        // from caller's input order. We verify the relationship between Desired and Min.
+        const amount0Desired = BigInt(callParams.amount0Desired.toString());
+        const amount1Desired = BigInt(callParams.amount1Desired.toString());
+        const amount0Min = BigInt(callParams.amount0Min.toString());
+        const amount1Min = BigInt(callParams.amount1Min.toString());
+
+        // Check that tokensSwapped info is available in quote
+        expect(result.quote).toHaveProperty('tokensSwapped');
+        const tokensSwapped = result.quote.tokensSwapped;
+
+        // Get input amounts in sorted order to match calldata
+        const sortedInput0 = tokensSwapped ? BigInt(params.token1Amount) : BigInt(params.token0Amount);
+        const sortedInput1 = tokensSwapped ? BigInt(params.token0Amount) : BigInt(params.token1Amount);
+
+        // Desired amounts should equal input balances (full amounts) in sorted order
+        expect(amount0Desired).toBe(sortedInput0);
+        expect(amount1Desired).toBe(sortedInput1);
+
+        // Min amounts should be less than Desired (conservative floor protection)
+        expect(amount0Min).toBeLessThan(amount0Desired);
+        expect(amount1Min).toBeLessThan(amount1Desired);
+
+        console.log(`Balance-as-desired verification (V3 createPosition):`);
+        console.log(`  tokensSwapped: ${tokensSwapped}`);
+        console.log(`  sortedInput0: ${sortedInput0}, amount0Desired: ${amount0Desired}`);
+        console.log(`  sortedInput1: ${sortedInput1}, amount1Desired: ${amount1Desired}`);
+        console.log(`  amount0Min: ${amount0Min} (floor protection, < Desired)`);
+        console.log(`  amount1Min: ${amount1Min} (floor protection, < Desired)`);
       });
 
       it('should generate valid transaction data for creating position with both token amounts', async () => {
