@@ -462,4 +462,405 @@ describe('VaultDataService', () => {
       expect(result).toBe(false);
     });
   });
+
+  describe('refreshTokens', () => {
+    it('should throw if not initialized', async () => {
+      await expect(
+        vaultDataService.refreshTokens(VAULT_ADDRESS_1)
+      ).rejects.toThrow('VaultDataService not initialized');
+    });
+
+    it('should throw if vault not in cache', async () => {
+      vaultDataService.initialize({ getNetwork: vi.fn() }, 1337);
+
+      await expect(
+        vaultDataService.refreshTokens(VAULT_ADDRESS_1)
+      ).rejects.toThrow('not found in cache');
+    });
+
+    it('should update vault.tokens with fresh balances', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+
+      const mockBalances = { ETH: '1000000000000000000', USDC: '1000000' };
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue(mockBalances);
+
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: { ETH: '0', USDC: '0' },
+        positions: {},
+        lastUpdated: 0
+      });
+
+      await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      const vault = await vaultDataService.getVault(VAULT_ADDRESS_1);
+      expect(vault.tokens).toEqual(mockBalances);
+    });
+
+    it('should update lastUpdated timestamp', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
+
+      const oldTimestamp = 1000;
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: {},
+        lastUpdated: oldTimestamp
+      });
+
+      await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      const vault = await vaultDataService.getVault(VAULT_ADDRESS_1);
+      expect(vault.lastUpdated).toBeGreaterThan(oldTimestamp);
+    });
+
+    it('should NOT modify positions', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({ ETH: '100' });
+
+      const existingPositions = { '123': { id: '123', liquidity: '1000' } };
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: existingPositions,
+        lastUpdated: 0
+      });
+
+      await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      const vault = await vaultDataService.getVault(VAULT_ADDRESS_1);
+      expect(vault.positions).toEqual(existingPositions);
+    });
+
+    it('should emit tokensRefreshing event', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: {},
+        lastUpdated: 0
+      });
+
+      const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+      await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      expect(emitSpy).toHaveBeenCalledWith('tokensRefreshing', expect.any(String));
+    });
+
+    it('should emit tokensRefreshed event with balances', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      const mockBalances = { ETH: '100', USDC: '200' };
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue(mockBalances);
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: {},
+        lastUpdated: 0
+      });
+
+      const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+      await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      expect(emitSpy).toHaveBeenCalledWith(
+        'tokensRefreshed',
+        expect.any(String),
+        mockBalances
+      );
+    });
+
+    it('should return true on success', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: {},
+        lastUpdated: 0
+      });
+
+      const result = await vaultDataService.refreshTokens(VAULT_ADDRESS_1);
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('updatePosition', () => {
+    const mockPositionData = {
+      id: '12345',
+      pool: '0x1234567890123456789012345678901234567890',
+      tickLower: -887220,
+      tickUpper: 887220,
+      liquidity: '1000000000000000000',
+      feeGrowthInside0LastX128: '0',
+      feeGrowthInside1LastX128: '0',
+      tokensOwed0: '0',
+      tokensOwed1: '0',
+      lastUpdated: Date.now()
+    };
+
+    const mockPoolData = {
+      '0x1234567890123456789012345678901234567890': {
+        token0Symbol: 'USDC',
+        token1Symbol: 'WETH',
+        fee: 3000,
+        platform: 'uniswapV3'
+      }
+    };
+
+    describe('Success Cases', () => {
+      it('should add new position to vault cache', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const result = await vaultDataService.updatePosition(
+          VAULT_ADDRESS_1,
+          mockPositionData,
+          mockPoolData
+        );
+
+        expect(result).toBe(true);
+
+        const vault = await vaultDataService.getVault(VAULT_ADDRESS_1, false);
+        expect(vault.positions[mockPositionData.id]).toEqual(mockPositionData);
+      });
+
+      it('should update existing position in vault cache', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: { [mockPositionData.id]: mockPositionData },
+          lastUpdated: 0
+        });
+
+        const updatedPosition = { ...mockPositionData, liquidity: '2000000000000000000' };
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, updatedPosition, mockPoolData);
+
+        const vault = await vaultDataService.getVault(VAULT_ADDRESS_1, false);
+        expect(vault.positions[mockPositionData.id].liquidity).toBe('2000000000000000000');
+      });
+
+      it('should update vault lastUpdated timestamp', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const before = Date.now();
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, mockPoolData);
+        const after = Date.now();
+
+        const vault = await vaultDataService.getVault(VAULT_ADDRESS_1, false);
+        expect(vault.lastUpdated).toBeGreaterThanOrEqual(before);
+        expect(vault.lastUpdated).toBeLessThanOrEqual(after);
+      });
+
+      it('should emit positionUpdating event', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, mockPoolData);
+
+        expect(emitSpy).toHaveBeenCalledWith(
+          'positionUpdating',
+          ethers.utils.getAddress(VAULT_ADDRESS_1),
+          mockPositionData.id
+        );
+      });
+
+      it('should emit positionUpdated event', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, mockPoolData);
+
+        expect(emitSpy).toHaveBeenCalledWith(
+          'positionUpdated',
+          ethers.utils.getAddress(VAULT_ADDRESS_1),
+          mockPositionData
+        );
+      });
+
+      it('should emit PoolDataFetched event for pool cache update', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, mockPoolData);
+
+        expect(emitSpy).toHaveBeenCalledWith('PoolDataFetched', {
+          poolData: mockPoolData,
+          source: 'updatePosition',
+          vaultAddress: ethers.utils.getAddress(VAULT_ADDRESS_1)
+        });
+      });
+
+      it('should not emit PoolDataFetched if poolData is empty', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          positions: {},
+          lastUpdated: 0
+        });
+
+        const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, {});
+
+        expect(emitSpy).not.toHaveBeenCalledWith('PoolDataFetched', expect.anything());
+      });
+
+      it('should initialize positions object if it does not exist', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+        vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+          address: VAULT_ADDRESS_1,
+          tokens: {},
+          lastUpdated: 0
+        });
+
+        await vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, mockPoolData);
+
+        const vault = await vaultDataService.getVault(VAULT_ADDRESS_1, false);
+        expect(vault.positions).toBeDefined();
+        expect(vault.positions[mockPositionData.id]).toEqual(mockPositionData);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing vaultAddress', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        await expect(vaultDataService.updatePosition(null, mockPositionData, mockPoolData))
+          .rejects.toThrow('vaultAddress parameter is required');
+        await expect(vaultDataService.updatePosition(undefined, mockPositionData, mockPoolData))
+          .rejects.toThrow('vaultAddress parameter is required');
+        await expect(vaultDataService.updatePosition('', mockPositionData, mockPoolData))
+          .rejects.toThrow('vaultAddress parameter is required');
+      });
+
+      it('should throw error for missing positionData', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, null, mockPoolData))
+          .rejects.toThrow('positionData parameter is required');
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, undefined, mockPoolData))
+          .rejects.toThrow('positionData parameter is required');
+      });
+
+      it('should throw error for non-object positionData', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, 'not-an-object', mockPoolData))
+          .rejects.toThrow('positionData parameter is required and must be an object');
+      });
+
+      it('should throw error for missing positionData.id', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        const badPosition = { ...mockPositionData };
+        delete badPosition.id;
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, badPosition, mockPoolData))
+          .rejects.toThrow('positionData.id is required');
+      });
+
+      it('should throw error for missing poolData', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, null))
+          .rejects.toThrow('poolData parameter is required');
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, undefined))
+          .rejects.toThrow('poolData parameter is required');
+      });
+
+      it('should throw error for non-object poolData', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        await expect(vaultDataService.updatePosition(VAULT_ADDRESS_1, mockPositionData, 'not-an-object'))
+          .rejects.toThrow('poolData parameter is required and must be an object');
+      });
+
+      it('should throw error for vault not in cache', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        const unknownVault = '0x1111111111111111111111111111111111111111';
+        await expect(vaultDataService.updatePosition(unknownVault, mockPositionData, mockPoolData))
+          .rejects.toThrow('not found in cache');
+      });
+
+      it('should emit positionUpdateError on failure', async () => {
+        const mockProvider = { getNetwork: vi.fn() };
+        vaultDataService.initialize(mockProvider, 1337);
+
+        const emitSpy = vi.spyOn(mockEventManager, 'emit');
+
+        const unknownVault = '0x1111111111111111111111111111111111111111';
+        try {
+          await vaultDataService.updatePosition(unknownVault, mockPositionData, mockPoolData);
+        } catch (e) {
+          // expected
+        }
+
+        expect(emitSpy).toHaveBeenCalledWith(
+          'positionUpdateError',
+          expect.any(String),
+          mockPositionData.id,
+          expect.stringContaining('not found in cache')
+        );
+      });
+    });
+  });
 });

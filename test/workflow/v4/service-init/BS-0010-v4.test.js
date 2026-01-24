@@ -512,11 +512,15 @@ describe('V4 AutomationService Initialization - createNewPosition Workflow', () 
       expect(tokenBalancesFetchedEvents.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('should have USDC balance after deficit swap', () => {
-      const postSwapEvent = tokenBalancesFetchedEvents[tokenBalancesFetchedEvents.length - 1];
+    it('should have position in VDS cache after creation', async () => {
+      const vault = await service.vaultDataService.getVault(testVault.vaultAddress, false);
+      const positionId = newPositionCreatedEvents[0].positionId;
 
-      const USDCBalance = BigInt(postSwapEvent.balances.USDC || '0');
-      expect(USDCBalance).toBeGreaterThan(0n);
+      expect(vault.positions).toBeDefined();
+      expect(vault.positions[positionId]).toBeDefined();
+      expect(vault.positions[positionId].id).toBe(positionId);
+      expect(vault.positions[positionId].liquidity).toBeDefined();
+      expect(BigInt(vault.positions[positionId].liquidity)).toBeGreaterThan(0n);
     });
 
     it('should have remaining ETH balance (V4 uses native ETH)', () => {

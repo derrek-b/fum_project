@@ -1,7 +1,7 @@
 /**
  * @fileoverview Shared Hardhat blockchain setup for V4 automation service tests
  *
- * Connects to the shared Hardhat instance started by v4-global-setup.js on port 8547.
+ * Connects to the shared Hardhat instance started by global-setup.js.
  * Each test file reverts to the base snapshot (contracts deployed, no vaults)
  * to ensure clean isolation between test files.
  */
@@ -11,7 +11,7 @@ import { TEST_ACCOUNTS } from 'fum_library/test/setup/hardhat-config';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
-import { loadV4SharedState, saveV4SharedState } from '../v4-shared-state.js';
+import { loadSharedState, saveSharedState } from '../shared-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,13 +25,13 @@ const EMPTY_BLACKLIST = {
 };
 
 /**
- * Connect to the shared V4 Hardhat instance and revert to base snapshot
+ * Connect to the shared Hardhat instance and revert to base snapshot
  * @returns {Promise<Object>} Shared Hardhat connection with helpers
  */
 async function connectToV4SharedHardhat() {
-  const state = loadV4SharedState();
+  const state = loadSharedState();
 
-  // Create providers connecting to shared V4 Hardhat on port 8547
+  // Create providers connecting to shared Hardhat
   const provider = new ethers.providers.JsonRpcProvider(`http://localhost:${state.port}`);
   const wsProvider = new ethers.providers.WebSocketProvider(`ws://localhost:${state.port}`);
 
@@ -50,7 +50,7 @@ async function connectToV4SharedHardhat() {
   const newBaseSnapshot = await provider.send('evm_snapshot', []);
 
   // Update the shared state with new base snapshot ID
-  saveV4SharedState({
+  saveSharedState({
     ...state,
     baseSnapshotId: newBaseSnapshot
   });
@@ -164,7 +164,7 @@ export async function setupV4TestBlockchain(options = {}) {
   const testConfig = {
     automationServiceAddress,
     chainId: 1337,
-    wsUrl: `ws://localhost:${shared.port}`,  // Port 8547 for V4
+    wsUrl: `ws://localhost:${shared.port}`,
     debug: true,
     envPath: path.join(__dirname, '../.env.test'),
     blacklistFilePath: path.join(__dirname, '../../data/.vault-blacklist.json'),

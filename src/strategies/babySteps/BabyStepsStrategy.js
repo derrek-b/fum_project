@@ -194,10 +194,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Step 4: Refresh token balances after position closures and fee distribution
-    vault.tokens = await this.vaultDataService.fetchTokenBalances(
-      vault.address,
-      Object.keys(this.tokens)
-    );
+    await this.vaultDataService.refreshTokens(vault.address);
 
     // Step 5: Calculate available deployment
     const { availableDeployment, assetValues } = await this.calculateAvailableDeployment(vault);
@@ -385,8 +382,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         if (feeCollectionNeeded) {
           this.log(`💰 Executing fee collection for vault ${vault.address}`);
           await this.collectFees(vault, position);
-          await this.vaultDataService.refreshPositionsAndTokens(vault.address);
-          this.log(`Refreshed vault data for ${vault.address}`);
+          await this.vaultDataService.refreshTokens(vault.address);
+          this.log(`Refreshed token balances for ${vault.address}`);
           return;
         }
       } catch (error) {
@@ -801,10 +798,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
 
       // Step 4: Refresh token balances after position closure and fee distribution
-      vault.tokens = await this.vaultDataService.fetchTokenBalances(
-        vault.address,
-        Object.keys(this.tokens)
-      );
+      await this.vaultDataService.refreshTokens(vault.address);
 
       // Step 5: Calculate available deployment
       const { availableDeployment, assetValues } = await this.calculateAvailableDeployment(vault);
@@ -819,12 +813,10 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
 
       // Step 7: Create new position centered on current price
+      // Note: createNewPosition handles its own cache update via getPositionById + updatePosition
       await this.createNewPosition(vault, availableDeployment, assetValues, targetPool);
 
-      // Step 8: Refresh vault data
-      await this.vaultDataService.refreshPositionsAndTokens(vault.address);
-
-      // Step 9: Emit PositionRebalanced event
+      // Step 8: Emit PositionRebalanced event
       this.eventManager.emit('PositionRebalanced', {
         vaultAddress: vault.address,
         oldPositionId: position.id,
@@ -2001,9 +1993,13 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now()
     });
 
-    // Step 10: Refresh vault cache with updated position and token balances
-    // If this fails, error bubbles up to trigger failed vault retry mechanism
-    await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+    // Step 10: Update cache with modified position (direct on-chain, no Graph latency)
+    const { position: updatedPosition, poolData: updatedPoolData } = await retryRpcCall(
+      () => adapter.getPositionById(position.id, this.provider),
+      'getPositionById'
+    );
+    await this.vaultDataService.updatePosition(vault.address, updatedPosition, updatedPoolData);
+    await this.vaultDataService.refreshTokens(vault.address);
   }
 
   /**
@@ -2342,6 +2338,14 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // 11b. Generate CREATE position data (different from addToPosition which uses generateAddLiquidityData)
+    // 🔍 DEBUG: Log strategy parameters before calling adapter
+    this.log(`🔍 [createNewPosition] Strategy parameters debug:`);
+    this.log(`   vault.strategy.parameters.maxSlippage: ${vault.strategy.parameters.maxSlippage} (type: ${typeof vault.strategy.parameters.maxSlippage})`);
+    this.log(`   token0ForLiquidity: ${token0ForLiquidity} (${token0Data.symbol})`);
+    this.log(`   token1ForLiquidity: ${token1ForLiquidity} (${token1Data.symbol})`);
+    this.log(`   vault.address: ${vault.address}`);
+    this.log(`   targetPool.platform: ${targetPool.platform}`);
+
     const createPositionData = await retryRpcCall(
       () => adapter.generateCreatePositionData({
         position,
@@ -2357,6 +2361,15 @@ export default class BabyStepsStrategy extends StrategyBase {
       }),
       'generateCreatePositionData'
     );
+
+    // 🔍 DEBUG: Log createPositionData result
+    this.log(`🔍 [createNewPosition] createPositionData result:`);
+    this.log(`   to: ${createPositionData.to}`);
+    this.log(`   value: ${createPositionData.value}`);
+    this.log(`   value in ETH: ${ethers.utils.formatEther(createPositionData.value || '0')}`);
+    this.log(`   quote.liquidity: ${createPositionData.quote?.liquidity}`);
+    this.log(`   quote.mintAmount0: ${createPositionData.quote?.mintAmount0}`);
+    this.log(`   quote.mintAmount1: ${createPositionData.quote?.mintAmount1}`);
 
     // 11c. Execute MINT transaction (different from 'addliq')
     this.log(`Executing mint for new ${token0Data.symbol}/${token1Data.symbol} position`);
@@ -2414,9 +2427,13 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.emergencyExitBaseline[vault.address] = currentPool;
     this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
 
-    // Step 13: Refresh vault cache with new position and updated token balances
-    // If this fails, error bubbles up to trigger failed vault retry mechanism
-    await this.vaultDataService.refreshPositionsAndTokens(vault.address);
+    // Step 13: Update cache with new position (direct on-chain, no Graph latency)
+    const { position: newPosition, poolData: newPoolData } = await retryRpcCall(
+      () => adapter.getPositionById(receiptData.tokenId, this.provider),
+      'getPositionById'
+    );
+    await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
+    await this.vaultDataService.refreshTokens(vault.address);
   }
 
   // ===========================================================================

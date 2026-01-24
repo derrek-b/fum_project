@@ -13,7 +13,6 @@
     "start": "node scripts/start-automation.js",
     "setup:dev": "npm install --include=dev --include=optional",
     "test": "vitest run",
-    "test:v4": "vitest run --config vitest.config.v4.js",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

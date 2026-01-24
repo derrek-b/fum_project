@@ -435,6 +435,123 @@ class VaultDataService {
   }
 
   /**
+   * Refresh only token balances for a vault (no position refresh)
+   * Use this after operations where we already know position state (e.g., closePositions)
+   * @param {string} vaultAddress - Vault address to refresh
+   * @returns {Promise<boolean>} True if refresh successful
+   */
+  async refreshTokens(vaultAddress) {
+    this.ensureInitialized();
+
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+    this.eventManager.emit('tokensRefreshing', normalizedAddress);
+
+    try {
+      const vault = this.#vaults.get(normalizedAddress);
+      if (!vault) {
+        throw new Error(`Vault ${normalizedAddress} not found in cache`);
+      }
+
+      const allTokenBalances = await this.fetchTokenBalances(
+        normalizedAddress,
+        getAllTokenSymbols()
+      );
+
+      vault.tokens = allTokenBalances;
+      vault.lastUpdated = Date.now();
+      this.#vaults.set(normalizedAddress, vault);
+
+      this.eventManager.emit('tokensRefreshed', normalizedAddress, allTokenBalances);
+      return true;
+    } catch (error) {
+      const detailedMessage = `Error refreshing tokens for vault ${normalizedAddress}: ${error.message}`;
+      console.error(detailedMessage, error);
+      this.eventManager.emit('tokensRefreshError', normalizedAddress, detailedMessage);
+      throw new Error(detailedMessage);
+    }
+  }
+
+  /**
+   * Update or add a single position in the vault cache
+   *
+   * Used after creating/modifying positions when we have the tokenId from the receipt
+   * and have fetched position data directly from on-chain via adapter.getPositionById().
+   * This bypasses The Graph latency issue.
+   *
+   * @param {string} vaultAddress - Vault address
+   * @param {Object} positionData - Position data from adapter.getPositionById()
+   * @param {string} positionData.id - Position token ID
+   * @param {string} positionData.pool - Pool identifier
+   * @param {number} positionData.tickLower - Lower tick bound
+   * @param {number} positionData.tickUpper - Upper tick bound
+   * @param {string} positionData.liquidity - Position liquidity
+   * @param {string} positionData.feeGrowthInside0LastX128 - Fee growth tracker
+   * @param {string} positionData.feeGrowthInside1LastX128 - Fee growth tracker
+   * @param {string} positionData.tokensOwed0 - Uncollected token0 fees
+   * @param {string} positionData.tokensOwed1 - Uncollected token1 fees
+   * @param {number} positionData.lastUpdated - Timestamp
+   * @param {Object} poolData - Pool metadata keyed by pool identifier
+   * @returns {Promise<boolean>} True if update successful
+   * @throws {Error} If vault not found or parameters invalid
+   */
+  async updatePosition(vaultAddress, positionData, poolData) {
+    this.ensureInitialized();
+
+    // Parameter validation
+    if (!vaultAddress) {
+      throw new Error('vaultAddress parameter is required');
+    }
+    if (!positionData || typeof positionData !== 'object') {
+      throw new Error('positionData parameter is required and must be an object');
+    }
+    if (!positionData.id) {
+      throw new Error('positionData.id is required');
+    }
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData parameter is required and must be an object');
+    }
+
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+    this.eventManager.emit('positionUpdating', normalizedAddress, positionData.id);
+
+    try {
+      const vault = this.#vaults.get(normalizedAddress);
+      if (!vault) {
+        throw new Error(`Vault ${normalizedAddress} not found in cache`);
+      }
+
+      // Initialize positions object if it doesn't exist
+      if (!vault.positions) {
+        vault.positions = {};
+      }
+
+      // Add or update the position
+      vault.positions[positionData.id] = positionData;
+      vault.lastUpdated = Date.now();
+      this.#vaults.set(normalizedAddress, vault);
+
+      // Emit pool data for global cache update (same pattern as fetchPositions)
+      if (Object.keys(poolData).length > 0) {
+        this.eventManager.emit('PoolDataFetched', {
+          poolData: poolData,
+          source: 'updatePosition',
+          vaultAddress: normalizedAddress
+        });
+      }
+
+      this.eventManager.emit('positionUpdated', normalizedAddress, positionData);
+      return true;
+    } catch (error) {
+      const detailedMessage = `Error updating position ${positionData.id} for vault ${normalizedAddress}: ${error.message}`;
+      console.error(detailedMessage, error);
+      this.eventManager.emit('positionUpdateError', normalizedAddress, positionData.id, detailedMessage);
+      throw new Error(detailedMessage);
+    }
+  }
+
+  /**
    * Fetch USD values for all vault assets
    * @param {Object} vault - Vault object
    * @param {number} [cacheDuration] - Cache duration in ms

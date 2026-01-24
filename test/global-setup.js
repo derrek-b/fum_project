@@ -29,10 +29,12 @@ export default async function globalSetup() {
   // Load environment variables (needed for Alchemy API key)
   dotenv.config({ path: path.join(__dirname, '../.env.local') });
 
-  // Initialize fum_library
+  // Initialize fum_library with all API keys (V3 and V4 both need these)
   initFumLibrary({
     alchemyApiKey: process.env.ALCHEMY_API_KEY,
     coingeckoApiKey: process.env.COINGECKO_API_KEY,
+    theGraphApiKey: process.env.THEGRAPH_API_KEY,
+    arbiscanApiKey: process.env.ARBISCAN_API_KEY,
   });
 
   // Clear any stale state from previous runs

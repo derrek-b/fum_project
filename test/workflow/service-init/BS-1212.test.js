@@ -308,7 +308,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       // Verify pool data structure
       for (const event of poolDataFetchedEvents) {
         expect(event.poolData).toBeDefined();
-        expect(event.source).toBe('Uniswap V3');
+        // Source can be adapter name ('Uniswap V3') or 'updatePosition' (direct on-chain fetch)
+        expect(['Uniswap V3', 'updatePosition']).toContain(event.source);
         expect(event.vaultAddress.toLowerCase()).toBe(testVault.vaultAddress.toLowerCase());
       }
 
