@@ -193,7 +193,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         feesDistributedEvents.push(data);
       });
 
-      service.eventManager.subscribe('UtilizationCalculated', (data) => {
+      service.eventManager.subscribe('DeploymentCalculated', (data) => {
         utilizationEvents.push(data);
       });
 
@@ -329,7 +329,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       const params = vault.strategy.parameters;
       expect(params.targetRangeUpper).toBe(5.0);   // 500 basis points → 5.0%
       expect(params.targetRangeLower).toBe(5.0);   // 500 basis points → 5.0%
-      expect(params.maxUtilization).toBe(90);      // 9000 basis points → 90%
       expect(params.feeReinvestment).toBe(true);   // Default enabled
     });
   });
@@ -1027,7 +1026,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   });
 
   describe('setupVault() Step 5: Calculate Available Deployment', () => {
-    it('should emit UtilizationCalculated event', () => {
+    it('should emit DeploymentCalculated event', () => {
       expect(utilizationEvents.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -1037,41 +1036,22 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.totalVaultValue).toBeDefined();
       expect(event.positionValue).toBeDefined();
       expect(event.tokenValue).toBeDefined();
-      expect(event.currentUtilization).toBeDefined();
-      expect(event.maxUtilization).toBeDefined();
       expect(event.availableDeployment).toBeDefined();
-    });
-
-    it('should calculate utilization correctly', () => {
-      const event = utilizationEvents[utilizationEvents.length - 1];
-
-      // Verify maxUtilization matches strategy param (90% = 0.9)
-      expect(event.maxUtilization).toBe(0.9);
-
-      // Verify currentUtilization formula: positionValue / totalVaultValue
-      const expectedCurrentUtil = event.totalVaultValue > 0
-        ? event.positionValue / event.totalVaultValue
-        : 0;
-      expect(event.currentUtilization).toBeCloseTo(expectedCurrentUtil, 10);
     });
 
     it('should calculate availableDeployment correctly', () => {
       const event = utilizationEvents[utilizationEvents.length - 1];
 
-      // Formula: (totalValue * maxUtilization) - positionValue
-      const rawExpected = event.totalVaultValue * event.maxUtilization - event.positionValue;
-
-      // availableDeployment is either rawExpected or 0 (if below threshold)
+      // Full vault deployment - available = total token value (above minimum threshold)
       expect(event.availableDeployment).toBeGreaterThanOrEqual(0);
-      expect(event.rawAvailableDeployment).toBeCloseTo(rawExpected, 2);
     });
 
-    it('should have position value (1111 scenario has aligned position)', () => {
+    it('should have position value (1212 scenario has aligned position)', () => {
       const event = utilizationEvents[utilizationEvents.length - 1];
       expect(event.positionValue).toBeGreaterThan(0);
     });
 
-    it('should have token value (1111 scenario has token balances)', () => {
+    it('should have token value (1212 scenario has token balances)', () => {
       const event = utilizationEvents[utilizationEvents.length - 1];
       expect(event.tokenValue).toBeGreaterThan(0);
     });
@@ -1084,15 +1064,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.chainMinimum).toBeDefined();
       expect(event.vaultRelativeMinimum).toBeDefined();
       expect(event.minDeployment).toBe(Math.max(event.chainMinimum, event.vaultRelativeMinimum));
-    });
-
-    it('should include utilization gap', () => {
-      const event = utilizationEvents[utilizationEvents.length - 1];
-      expect(event.utilizationGap).toBeDefined();
-      expect(event.utilizationGapPercent).toBeDefined();
-      // gap = maxUtil - currentUtil
-      expect(event.utilizationGap).toBeCloseTo(event.maxUtilization - event.currentUtilization, 10);
-      expect(event.utilizationGapPercent).toBeCloseTo(event.utilizationGap * 100, 10);
     });
   });
 
@@ -1202,14 +1173,11 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     it('should have consistent swap counts and metadata', () => {
       const event = tokenPreparationCompletedEvents[0];
 
-      // swapTransactions.length should equal deficitSwapCount + bufferSwapCount
-      expect(event.swapTransactions.length).toBe(
-        event.deficitSwapCount + event.bufferSwapCount
-      );
+      // swapTransactions.length should equal deficitSwapCount (no buffer swaps)
+      expect(event.swapTransactions.length).toBe(event.deficitSwapCount);
 
       // Metadata counts should match swap counts
       expect(event.swapMetadata.deficit.length).toBe(event.deficitSwapCount);
-      expect(event.swapMetadata.buffer.length).toBe(event.bufferSwapCount);
     });
 
     it('should have correct phasesUsed for 1212 scenario with native ETH', () => {
@@ -1218,11 +1186,9 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       // 1212 scenario: native ETH + WBTC non-aligned, target USDC/WETH
       // - wrapUnwrap: true (ETH wraps to WETH)
       // - nonAlignedForDeficit: true (ETH and WBTC used for deficits)
-      // - bufferSwaps: true (remaining non-aligned tokens split to both targets)
       // - excessTargetTokens: false (no excess, we have deficits)
       expect(event.phasesUsed.wrapUnwrap).toBe(true);
       expect(event.phasesUsed.nonAlignedForDeficit).toBe(true);
-      expect(event.phasesUsed.bufferSwaps).toBe(true);
       expect(event.phasesUsed.excessTargetTokens).toBe(false);
     });
   });
@@ -1242,18 +1208,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         expect(deficitEvent.transactionHash).toBeDefined();
         expect(deficitEvent.gasUsed).toBeDefined();
         expect(deficitEvent.effectiveGasPrice).toBeDefined();
-      }
-    });
-
-    it('should emit TokensSwapped event for buffer swaps', () => {
-      const bufferEvent = tokensSwappedEvents.find(e => e.swapType === 'buffer');
-
-      // Only expect buffer event if buffer swaps were generated
-      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
-      if (tokenPrepEvent.preparationResult === 'swaps_generated' && tokenPrepEvent.bufferSwapCount > 0) {
-        expect(bufferEvent).toBeDefined();
-        expect(bufferEvent.success).toBe(true);
-        expect(bufferEvent.swapCount).toBeGreaterThan(0);
       }
     });
 
@@ -1307,9 +1261,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         // Count total swaps from TokensSwapped events
         const totalSwapsExecuted = tokensSwappedEvents.reduce((sum, e) => sum + e.swapCount, 0);
 
-        // Should match what was prepared
-        const expectedTotal = tokenPrepEvent.deficitSwapCount + tokenPrepEvent.bufferSwapCount;
-        expect(totalSwapsExecuted).toBe(expectedTotal);
+        // Should match what was prepared (deficit swaps only, no buffer swaps)
+        expect(totalSwapsExecuted).toBe(tokenPrepEvent.deficitSwapCount);
       }
     });
 
@@ -1389,15 +1342,15 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
     });
 
-    it('should have valid quoted amounts (capped by original quote)', () => {
+    it('should have valid target amounts (based on ratio)', () => {
       const event = liquidityAddedToPositionEvents[0];
 
-      expect(event.quotedToken0).toBeDefined();
-      expect(event.quotedToken1).toBeDefined();
+      expect(event.targetToken0).toBeDefined();
+      expect(event.targetToken1).toBeDefined();
 
-      // Quoted amounts should be positive
-      expect(BigInt(event.quotedToken0)).toBeGreaterThan(0n);
-      expect(BigInt(event.quotedToken1)).toBeGreaterThan(0n);
+      // Target amounts should be positive
+      expect(BigInt(event.targetToken0)).toBeGreaterThan(0n);
+      expect(BigInt(event.targetToken1)).toBeGreaterThan(0n);
     });
 
     it('should have actual amounts from receipt parsing', () => {

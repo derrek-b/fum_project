@@ -899,7 +899,7 @@ export default class Tracker {
     if (!this.vaultMetadata.has(vaultAddress)) return;
 
     try {
-      const { quotedToken0, quotedToken1, actualToken0, actualToken1, tokenSymbols, gasUsed, effectiveGasPrice } = data;
+      const { targetToken0, targetToken1, actualToken0, actualToken1, tokenSymbols, gasUsed, effectiveGasPrice } = data;
       this.log(`Position created for vault ${vaultAddress}`);
 
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
@@ -915,11 +915,11 @@ export default class Tracker {
       try { token0Decimals = getTokenBySymbol(tokenSymbols[0]).decimals; } catch (e) { }
       try { token1Decimals = getTokenBySymbol(tokenSymbols[1]).decimals; } catch (e) { }
 
-      const quotedToken0Formatted = parseFloat(ethers.utils.formatUnits(quotedToken0, token0Decimals));
-      const quotedToken1Formatted = parseFloat(ethers.utils.formatUnits(quotedToken1, token1Decimals));
-      const quotedToken0USD = quotedToken0Formatted * (prices[tokenSymbols[0]] || 0);
-      const quotedToken1USD = quotedToken1Formatted * (prices[tokenSymbols[1]] || 0);
-      const totalQuotedUSD = quotedToken0USD + quotedToken1USD;
+      const targetToken0Formatted = parseFloat(ethers.utils.formatUnits(targetToken0, token0Decimals));
+      const targetToken1Formatted = parseFloat(ethers.utils.formatUnits(targetToken1, token1Decimals));
+      const targetToken0USD = targetToken0Formatted * (prices[tokenSymbols[0]] || 0);
+      const targetToken1USD = targetToken1Formatted * (prices[tokenSymbols[1]] || 0);
+      const totalTargetUSD = targetToken0USD + targetToken1USD;
 
       const actualToken0Formatted = parseFloat(ethers.utils.formatUnits(actualToken0, token0Decimals));
       const actualToken1Formatted = parseFloat(ethers.utils.formatUnits(actualToken1, token1Decimals));
@@ -927,8 +927,8 @@ export default class Tracker {
       const actualToken1USD = actualToken1Formatted * (prices[tokenSymbols[1]] || 0);
       const totalActualUSD = actualToken0USD + actualToken1USD;
 
-      const differenceUSD = totalQuotedUSD - totalActualUSD;
-      const differencePercent = totalQuotedUSD > 0 ? (differenceUSD / totalQuotedUSD) * 100 : 0;
+      const differenceUSD = totalTargetUSD - totalActualUSD;
+      const differencePercent = totalTargetUSD > 0 ? (differenceUSD / totalTargetUSD) * 100 : 0;
 
       await this.appendTransaction(vaultAddress, {
         type: 'NewPositionCreated',
@@ -937,11 +937,11 @@ export default class Tracker {
         poolAddress: data.poolAddress,
         token0Symbol: tokenSymbols[0],
         token1Symbol: tokenSymbols[1],
-        quotedToken0,
-        quotedToken1,
-        quotedToken0USD,
-        quotedToken1USD,
-        totalQuotedUSD,
+        targetToken0,
+        targetToken1,
+        targetToken0USD,
+        targetToken1USD,
+        totalTargetUSD,
         actualToken0,
         actualToken1,
         actualToken0USD,

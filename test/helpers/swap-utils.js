@@ -272,7 +272,6 @@ export async function configureStrategyParameters(testEnv, vaultAddress, vault, 
     rebalanceThresholdLower = 150, // 1.5%
     maxSlippage = 500,        // 5%
     emergencyExitTrigger = 50, // 0.5%
-    maxUtilization = 8000,    // 80%
     feeReinvestment = true,
     reinvestmentTrigger = 100, // $1.00
     reinvestmentRatio = 5000  // 50%
@@ -293,7 +292,7 @@ export async function configureStrategyParameters(testEnv, vaultAddress, vault, 
   // Encode parameter calls - must match BabyStepsStrategy.sol signatures
   const strategyInterface = new ethers.utils.Interface([
     'function setRangeParameters(uint16 upperRange, uint16 lowerRange) external',
-    'function setRiskParameters(uint16 slippage, uint16 exitTrigger, uint16 utilization) external',
+    'function setRiskParameters(uint16 slippage, uint16 exitTrigger) external',
     'function setFeeParameters(bool reinvest, uint256 trigger, uint16 ratio) external'
   ]);
 
@@ -304,8 +303,7 @@ export async function configureStrategyParameters(testEnv, vaultAddress, vault, 
 
   const setRiskData = strategyInterface.encodeFunctionData('setRiskParameters', [
     maxSlippage,
-    emergencyExitTrigger,
-    maxUtilization
+    emergencyExitTrigger
   ]);
 
   const setFeeData = strategyInterface.encodeFunctionData('setFeeParameters', [

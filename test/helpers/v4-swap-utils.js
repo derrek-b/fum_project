@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { UniswapV4Adapter } from 'fum_library/adapters';
-import { getTokenAddress, getTokenBySymbol } from 'fum_library';
+import { getTokenAddress, getTokenBySymbol, getPlatformAddresses } from 'fum_library';
 
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
@@ -14,6 +14,25 @@ const ERC20_ABI = [
 
 const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 const NATIVE_ETH = ethers.constants.AddressZero;
+
+// V4 Action types from @uniswap/v4-sdk
+const Actions = {
+  SWAP_EXACT_IN_SINGLE: 6,
+  SETTLE: 11,
+  TAKE: 14
+};
+
+// Universal Router command types
+const CommandType = {
+  V4_SWAP: 0x10
+};
+
+// ABI encoding helpers
+const POOL_KEY_STRUCT = '(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)';
+const SWAP_EXACT_IN_SINGLE_STRUCT = `(${POOL_KEY_STRUCT} poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)`;
+
+// Full delta amount constant (used for SETTLE_ALL and TAKE_ALL)
+const FULL_DELTA_AMOUNT = 0;
 
 /**
  * Get token address for V4, handling native ETH
@@ -109,7 +128,8 @@ export async function setupV4SwapWallet(testEnv, options = {}) {
     console.log(`  Built USDC reserves via V4: ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
 
     // Setup Permit2 approval for USDC (needed for USDC -> ETH swaps)
-    await setupPermit2Approval(usdcContract, adapter.addresses.positionManagerAddress, swapWallet);
+    // Note: Swaps go through Universal Router, not Position Manager
+    await setupPermit2Approval(usdcContract, adapter.addresses.universalRouterAddress, swapWallet);
     console.log(`  Permit2 approval set for USDC`);
   }
 
@@ -121,7 +141,7 @@ export async function setupV4SwapWallet(testEnv, options = {}) {
 }
 
 /**
- * Execute a swap on Uniswap V4
+ * Execute a swap on Uniswap V4 (uses AlphaRouter - may route through different pools)
  * @param {Object} testEnv - Test environment
  * @param {Object} params - Swap parameters
  * @returns {Promise<Object>} Transaction receipt
@@ -158,6 +178,135 @@ export async function executeV4Swap(testEnv, params) {
   });
 
   return tx.wait();
+}
+
+/**
+ * Execute a swap directly through a specific V4 pool (bypasses AlphaRouter)
+ * Use this for tests that need swaps to hit a specific pool to trigger events.
+ *
+ * @param {Object} testEnv - Test environment
+ * @param {Object} params - Swap parameters
+ * @param {string} params.tokenIn - Input token address (use AddressZero for ETH)
+ * @param {string} params.tokenOut - Output token address (use AddressZero for ETH)
+ * @param {BigNumber|string} params.amountIn - Amount to swap
+ * @param {Object} params.wallet - Signer wallet
+ * @param {number} [params.fee=500] - Pool fee tier (500 = 5bp)
+ * @param {number} [params.tickSpacing=10] - Pool tick spacing
+ * @param {number} [params.slippage=5] - Slippage tolerance percentage
+ * @returns {Promise<Object>} Transaction receipt
+ */
+export async function executeV4PoolSwap(_testEnv, params) {
+  const {
+    tokenIn,
+    tokenOut,
+    amountIn,
+    wallet,
+    fee = 500,
+    tickSpacing = 10
+    // slippage not used - test swaps accept any output (amountOutMinimum = 0)
+  } = params;
+
+  const addresses = getPlatformAddresses(1337, 'uniswapV4');
+  const universalRouterAddress = addresses.universalRouterAddress;
+
+  // Sort tokens to build poolKey (V4 requires currency0 < currency1)
+  const isToken0In = tokenIn.toLowerCase() < tokenOut.toLowerCase();
+  const currency0 = isToken0In ? tokenIn : tokenOut;
+  const currency1 = isToken0In ? tokenOut : tokenIn;
+  const zeroForOne = isToken0In; // true if swapping token0 -> token1
+
+  // Build poolKey
+  const poolKey = {
+    currency0,
+    currency1,
+    fee,
+    tickSpacing,
+    hooks: ethers.constants.AddressZero
+  };
+
+  // Calculate minimum output with slippage (we accept 0 for simplicity in tests)
+  const amountInBN = ethers.BigNumber.from(amountIn);
+  const amountOutMinimum = 0; // Accept any output for test swaps
+
+  // Build V4 swap actions using V4Planner pattern
+  // Actions: SWAP_EXACT_IN_SINGLE -> SETTLE_ALL (input) -> TAKE_ALL (output)
+  const actions = buildV4SwapActions(poolKey, zeroForOne, amountInBN, amountOutMinimum, tokenIn, tokenOut, wallet.address);
+
+  // Encode Universal Router execute call
+  const deadline = Math.floor(Date.now() / 1000) + 1200; // 20 minutes
+  const commands = ethers.utils.hexlify([CommandType.V4_SWAP]);
+  const inputs = [actions];
+
+  const universalRouterInterface = new ethers.utils.Interface([
+    'function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable'
+  ]);
+
+  const calldata = universalRouterInterface.encodeFunctionData('execute', [commands, inputs, deadline]);
+
+  // Determine msg.value (only for native ETH input)
+  const isNativeIn = tokenIn === NATIVE_ETH;
+  const value = isNativeIn ? amountInBN : 0;
+
+  // Execute swap
+  const tx = await wallet.sendTransaction({
+    to: universalRouterAddress,
+    data: calldata,
+    value
+  });
+
+  return tx.wait();
+}
+
+/**
+ * Build V4 swap actions (SWAP_EXACT_IN_SINGLE + SETTLE + TAKE)
+ * @private
+ */
+function buildV4SwapActions(poolKey, zeroForOne, amountIn, amountOutMinimum, tokenIn, tokenOut, recipient) {
+  // Action 1: SWAP_EXACT_IN_SINGLE
+  // Params: ((address,address,uint24,int24,address) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMin, bytes hookData)
+  const swapParams = {
+    poolKey: [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks],
+    zeroForOne,
+    amountIn: amountIn.toString(),
+    amountOutMinimum: amountOutMinimum.toString(),
+    hookData: '0x'
+  };
+
+  const swapEncoded = ethers.utils.defaultAbiCoder.encode(
+    [SWAP_EXACT_IN_SINGLE_STRUCT],
+    [[swapParams.poolKey, swapParams.zeroForOne, swapParams.amountIn, swapParams.amountOutMinimum, swapParams.hookData]]
+  );
+
+  // Action 2: SETTLE (settle input currency from user)
+  // Params: (address currency, uint256 amount, bool payerIsUser)
+  // For native ETH: settles from msg.value. For ERC20: settles via Permit2 transfer.
+  // FULL_DELTA_AMOUNT (0) means settle the full delta owed
+  const settleEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'uint256', 'bool'],
+    [tokenIn, FULL_DELTA_AMOUNT, true] // payerIsUser = true
+  );
+
+  // Action 3: TAKE (take output currency to recipient)
+  // Params: (address currency, address recipient, uint256 amount)
+  // FULL_DELTA_AMOUNT (0) means take the full delta owed to us
+  const takeEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint256'],
+    [tokenOut, recipient, FULL_DELTA_AMOUNT]
+  );
+
+  // Build action bytes and params array
+  // Actions are single bytes concatenated
+  const actionBytes = ethers.utils.hexlify([
+    Actions.SWAP_EXACT_IN_SINGLE,
+    Actions.SETTLE,
+    Actions.TAKE
+  ]);
+
+  // Encode final V4 swap payload: (bytes actions, bytes[] params)
+  return ethers.utils.defaultAbiCoder.encode(
+    ['bytes', 'bytes[]'],
+    [actionBytes, [swapEncoded, settleEncoded, takeEncoded]]
+  );
 }
 
 /**
@@ -206,11 +355,9 @@ export async function configureV4StrategyParameters(testEnv, vaultAddress, vault
   const {
     targetRangeUpper = 25,    // 0.25%
     targetRangeLower = 25,    // 0.25%
-    rebalanceThresholdUpper = 150, // 1.5%
-    rebalanceThresholdLower = 150, // 1.5%
+    // rebalanceThresholdUpper/Lower not exposed via strategy contract
     maxSlippage = 500,        // 5%
     emergencyExitTrigger = 50, // 0.5%
-    maxUtilization = 8000,    // 80%
     feeReinvestment = true,
     reinvestmentTrigger = 100, // $1.00
     reinvestmentRatio = 5000  // 50%
@@ -231,7 +378,7 @@ export async function configureV4StrategyParameters(testEnv, vaultAddress, vault
   // Encode parameter calls
   const strategyInterface = new ethers.utils.Interface([
     'function setRangeParameters(uint16 upperRange, uint16 lowerRange) external',
-    'function setRiskParameters(uint16 slippage, uint16 exitTrigger, uint16 utilization) external',
+    'function setRiskParameters(uint16 slippage, uint16 exitTrigger) external',
     'function setFeeParameters(bool reinvest, uint256 trigger, uint16 ratio) external'
   ]);
 
@@ -242,8 +389,7 @@ export async function configureV4StrategyParameters(testEnv, vaultAddress, vault
 
   const setRiskData = strategyInterface.encodeFunctionData('setRiskParameters', [
     maxSlippage,
-    emergencyExitTrigger,
-    maxUtilization
+    emergencyExitTrigger
   ]);
 
   const setFeeData = strategyInterface.encodeFunctionData('setFeeParameters', [

@@ -147,7 +147,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         tokenBalancesFetchedEvents.push(data);
       });
 
-      service.eventManager.subscribe('UtilizationCalculated', (data) => {
+      service.eventManager.subscribe('DeploymentCalculated', (data) => {
         utilizationEvents.push(data);
       });
 
@@ -377,7 +377,7 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
   });
 
   describe('setupVault() Step 5: Calculate Available Deployment', () => {
-    it('should emit UtilizationCalculated event', () => {
+    it('should emit DeploymentCalculated event', () => {
       expect(utilizationEvents.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -392,19 +392,10 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
     it('should have full token value as available deployment', () => {
       const event = utilizationEvents[utilizationEvents.length - 1];
 
-      // With 0% utilization and 90% max, availableDeployment should be ~90% of total
-      // (assuming it exceeds minimum thresholds)
+      // Full vault deployment - all tokens available (above minimum thresholds)
       expect(event.totalVaultValue).toBeGreaterThan(0);
       expect(event.tokenValue).toBeGreaterThan(0);
       expect(event.availableDeployment).toBeGreaterThan(0);
-    });
-
-    it('should have large utilization gap (0% current vs 90% max)', () => {
-      const event = utilizationEvents[utilizationEvents.length - 1];
-
-      // gap = maxUtil - currentUtil = 0.9 - 0 = 0.9 (90%)
-      expect(event.utilizationGap).toBeCloseTo(0.9, 2);
-      expect(event.utilizationGapPercent).toBeCloseTo(90, 1);
     });
   });
 
@@ -496,14 +487,11 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
     it('should have consistent swap counts and metadata', () => {
       const event = tokenPreparationCompletedEvents[0];
 
-      // swapTransactions.length should equal deficitSwapCount + bufferSwapCount
-      expect(event.swapTransactions.length).toBe(
-        event.deficitSwapCount + event.bufferSwapCount
-      );
+      // swapTransactions.length should equal deficitSwapCount (no buffer swaps)
+      expect(event.swapTransactions.length).toBe(event.deficitSwapCount);
 
       // Metadata counts should match swap counts
       expect(event.swapMetadata.deficit.length).toBe(event.deficitSwapCount);
-      expect(event.swapMetadata.buffer.length).toBe(event.bufferSwapCount);
     });
 
     it('should route swap transactions to correct UniversalRouter', () => {
@@ -539,17 +527,6 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         expect(deficitEvent.transactionHash).toBeDefined();
         expect(deficitEvent.gasUsed).toBeDefined();
         expect(deficitEvent.effectiveGasPrice).toBeDefined();
-      }
-    });
-
-    it('should emit TokensSwapped event for buffer swaps', () => {
-      const bufferEvent = tokensSwappedEvents.find(e => e.swapType === 'buffer');
-
-      const tokenPrepEvent = tokenPreparationCompletedEvents[0];
-      if (tokenPrepEvent.preparationResult === 'swaps_generated' && tokenPrepEvent.bufferSwapCount > 0) {
-        expect(bufferEvent).toBeDefined();
-        expect(bufferEvent.success).toBe(true);
-        expect(bufferEvent.swapCount).toBeGreaterThan(0);
       }
     });
 
@@ -597,9 +574,8 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
         // Count total swaps from TokensSwapped events
         const totalSwapsExecuted = tokensSwappedEvents.reduce((sum, e) => sum + e.swapCount, 0);
 
-        // Should match what was prepared
-        const expectedTotal = tokenPrepEvent.deficitSwapCount + tokenPrepEvent.bufferSwapCount;
-        expect(totalSwapsExecuted).toBe(expectedTotal);
+        // Should match what was prepared (deficit swaps only, no buffer swaps)
+        expect(totalSwapsExecuted).toBe(tokenPrepEvent.deficitSwapCount);
       }
     });
   });
@@ -643,15 +619,15 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       expect(event.poolAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
     });
 
-    it('should have valid quoted amounts (from original quote)', () => {
+    it('should have valid target amounts (based on ratio)', () => {
       const event = newPositionCreatedEvents[0];
 
-      expect(event.quotedToken0).toBeDefined();
-      expect(event.quotedToken1).toBeDefined();
+      expect(event.targetToken0).toBeDefined();
+      expect(event.targetToken1).toBeDefined();
 
-      // Quoted amounts should be positive
-      expect(BigInt(event.quotedToken0)).toBeGreaterThan(0n);
-      expect(BigInt(event.quotedToken1)).toBeGreaterThan(0n);
+      // Target amounts should be positive
+      expect(BigInt(event.targetToken0)).toBeGreaterThan(0n);
+      expect(BigInt(event.targetToken1)).toBeGreaterThan(0n);
     });
 
     it('should have actual amounts from receipt parsing', () => {

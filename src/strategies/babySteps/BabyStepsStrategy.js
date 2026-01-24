@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
-import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas } from 'fum_library';
+import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas, getMinSwapValue } from 'fum_library';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
 import { UnrecoverableError } from '../../utils/errors.js';
 
@@ -224,14 +224,14 @@ export default class BabyStepsStrategy extends StrategyBase {
       if (assetValues.totalVaultValue === 0) {
         throw new Error(`Empty vault cannot be managed: no tokens or positions (vault: ${vault.address})`);
       } else {
-        // At or above max utilization - this is OK
-        this.log('No available capital to deploy (at or above max utilization)');
+        // No available tokens above minimum threshold - all value is in positions
+        this.log('No available capital to deploy (all value in positions or below minimum)');
 
         // Still need to set emergency exit baseline if we have aligned positions
         if (Object.keys(evaluation.alignedPositions).length > 0 && this.emergencyExitBaseline[vault.address] === undefined) {
           const currentTick = adapter.getPoolCurrent(targetPool);
           this.emergencyExitBaseline[vault.address] = currentTick;
-          this.log(`Set emergency exit baseline ${currentTick} for vault ${vault.address} (at max utilization)`);
+          this.log(`Set emergency exit baseline ${currentTick} for vault ${vault.address} (no deployable capital)`);
         }
       }
     }
@@ -377,18 +377,21 @@ export default class BabyStepsStrategy extends StrategyBase {
     if (swapCount >= FEE_CHECK_INTERVAL) {
       try {
         const feeCollectionNeeded = await this.checkFeesToCollect(vault, position, adapter);
-        this.swapCountSinceLastFeeCheck[vault.address] = 0;
 
         if (feeCollectionNeeded) {
           this.log(`💰 Executing fee collection for vault ${vault.address}`);
           await this.collectFees(vault, position);
           await this.vaultDataService.refreshTokens(vault.address);
           this.log(`Refreshed token balances for ${vault.address}`);
+          this.swapCountSinceLastFeeCheck[vault.address] = 0;  // Reset after successful collection
           return;
+        } else {
+          // No collection needed, reset counter to check again in 50 swaps
+          this.swapCountSinceLastFeeCheck[vault.address] = 0;
         }
       } catch (error) {
         this.log(`Error checking fees: ${error.message}`);
-        // Don't reset counter on error - try again next interval
+        // Counter stays at 50+ so we retry on next swap
       }
     }
 
@@ -593,10 +596,12 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // Build position metadata for receipt parsing
+    // V4 needs position.liquidity for proportional native ETH distribution
     const positionMetadata = {
       [positionId]: {
         token0Data,
-        token1Data
+        token1Data,
+        position
       }
     };
 
@@ -740,6 +745,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`Target pool for new position: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
 
       // Step 2: Close the out-of-range position
+      this.log(`🔍 [rebalancePosition] BEFORE CLOSE - Position ${position.id}: tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
       const { receipt, feesByPosition } = await this.closePositions(vault, { [position.id]: position });
 
       // Step 3: Process fees (if any)
@@ -808,7 +814,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         throw new UnrecoverableError(
           `No available capital after closing position. ` +
           `availableDeployment=${availableDeployment}, totalValue=${assetValues.totalVaultValue}, ` +
-          `maxUtilization=${vault.strategy.parameters.maxUtilization}%`
+          `tokenValue=${assetValues.totalTokenValue}`
         );
       }
 
@@ -1068,13 +1074,6 @@ export default class BabyStepsStrategy extends StrategyBase {
         throw new UnrecoverableError(`Missing token data for ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol}`);
       }
 
-      // Fetch fresh pool data
-      const poolData = await retryRpcCall(
-        () => adapter.getPoolData(position.pool, this.provider),
-        'getPoolData',
-        { log: (msg) => this.log(msg) }
-      );
-
       // Check if position has native ETH (V4 native ETH transfers emit no events)
       const token0IsNative = token0Data.address === ethers.constants.AddressZero;
       const token1IsNative = token1Data.address === ethers.constants.AddressZero;
@@ -1105,11 +1104,22 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       this.log(`Adding position ${positionId} to close batch: ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol} on ${poolMetadata.platform}`);
 
-      // Store metadata for event parsing (includes poolData for principal calculation)
+      // Fetch fresh pool state (cached poolMetadata only has static metadata)
+      // Both V3 and V4 need current tick, sqrtPriceX96, and liquidity for liquidity removal
+      const freshPoolState = await retryRpcCall(
+        () => adapter.getPoolData(position.pool, this.provider),
+        'getPoolData',
+        { log: (msg) => this.log(msg) }
+      );
+      const poolData = {
+        ...poolMetadata,     // Static metadata (fee, token symbols, platform)
+        ...freshPoolState    // Current state (tick, sqrtPriceX96, liquidity)
+      };
+
+      // Store metadata for event parsing (use fresh poolData, not cached poolMetadata)
       positionMetadata[positionId] = {
         position,
-        poolMetadata,
-        poolData,        // Fresh pool data with sqrtPriceX96 for principal calculation
+        poolData,  // Fresh pool data (includes sqrtPriceX96 for principal calc)
         token0Data,
         token1Data,
         adapter,
@@ -1123,7 +1133,7 @@ export default class BabyStepsStrategy extends StrategyBase {
           percentage: 100,
           provider: this.provider,
           walletAddress: vault.address,
-          poolData,
+          poolData,  // Use merged poolData with fresh state
           token0Data,
           token1Data,
           slippageTolerance: vault.strategy.parameters.maxSlippage,
@@ -1242,7 +1252,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       return {
         positionId,
         position,
-        platform: metadata.poolMetadata.platform,
+        platform: metadata.poolData.platform,
         principalAmount0: principal.amount0.toString(),
         principalAmount1: principal.amount1.toString()
       };
@@ -1478,13 +1488,19 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     for (const [addr, tokenData] of Object.entries(ownerAmounts)) {
       const isWeth = addr.toLowerCase() === wethAddress.toLowerCase();
+      const isNativeEth = tokenData.address === ethers.constants.AddressZero;
 
       try {
         const receipt = await retryRpcCall(async () => {
           let tx;
           if (isWeth) {
+            // V3: WETH needs unwrapping
             tx = await vaultWithSigner.unwrapAndWithdrawETH(wethAddress, tokenData.amount);
+          } else if (isNativeEth) {
+            // V4: Native ETH is already unwrapped, use withdrawETH
+            tx = await vaultWithSigner.withdrawETH(tokenData.amount);
           } else {
+            // ERC20 tokens
             tx = await vaultWithSigner.withdrawTokens(tokenData.address, tokenData.amount);
           }
           return tx.wait();
@@ -1567,13 +1583,13 @@ export default class BabyStepsStrategy extends StrategyBase {
   // ===========================================================================
 
   /**
-   * Calculate available capital for deployment based on utilization limits
+   * Calculate available capital for deployment
    *
-   * Formula: availableDeployment = (totalValue * maxUtilization) - positionValue
+   * Deploys all undeployed tokens (tokenValue) unless below minimum thresholds.
    *
    * Applies two minimum thresholds:
    * 1. Chain minimum - don't waste gas on tiny deployments
-   * 2. Vault-relative minimum (1%) - don't deploy unless utilization gap > 1%
+   * 2. Vault-relative minimum (1%) - don't deploy dust relative to vault size
    *
    * Uses max(chainMin, vaultValue * 1%) to ensure both constraints are met.
    *
@@ -1585,33 +1601,26 @@ export default class BabyStepsStrategy extends StrategyBase {
     const totalValue = assetValues.totalVaultValue;
     const positionValue = assetValues.totalPositionValue;
     const tokenValue = assetValues.totalTokenValue;
-    const maxUtilization = vault.strategy.parameters.maxUtilization / 100;
     const currentUtilization = totalValue > 0 ? positionValue / totalValue : 0;
-    const rawAvailableDeployment = totalValue * maxUtilization - positionValue;
 
     // Minimum deployment thresholds:
     // - Chain minimum: don't waste gas on tiny deployments
-    // - Vault-relative (1%): don't deploy unless utilization gap > 1%
+    // - Vault-relative (1%): don't deploy dust relative to vault size
     const chainMinimum = getMinDeploymentForGas(this.chainId);
     const vaultRelativeMinimum = totalValue * 0.01; // 1% of vault value
     const minDeployment = Math.max(chainMinimum, vaultRelativeMinimum);
 
-    // Apply minimum threshold - if below, not worth deploying
-    const availableDeployment = rawAvailableDeployment > minDeployment ? rawAvailableDeployment : 0;
+    // Deploy all available tokens if above minimum threshold
+    const availableDeployment = tokenValue > minDeployment ? tokenValue : 0;
 
-    // Emit utilization metrics
-    const utilizationGap = maxUtilization - currentUtilization;
-    this.eventManager.emit('UtilizationCalculated', {
+    // Emit deployment metrics
+    this.eventManager.emit('DeploymentCalculated', {
       vaultAddress: vault.address,
       totalVaultValue: totalValue,
       positionValue: positionValue,
       tokenValue: tokenValue,
       currentUtilization: currentUtilization,
-      maxUtilization: maxUtilization,
-      utilizationGap: utilizationGap,
-      utilizationGapPercent: utilizationGap * 100,
       availableDeployment: availableDeployment,
-      rawAvailableDeployment: rawAvailableDeployment,
       minDeployment: minDeployment,
       chainMinimum: chainMinimum,
       vaultRelativeMinimum: vaultRelativeMinimum,
@@ -1619,7 +1628,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       strategyId: vault.strategy.strategyId,
       log: {
         level: 'info',
-        message: `Vault value: $${totalValue.toFixed(2)}, Utilization: ${(currentUtilization * 100).toFixed(1)}% (gap: ${(utilizationGap * 100).toFixed(1)}%), Available: $${availableDeployment.toFixed(2)} (min: $${minDeployment.toFixed(2)})`,
+        message: `Vault value: $${totalValue.toFixed(2)}, Utilization: ${(currentUtilization * 100).toFixed(1)}%, Available: $${availableDeployment.toFixed(2)} (min: $${minDeployment.toFixed(2)})`,
         includeData: false
       }
     });
@@ -1654,7 +1663,25 @@ export default class BabyStepsStrategy extends StrategyBase {
     const token0Data = targetPool.token0;
     const token1Data = targetPool.token1;
 
-    // Step 3: Convert full budget to token0 amount (adapter will determine actual split)
+    // Step 3: Get adapter and ensure token approvals early
+    const platformId = vault.targetPlatforms[0];
+    const adapter = this.adapters.get(platformId);
+    if (!adapter) {
+      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
+    }
+
+    // Step 3a: Ensure token approvals for position manager (do early while calculating)
+    const approvalTxs = await adapter.getRequiredApprovals(
+      'liquidity',
+      vault.address,
+      [token0Data.address, token1Data.address],
+      this.provider
+    );
+    if (approvalTxs.length > 0) {
+      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
+    }
+
+    // Step 4: Calculate target amounts from position ratio and total vault value
     const positionValues = assetValues.positions[position.id];
     if (!positionValues) {
       throw new UnrecoverableError(`Position ${position.id} not found in assetValues`);
@@ -1663,61 +1690,43 @@ export default class BabyStepsStrategy extends StrategyBase {
     const token0Price = positionValues.token0Price;
     const token1Price = positionValues.token1Price;
 
+    // Validate prices exist
+    if (!token0Price || !token1Price || !Number.isFinite(token0Price) || !Number.isFinite(token1Price)) {
+      throw new UnrecoverableError(
+        `Missing or invalid prices for position ${position.id}: ` +
+        `${token0Data.symbol}=${token0Price}, ${token1Data.symbol}=${token1Price}`
+      );
+    }
+
     // Calculate current position VALUE ratio (not token amount ratio)
-    // This determines how to split the deployment budget between tokens
     const token0ValueUSD = positionValues.token0UsdValue;
     const token1ValueUSD = positionValues.token1UsdValue;
     const positionValueRatio = token0ValueUSD / token1ValueUSD;
 
-    this.log(`Position value: $${token0ValueUSD.toFixed(2)} ${token0Data.symbol} : $${token1ValueUSD.toFixed(2)} ${token1Data.symbol}`);
     this.log(`Position value ratio: ${positionValueRatio.toFixed(4)} (${(positionValueRatio / (1 + positionValueRatio) * 100).toFixed(1)}% ${token0Data.symbol} : ${(1 / (1 + positionValueRatio) * 100).toFixed(1)}% ${token1Data.symbol})`);
 
-    // Calculate how much of token0 to use as input based on VALUE ratio
-    // If value ratio is 0.88 (47% WETH : 53% USDC), we allocate 47% of budget to WETH
-    const token0Share = availableDeployment * (positionValueRatio / (1 + positionValueRatio));
+    // Calculate target amounts based on ratio and AVAILABLE DEPLOYMENT (not total vault value)
+    // The available deployment is what we're adding to the position, not the entire vault
+    const targetToken0ValueUSD = availableDeployment * (positionValueRatio / (1 + positionValueRatio));
+    const targetToken1ValueUSD = availableDeployment - targetToken0ValueUSD;
 
-    // Convert USD amount to raw token amount
-    const token0InputDecimal = token0Share / token0Price;
-    const token0InputAmount = ethers.utils.parseUnits(
-      token0InputDecimal.toFixed(token0Data.decimals),
+    // Convert to token amounts
+    const targetToken0Amount = ethers.utils.parseUnits(
+      (targetToken0ValueUSD / token0Price).toFixed(token0Data.decimals),
       token0Data.decimals
     );
-
-    this.log(`Requesting quote for ${ethers.utils.formatUnits(token0InputAmount, token0Data.decimals)} ${token0Data.symbol} ($${token0Share.toFixed(2)} of $${availableDeployment.toFixed(2)} budget)`);
-
-    // Step 4: Get add liquidity quote amounts - adapter determines optimal token split
-    const platformId = vault.targetPlatforms[0];
-    const adapter = this.adapters.get(platformId);
-    if (!adapter) {
-      throw new UnrecoverableError(`No adapter for platform ${platformId}`);
-    }
-
-    // Get add liquidity amounts - platform-agnostic interface returns amounts in caller's token order
-    const quote = await retryRpcCall(
-      () => adapter.getAddLiquidityAmounts({
-        position,
-        token0Amount: token0InputAmount.toString(),
-        token1Amount: "0",
-        provider: this.provider,
-        poolData: targetPool,
-        token0Data,
-        token1Data
-      }),
-      'adapter.getAddLiquidityAmounts'
+    const targetToken1Amount = ethers.utils.parseUnits(
+      (targetToken1ValueUSD / token1Price).toFixed(token1Data.decimals),
+      token1Data.decimals
     );
 
-    this.log(`Quote amounts received - need: ${ethers.utils.formatUnits(quote.token0Amount, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(quote.token1Amount, token1Data.decimals)} ${token1Data.symbol}`);
-
-    // Capture original requirements for post-swap validation (if deficit swaps fail)
-    const originalRequirements = {
-      token0Amount: BigInt(quote.token0Amount),
-      token1Amount: BigInt(quote.token1Amount)
-    };
+    this.log(`Target amounts: ${ethers.utils.formatUnits(targetToken0Amount, token0Data.decimals)} ${token0Data.symbol} ($${targetToken0ValueUSD.toFixed(2)}), ${ethers.utils.formatUnits(targetToken1Amount, token1Data.decimals)} ${token1Data.symbol} ($${targetToken1ValueUSD.toFixed(2)})`);
+    this.log(`Available deployment: $${availableDeployment.toFixed(2)}`);
 
     // Step 5: Prepare tokens (swap/wrap if needed to cover deficits)
-    const { deficitSwaps, bufferSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
+    const { deficitSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
       vault,
-      quote,
+      { token0Amount: targetToken0Amount.toString(), token1Amount: targetToken1Amount.toString() },
       token0Data,
       token1Data
     );
@@ -1738,21 +1747,15 @@ export default class BabyStepsStrategy extends StrategyBase {
       );
     }
 
-    // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
+    // Step 6: Execute deficit swaps (with retry on failure)
     let currentDeficitSwaps = deficitSwaps;
-    let currentBufferSwaps = bufferSwaps;
     let currentDeficitMetadata = metadata.deficit;
-    let currentBufferMetadata = metadata.buffer;
     const maxRetries = 1;
     let retryCount = 0;
 
-    // Track if deficit swaps failed - we'll still try buffer swaps
-    let deficitSwapsFailed = false;
-    let deficitSwapError = null;
-
     while (currentDeficitSwaps.length > 0) {
       try {
-        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps (critical)${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
+        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
@@ -1775,11 +1778,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       } catch (error) {
         retryCount++;
         if (retryCount > maxRetries) {
-          // Don't throw yet - try buffer swaps first, then validate
-          deficitSwapsFailed = true;
-          deficitSwapError = error.message;
-          this.log(`⚠️ Deficit swaps failed after ${maxRetries} retry(s), continuing to buffer swaps...`);
-          break;
+          throw new UnrecoverableError(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
         }
 
         this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);
@@ -1794,7 +1793,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Regenerate swap transactions with fresh quotes and Permit2 nonces
         const freshResult = await this.prepareTokensForPosition(
           vault,
-          quote,
+          { token0Amount: targetToken0Amount.toString(), token1Amount: targetToken1Amount.toString() },
           token0Data,
           token1Data
         );
@@ -1818,9 +1817,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
         // Update swaps and metadata for next iteration
         currentDeficitSwaps = freshResult.deficitSwaps;
-        currentBufferSwaps = freshResult.bufferSwaps;
         currentDeficitMetadata = freshResult.metadata.deficit;
-        currentBufferMetadata = freshResult.metadata.buffer;
 
         // If no deficit swaps needed after refresh, we're done
         if (currentDeficitSwaps.length === 0) {
@@ -1830,120 +1827,38 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Execute buffer swaps (OPTIONAL - failure is logged but doesn't block)
-    if (currentBufferSwaps.length > 0) {
-      try {
-        this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
-
-        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
-
-        // Extract actual amounts from receipt and emit TokensSwapped event
-        const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
-
-        const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
-        this.eventManager.emit('TokensSwapped', {
-          vaultAddress: vault.address,
-          swapCount: swapDetails.length,
-          swapType: 'buffer',
-          swaps: swapDetails,
-          gasUsed: receipt.gasUsed.toString(),
-          gasEstimated: gasEstimated,
-          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
-          transactionHash: receipt.transactionHash,
-          success: receipt.status === 1,
-          timestamp: Date.now()
-        });
-      } catch (error) {
-        this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
-        // Continue - buffer swaps are nice-to-have, not required
-      }
-    }
-
-    // Step 6: Refresh token balances after swaps are completed
+    // Step 7: Refresh token balances after swaps are completed
     vault.tokens = await this.vaultDataService.fetchTokenBalances(
       vault.address,
       Object.keys(this.tokens)
     );
 
-    // Validate against original requirements (ONLY if deficit swaps failed)
-    // If deficit swaps succeeded, we got what we needed - no extra validation
-    if (deficitSwapsFailed) {
-      const available0 = BigInt(vault.tokens[token0Data.symbol] || '0');
-      const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
-
-      // Use maxSlippage as tolerance (user's configured acceptable variance)
-      const maxSlippage = vault.strategy.parameters.maxSlippage;
-      const toleranceMultiplier = (100 - maxSlippage) / 100; // e.g., 0.995 for 0.5% slippage
-
-      const minRequired0 = BigInt(Math.floor(Number(originalRequirements.token0Amount) * toleranceMultiplier));
-      const minRequired1 = BigInt(Math.floor(Number(originalRequirements.token1Amount) * toleranceMultiplier));
-
-      const hasEnoughToken0 = available0 >= minRequired0;
-      const hasEnoughToken1 = available1 >= minRequired1;
-
-      if (!hasEnoughToken0 || !hasEnoughToken1) {
-        const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
-        const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
-
-        throw new UnrecoverableError(
-          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
-          `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
-          `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
-          `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
-          `${token1Data.symbol}: need ${ethers.utils.formatUnits(minRequired1, token1Data.decimals)}, ` +
-          `have ${ethers.utils.formatUnits(available1, token1Data.decimals)} ` +
-          `(short ${ethers.utils.formatUnits(shortfall1, token1Data.decimals)}). ` +
-          `Original error: ${deficitSwapError}`
-        );
-      }
-
-      this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
-    }
-
-    // Step 7: Calculate final amounts - cap at original quote (respects maxUtilization) but don't exceed actual balance
+    // Step 8: Get final token balances to pass to adapter
     const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
     const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
-    const originalToken0 = BigInt(quote.token0Amount);
-    const originalToken1 = BigInt(quote.token1Amount);
+    const maxSlippage = vault.strategy.parameters.maxSlippage;
 
-    const token0ForLiquidity = finalToken0Balance < originalToken0
-      ? finalToken0Balance.toString()
-      : quote.token0Amount;
-    const token1ForLiquidity = finalToken1Balance < originalToken1
-      ? finalToken1Balance.toString()
-      : quote.token1Amount;
+    this.log(`🔄 Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
-    this.log(`🔧 Final amounts for liquidity: ${ethers.utils.formatUnits(token0ForLiquidity, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(token1ForLiquidity, token1Data.decimals)} ${token1Data.symbol}`);
-
-    // Step 8: Execute increaseLiquidity transaction
-    // 8a. Ensure token approvals for position manager
-    const approvalTxs = await adapter.getRequiredApprovals(
-      'liquidity',
-      vault.address,
-      [token0Data.address, token1Data.address],
-      this.provider
-    );
-    if (approvalTxs.length > 0) {
-      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
-    }
-
-    // 8b. Generate add liquidity transaction data
+    // Step 9: Execute increaseLiquidity transaction
+    // 9a. Generate add liquidity transaction data
+    // Pass full balances - adapter applies slippage internally and uses balances as max amounts
     const addLiquidityData = await retryRpcCall(
       () => adapter.generateAddLiquidityData({
         position,
-        token0Amount: token0ForLiquidity,
-        token1Amount: token1ForLiquidity,
+        token0Amount: finalToken0Balance.toString(),
+        token1Amount: finalToken1Balance.toString(),
         provider: this.provider,
         poolData: targetPool,
         token0Data,
         token1Data,
-        slippageTolerance: vault.strategy.parameters.maxSlippage,
+        slippageTolerance: maxSlippage,
         deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
       }),
       'generateAddLiquidityData'
     );
 
-    // 8c. Execute add liquidity transaction
+    // 9b. Execute add liquidity transaction
     this.log(`Executing increaseLiquidity for position ${position.id}`);
     const { receipt, gasEstimated } = await this.executeBatchTransactions(
       vault,
@@ -1952,7 +1867,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       'addliq'
     );
 
-    // 8d. Parse receipt for actual amounts consumed
+    // 9d. Parse receipt for actual amounts consumed
     const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt, {
       position,
       poolData: targetPool
@@ -1960,16 +1875,16 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 
-    // Step 9: Emit LiquidityAddedToPosition event
+    // Step 10: Emit LiquidityAddedToPosition event
     this.eventManager.emit('LiquidityAddedToPosition', {
       // Identity
       vaultAddress: vault.address,
       positionId: position.id,
       poolAddress: position.pool,
 
-      // Amounts (quoted vs actual for slippage tracking)
-      quotedToken0: token0ForLiquidity,
-      quotedToken1: token1ForLiquidity,
+      // Amounts (target vs actual for tracking)
+      targetToken0: targetToken0Amount.toString(),
+      targetToken1: targetToken1Amount.toString(),
       actualToken0: receiptData.amount0,
       actualToken1: receiptData.amount1,
 
@@ -1993,7 +1908,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now()
     });
 
-    // Step 10: Update cache with modified position (direct on-chain, no Graph latency)
+    // Step 11: Update cache with modified position (direct on-chain, no Graph latency)
     const { position: updatedPosition, poolData: updatedPoolData } = await retryRpcCall(
       () => adapter.getPositionById(position.id, this.provider),
       'getPositionById'
@@ -2031,8 +1946,21 @@ export default class BabyStepsStrategy extends StrategyBase {
       throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
+    // Step 3a: Ensure token approvals for position manager (do early while calculating quotes)
+    const approvalTxs = await adapter.getRequiredApprovals(
+      'liquidity',
+      vault.address,
+      [token0Data.address, token1Data.address],
+      this.provider
+    );
+    if (approvalTxs.length > 0) {
+      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
+    }
+
     // Get position range object (platform-specific properties, e.g., tickLower/tickUpper for V3)
-    const position = adapter.getPositionRange(
+    this.log(`🔍 [createNewPosition] Calculating new position range from pool tick: ${targetPool.tick}`);
+    this.log(`   Range params: +${vault.strategy.parameters.targetRangeUpper}bp / -${vault.strategy.parameters.targetRangeLower}bp`);
+    let position = adapter.getPositionRange(
       targetPool,
       vault.strategy.parameters.targetRangeUpper,
       vault.strategy.parameters.targetRangeLower
@@ -2040,8 +1968,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Generic logging via Object.values destructuring
     const [lower, upper, current] = Object.values(position);
-    this.log(`Calculated range: ${lower} to ${upper} (current: ${current})`);
-    this.log(`Range params: +${vault.strategy.parameters.targetRangeUpper}% / -${vault.strategy.parameters.targetRangeLower}%`);
+    this.log(`🔍 [createNewPosition] NEW POSITION RANGE CALCULATED: tickLower=${lower}, tickUpper=${upper} (current tick: ${current})`);
 
     // Step 4: Get token prices and determine optimal ratio via test quote
     // Always fetch prices for target tokens (cache handles efficiency)
@@ -2088,46 +2015,29 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`Test quote ratio: ${testToken0Decimal.toFixed(6)} ${token0Data.symbol} : ${testToken1Decimal.toFixed(6)} ${token1Data.symbol}`);
     this.log(`Optimal value ratio: ${optimalRatio.toFixed(4)} (${(optimalRatio / (1 + optimalRatio) * 100).toFixed(1)}% ${token0Data.symbol} : ${(1 / (1 + optimalRatio) * 100).toFixed(1)}% ${token1Data.symbol})`);
 
-    // Step 5: Split budget according to optimal ratio
-    // Calculate how much of token0 to use as input based on VALUE ratio
-    // If ratio is 1.0 (50%:50%), we allocate 50% of budget to token0
-    const token0Share = availableDeployment * (optimalRatio / (1 + optimalRatio));
+    // Step 5: Calculate target amounts based on ratio and total vault value
+    // Use totalVaultValue (includes non-aligned tokens that will be swapped)
+    const totalValue = assetValues.totalVaultValue;
+    const targetToken0ValueUSD = totalValue * (optimalRatio / (1 + optimalRatio));
+    const targetToken1ValueUSD = totalValue - targetToken0ValueUSD;
 
-    // Convert USD amount to raw token amount
-    const token0InputDecimal = token0Share / token0Price;
-    const token0InputAmount = ethers.utils.parseUnits(
-      token0InputDecimal.toFixed(token0Data.decimals),
+    // Convert to token amounts
+    const targetToken0Amount = ethers.utils.parseUnits(
+      (targetToken0ValueUSD / token0Price).toFixed(token0Data.decimals),
       token0Data.decimals
     );
-
-    this.log(`Requesting quote for ${ethers.utils.formatUnits(token0InputAmount, token0Data.decimals)} ${token0Data.symbol} ($${token0Share.toFixed(2)} of $${availableDeployment.toFixed(2)} budget)`);
-
-    // Step 6: Get FULL add liquidity quote with actual amounts
-    const quote = await retryRpcCall(
-      () => adapter.getAddLiquidityAmounts({
-        position,
-        token0Amount: token0InputAmount.toString(),
-        token1Amount: '0',
-        provider: this.provider,
-        poolData: targetPool,
-        token0Data,
-        token1Data
-      }),
-      'adapter.getAddLiquidityAmounts'
+    const targetToken1Amount = ethers.utils.parseUnits(
+      (targetToken1ValueUSD / token1Price).toFixed(token1Data.decimals),
+      token1Data.decimals
     );
 
-    this.log(`Quote amounts received - need: ${ethers.utils.formatUnits(quote.token0Amount, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(quote.token1Amount, token1Data.decimals)} ${token1Data.symbol}`);
+    this.log(`Target amounts: ${ethers.utils.formatUnits(targetToken0Amount, token0Data.decimals)} ${token0Data.symbol} ($${targetToken0ValueUSD.toFixed(2)}), ${ethers.utils.formatUnits(targetToken1Amount, token1Data.decimals)} ${token1Data.symbol} ($${targetToken1ValueUSD.toFixed(2)})`);
+    this.log(`Total vault value: $${totalValue.toFixed(2)}`);
 
-    // Capture original requirements for post-swap validation (if deficit swaps fail)
-    const originalRequirements = {
-      token0Amount: BigInt(quote.token0Amount),
-      token1Amount: BigInt(quote.token1Amount)
-    };
-
-    // Step 7: Prepare tokens (swap/wrap if needed to cover deficits)
-    const { deficitSwaps, bufferSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
+    // Step 6: Prepare tokens (swap/wrap if needed to cover deficits)
+    const { deficitSwaps, wrapUnwrap, metadata } = await this.prepareTokensForPosition(
       vault,
-      quote,
+      { token0Amount: targetToken0Amount.toString(), token1Amount: targetToken1Amount.toString() },
       token0Data,
       token1Data
     );
@@ -2148,21 +2058,15 @@ export default class BabyStepsStrategy extends StrategyBase {
       );
     }
 
-    // Execute deficit swaps (CRITICAL - with retry on failure, but continue to buffer swaps even if exhausted)
+    // Step 7: Execute deficit swaps (with retry on failure)
     let currentDeficitSwaps = deficitSwaps;
-    let currentBufferSwaps = bufferSwaps;
     let currentDeficitMetadata = metadata.deficit;
-    let currentBufferMetadata = metadata.buffer;
     const maxRetries = 1;
     let retryCount = 0;
 
-    // Track if deficit swaps failed - we'll still try buffer swaps
-    let deficitSwapsFailed = false;
-    let deficitSwapError = null;
-
     while (currentDeficitSwaps.length > 0) {
       try {
-        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps (critical)${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
+        this.log(`Executing ${currentDeficitSwaps.length} deficit swaps${retryCount > 0 ? ` [retry ${retryCount}]` : ''}`);
         const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentDeficitSwaps, 'deficit swaps', 'swap');
 
         // Extract actual amounts from receipt and emit TokensSwapped event
@@ -2185,11 +2089,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       } catch (error) {
         retryCount++;
         if (retryCount > maxRetries) {
-          // Don't throw yet - try buffer swaps first, then validate
-          deficitSwapsFailed = true;
-          deficitSwapError = error.message;
-          this.log(`⚠️ Deficit swaps failed after ${maxRetries} retry(s), continuing to buffer swaps...`);
-          break;
+          throw new UnrecoverableError(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
         }
 
         this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);
@@ -2204,7 +2104,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Regenerate swap transactions with fresh quotes and Permit2 nonces
         const freshResult = await this.prepareTokensForPosition(
           vault,
-          quote,
+          { token0Amount: targetToken0Amount.toString(), token1Amount: targetToken1Amount.toString() },
           token0Data,
           token1Data
         );
@@ -2228,9 +2128,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
         // Update swaps and metadata for next iteration
         currentDeficitSwaps = freshResult.deficitSwaps;
-        currentBufferSwaps = freshResult.bufferSwaps;
         currentDeficitMetadata = freshResult.metadata.deficit;
-        currentBufferMetadata = freshResult.metadata.buffer;
 
         // If no deficit swaps needed after refresh, we're done
         if (currentDeficitSwaps.length === 0) {
@@ -2240,129 +2138,63 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Execute buffer swaps (OPTIONAL - failure is logged but doesn't block)
-    if (currentBufferSwaps.length > 0) {
-      try {
-        this.log(`Executing ${currentBufferSwaps.length} buffer swaps (optional)`);
-
-        const { receipt, gasEstimated } = await this.executeBatchTransactions(vault, currentBufferSwaps, 'buffer swaps', 'swap');
-
-        // Extract actual amounts from receipt and emit TokensSwapped event
-        const actualSwaps = adapter.parseSwapReceipt(receipt, currentBufferMetadata);
-
-        const swapDetails = this.buildSwapDetails(currentBufferMetadata, actualSwaps);
-        this.eventManager.emit('TokensSwapped', {
-          vaultAddress: vault.address,
-          swapCount: swapDetails.length,
-          swapType: 'buffer',
-          swaps: swapDetails,
-          gasUsed: receipt.gasUsed.toString(),
-          gasEstimated: gasEstimated,
-          effectiveGasPrice: receipt.effectiveGasPrice.toString(),
-          transactionHash: receipt.transactionHash,
-          success: receipt.status === 1,
-          timestamp: Date.now()
-        });
-      } catch (error) {
-        this.log(`⚠️ Buffer swaps failed (non-critical): ${error.message}`);
-        // Continue - buffer swaps are nice-to-have, not required
-      }
-    }
-
     // Step 8: Refresh token balances after swaps are completed
     vault.tokens = await this.vaultDataService.fetchTokenBalances(
       vault.address,
       Object.keys(this.tokens)
     );
 
-    // Step 9: Validate against original requirements (ONLY if deficit swaps failed)
-    // If deficit swaps succeeded, we got what we needed - no extra validation
-    if (deficitSwapsFailed) {
-      const available0 = BigInt(vault.tokens[token0Data.symbol] || '0');
-      const available1 = BigInt(vault.tokens[token1Data.symbol] || '0');
+    // Step 9: Re-fetch pool data at current price (swaps may have moved it)
+    // getPoolData returns fresh tick/sqrtPriceX96/liquidity but not poolKey
+    // Merge fresh state with original targetPool to preserve poolKey
+    const freshPoolState = await retryRpcCall(
+      () => adapter.getPoolData(targetPool.address, this.provider),
+      'getPoolData (post-swap refresh)'
+    );
+    const freshPoolData = {
+      ...targetPool,        // Preserve poolKey and other metadata
+      ...freshPoolState     // Override with fresh tick, sqrtPriceX96, liquidity
+    };
+    this.log(`🔍 [createNewPosition] AFTER DEFICIT SWAPS - Current pool tick: ${freshPoolData.tick}`);
 
-      // Use maxSlippage as tolerance (user's configured acceptable variance)
-      const maxSlippage = vault.strategy.parameters.maxSlippage;
-      const toleranceMultiplier = (100 - maxSlippage) / 100; // e.g., 0.995 for 0.5% slippage
+    // Step 9a: Recalculate position range centered on current tick
+    // Deficit swaps may have moved the price, so we need to recenter the range
+    // on the actual current tick to ensure position is properly centered
+    position = adapter.getPositionRange(
+      freshPoolData,
+      vault.strategy.parameters.targetRangeUpper,
+      vault.strategy.parameters.targetRangeLower
+    );
+    const [finalLower, finalUpper, finalCurrent] = Object.values(position);
+    this.log(`🔍 [createNewPosition] FINAL POSITION RANGE: tickLower=${finalLower}, tickUpper=${finalUpper} (current tick: ${finalCurrent})`);
 
-      const minRequired0 = BigInt(Math.floor(Number(originalRequirements.token0Amount) * toleranceMultiplier));
-      const minRequired1 = BigInt(Math.floor(Number(originalRequirements.token1Amount) * toleranceMultiplier));
-
-      const hasEnoughToken0 = available0 >= minRequired0;
-      const hasEnoughToken1 = available1 >= minRequired1;
-
-      if (!hasEnoughToken0 || !hasEnoughToken1) {
-        const shortfall0 = hasEnoughToken0 ? 0n : minRequired0 - available0;
-        const shortfall1 = hasEnoughToken1 ? 0n : minRequired1 - available1;
-
-        throw new UnrecoverableError(
-          `Position requirements not met after swap attempts (tolerance: ${maxSlippage}%). ` +
-          `${token0Data.symbol}: need ${ethers.utils.formatUnits(minRequired0, token0Data.decimals)}, ` +
-          `have ${ethers.utils.formatUnits(available0, token0Data.decimals)} ` +
-          `(short ${ethers.utils.formatUnits(shortfall0, token0Data.decimals)}). ` +
-          `${token1Data.symbol}: need ${ethers.utils.formatUnits(minRequired1, token1Data.decimals)}, ` +
-          `have ${ethers.utils.formatUnits(available1, token1Data.decimals)} ` +
-          `(short ${ethers.utils.formatUnits(shortfall1, token1Data.decimals)}). ` +
-          `Original error: ${deficitSwapError}`
-        );
-      }
-
-      this.log(`✅ Buffer swaps compensated for deficit swap failure - proceeding with position`);
-    }
-
-    // Step 10: Calculate final amounts - cap at original quote but don't exceed actual balance
+    // Step 10: Get final token balances to pass to adapter
     const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
     const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
-    const originalToken0 = BigInt(quote.token0Amount);
-    const originalToken1 = BigInt(quote.token1Amount);
+    const maxSlippage = vault.strategy.parameters.maxSlippage;
 
-    const token0ForLiquidity = finalToken0Balance < originalToken0
-      ? finalToken0Balance.toString()
-      : quote.token0Amount;
-    const token1ForLiquidity = finalToken1Balance < originalToken1
-      ? finalToken1Balance.toString()
-      : quote.token1Amount;
-
-    this.log(`Final amounts for liquidity: ${ethers.utils.formatUnits(token0ForLiquidity, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(token1ForLiquidity, token1Data.decimals)} ${token1Data.symbol}`);
+    this.log(`🔄 Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
     // Step 11: Execute mint transaction
-    // 11a. Ensure token approvals for position manager
-    const approvalTxs = await adapter.getRequiredApprovals(
-      'liquidity',
-      vault.address,
-      [token0Data.address, token1Data.address],
-      this.provider
-    );
-    if (approvalTxs.length > 0) {
-      await this.executeBatchTransactions(vault, approvalTxs, 'token approvals', 'approval');
-    }
-
-    // 11b. Generate CREATE position data (different from addToPosition which uses generateAddLiquidityData)
-    // 🔍 DEBUG: Log strategy parameters before calling adapter
-    this.log(`🔍 [createNewPosition] Strategy parameters debug:`);
-    this.log(`   vault.strategy.parameters.maxSlippage: ${vault.strategy.parameters.maxSlippage} (type: ${typeof vault.strategy.parameters.maxSlippage})`);
-    this.log(`   token0ForLiquidity: ${token0ForLiquidity} (${token0Data.symbol})`);
-    this.log(`   token1ForLiquidity: ${token1ForLiquidity} (${token1Data.symbol})`);
-    this.log(`   vault.address: ${vault.address}`);
-    this.log(`   targetPool.platform: ${targetPool.platform}`);
-
+    // 11a. Generate CREATE position data with fresh pool data
+    // Pass full balances - adapter applies slippage internally and uses balances as max amounts
     const createPositionData = await retryRpcCall(
       () => adapter.generateCreatePositionData({
         position,
-        token0Amount: token0ForLiquidity,
-        token1Amount: token1ForLiquidity,
+        token0Amount: finalToken0Balance.toString(),
+        token1Amount: finalToken1Balance.toString(),
         provider: this.provider,
         walletAddress: vault.address,
-        poolData: targetPool,
+        poolData: freshPoolData,
         token0Data,
         token1Data,
-        slippageTolerance: vault.strategy.parameters.maxSlippage,
+        slippageTolerance: maxSlippage,
         deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
       }),
       'generateCreatePositionData'
     );
 
-    // 🔍 DEBUG: Log createPositionData result
+    this.log(`Position data generated with fresh pool state (tick: ${freshPoolData.tick})`);
     this.log(`🔍 [createNewPosition] createPositionData result:`);
     this.log(`   to: ${createPositionData.to}`);
     this.log(`   value: ${createPositionData.value}`);
@@ -2371,7 +2203,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`   quote.mintAmount0: ${createPositionData.quote?.mintAmount0}`);
     this.log(`   quote.mintAmount1: ${createPositionData.quote?.mintAmount1}`);
 
-    // 11c. Execute MINT transaction (different from 'addliq')
+    // 11b. Execute MINT transaction (different from 'addliq')
     this.log(`Executing mint for new ${token0Data.symbol}/${token1Data.symbol} position`);
     const { receipt, gasEstimated } = await this.executeBatchTransactions(
       vault,
@@ -2380,10 +2212,10 @@ export default class BabyStepsStrategy extends StrategyBase {
       'mint'
     );
 
-    // 11d. Parse receipt for actual amounts consumed and new position ID
+    // 11c. Parse receipt for actual amounts consumed and new position ID
     const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt, {
       position,
-      poolData: targetPool
+      poolData: freshPoolData
     });
 
     this.log(`✅ Position created: ID ${receiptData.tokenId}, ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
@@ -2395,9 +2227,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       positionId: receiptData.tokenId,
       poolAddress: targetPool.address,
 
-      // Amounts (quoted vs actual for slippage tracking)
-      quotedToken0: token0ForLiquidity,
-      quotedToken1: token1ForLiquidity,
+      // Amounts (target vs actual for tracking)
+      targetToken0: targetToken0Amount.toString(),
+      targetToken1: targetToken1Amount.toString(),
       actualToken0: receiptData.amount0,
       actualToken1: receiptData.amount1,
 
@@ -2421,17 +2253,18 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now()
     });
 
-    // Step 12.5: Set emergency exit baseline for new position
+    // Step 13: Set emergency exit baseline for new position
     // This overwrites any previous baseline (e.g., from aligned position at init, or previous position before rebalance)
     const currentPool = adapter.getPoolCurrent(targetPool);
     this.emergencyExitBaseline[vault.address] = currentPool;
     this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
 
-    // Step 13: Update cache with new position (direct on-chain, no Graph latency)
+    // Step 14: Update cache with new position (direct on-chain, no Graph latency)
     const { position: newPosition, poolData: newPoolData } = await retryRpcCall(
       () => adapter.getPositionById(receiptData.tokenId, this.provider),
       'getPositionById'
     );
+    this.log(`🔍 [createNewPosition] FINAL ON-CHAIN POSITION - ID ${newPosition.id}: tickLower=${newPosition.tickLower}, tickUpper=${newPosition.tickUpper}`);
     await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
     await this.vaultDataService.refreshTokens(vault.address);
   }
@@ -2446,33 +2279,65 @@ export default class BabyStepsStrategy extends StrategyBase {
    * Three-phase approach:
    * 1. Use non-aligned tokens to cover deficits (with quote-based amounts)
    * 2. Use excess target tokens if deficits remain
-   * 3. Convert remaining non-aligned tokens 50/50 to target tokens
    *
    * @param {Object} vault - Vault object with tokens balance
-   * @param {Object} quote - Liquidity quote with required amounts
+   * @param {Object} targetAmounts - Target amounts { token0Amount, token1Amount } based on ratio
    * @param {Object} token0Data - Token0 data { address, symbol, decimals }
    * @param {Object} token1Data - Token1 data { address, symbol, decimals }
-   * @returns {Promise<Object>} { deficitSwaps: [], bufferSwaps: [], metadata: { deficit: [], buffer: [] } }
+   * @returns {Promise<Object>} { deficitSwaps: [], wrapUnwrap: {}, metadata: { deficit: [] } }
    */
-  async prepareTokensForPosition(vault, quote, token0Data, token1Data) {
+  async prepareTokensForPosition(vault, targetAmounts, token0Data, token1Data) {
     const platformId = vault.targetPlatforms[0];
     const adapter = this.adapters.get(platformId);
     if (!adapter) {
       throw new UnrecoverableError(`No adapter for platform ${platformId}`);
     }
 
+    // Fetch prices for all tokens (aligned + non-aligned) early
+    const allTokenSymbols = [token0Data.symbol, token1Data.symbol];
+    const nonAlignedTokens = Object.keys(vault.tokens).filter(symbol =>
+      symbol !== token0Data.symbol &&
+      symbol !== token1Data.symbol &&
+      vault.tokens[symbol] !== '0'
+    );
+    allTokenSymbols.push(...nonAlignedTokens);
+
+    const prices = await retryRpcCall(
+      () => fetchTokenPrices(allTokenSymbols, CACHE_DURATIONS['30-SECONDS']),
+      'fetchTokenPrices for prepareTokensForPosition',
+      { log: (msg) => this.log(msg) }
+    );
+
+    // Validate target token prices exist
+    const token0Price = prices[token0Data.symbol.toUpperCase()];
+    const token1Price = prices[token1Data.symbol.toUpperCase()];
+
+    if (!token0Price || !token1Price || !Number.isFinite(token0Price) || !Number.isFinite(token1Price)) {
+      throw new UnrecoverableError(
+        `Missing or invalid prices for target tokens: ` +
+        `${token0Data.symbol}=${token0Price}, ${token1Data.symbol}=${token1Price}`
+      );
+    }
+
+    // Get minimum swap value for this chain
+    const minSwapValue = getMinSwapValue(this.chainId);
+    this.log(`Minimum swap value for chain ${this.chainId}: $${minSwapValue}`);
+
+    // Track skipped dust value for deficit tolerance calculation
+    let totalSkippedDustUSD = 0;
+
     // Track which phases were used
     const phasesUsed = {
       wrapUnwrap: false,
       nonAlignedForDeficit: false,
-      excessTargetTokens: false,
-      bufferSwaps: false
+      excessTargetTokens: false
     };
     const nonAlignedTokensUsedForDeficit = new Set();
 
-    // 1. Calculate required vs available
-    const requiredToken0 = BigInt(quote.token0Amount);
-    const requiredToken1 = BigInt(quote.token1Amount);
+    // 1. Calculate required vs available (target amounts from ratio calculation)
+    // No slippage buffer needed here - adapter handles slippage during mint
+    const requiredToken0 = BigInt(targetAmounts.token0Amount);
+    const requiredToken1 = BigInt(targetAmounts.token1Amount);
     const availableToken0 = BigInt(vault.tokens[token0Data.symbol] || '0'); // Keep fallback values because vault cache will not have entries for tokens with 0 balance
     const availableToken1 = BigInt(vault.tokens[token1Data.symbol] || '0');
 
@@ -2483,13 +2348,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const token0Deficit = requiredToken0 > availableToken0 ? requiredToken0 - availableToken0 : 0n;
     const token1Deficit = requiredToken1 > availableToken1 ? requiredToken1 - availableToken1 : 0n;
 
-    // 3. Get non-aligned tokens
-    const nonAlignedTokens = Object.keys(vault.tokens).filter(symbol =>
-      symbol !== token0Data.symbol &&
-      symbol !== token1Data.symbol &&
-      vault.tokens[symbol] !== '0'
-    );
-
+    // 3. Track remaining balances for non-aligned tokens
     const remainingBalances = {};
     for (const symbol of nonAlignedTokens) {
       remainingBalances[symbol] = BigInt(vault.tokens[symbol]);
@@ -2499,7 +2358,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.log(`Non-aligned tokens available: ${nonAlignedTokens.length > 0 ? nonAlignedTokens.join(', ') : 'none'}`);
 
     const deficitSwapInstructions = [];
-    const bufferSwapInstructions = [];
     let remainingToken0Deficit = token0Deficit;
     let remainingToken1Deficit = token1Deficit;
 
@@ -2561,10 +2419,29 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Phase 1: Use non-aligned tokens to cover deficits
+    // Phase 1: Use non-aligned tokens to cover deficits (filter dust)
     for (const tokenSymbol of nonAlignedTokens) {
       const tokenData = this.tokens[tokenSymbol];
       if (!tokenData) continue;
+
+      // Calculate USD value of this token
+      const tokenBalance = remainingBalances[tokenSymbol];
+      const tokenPrice = prices[tokenSymbol.toUpperCase()];
+
+      // Validate price exists (fail fast if missing for non-aligned token)
+      if (!tokenPrice || !Number.isFinite(tokenPrice)) {
+        this.log(`⚠️ Warning: Missing price for ${tokenSymbol}, skipping swap`);
+        continue;
+      }
+
+      const tokenUSDValue = parseFloat(ethers.utils.formatUnits(tokenBalance, tokenData.decimals)) * tokenPrice;
+
+      // Skip dust swaps - track their value for deficit tolerance
+      if (tokenUSDValue < minSwapValue) {
+        totalSkippedDustUSD += tokenUSDValue;
+        this.log(`Skipping ${tokenSymbol} swap: $${tokenUSDValue.toFixed(2)} < $${minSwapValue} minimum (dust)`);
+        continue;
+      }
 
       // Cover token0 deficit
       if (remainingToken0Deficit > 0n && remainingBalances[tokenSymbol] > 0n) {
@@ -2607,13 +2484,35 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Phase 2: Use excess target tokens if deficits remain
+    // Phase 2: Use excess target tokens if deficits remain (filter dust)
     const excessToken0 = availableToken0 > requiredToken0 ? availableToken0 - requiredToken0 : 0n;
     const excessToken1 = availableToken1 > requiredToken1 ? availableToken1 - requiredToken1 : 0n;
 
-    if (remainingToken0Deficit > 0n && excessToken1 > 0n) {
+    // Check if excess amounts are above swap minimum
+    let swappableExcessToken0 = excessToken0;
+    let swappableExcessToken1 = excessToken1;
+
+    if (excessToken0 > 0n) {
+      const excessToken0USD = parseFloat(ethers.utils.formatUnits(excessToken0, token0Data.decimals)) * token0Price;
+      if (excessToken0USD < minSwapValue) {
+        this.log(`Skipping excess ${token0Data.symbol} swap: $${excessToken0USD.toFixed(2)} < $${minSwapValue} minimum (dust)`);
+        totalSkippedDustUSD += excessToken0USD;
+        swappableExcessToken0 = 0n;
+      }
+    }
+
+    if (excessToken1 > 0n) {
+      const excessToken1USD = parseFloat(ethers.utils.formatUnits(excessToken1, token1Data.decimals)) * token1Price;
+      if (excessToken1USD < minSwapValue) {
+        this.log(`Skipping excess ${token1Data.symbol} swap: $${excessToken1USD.toFixed(2)} < $${minSwapValue} minimum (dust)`);
+        totalSkippedDustUSD += excessToken1USD;
+        swappableExcessToken1 = 0n;
+      }
+    }
+
+    if (remainingToken0Deficit > 0n && swappableExcessToken1 > 0n) {
       const swapResult = await this.getDeficitSwapQuote(
-        adapter, token1Data, token0Data, excessToken1, remainingToken0Deficit
+        adapter, token1Data, token0Data, swappableExcessToken1, remainingToken0Deficit
       );
       if (swapResult) {
         deficitSwapInstructions.push({
@@ -2625,9 +2524,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    if (remainingToken1Deficit > 0n && excessToken0 > 0n) {
+    if (remainingToken1Deficit > 0n && swappableExcessToken0 > 0n) {
       const swapResult = await this.getDeficitSwapQuote(
-        adapter, token0Data, token1Data, excessToken0, remainingToken1Deficit
+        adapter, token0Data, token1Data, swappableExcessToken0, remainingToken1Deficit
       );
       if (swapResult) {
         deficitSwapInstructions.push({
@@ -2639,65 +2538,48 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Verify deficits are covered
+    // Verify deficits are covered or tolerate small deficits
     if (remainingToken0Deficit > 0n || remainingToken1Deficit > 0n) {
-      throw new UnrecoverableError(`Unable to cover deficits: ${token0Data.symbol}=${remainingToken0Deficit}, ${token1Data.symbol}=${remainingToken1Deficit}`);
-    }
+      // Validate prices before calculating USD values (fail fast)
+      if (!token0Price || !token1Price || !Number.isFinite(token0Price) || !Number.isFinite(token1Price)) {
+        throw new UnrecoverableError(
+          `Cannot calculate deficit tolerance: Missing prices for ${token0Data.symbol}=${token0Price}, ${token1Data.symbol}=${token1Price}`
+        );
+      }
 
-    // Phase 3: Buffer swaps for remaining non-aligned tokens
-    for (const tokenSymbol of nonAlignedTokens) {
-      if (remainingBalances[tokenSymbol] > 0n) {
-        const tokenData = this.tokens[tokenSymbol];
-        if (!tokenData) continue;
+      // Calculate deficit percentage AND USD value
+      const token0DeficitPct = Number(remainingToken0Deficit) / Number(requiredToken0) * 100;
+      const token1DeficitPct = Number(remainingToken1Deficit) / Number(requiredToken1) * 100;
 
-        const halfBalance = remainingBalances[tokenSymbol] / 2n;
-        const otherHalf = remainingBalances[tokenSymbol] - halfBalance;
+      const token0DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken0Deficit, token0Data.decimals)) * token0Price;
+      const token1DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken1Deficit, token1Data.decimals)) * token1Price;
+      const totalDeficitUSD = token0DeficitUSD + token1DeficitUSD;
 
-        // Check if either half should be a wrap/unwrap instead of swap
-        const { isWrap: isToken0Wrap, isUnwrap: isToken0Unwrap } = this.isWrapUnwrapPair(tokenData, token0Data);
-        const { isWrap: isToken1Wrap, isUnwrap: isToken1Unwrap } = this.isWrapUnwrapPair(tokenData, token1Data);
+      this.log(`⚠️ Remaining deficits after swap attempts:`);
+      this.log(`   ${token0Data.symbol}: ${remainingToken0Deficit} (${token0DeficitPct.toFixed(2)}% of target, $${token0DeficitUSD.toFixed(2)})`);
+      this.log(`   ${token1Data.symbol}: ${remainingToken1Deficit} (${token1DeficitPct.toFixed(2)}% of target, $${token1DeficitUSD.toFixed(2)})`);
+      this.log(`   Total deficit: $${totalDeficitUSD.toFixed(2)}, Skipped dust: $${totalSkippedDustUSD.toFixed(2)}`);
 
-        // Handle half going to token0
-        if (halfBalance > 0n) {
-          if (isToken0Wrap) {
-            wrapAmount += halfBalance;
-            phasesUsed.wrapUnwrap = true;
-            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} ETH to wrap amount`);
-          } else if (isToken0Unwrap) {
-            unwrapAmount += halfBalance;
-            phasesUsed.wrapUnwrap = true;
-            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(halfBalance)} WETH to unwrap amount`);
-          } else {
-            bufferSwapInstructions.push({
-              tokenIn: tokenData, tokenOut: token0Data, amount: halfBalance.toString(), isAmountIn: true
-            });
-            phasesUsed.bufferSwaps = true;
-          }
-        }
+      // Calculate acceptable deficit threshold
+      // 0.5% tolerance for EXACT_INPUT fallbacks + skipped dust value
+      const targetUSD = parseFloat(ethers.utils.formatUnits(requiredToken0, token0Data.decimals)) * token0Price +
+                        parseFloat(ethers.utils.formatUnits(requiredToken1, token1Data.decimals)) * token1Price;
+      const percentageTolerance = targetUSD * 0.005; // 0.5%
+      const acceptableDeficitUSD = percentageTolerance + totalSkippedDustUSD;
 
-        // Handle half going to token1
-        if (otherHalf > 0n) {
-          if (isToken1Wrap) {
-            wrapAmount += otherHalf;
-            phasesUsed.wrapUnwrap = true;
-            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} ETH to wrap amount`);
-          } else if (isToken1Unwrap) {
-            unwrapAmount += otherHalf;
-            phasesUsed.wrapUnwrap = true;
-            this.log(`Buffer phase: Adding ${ethers.utils.formatEther(otherHalf)} WETH to unwrap amount`);
-          } else {
-            bufferSwapInstructions.push({
-              tokenIn: tokenData, tokenOut: token1Data, amount: otherHalf.toString(), isAmountIn: true
-            });
-            phasesUsed.bufferSwaps = true;
-          }
-        }
+      if (totalDeficitUSD <= acceptableDeficitUSD) {
+        this.log(`   ✅ Deficit $${totalDeficitUSD.toFixed(2)} within tolerance $${acceptableDeficitUSD.toFixed(2)} (0.5% + skipped dust)`);
+      } else {
+        throw new UnrecoverableError(
+          `Unable to cover deficits: ${token0Data.symbol}=$${token0DeficitUSD.toFixed(2)}, ${token1Data.symbol}=$${token1DeficitUSD.toFixed(2)} ` +
+          `(total: $${totalDeficitUSD.toFixed(2)} exceeds acceptable: $${acceptableDeficitUSD.toFixed(2)})`
+        );
       }
     }
 
     // Early return if no swaps or wraps needed
     const hasWrapUnwrap = wrapAmount > 0n || unwrapAmount > 0n;
-    if (deficitSwapInstructions.length === 0 && bufferSwapInstructions.length === 0 && !hasWrapUnwrap) {
+    if (deficitSwapInstructions.length === 0 && !hasWrapUnwrap) {
       this.log('No swaps or wraps needed - sufficient tokens available');
 
       this.eventManager.emit('TokenPreparationCompleted', {
@@ -2711,10 +2593,9 @@ export default class BabyStepsStrategy extends StrategyBase {
         preparationResult: 'sufficient_tokens',
         swapTransactions: [],
         deficitSwapCount: 0,
-        bufferSwapCount: 0,
         wrapUnwrap: { wrapAmount: '0', unwrapAmount: '0' },
         nonAlignedTokensUsed: [],
-        swapMetadata: { deficit: [], buffer: [] },
+        swapMetadata: { deficit: [] },
         phasesUsed,
         timestamp: Date.now(),
         log: { level: 'info', message: 'Sufficient tokens available, no swaps or wraps needed', includeData: false }
@@ -2722,17 +2603,15 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       return {
         deficitSwaps: [],
-        bufferSwaps: [],
         wrapUnwrap: { wrapAmount: '0', unwrapAmount: '0' },
-        metadata: { deficit: [], buffer: [] }
+        metadata: { deficit: [] }
       };
     }
 
     // Ensure on-chain approvals for swap tokens (Permit2 for V3, router for traditional)
     // Skip native ETH - it doesn't need ERC20 approvals
-    const allSwapInstructions = [...deficitSwapInstructions, ...bufferSwapInstructions];
     const tokenInAddresses = [...new Set(
-      allSwapInstructions
+      deficitSwapInstructions
         .filter(i => !i.tokenIn.isNative)  // Native ETH has no contract to approve
         .map(i => i.tokenIn.address)
     )];
@@ -2749,8 +2628,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Generate swap transactions - adapter handles platform-specific auth
-    // IMPORTANT: Generate ALL swaps in a single batch to share Permit2 nonce tracker
-    // (separate batches would create nonce collisions when executed sequentially)
     const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
     const swapOptions = {
       signer,
@@ -2760,14 +2637,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       chainId: this.chainId
     };
 
-    const { transactions: allSwapTransactions, metadata: allSwapMetadata } =
-      await adapter.batchSwapTransactions(allSwapInstructions, swapOptions);
-
-    // Split transactions back into deficit and buffer swaps for separate execution
-    const deficitSwaps = allSwapTransactions.slice(0, deficitSwapInstructions.length);
-    const bufferSwaps = allSwapTransactions.slice(deficitSwapInstructions.length);
-    const deficitMetadata = allSwapMetadata.slice(0, deficitSwapInstructions.length);
-    const bufferMetadata = allSwapMetadata.slice(deficitSwapInstructions.length);
+    const { transactions: deficitSwaps, metadata: deficitMetadata } =
+      await adapter.batchSwapTransactions(deficitSwapInstructions, swapOptions);
 
     // Build wrap/unwrap result
     const wrapUnwrapResult = {
@@ -2779,7 +2650,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const wrapUnwrapSummary = hasWrapUnwrap
       ? `, wrap: ${ethers.utils.formatEther(wrapAmount)} ETH, unwrap: ${ethers.utils.formatEther(unwrapAmount)} WETH`
       : '';
-    this.log(`Generated ${deficitSwaps.length} deficit + ${bufferSwaps.length} buffer swap transactions${wrapUnwrapSummary}`);
+    this.log(`Generated ${deficitSwaps.length} deficit swap transactions${wrapUnwrapSummary}`);
 
     // Emit event
     this.eventManager.emit('TokenPreparationCompleted', {
@@ -2791,22 +2662,20 @@ export default class BabyStepsStrategy extends StrategyBase {
         token1: { symbol: token1Data.symbol, required: requiredToken1.toString(), available: availableToken1.toString(), deficit: token1Deficit.toString() }
       },
       preparationResult: 'swaps_generated',
-      swapTransactions: [...deficitSwaps, ...bufferSwaps],
+      swapTransactions: deficitSwaps,
       deficitSwapCount: deficitSwaps.length,
-      bufferSwapCount: bufferSwaps.length,
       wrapUnwrap: wrapUnwrapResult,
       nonAlignedTokensUsed: Array.from(nonAlignedTokensUsedForDeficit),
-      swapMetadata: { deficit: deficitMetadata, buffer: bufferMetadata },
+      swapMetadata: { deficit: deficitMetadata },
       phasesUsed,
       timestamp: Date.now(),
-      log: { level: 'info', message: `Generated ${deficitSwaps.length} deficit + ${bufferSwaps.length} buffer swap transactions${wrapUnwrapSummary}`, includeData: false }
+      log: { level: 'info', message: `Generated ${deficitSwaps.length} deficit swap transactions${wrapUnwrapSummary}`, includeData: false }
     });
 
     return {
       deficitSwaps,
-      bufferSwaps,
       wrapUnwrap: wrapUnwrapResult,
-      metadata: { deficit: deficitMetadata, buffer: bufferMetadata }
+      metadata: { deficit: deficitMetadata }
     };
   }
 

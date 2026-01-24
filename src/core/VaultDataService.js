@@ -648,13 +648,23 @@ class VaultDataService {
         const token0Formatted = ethers.utils.formatUnits(tokenAmounts[0], token0Data.decimals);
         const token1Formatted = ethers.utils.formatUnits(tokenAmounts[1], token1Data.decimals);
 
+        const token0Price = prices[poolMetadata.token0Symbol];
+        const token1Price = prices[poolMetadata.token1Symbol];
+
+        if (!token0Price || !token1Price || !Number.isFinite(token0Price) || !Number.isFinite(token1Price)) {
+          throw new Error(
+            `Missing or invalid prices for position ${positionId}: ` +
+            `${poolMetadata.token0Symbol}=${token0Price}, ${poolMetadata.token1Symbol}=${token1Price}`
+          );
+        }
+
         positions[positionId] = {
           token0Amount: tokenAmounts[0].toString(),
           token1Amount: tokenAmounts[1].toString(),
-          token0UsdValue: parseFloat(token0Formatted) * prices[poolMetadata.token0Symbol],
-          token1UsdValue: parseFloat(token1Formatted) * prices[poolMetadata.token1Symbol],
-          token0Price: prices[poolMetadata.token0Symbol],
-          token1Price: prices[poolMetadata.token1Symbol]
+          token0UsdValue: parseFloat(token0Formatted) * token0Price,
+          token1UsdValue: parseFloat(token1Formatted) * token1Price,
+          token0Price: token0Price,
+          token1Price: token1Price
         };
       }
 

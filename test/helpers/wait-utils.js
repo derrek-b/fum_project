@@ -13,7 +13,7 @@
 export async function waitForCondition(conditionFn, timeoutMs = 30000, pollMs = 100) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (conditionFn()) return true;
+    if (await conditionFn()) return true;
     await new Promise(r => setTimeout(r, pollMs));
   }
   throw new Error(`Condition not met within ${timeoutMs}ms`);

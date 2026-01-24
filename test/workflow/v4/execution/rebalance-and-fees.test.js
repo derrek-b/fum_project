@@ -18,7 +18,7 @@ import { setupV4TestBlockchain, cleanupV4TestBlockchain } from '../../../helpers
 import { setupV4TestVault } from '../../../helpers/v4-vault-setup.js';
 import {
   setupV4SwapWallet,
-  executeV4Swap,
+  executeV4PoolSwap,
   getV4PoolData,
   configureV4StrategyParameters,
   getV4TokenAddress
@@ -68,15 +68,13 @@ describe('V4 Rebalance and Fee Collection', () => {
     console.log(`V4 Test vault created: ${testVault.vaultAddress}`);
 
     // Configure strategy with parameters for testing:
-    // - Wide range to stay in-range during fee collection swaps
-    // - Moderate rebalance thresholds
+    // - Wide range (5%) to accommodate aggressive price swaps and ensure different bounds after rebalance
+    // - High emergency exit trigger (10%) to avoid triggering during test swaps
     // - Low fee trigger for testing
     await configureV4StrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
-      targetRangeUpper: 100,       // 1% range (wider so position stays in-range during fee swaps)
-      targetRangeLower: 100,
-      rebalanceThresholdUpper: 200, // 2% threshold for rebalance
-      rebalanceThresholdLower: 200,
-      emergencyExitTrigger: 500,   // 5% (high to avoid triggering)
+      targetRangeUpper: 500,       // 5% range (wide for aggressive test swaps)
+      targetRangeLower: 500,
+      emergencyExitTrigger: 1000,  // 10% (avoid triggering during aggressive swaps)
       reinvestmentTrigger: 100,    // $1.00 fee trigger (low for testing)
       reinvestmentRatio: 5000      // 50% to owner
     });
@@ -123,7 +121,7 @@ describe('V4 Rebalance and Fee Collection', () => {
       service.eventManager.subscribe('FeesCollected', (data) => {
         if (data.vaultAddress === testVault.vaultAddress) {
           feesCollectedEvents.push(data);
-          console.log(`🪙 FeesCollected: $${data.totalUsdValue?.toFixed(2) || 'N/A'}`);
+          console.log(`🪙 FeesCollected: $${data.totalUSD?.toFixed(2) || 'N/A'}`);
         }
       });
 
@@ -158,11 +156,13 @@ describe('V4 Rebalance and Fee Collection', () => {
         const isEthToUsdc = i % 2 === 0;
 
         try {
-          await executeV4Swap(testEnv, {
+          await executeV4PoolSwap(testEnv, {
             tokenIn: isEthToUsdc ? NATIVE_ETH : usdcAddress,
             tokenOut: isEthToUsdc ? usdcAddress : NATIVE_ETH,
             amountIn: isEthToUsdc ? ethSwapAmount : usdcSwapAmount,
             wallet: swapWallet.wallet,
+            fee: 500,        // Target the 500bp pool where position lives
+            tickSpacing: 10,
             slippage: 10
           });
 
@@ -195,10 +195,9 @@ describe('V4 Rebalance and Fee Collection', () => {
       expect(feeEvent.positionIds.length).toBeGreaterThan(0);
 
       // Verify fees were actually collected
-      if (feeEvent.totalUsdValue !== undefined) {
-        expect(feeEvent.totalUsdValue).toBeGreaterThan(0);
-        console.log(`Total V4 fees collected: $${feeEvent.totalUsdValue.toFixed(2)}`);
-      }
+      expect(feeEvent.totalUSD).toBeDefined();
+      expect(feeEvent.totalUSD).toBeGreaterThan(0);
+      console.log(`Total V4 fees collected: $${feeEvent.totalUSD.toFixed(2)}`);
 
       // Verify fee distribution occurred
       await waitForCondition(
@@ -207,11 +206,15 @@ describe('V4 Rebalance and Fee Collection', () => {
         500
       );
 
-      if (feesDistributedEvents.length > 0) {
-        const distEvent = feesDistributedEvents[0];
-        expect(distEvent.reinvestmentRatio).toBe(50); // 50% stored as percentage
-        console.log(`V4 Fee distribution: ${distEvent.distributions?.length || 0} tokens distributed`);
-      }
+      expect(feesDistributedEvents.length).toBeGreaterThan(0);
+      const distEvent = feesDistributedEvents[0];
+      expect(distEvent.reinvestmentRatio).toBe(50); // 50% stored as percentage
+      expect(distEvent.distributions).toBeDefined();
+      expect(distEvent.distributions.length).toBe(2); // ETH + USDC
+      expect(distEvent.failures).toBeDefined();
+      expect(distEvent.failures.length).toBe(0); // All distributions should succeed
+      expect(distEvent.totalTokensFailed).toBe(0);
+      console.log(`V4 Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`);
 
       console.log('✅ V4 Fee collection test passed');
     }, 180000);
@@ -234,7 +237,7 @@ describe('V4 Rebalance and Fee Collection', () => {
       service.eventManager.subscribe('PositionsClosed', (data) => {
         if (data.vaultAddress === testVault.vaultAddress) {
           positionsClosedEvents.push(data);
-          console.log(`❌ PositionsClosed: ${data.positionIds?.length || 0} positions`);
+          console.log(`❌ PositionsClosed: ${data.closedCount || 0} positions`);
         }
       });
 
@@ -255,8 +258,11 @@ describe('V4 Rebalance and Fee Collection', () => {
       const initialTickLower = initialPosition.tickLower;
       const initialTickUpper = initialPosition.tickUpper;
       const initialPositionId = initialPosition.id;
-      console.log(`Initial V4 position: ${initialPositionId}`);
-      console.log(`Initial V4 position range: ${initialTickLower} to ${initialTickUpper}`);
+      console.log(`\n🔍 [TEST] ========== INITIAL STATE ==========`);
+      console.log(`   Position ID: ${initialPositionId}`);
+      console.log(`   Tick Range: ${initialTickLower} to ${initialTickUpper}`);
+      console.log(`   Current Tick: ${initialPosition.currentTick || 'N/A'}`);
+      console.log(`==========================================\n`);
 
       // Get token addresses
       const usdcAddress = getV4TokenAddress('USDC', 1337);
@@ -276,17 +282,20 @@ describe('V4 Rebalance and Fee Collection', () => {
         }
 
         try {
-          await executeV4Swap(testEnv, {
+          await executeV4PoolSwap(testEnv, {
             tokenIn: NATIVE_ETH,
             tokenOut: usdcAddress,
             amountIn: swapAmount,
             wallet: swapWallet.wallet,
+            fee: 500,        // Target the 500bp pool where position lives
+            tickSpacing: 10,
             slippage: 100 // High slippage for aggressive price movement
           });
 
           // Get current tick
           const poolData = await getV4PoolData(testEnv, NATIVE_ETH, usdcAddress, 500, 10);
-          console.log(`  Swap ${i + 1}: current tick = ${poolData.tick}`);
+          const tickDelta = poolData.tick - (initialPosition.currentTick || poolData.tick);
+          console.log(`  Swap ${i + 1}: current tick = ${poolData.tick} (delta from initial: ${tickDelta})`);
 
           // Wait for event processing
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -314,7 +323,10 @@ describe('V4 Rebalance and Fee Collection', () => {
       expect(positionsClosedEvents.length).toBeGreaterThan(0);
       const closedEvent = positionsClosedEvents[0];
       expect(closedEvent.vaultAddress).toBe(testVault.vaultAddress);
-      expect(closedEvent.positionIds).toContain(initialPosition.id);
+      expect(closedEvent.closedPositions).toBeDefined();
+      expect(closedEvent.closedPositions.length).toBeGreaterThan(0);
+      const closedPositionIds = closedEvent.closedPositions.map(p => p.positionId);
+      expect(closedPositionIds).toContain(initialPosition.id);
 
       // Verify new position was created
       await waitForCondition(
@@ -334,7 +346,17 @@ describe('V4 Rebalance and Fee Collection', () => {
       expect(updatedPositions.length).toBe(1);
 
       const newPosition = updatedPositions[0];
-      console.log(`New V4 position range: ${newPosition.tickLower} to ${newPosition.tickUpper}`);
+      console.log(`\n🔍 [TEST] ========== FINAL STATE ==========`);
+      console.log(`   Position ID: ${newPosition.id}`);
+      console.log(`   Tick Range: ${newPosition.tickLower} to ${newPosition.tickUpper}`);
+      console.log(`   Current Tick: ${newPosition.currentTick || 'N/A'}`);
+      console.log(`==========================================`);
+      console.log(`\n🔍 [TEST] ========== COMPARISON ==========`);
+      console.log(`   OLD Position: ${initialPositionId} [${initialTickLower}, ${initialTickUpper}]`);
+      console.log(`   NEW Position: ${newPosition.id} [${newPosition.tickLower}, ${newPosition.tickUpper}]`);
+      console.log(`   TickLower changed: ${initialTickLower !== newPosition.tickLower} (${initialTickLower} → ${newPosition.tickLower})`);
+      console.log(`   TickUpper changed: ${initialTickUpper !== newPosition.tickUpper} (${initialTickUpper} → ${newPosition.tickUpper})`);
+      console.log(`==========================================\n`);
 
       // Verify the new position has different tick bounds (centered on new price)
       expect(newPosition.tickLower).not.toBe(initialTickLower);

@@ -16,7 +16,7 @@ import { setupV4TestBlockchain, cleanupV4TestBlockchain } from '../../../helpers
 import { setupV4TestVault } from '../../../helpers/v4-vault-setup.js';
 import {
   setupV4SwapWallet,
-  executeV4Swap,
+  executeV4PoolSwap,
   getV4PoolData,
   configureV4StrategyParameters,
   getV4TokenAddress
@@ -43,8 +43,9 @@ describe('V4 Emergency Exit', () => {
       usdcAmount: '0' // No USDC needed - we'll swap ETH -> USDC
     });
 
-    // Create test vault with V4 position
-    console.log('Creating V4 test vault...');
+    // Create test vault with NO positions - service will create one during setup
+    // This avoids Graph indexing delay issues (same pattern as BS-0010-v4 and rebalance-and-fees)
+    console.log('Creating V4 test vault (no initial positions)...');
     testVault = await setupV4TestVault(
       testEnv.hardhatServer,
       testEnv.contracts,
@@ -53,16 +54,9 @@ describe('V4 Emergency Exit', () => {
         vaultName: 'V4 Emergency Exit Test Vault',
         automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         nativeEthAmount: '10',
-        nativeEthToVault: '0',
-        swapTokens: [{ from: 'ETH', to: 'USDC', amount: '5' }],
-        positions: [{
-          token0: 'ETH',
-          token1: 'USDC',
-          fee: 500,
-          tickSpacing: 10,
-          percentOfAssets: 90,
-          tickRange: { type: 'centered', spacing: 5 }
-        }],
+        nativeEthToVault: '20', // V4 needs ETH for deficit swap + position msg.value
+        swapTokens: [], // No pre-swaps
+        positions: [], // NO positions - service will create during setupVault
         tokenTransfers: {},
         targetTokens: ['ETH', 'USDC'],
         targetPlatforms: ['uniswapV4'],
@@ -71,15 +65,16 @@ describe('V4 Emergency Exit', () => {
     );
     console.log(`V4 Emergency Exit test vault created: ${testVault.vaultAddress}`);
 
-    // Configure strategy with VERY LOW emergency exit trigger
+    // Configure strategy parameters for emergency exit testing:
+    // - Moderate range (2%) to accommodate some price movement
+    // - Low emergency exit trigger (3%) to trigger quickly during aggressive swaps
+    // - High reinvestment trigger to avoid fee collection interference
     await configureV4StrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
-      targetRangeUpper: 25,        // 0.25% range
-      targetRangeLower: 25,
-      rebalanceThresholdUpper: 150, // 1.5%
-      rebalanceThresholdLower: 150,
-      emergencyExitTrigger: 50,    // 0.5% - VERY TIGHT for testing
+      targetRangeUpper: 200,       // 2% range
+      targetRangeLower: 200,
+      emergencyExitTrigger: 300,   // 3% emergency exit trigger (triggers quickly for test)
       reinvestmentTrigger: 1000,   // $10 (high to avoid interference)
-      reinvestmentRatio: 5000
+      reinvestmentRatio: 5000      // 50% to owner
     });
 
     // Initialize and start automation service
@@ -94,6 +89,18 @@ describe('V4 Emergency Exit', () => {
       500
     );
     console.log('V4 Vault discovered by service');
+
+    // Wait for service to create position (setupVault flow)
+    await waitForCondition(
+      async () => {
+        const vault = await service.vaultDataService.getVault(testVault.vaultAddress);
+        const positions = Object.values(vault.positions || {});
+        return positions.length > 0;
+      },
+      60000,
+      1000
+    );
+    console.log('V4 Position created by service');
   }, 180000);
 
   afterAll(async () => {
@@ -141,11 +148,13 @@ describe('V4 Emergency Exit', () => {
     const massiveSwapAmount = ethers.utils.parseEther('550'); // 550 ETH
 
     try {
-      await executeV4Swap(testEnv, {
+      await executeV4PoolSwap(testEnv, {
         tokenIn: NATIVE_ETH,
         tokenOut: usdcAddress,
         amountIn: massiveSwapAmount,
         wallet: swapWallet.wallet,
+        fee: 500,        // Target the 500bp pool where position lives
+        tickSpacing: 10,
         slippage: 100 // 100% slippage tolerance for massive swap
       });
       console.log('Massive V4 swap completed');

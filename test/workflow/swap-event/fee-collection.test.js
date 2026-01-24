@@ -114,7 +114,7 @@ describe('Fee Collection Trigger', () => {
     service.eventManager.subscribe('FeesCollected', (data) => {
       if (data.vaultAddress === testVault.vaultAddress) {
         feesCollectedEvents.push(data);
-        console.log(`FeesCollected event: $${data.totalUsdValue?.toFixed(2) || 'N/A'}`);
+        console.log(`FeesCollected event: $${data.totalUSD?.toFixed(2) || 'N/A'}`);
       }
     });
 
@@ -178,12 +178,9 @@ describe('Fee Collection Trigger', () => {
     expect(feeEvent.source).toBe('swap_threshold');
     expect(feeEvent.positionIds).toBeDefined();
     expect(feeEvent.positionIds.length).toBeGreaterThan(0);
-
-    // Verify fees were actually collected
-    if (feeEvent.totalUsdValue !== undefined) {
-      expect(feeEvent.totalUsdValue).toBeGreaterThan(0);
-      console.log(`Total fees collected: $${feeEvent.totalUsdValue.toFixed(2)}`);
-    }
+    expect(feeEvent.totalUSD).toBeDefined();
+    expect(feeEvent.totalUSD).toBeGreaterThan(0);
+    console.log(`Total fees collected: $${feeEvent.totalUSD.toFixed(2)}`);
 
     // Verify fee distribution occurred (since reinvestmentRatio is 50%)
     await waitForCondition(
@@ -192,11 +189,15 @@ describe('Fee Collection Trigger', () => {
       500
     );
 
-    if (feesDistributedEvents.length > 0) {
-      const distEvent = feesDistributedEvents[0];
-      expect(distEvent.reinvestmentRatio).toBe(50); // 50% stored as percentage
-      console.log(`Fee distribution: ${distEvent.distributions?.length || 0} tokens distributed to owner`);
-    }
+    expect(feesDistributedEvents.length).toBeGreaterThan(0);
+    const distEvent = feesDistributedEvents[0];
+    expect(distEvent.reinvestmentRatio).toBe(50); // 50% stored as percentage
+    expect(distEvent.distributions).toBeDefined();
+    expect(distEvent.distributions.length).toBe(2); // USDC + WETH (as ETH)
+    expect(distEvent.failures).toBeDefined();
+    expect(distEvent.failures.length).toBe(0); // All distributions should succeed
+    expect(distEvent.totalTokensFailed).toBe(0);
+    console.log(`Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`)
 
     console.log('Fee collection test passed');
   }, 180000);

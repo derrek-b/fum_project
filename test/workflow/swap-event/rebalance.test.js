@@ -133,7 +133,7 @@ describe('Position Rebalancing', () => {
     service.eventManager.subscribe('PositionsClosed', (data) => {
       if (data.vaultAddress === testVault.vaultAddress) {
         positionsClosedEvents.push(data);
-        console.log(`PositionsClosed: ${data.positionIds?.length || 0} positions`);
+        console.log(`PositionsClosed: ${data.closedCount || 0} positions`);
       }
     });
 
