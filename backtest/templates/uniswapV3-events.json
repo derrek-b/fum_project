@@ -1,0 +1,18 @@
+{
+  "_comment": "Template for Uniswap V3 event data collection (swaps, mints, burns). startTimestamp is 1767225600 (2026-01-01T00:00:00 UTC)",
+  "metadata": {
+    "poolAddress": "0x...",
+    "platform": "uniswapV3",
+    "chainId": 42161,
+    "token0": "TOKEN0",
+    "token1": "TOKEN1",
+    "fee": 500,
+    "startBlock": null,
+    "endBlock": null,
+    "startTimestamp": 1767225600,
+    "endTimestamp": null,
+    "totalEvents": 0,
+    "collectedAt": null
+  },
+  "events": []
+}

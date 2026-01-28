@@ -5,6 +5,7 @@
 **/.claude/settings.local.json
 node_modules
 
+/artifacts/
 /bytecode/
 /dist/
 
@@ -22,3 +23,9 @@ cache/
 
 # Test artifacts
 test/.hardhat-state.json
+
+# Backtest data and reports (keep directory structure with .gitkeep)
+/backtest/data/*
+!/backtest/data/.gitkeep
+/backtest/reports/*
+!/backtest/reports/.gitkeep

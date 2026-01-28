@@ -9,7 +9,7 @@ export default defineConfig({
     globalSetup: './test/global-setup.js',
     // Per-file setup - loads env vars, initializes fum_library
     setupFiles: ['./test/setup.js'],
-    include: ['./test/**/*.test.js'],
+    include: ['./test/**/*.test.js', './backtest/**/*.js'],
     testTimeout: 30000, // 30 seconds for integration tests
     hookTimeout: 30000, // 30 seconds for setup/teardown
     teardownTimeout: 5000, // 5 seconds for teardown (reduces hanging wait)

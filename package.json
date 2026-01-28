@@ -14,7 +14,18 @@
     "setup:dev": "npm install --include=dev --include=optional",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "collect:events:weth-usdc": "node backtest/collectors/collect-v3-events.js --chain 42161 --tokens WETH USDC --fee 500",
+    "collect:events:weth-usdc:reverse": "node backtest/collectors/collect-v3-events.js --chain 42161 --tokens WETH USDC --fee 500 --reverse --runs 30",
+    "collect:prices:eth": "node backtest/collectors/collect-prices.js ETH",
+    "collect:prices:eth:reverse": "node backtest/collectors/collect-prices.js ETH --reverse",
+    "collect:prices:usdc": "node backtest/collectors/collect-prices.js USDC",
+    "collect:prices:usdc:reverse": "node backtest/collectors/collect-prices.js USDC --reverse",
+    "encode:weth-usdc": "node backtest/encoders/encode-v3-calldata.js --chain 42161 --tokens WETH USDC --fee 500",
+    "discover:slots": "vitest run backtest/discover-slots.js",
+    "backtest:setup": "node backtest/runners/setup-v3-backtest.js --chain 42161 --tokens WETH USDC --fee 500",
+    "backtest:replay": "node backtest/runners/replay-v3-events.js --chain 42161 --tokens WETH USDC --fee 500",
+    "backtest:run": "node backtest/runners/run-v3-backtest.js --chain 42161 --tokens WETH USDC --fee 500"
   },
   "dependencies": {
     "@uniswap/permit2-sdk": "^1.4.0",

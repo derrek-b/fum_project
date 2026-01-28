@@ -1,0 +1,20 @@
+{
+  "_comment": "Template for Uniswap V4 swap data collection. startTimestamp is 1767225600 (2026-01-01T00:00:00 UTC)",
+  "metadata": {
+    "poolId": "0x...",
+    "platform": "uniswapV4",
+    "chainId": 42161,
+    "currency0": "TOKEN0",
+    "currency1": "TOKEN1",
+    "fee": 500,
+    "tickSpacing": 10,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "startBlock": null,
+    "endBlock": null,
+    "startTimestamp": 1767225600,
+    "endTimestamp": null,
+    "totalSwaps": 0,
+    "collectedAt": null
+  },
+  "swaps": []
+}
