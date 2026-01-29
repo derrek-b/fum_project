@@ -156,6 +156,7 @@ describe("VaultFactory - 2.0.0", function() {
       expect(vaultInfo[0]).to.equal(user1.address); // owner
       expect(vaultInfo[1]).to.equal("My First Vault"); // name
       expect(vaultInfo[2]).to.be.gt(0); // creation time
+      expect(vaultInfo[3]).to.be.gt(0); // creation block
 
       // Verify the vault contract has the correct owner and factory
       const vault = await ethers.getContractAt("PositionVault", vaultAddress);
