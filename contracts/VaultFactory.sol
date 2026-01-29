@@ -29,6 +29,7 @@ contract VaultFactory is Ownable {
         address owner;
         string name;
         uint256 creationTime;
+        uint256 creationBlock;
     }
     mapping(address => VaultInfo) public vaultInfo;
 
@@ -174,7 +175,8 @@ contract VaultFactory is Ownable {
         vaultInfo[vault] = VaultInfo({
             owner: msg.sender,
             name: name,
-            creationTime: block.timestamp
+            creationTime: block.timestamp,
+            creationBlock: block.number
         });
 
         // Add to global registry
@@ -215,14 +217,16 @@ contract VaultFactory is Ownable {
      * @return owner Owner of the vault
      * @return name Name of the vault
      * @return creationTime Timestamp when the vault was created
+     * @return creationBlock Block number when the vault was created
      */
     function getVaultInfo(address vault) external view returns (
         address owner,
         string memory name,
-        uint256 creationTime
+        uint256 creationTime,
+        uint256 creationBlock
     ) {
         VaultInfo memory info = vaultInfo[vault];
-        return (info.owner, info.name, info.creationTime);
+        return (info.owner, info.name, info.creationTime, info.creationBlock);
     }
 
     /**

@@ -17,14 +17,16 @@ const OUTPUT_DIR = path.join(__dirname, '../bytecode');
 const CONTRACTS_TO_EXTRACT = [
   'VaultFactory',
   'PositionVault',
-  'BabyStepsStrategy'
+  'BabyStepsStrategy',
+  'TJPositionManager'
 ];
 
 // Validators to extract (in validators/ subdirectory)
 const VALIDATORS_TO_EXTRACT = [
   'UniversalRouterValidator',
   'UniswapV3PositionValidator',
-  'UniswapV4PositionValidator'
+  'UniswapV4PositionValidator',
+  'TJPositionValidator'
 ];
 
 // Debug logging

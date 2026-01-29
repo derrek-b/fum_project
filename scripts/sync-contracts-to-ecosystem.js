@@ -19,14 +19,16 @@ const __dirname = path.dirname(__filename);
 const CORE_CONTRACTS = [
   'BabyStepsStrategy',
   'VaultFactory',
-  'PositionVault'
+  'PositionVault',
+  'TJPositionManager'
 ];
 
 // Validator contracts (from validators/ subdirectory)
 const VALIDATOR_CONTRACTS = [
   'UniversalRouterValidator',
   'UniswapV3PositionValidator',
-  'UniswapV4PositionValidator'
+  'UniswapV4PositionValidator',
+  'TJPositionValidator'
 ];
 
 // Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)

@@ -18,9 +18,11 @@ const contractMapping = {
   'BabyStepsStrategy.sol': 'bob',
   'PositionVault.sol': 'PositionVault',
   'VaultFactory.sol': 'VaultFactory',
+  'TJPositionManager.sol': 'TJPositionManager',
   'validators/UniversalRouterValidator.sol': 'UniversalRouterValidator',
   'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator',
-  'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator'
+  'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator',
+  'validators/TJPositionValidator.sol': 'TJPositionValidator'
 };
 
 // List of contracts to extract ABIs from
