@@ -35,6 +35,12 @@ const chains = {
         // V4 uses UniversalRouter for swaps (shared with V3)
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
       },
+      traderjoeV2_1: {
+        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
+        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
+        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
+        positionManagerAddress: "",  // Populated after deployment
+      },
     },
   },
 
@@ -67,6 +73,13 @@ const chains = {
         stateViewAddress: "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
         quoterAddress: "0x3972c00f7ed4885e145823eb7c655375d275a1c5",
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
+      },
+      traderjoeV2_1: {
+        // Same as Arbitrum since it's a fork
+        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
+        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
+        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
+        positionManagerAddress: "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",  // Populated per test run after TJPositionManager deployment
       },
     },
   },

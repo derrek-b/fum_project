@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.0",
+    "@traderjoe-xyz/sdk-v2": "^3.0.30",
     "@uniswap/sdk-core": "^5.9.0",
     "@uniswap/smart-order-router": "^4.7.7",
     "@uniswap/v3-core": "^1.0.1",

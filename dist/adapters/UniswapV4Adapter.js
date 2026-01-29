@@ -82,7 +82,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     super(chainId, "uniswapV4", "Uniswap V4");
 
     // Cache platform addresses (getPlatformAddresses throws if not configured)
-    this.addresses = getPlatformAddresses(chainId, "uniswapV4");
+    this.addresses = { ...getPlatformAddresses(chainId, "uniswapV4") };
 
     // Cache platform configuration data
     this.tickBounds = getPlatformTickBounds("uniswapV4");

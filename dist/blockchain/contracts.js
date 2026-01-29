@@ -310,7 +310,7 @@ export async function getAuthorizedVaults(executorAddress, provider) {
  * Gets information about a vault
  * @param {string} vaultAddress - Address of the vault
  * @param {ethers.JsonRpcProvider} provider - Ethers provider
- * @returns {Promise<{owner: string, name: string, creationTime: number}>} Vault information
+ * @returns {Promise<{owner: string, name: string, creationTime: number, creationBlock: number}>} Vault information
  */
 export async function getVaultInfo(vaultAddress, provider) {
   // Validate vault address
@@ -327,12 +327,13 @@ export async function getVaultInfo(vaultAddress, provider) {
   const factory = await getVaultFactory(provider);
 
   try {
-    const [owner, name, creationTime] = await factory.getVaultInfo(vaultAddress);
+    const [owner, name, creationTime, creationBlock] = await factory.getVaultInfo(vaultAddress);
 
     return {
       owner,
       name,
-      creationTime: Number(creationTime)
+      creationTime: Number(creationTime),
+      creationBlock: Number(creationBlock)
     };
   } catch (error) {
     throw new Error(`Failed to get vault info: ${error.message}`);

@@ -12,6 +12,7 @@ import AdapterFactory from './AdapterFactory.js';
 export { default as PlatformAdapter } from './PlatformAdapter.js';
 export { default as UniswapV3Adapter } from './UniswapV3Adapter.js';
 export { default as UniswapV4Adapter } from './UniswapV4Adapter.js';
+export { default as TraderJoeV2_1Adapter } from './TraderJoeV2_1Adapter.js';
 export { AdapterFactory };
 
 // Export a convenience function to get all adapters for a chain

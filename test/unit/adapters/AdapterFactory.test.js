@@ -44,10 +44,10 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(result).toHaveProperty('failures');
         expect(Array.isArray(result.adapters)).toBe(true);
         expect(Array.isArray(result.failures)).toBe(true);
-        expect(result.adapters.length).toBe(2);
+        expect(result.adapters.length).toBe(3); // V3, V4, and Trader Joe V2.1
         expect(result.failures.length).toBe(0);
 
-        // Check for both V3 and V4 adapters
+        // Check for V3 and V4 adapters
         const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
         const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
         expect(v3Adapter).toBeDefined();
@@ -76,10 +76,10 @@ describe('AdapterFactory - Unit Tests', () => {
         const result = AdapterFactory.getAdaptersForChain(1337, mockProvider);
 
         expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(2);
+        expect(result.adapters.length).toBe(3); // V3, V4, and Trader Joe V2.1 (Arbitrum fork)
         expect(result.failures.length).toBe(0);
 
-        // Check for both V3 and V4 adapters
+        // Check for V3 and V4 adapters
         const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
         const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
         expect(v3Adapter).toBeDefined();
@@ -98,11 +98,11 @@ describe('AdapterFactory - Unit Tests', () => {
         // Register a failing adapter
         AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
 
-        // Test with a chain that has uniswapV3 and uniswapV4
+        // Test with a chain that has uniswapV3, uniswapV4, and traderjoeV2_1
         const result = AdapterFactory.getAdaptersForChain(42161, mockProvider);
 
-        // Should still get the working uniswapV3 and uniswapV4 adapters
-        expect(result.adapters.length).toBe(2);
+        // Should still get the working adapters (V3, V4, Trader Joe V2.1)
+        expect(result.adapters.length).toBe(3);
         const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
         const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
         expect(v3Adapter).toBeDefined();

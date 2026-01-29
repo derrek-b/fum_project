@@ -80,7 +80,21 @@ const platforms = {
       }    // Local fork (uses Arbitrum subgraph)
     },
   },
-  // Add other platforms here as needed
+  traderjoeV2_1: {
+    id: "traderjoeV2_1",
+    name: "Trader Joe V2.1",
+    logo: "/Platform_Logos/traderjoe.svg",
+    color: "#E53E3E",
+    description: "Trader Joe V2.1 Liquidity Book positions",
+    features: {
+      concentratedLiquidity: true,
+      binBasedLiquidity: true,
+    },
+    // Note: Bin step is a per-pool parameter (like V4's flexible fees/tickSpacing),
+    // not a fixed set of tiers. We get it from pool data, not config.
+    // Pool discovery uses LBFactory.getAllLBPairs() on-chain queries
+    // (more reliable than subgraph - no migration/availability issues)
+  },
 };
 
 export { platforms };

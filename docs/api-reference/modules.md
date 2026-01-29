@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-23T21:14:24.522Z
+Generated on: 2026-01-29T21:56:52.051Z
 
 ## Table of Contents
 
@@ -26,6 +26,7 @@ Generated on: 2026-01-23T21:14:24.522Z
 
 **Imports:**
 - from `../helpers/chainHelpers.js`
+- from `./TraderJoeV2_1Adapter.js`
 - from `./UniswapV3Adapter.js`
 - from `./UniswapV4Adapter.js`
 
@@ -51,6 +52,7 @@ Adapter system for DeFi platforms
 - `PlatformAdapter` (class) (from `./PlatformAdapter.js`)
 - `UniswapV3Adapter` (class) (from `./UniswapV3Adapter.js`)
 - `UniswapV4Adapter` (class) (from `./UniswapV4Adapter.js`)
+- `TraderJoeV2_1Adapter` (class) (from `./TraderJoeV2_1Adapter.js`)
 
 ---
 
@@ -62,6 +64,25 @@ Base class for DeFi platform adapters.
 
 **Exports:**
 - default: `PlatformAdapter` (class)
+
+---
+
+### TraderJoeV2_1Adapter.js
+
+Adapter for Trader Joe V2.1 Liquidity Book on Arbitrum
+
+**Path:** `src/adapters/TraderJoeV2_1Adapter.js`
+
+**Imports:**
+- from `../helpers/chainHelpers.js`
+- from `../helpers/tokenHelpers.js`
+- from `./PlatformAdapter.js`
+- from `@openzeppelin/contracts/build/contracts/ERC20.json`
+- from `@traderjoe-xyz/sdk-v2`
+- from `ethers`
+
+**Exports:**
+- default: `TraderJoeV2_1Adapter` (class)
 
 ---
 

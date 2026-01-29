@@ -6,6 +6,7 @@
 // fum_library/adapters/AdapterFactory.js
 import UniswapV3Adapter from "./UniswapV3Adapter.js";
 import UniswapV4Adapter from "./UniswapV4Adapter.js";
+import TraderJoeV2_1Adapter from "./TraderJoeV2_1Adapter.js";
 import { getChainConfig, lookupChainPlatformIds } from "../helpers/chainHelpers.js";
 
 /**
@@ -22,8 +23,7 @@ export default class AdapterFactory {
   static #PLATFORM_ADAPTERS = {
     uniswapV3: UniswapV3Adapter,
     uniswapV4: UniswapV4Adapter,
-    // Add more adapters here as they are implemented
-    // Example: sushiswap: SushiswapAdapter,
+    traderjoeV2_1: TraderJoeV2_1Adapter,
   };
 
   /**

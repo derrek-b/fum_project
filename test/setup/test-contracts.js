@@ -20,6 +20,8 @@ const BYTECODE_DIR = path.join(__dirname, '../../bytecode');
 const BLOCKCHAIN_CONTRACTS_FILE = path.join(__dirname, '../../src/blockchain/contracts.js');
 const ARTIFACTS_CONTRACTS_FILE = path.join(__dirname, '../../src/artifacts/contracts.js');
 const DIST_ARTIFACTS_CONTRACTS_FILE = path.join(__dirname, '../../dist/artifacts/contracts.js');
+const SRC_CHAINS_FILE = path.join(__dirname, '../../src/configs/chains.js');
+const DIST_CHAINS_FILE = path.join(__dirname, '../../dist/configs/chains.js');
 
 /**
  * Load contract bytecode from file
@@ -136,6 +138,40 @@ async function validateDeterministicAddresses(actualAddresses) {
 }
 
 /**
+ * Update chains.js config with a deployed address
+ * @param {number} chainId - Chain ID to update
+ * @param {string} platformId - Platform key (e.g. 'traderjoeV2_1')
+ * @param {string} key - Address key to update (e.g. 'positionManagerAddress')
+ * @param {string} value - The address value to set
+ */
+async function updateChainsConfig(chainId, platformId, key, value) {
+  const files = [SRC_CHAINS_FILE, DIST_CHAINS_FILE];
+
+  for (const filePath of files) {
+    if (!fs.existsSync(filePath)) {
+      console.warn(`Chains file not found at ${filePath}`);
+      continue;
+    }
+
+    let content = fs.readFileSync(filePath, 'utf8');
+
+    // Find the chainId block, then the platformId block within it, then update the key
+    // Pattern: find `chainId: {` ... `platformId: {` ... `key: "..."` and replace the value
+    const pattern = new RegExp(
+      `(${chainId}:\\s*\\{[\\s\\S]*?${platformId}:\\s*\\{[\\s\\S]*?${key}:\\s*)"[^"]*"`,
+    );
+
+    if (pattern.test(content)) {
+      content = content.replace(pattern, `$1"${value}"`);
+      fs.writeFileSync(filePath, content);
+      console.log(`  Updated ${key} in ${platformId} for chain ${chainId} in ${path.basename(filePath)}: ${value}`);
+    } else {
+      console.warn(`  Could not find ${key} in ${platformId} for chain ${chainId} in ${path.basename(filePath)}`);
+    }
+  }
+}
+
+/**
  * Deploy all FUM contracts
  * @param {ethers.Signer} deployer - Signer to deploy with
  * @param {Object} config - Deployment configuration
@@ -198,6 +234,28 @@ export async function deployFUMContracts(deployer, config = {}) {
       console.log(`  ✅ UniswapV4PositionValidator registered for ${v4PositionManagerAddress}`);
     } catch (e) {
       console.log(`  ⚠️ V4 not configured for chainId ${chainId}, skipping V4 validator registration`);
+    }
+
+    // Deploy TJ position manager and validator
+    try {
+      const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_1');
+      contracts.tjPositionManager = await deployContract(deployer, 'TJPositionManager', [
+        tjAddresses.lbRouterAddress
+      ]);
+      contracts.tjPositionValidator = await deployContract(deployer, 'TJPositionValidator');
+
+      // Register TJ validator with factory
+      await contracts.vaultFactory.setLiquidityValidator(
+        contracts.tjPositionManager.address,
+        contracts.tjPositionValidator.address
+      );
+      console.log(`  ✅ TJPositionValidator registered for ${contracts.tjPositionManager.address}`);
+
+      // Save TJPositionManager address to chains config so adapter can find it
+      await updateChainsConfig(chainId, 'traderjoeV2_1', 'positionManagerAddress',
+        contracts.tjPositionManager.address);
+    } catch (e) {
+      console.log(`  ⚠️ Trader Joe V2.1 not configured for chainId ${chainId}, skipping TJ deployment`);
     }
 
     // Deploy strategies (no constructor args)
@@ -294,7 +352,9 @@ function mapContractName(contractName) {
     'PositionVault': 'PositionVault',
     'UniversalRouterValidator': 'UniversalRouterValidator',
     'UniswapV3PositionValidator': 'UniswapV3PositionValidator',
-    'UniswapV4PositionValidator': 'UniswapV4PositionValidator'
+    'UniswapV4PositionValidator': 'UniswapV4PositionValidator',
+    'TJPositionManager': 'TJPositionManager',
+    'TJPositionValidator': 'TJPositionValidator'
   };
 
   return nameMap[contractName] || contractName;

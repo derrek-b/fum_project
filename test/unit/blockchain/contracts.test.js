@@ -360,6 +360,7 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaultInfo.name).toBe(vaultName);
         expect(vaultInfo.owner).toBe(signer.address);
         expect(vaultInfo.creationTime).toBeGreaterThan(0);
+        expect(vaultInfo.creationBlock).toBeGreaterThan(0);
       });
 
 
@@ -939,6 +940,7 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaultInfo).toHaveProperty('owner');
         expect(vaultInfo).toHaveProperty('name');
         expect(vaultInfo).toHaveProperty('creationTime');
+        expect(vaultInfo).toHaveProperty('creationBlock');
 
         // Check values
         expect(vaultInfo.owner).toBe(env.signers[0].address);
@@ -946,6 +948,8 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaultInfo.name.length).toBeGreaterThan(0);
         expect(typeof vaultInfo.creationTime).toBe('number');
         expect(vaultInfo.creationTime).toBeGreaterThan(0);
+        expect(typeof vaultInfo.creationBlock).toBe('number');
+        expect(vaultInfo.creationBlock).toBeGreaterThan(0);
       });
 
       it('should return correct owner address', async () => {
@@ -991,12 +995,15 @@ describe('contracts.js - Unit Tests', () => {
         expect(typeof vaultInfo.owner).toBe('string');
         expect(typeof vaultInfo.name).toBe('string');
         expect(typeof vaultInfo.creationTime).toBe('number');
+        expect(typeof vaultInfo.creationBlock).toBe('number');
 
         // Content validations
         expect(vaultInfo.owner).toMatch(/^0x[a-fA-F0-9]{40}$/);
         expect(vaultInfo.name.length).toBeGreaterThan(0);
         expect(vaultInfo.creationTime).toBeGreaterThan(0);
         expect(Number.isInteger(vaultInfo.creationTime)).toBe(true);
+        expect(vaultInfo.creationBlock).toBeGreaterThan(0);
+        expect(Number.isInteger(vaultInfo.creationBlock)).toBe(true);
       });
     });
 

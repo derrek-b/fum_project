@@ -710,7 +710,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
+      "1337": "0xF22F82759Bf999fFDBBcea0FE457C83353311f65",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -1705,6 +1705,11 @@
             "internalType": "uint256",
             "name": "creationTime",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "creationBlock",
+            "type": "uint256"
           }
         ],
         "stateMutability": "view",
@@ -2090,6 +2095,11 @@
             "internalType": "uint256",
             "name": "creationTime",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "creationBlock",
+            "type": "uint256"
           }
         ],
         "stateMutability": "view",
@@ -2100,6 +2110,363 @@
       "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
+  },
+  "TJPositionManager": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_lbRouter",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+      },
+      {
+        "inputs": [],
+        "name": "ReentrancyGuardReentrantCall",
+        "type": "error"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          }
+        ],
+        "name": "SafeERC20FailedOperation",
+        "type": "error"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256[]",
+            "name": "depositIds",
+            "type": "uint256[]"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256[]",
+            "name": "liquidityMinted",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "PositionCreated",
+        "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "activeIdDesired",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "idSlippage",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256[]",
+            "name": "deltaIds",
+            "type": "int256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "distributionX",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "distributionY",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "name": "createPosition",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          }
+        ],
+        "name": "getPosition",
+        "outputs": [
+          {
+            "components": [
+              {
+                "internalType": "address",
+                "name": "vault",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "lbPair",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "tokenX",
+                "type": "address"
+              },
+              {
+                "internalType": "address",
+                "name": "tokenY",
+                "type": "address"
+              },
+              {
+                "internalType": "uint16",
+                "name": "binStep",
+                "type": "uint16"
+              },
+              {
+                "internalType": "uint256[]",
+                "name": "depositIds",
+                "type": "uint256[]"
+              },
+              {
+                "internalType": "uint256[]",
+                "name": "liquidityMinted",
+                "type": "uint256[]"
+              },
+              {
+                "internalType": "uint256",
+                "name": "createdAt",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bool",
+                "name": "active",
+                "type": "bool"
+              }
+            ],
+            "internalType": "struct TJPositionManager.Position",
+            "name": "",
+            "type": "tuple"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "getPositionCount",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "getPositionsByVault",
+        "outputs": [
+          {
+            "internalType": "uint256[]",
+            "name": "",
+            "type": "uint256[]"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "lbRouter",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          }
+        ],
+        "name": "onERC1155BatchReceived",
+        "outputs": [
+          {
+            "internalType": "bytes4",
+            "name": "",
+            "type": "bytes4"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          }
+        ],
+        "name": "onERC1155Received",
+        "outputs": [
+          {
+            "internalType": "bytes4",
+            "name": "",
+            "type": "bytes4"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes4",
+            "name": "interfaceId",
+            "type": "bytes4"
+          }
+        ],
+        "name": "supportsInterface",
+        "outputs": [
+          {
+            "internalType": "bool",
+            "name": "",
+            "type": "bool"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      }
+    ],
+    "addresses": {}
   },
   "UniversalRouterValidator": {
     "abi": [
@@ -2285,6 +2652,101 @@
           {
             "internalType": "address",
             "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "validateIncreaseLiquidity",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "validateMint",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      }
+    ],
+    "addresses": {}
+  },
+  "TJPositionValidator": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "validateBurn",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "validateCollect",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "validateDecreaseLiquidity",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "",
             "type": "address"
           }
         ],
