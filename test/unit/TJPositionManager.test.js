@@ -8,6 +8,7 @@ describe("TJPositionManager", function() {
   let positionManager;
   let vault, vaultFactory;
   let tjValidator;
+  let deadline;
 
   // Helper to encode createPosition calldata
   function encodeCreatePosition(vaultAddr, lbPairAddr, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, deadline) {
@@ -114,6 +115,12 @@ describe("TJPositionManager", function() {
       [await tokenX.getAddress(), await tokenY.getAddress()],
       [approveXData, approveYData]
     );
+
+    // Compute deadline from current block timestamp (not wall-clock time)
+    // so it remains valid regardless of how many blocks have been mined
+    // by other tests in the full suite
+    const block = await ethers.provider.getBlock("latest");
+    deadline = block.timestamp + 3600;
   });
 
   describe("constructor", function() {
@@ -130,7 +137,7 @@ describe("TJPositionManager", function() {
   });
 
   describe("createPosition via vault.mint()", function() {
-    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
 
     it("should create a position and store position data", async function() {
       const vaultAddr = await vault.getAddress();
@@ -273,7 +280,7 @@ describe("TJPositionManager", function() {
   });
 
   describe("position enumeration", function() {
-    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
 
     it("should track multiple positions per vault", async function() {
       const vaultAddr = await vault.getAddress();
@@ -341,7 +348,7 @@ describe("TJPositionManager", function() {
   });
 
   describe("validation and security", function() {
-    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
 
     it("should reject when vault param does not match msg.sender", async function() {
       const vaultAddr = await vault.getAddress();
@@ -441,12 +448,6 @@ describe("TJPositionManager", function() {
       ).to.be.revertedWith("TJPositionValidator: not yet implemented");
     });
 
-    it("validateDecreaseLiquidity should revert", async function() {
-      await expect(
-        tjValidator.validateDecreaseLiquidity("0x", owner.address)
-      ).to.be.revertedWith("TJPositionValidator: not yet implemented");
-    });
-
     it("validateCollect should revert", async function() {
       await expect(
         tjValidator.validateCollect("0x", owner.address)
@@ -457,6 +458,330 @@ describe("TJPositionManager", function() {
       await expect(
         tjValidator.validateBurn("0x", owner.address)
       ).to.be.revertedWith("TJPositionValidator: not yet implemented");
+    });
+  });
+
+  describe("removePosition via vault.decreaseLiquidity()", function() {
+
+
+    // Helper to encode removePosition calldata
+    function encodeRemovePosition(vaultAddr, positionId, percentage, amountXMin, amountYMin, dl) {
+      const iface = new ethers.Interface([
+        "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      return iface.encodeFunctionData("removePosition", [
+        vaultAddr, positionId, percentage, amountXMin, amountYMin, dl
+      ]);
+    }
+
+    // Helper to create a position and return its ID
+    async function createTestPosition() {
+      const vaultAddr = await vault.getAddress();
+      const lbPairAddr = await mockLBPair.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      // Fund the mock router with tokens to send back during removal
+      const routerAddr = await mockLBRouter.getAddress();
+      await tokenX.mint(routerAddr, ethers.parseEther("100"));
+      await tokenY.mint(routerAddr, 100000n * 10n ** 6n);
+
+      const calldata = encodeCreatePosition(
+        vaultAddr, lbPairAddr,
+        ethers.parseEther("1"), 1000n * 10n ** 6n,
+        0, 0,
+        8388608, 5,
+        [-1, 0, 1],
+        [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
+        deadline
+      );
+
+      await vault.mint([pmAddr], [calldata], [0n]);
+
+      const posIds = await positionManager.getPositionsByVault(vaultAddr);
+      return posIds[posIds.length - 1];
+    }
+
+    it("should remove 100% of a position and mark inactive", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      const pos = await positionManager.getPosition(positionId);
+      expect(pos.active).to.equal(false);
+      expect(pos.depositIds.length).to.equal(0);
+      expect(pos.liquidityMinted.length).to.equal(0);
+    });
+
+    it("should remove 50% of a position and keep active with reduced liquidity", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      // Get original liquidity values
+      const posBefore = await positionManager.getPosition(positionId);
+      const origLiquidity = posBefore.liquidityMinted.map(lm => lm);
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 50, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      const posAfter = await positionManager.getPosition(positionId);
+      expect(posAfter.active).to.equal(true);
+      expect(posAfter.depositIds.length).to.equal(3);
+      expect(posAfter.liquidityMinted.length).to.equal(3);
+
+      // Each liquidityMinted should be halved
+      for (let i = 0; i < posAfter.liquidityMinted.length; i++) {
+        expect(posAfter.liquidityMinted[i]).to.equal(origLiquidity[i] / 2n);
+      }
+    });
+
+    it("should emit PositionRemoved event", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+      const lbPairAddr = await mockLBPair.getAddress();
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+
+      await expect(vault.decreaseLiquidity([pmAddr], [calldata]))
+        .to.emit(positionManager, "PositionRemoved");
+    });
+
+    it("should pass correct parameters to LBRouter.removeLiquidity", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 500, 600, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      // Verify router received correct params
+      expect(await mockLBRouter.lastRemoveTokenX()).to.equal(await tokenX.getAddress());
+      expect(await mockLBRouter.lastRemoveTokenY()).to.equal(await tokenY.getAddress());
+      expect(await mockLBRouter.lastRemoveBinStep()).to.equal(20);
+      expect(await mockLBRouter.lastRemoveAmountXMin()).to.equal(500);
+      expect(await mockLBRouter.lastRemoveAmountYMin()).to.equal(600);
+      expect(await mockLBRouter.lastRemoveTo()).to.equal(vaultAddr);
+    });
+
+    it("should send scaled amounts to router for 100% removal", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      // Mock returns liquidityMinted = [1000, 2000, 1000]
+      // 100% -> amounts = [1000, 2000, 1000]
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      // Verify amounts passed to router
+      expect(await mockLBRouter.lastRemoveAmounts(0)).to.equal(1000);
+      expect(await mockLBRouter.lastRemoveAmounts(1)).to.equal(2000);
+      expect(await mockLBRouter.lastRemoveAmounts(2)).to.equal(1000);
+    });
+
+    it("should send scaled amounts to router for 50% removal", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      // Mock returns liquidityMinted = [1000, 2000, 1000]
+      // 50% -> amounts = [500, 1000, 500]
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 50, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      expect(await mockLBRouter.lastRemoveAmounts(0)).to.equal(500);
+      expect(await mockLBRouter.lastRemoveAmounts(1)).to.equal(1000);
+      expect(await mockLBRouter.lastRemoveAmounts(2)).to.equal(500);
+    });
+
+    it("should send deposit IDs to router", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      // Mock depositIds = [8388607, 8388608, 8388609]
+      expect(await mockLBRouter.lastRemoveIds(0)).to.equal(8388607);
+      expect(await mockLBRouter.lastRemoveIds(1)).to.equal(8388608);
+      expect(await mockLBRouter.lastRemoveIds(2)).to.equal(8388609);
+    });
+
+    it("should send tokens back to vault via router", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      // Set router to return specific amounts
+      await mockLBRouter.setRemoveReturnValues(ethers.parseEther("0.5"), 500n * 10n ** 6n);
+
+      const beforeX = await tokenX.balanceOf(vaultAddr);
+      const beforeY = await tokenY.balanceOf(vaultAddr);
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      const afterX = await tokenX.balanceOf(vaultAddr);
+      const afterY = await tokenY.balanceOf(vaultAddr);
+
+      // Vault should have received tokens
+      expect(afterX - beforeX).to.equal(ethers.parseEther("0.5"));
+      expect(afterY - beforeY).to.equal(500n * 10n ** 6n);
+    });
+
+    it("should approve and then reset LBPair approvals for router", async function() {
+      const positionId = await createTestPosition();
+      const vaultAddr = await vault.getAddress();
+      const pmAddr = await positionManager.getAddress();
+      const routerAddr = await mockLBRouter.getAddress();
+
+      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+      await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+      // After removal, approval should be reset to false
+      const approved = await mockLBPair.isApprovedForAll(pmAddr, routerAddr);
+      expect(approved).to.equal(false);
+    });
+
+    describe("validation and security", function() {
+      it("should reject when vault param does not match msg.sender", async function() {
+        const positionId = await createTestPosition();
+        const pmAddr = await positionManager.getAddress();
+
+        const calldata = encodeRemovePosition(user1.address, positionId, 100, 0, 0, deadline);
+
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [calldata])
+        ).to.be.revertedWith("TJPositionValidator: vault mismatch");
+      });
+
+      it("should reject when position is not owned by vault", async function() {
+        // Create position from our vault
+        const positionId = await createTestPosition();
+        const pmAddr = await positionManager.getAddress();
+
+        // Try to remove from a different vault (user1 directly calling)
+        // This should fail because msg.sender != vault param
+        await expect(
+          positionManager.connect(user1).removePosition(
+            user1.address, positionId, 100, 0, 0, deadline
+          )
+        ).to.be.revertedWith("TJPositionManager: not position owner");
+      });
+
+      it("should reject when position is not active", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Remove 100% first
+        const calldata1 = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        await vault.decreaseLiquidity([pmAddr], [calldata1]);
+
+        // Try to remove again - should fail
+        const calldata2 = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [calldata2])
+        ).to.be.reverted;
+      });
+
+      it("should reject percentage of 0", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 0, 0, 0, deadline);
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [calldata])
+        ).to.be.reverted;
+      });
+
+      it("should reject percentage over 100", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 101, 0, 0, deadline);
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [calldata])
+        ).to.be.reverted;
+      });
+
+      it("should reject when router removeLiquidity fails", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        await mockLBRouter.setShouldFailRemove(true);
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [calldata])
+        ).to.be.reverted;
+      });
+
+      it("should reject non-removePosition selector via validator", async function() {
+        const pmAddr = await positionManager.getAddress();
+        const fakeCalldata = "0xdeadbeef" + "00".repeat(32);
+
+        await expect(
+          vault.decreaseLiquidity([pmAddr], [fakeCalldata])
+        ).to.be.revertedWith("TJPositionValidator: not removePosition");
+      });
+    });
+
+    describe("sequential operations", function() {
+      it("should allow partial then full removal", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Remove 50%
+        const calldata1 = encodeRemovePosition(vaultAddr, positionId, 50, 0, 0, deadline);
+        await vault.decreaseLiquidity([pmAddr], [calldata1]);
+
+        let pos = await positionManager.getPosition(positionId);
+        expect(pos.active).to.equal(true);
+        expect(pos.liquidityMinted[0]).to.equal(500); // 1000 / 2
+
+        // Remove remaining 100% of what's left
+        const calldata2 = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        await vault.decreaseLiquidity([pmAddr], [calldata2]);
+
+        pos = await positionManager.getPosition(positionId);
+        expect(pos.active).to.equal(false);
+        expect(pos.depositIds.length).to.equal(0);
+        expect(pos.liquidityMinted.length).to.equal(0);
+      });
+
+      it("should allow multiple partial removals", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Remove 25% three times
+        for (let i = 0; i < 3; i++) {
+          const calldata = encodeRemovePosition(vaultAddr, positionId, 25, 0, 0, deadline);
+          await vault.decreaseLiquidity([pmAddr], [calldata]);
+        }
+
+        const pos = await positionManager.getPosition(positionId);
+        expect(pos.active).to.equal(true);
+        // Original: [1000, 2000, 1000]
+        // After 3x 25%: depends on integer truncation
+        // Round 1: remove [250, 500, 250] -> [750, 1500, 750]
+        // Round 2: remove [187, 375, 187] -> [563, 1125, 563]
+        // Round 3: remove [140, 281, 140] -> [423, 844, 423]
+        expect(pos.liquidityMinted[0]).to.equal(423);
+        expect(pos.liquidityMinted[1]).to.equal(844);
+        expect(pos.liquidityMinted[2]).to.equal(423);
+      });
     });
   });
 });

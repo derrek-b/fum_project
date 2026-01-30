@@ -16,6 +16,16 @@ contract MockLBPair {
     // ERC1155 balances: account => id => balance
     mapping(address => mapping(uint256 => uint256)) private _balances;
 
+    // ERC1155-style approvals: owner => operator => approved
+    mapping(address => mapping(address => bool)) private _operatorApprovals;
+
+    // Bin reserves: binId => (reserveX, reserveY)
+    mapping(uint24 => uint128) private _binReserveX;
+    mapping(uint24 => uint128) private _binReserveY;
+
+    // Total supply per bin: binId => totalSupply
+    mapping(uint256 => uint256) private _totalSupply;
+
     constructor(address tokenX_, address tokenY_, uint16 binStep_) {
         _tokenX = tokenX_;
         _tokenY = tokenY_;
@@ -52,5 +62,36 @@ contract MockLBPair {
     /// @notice Test helper to set balances directly
     function setBalance(address account, uint256 id, uint256 amount) external {
         _balances[account][id] = amount;
+    }
+
+    // --- ERC1155-style approval (V2.1 uses approveForAll, not setApprovalForAll) ---
+
+    function approveForAll(address spender, bool approved) external {
+        _operatorApprovals[msg.sender][spender] = approved;
+    }
+
+    function isApprovedForAll(address account, address spender) external view returns (bool) {
+        return _operatorApprovals[account][spender];
+    }
+
+    // --- Bin data for removal flow ---
+
+    function getBin(uint24 id) external view returns (uint128 binReserveX, uint128 binReserveY) {
+        return (_binReserveX[id], _binReserveY[id]);
+    }
+
+    function totalSupply(uint256 id) external view returns (uint256) {
+        return _totalSupply[id];
+    }
+
+    /// @notice Test helper to set bin reserves
+    function setBinReserves(uint24 id, uint128 reserveX, uint128 reserveY) external {
+        _binReserveX[id] = reserveX;
+        _binReserveY[id] = reserveY;
+    }
+
+    /// @notice Test helper to set total supply for a bin
+    function setTotalSupply(uint256 id, uint256 supply) external {
+        _totalSupply[id] = supply;
     }
 }

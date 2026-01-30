@@ -30,8 +30,23 @@ contract MockLBRouter {
     address public lastTo;
     address public lastRefundTo;
 
+    // removeLiquidity captured params
+    address public lastRemoveTokenX;
+    address public lastRemoveTokenY;
+    uint16 public lastRemoveBinStep;
+    uint256 public lastRemoveAmountXMin;
+    uint256 public lastRemoveAmountYMin;
+    address public lastRemoveTo;
+    uint256[] public lastRemoveIds;
+    uint256[] public lastRemoveAmounts;
+
+    // removeLiquidity return values
+    uint256 public returnRemoveAmountX;
+    uint256 public returnRemoveAmountY;
+
     // Control flags
     bool public shouldFail;
+    bool public shouldFailRemove;
 
     struct LiquidityParameters {
         address tokenX;
@@ -71,6 +86,15 @@ contract MockLBRouter {
 
     function setShouldFail(bool _shouldFail) external {
         shouldFail = _shouldFail;
+    }
+
+    function setShouldFailRemove(bool _shouldFailRemove) external {
+        shouldFailRemove = _shouldFailRemove;
+    }
+
+    function setRemoveReturnValues(uint256 amountX, uint256 amountY) external {
+        returnRemoveAmountX = amountX;
+        returnRemoveAmountY = amountY;
     }
 
     function setReturnValues(
@@ -145,6 +169,48 @@ contract MockLBRouter {
         liquidityMinted = new uint256[](returnLiquidityMinted.length);
         for (uint256 i = 0; i < returnLiquidityMinted.length; i++) {
             liquidityMinted[i] = returnLiquidityMinted[i];
+        }
+    }
+
+    function removeLiquidity(
+        address tokenX,
+        address tokenY,
+        uint16 binStep,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256[] calldata ids,
+        uint256[] calldata amounts,
+        address to,
+        uint256 deadline
+    ) external returns (uint256 amountX, uint256 amountY) {
+        require(!shouldFailRemove, "MockLBRouter: forced remove failure");
+        require(deadline >= block.timestamp, "MockLBRouter: deadline expired");
+
+        // Capture parameters for verification
+        lastRemoveTokenX = tokenX;
+        lastRemoveTokenY = tokenY;
+        lastRemoveBinStep = binStep;
+        lastRemoveAmountXMin = amountXMin;
+        lastRemoveAmountYMin = amountYMin;
+        lastRemoveTo = to;
+
+        delete lastRemoveIds;
+        delete lastRemoveAmounts;
+        for (uint256 i = 0; i < ids.length; i++) {
+            lastRemoveIds.push(ids[i]);
+            lastRemoveAmounts.push(amounts[i]);
+        }
+
+        // Use configured return values, or defaults based on amountXMin/amountYMin
+        amountX = returnRemoveAmountX > 0 ? returnRemoveAmountX : amountXMin;
+        amountY = returnRemoveAmountY > 0 ? returnRemoveAmountY : amountYMin;
+
+        // Send tokens to the recipient (simulating real router behavior)
+        if (amountX > 0) {
+            IERC20(tokenX).safeTransfer(to, amountX);
+        }
+        if (amountY > 0) {
+            IERC20(tokenY).safeTransfer(to, amountY);
         }
     }
 }

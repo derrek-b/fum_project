@@ -94,9 +94,50 @@ describe("TJPositionValidator", function() {
   });
 
   describe("validateDecreaseLiquidity", function() {
-    it("should revert with not yet implemented", async function() {
-      await expect(validator.validateDecreaseLiquidity("0x", vaultAddress))
-        .to.be.revertedWith("TJPositionValidator: not yet implemented");
+    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+    function encodeRemovePosition(vault, positionId, percentage, amountXMin, amountYMin, dl) {
+      const iface = new ethers.Interface([
+        "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      return iface.encodeFunctionData("removePosition", [
+        vault, positionId, percentage, amountXMin, amountYMin, dl
+      ]);
+    }
+
+    it("should allow removePosition with correct vault", async function() {
+      const calldata = encodeRemovePosition(vaultAddress, 1, 100, 0, 0, deadline);
+      await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject removePosition with wrong vault in calldata", async function() {
+      const calldata = encodeRemovePosition(otherAddress, 1, 100, 0, 0, deadline);
+      await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: vault mismatch");
+    });
+
+    it("should reject non-removePosition selector", async function() {
+      const fakeCalldata = "0xdeadbeef" + "00".repeat(32);
+      await expect(validator.validateDecreaseLiquidity(fakeCalldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: not removePosition");
+    });
+
+    it("should reject calldata that is too short", async function() {
+      await expect(validator.validateDecreaseLiquidity("0xdeadbeef", vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: invalid data");
+    });
+
+    it("should reject calldata with only selector (35 bytes)", async function() {
+      const shortCalldata = "0xdeadbeef" + "00".repeat(31);
+      await expect(validator.validateDecreaseLiquidity(shortCalldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: invalid data");
+    });
+
+    it("should accept various valid percentage values", async function() {
+      for (const pct of [1, 50, 100]) {
+        const calldata = encodeRemovePosition(vaultAddress, 1, pct, 0, 0, deadline);
+        await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
+      }
     });
   });
 

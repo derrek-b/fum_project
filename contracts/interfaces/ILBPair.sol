@@ -13,4 +13,8 @@ interface ILBPair {
     function balanceOf(address account, uint256 id) external view returns (uint256);
     function balanceOfBatch(address[] calldata accounts, uint256[] calldata ids)
         external view returns (uint256[] memory);
+    function getBin(uint24 id) external view returns (uint128 binReserveX, uint128 binReserveY);
+    function totalSupply(uint256 id) external view returns (uint256);
+    function approveForAll(address spender, bool approved) external;
+    function isApprovedForAll(address account, address spender) external view returns (bool);
 }
