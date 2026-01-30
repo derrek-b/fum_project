@@ -58,6 +58,15 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         uint256[] liquidityMinted
     );
 
+    event PositionRemoved(
+        uint256 indexed positionId,
+        address indexed vault,
+        address indexed lbPair,
+        uint256 percentage,
+        uint256 amountX,
+        uint256 amountY
+    );
+
     constructor(address _lbRouter) {
         require(_lbRouter != address(0), "TJPositionManager: zero router");
         lbRouter = _lbRouter;
@@ -157,6 +166,74 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         _vaultPositions[vault].push(positionId);
 
         emit PositionCreated(positionId, vault, lbPair, depositedIds, liquidityAmounts);
+    }
+
+    /**
+     * @notice Remove liquidity from an existing position
+     * @param vault Must equal msg.sender; validator checks this in calldata
+     * @param positionId The position to remove liquidity from
+     * @param percentage Percentage of liquidity to remove (1-100)
+     * @param amountXMin Minimum tokenX to receive (slippage protection)
+     * @param amountYMin Minimum tokenY to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     * @return amountX Amount of tokenX received
+     * @return amountY Amount of tokenY received
+     */
+    function removePosition(
+        address vault,
+        uint256 positionId,
+        uint256 percentage,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
+        require(vault == msg.sender, "TJPositionManager: vault must be caller");
+
+        Position storage pos = _positions[positionId];
+        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.active, "TJPositionManager: position not active");
+        require(percentage > 0 && percentage <= 100, "TJPositionManager: invalid percentage");
+
+        uint256 len = pos.depositIds.length;
+        uint256[] memory ids = new uint256[](len);
+        uint256[] memory amounts = new uint256[](len);
+
+        for (uint256 i = 0; i < len; i++) {
+            ids[i] = pos.depositIds[i];
+            amounts[i] = pos.liquidityMinted[i] * percentage / 100;
+        }
+
+        // Approve LBRouter to burn our ERC1155 LB tokens
+        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
+
+        // Remove liquidity — tokens sent directly to vault
+        (amountX, amountY) = ILBRouter(lbRouter).removeLiquidity(
+            pos.tokenX,
+            pos.tokenY,
+            pos.binStep,
+            amountXMin,
+            amountYMin,
+            ids,
+            amounts,
+            vault,
+            deadline
+        );
+
+        // Reset ERC1155 approval
+        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
+
+        // Update position state
+        if (percentage == 100) {
+            pos.active = false;
+            delete pos.depositIds;
+            delete pos.liquidityMinted;
+        } else {
+            for (uint256 i = 0; i < len; i++) {
+                pos.liquidityMinted[i] -= amounts[i];
+            }
+        }
+
+        emit PositionRemoved(positionId, vault, pos.lbPair, percentage, amountX, amountY);
     }
 
     /**

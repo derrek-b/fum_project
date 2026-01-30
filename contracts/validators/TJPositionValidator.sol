@@ -36,8 +36,17 @@ contract TJPositionValidator is ILiquidityValidator {
         revert("TJPositionValidator: not yet implemented");
     }
 
-    function validateDecreaseLiquidity(bytes calldata, address) external pure override {
-        revert("TJPositionValidator: not yet implemented");
+    // removePosition(address,uint256,uint256,uint256,uint256,uint256)
+    bytes4 constant internal REMOVE_POSITION_SELECTOR = bytes4(keccak256(
+        "removePosition(address,uint256,uint256,uint256,uint256,uint256)"
+    ));
+
+    function validateDecreaseLiquidity(bytes calldata data, address vault) external pure override {
+        require(data.length >= 36, "TJPositionValidator: invalid data");
+        bytes4 selector = bytes4(data[:4]);
+        require(selector == REMOVE_POSITION_SELECTOR, "TJPositionValidator: not removePosition");
+        address calldataVault = abi.decode(data[4:36], (address));
+        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
     function validateCollect(bytes calldata, address) external pure override {

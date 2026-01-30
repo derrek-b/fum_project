@@ -35,4 +35,16 @@ interface ILBRouter {
             uint256[] memory depositIds,
             uint256[] memory liquidityMinted
         );
+
+    function removeLiquidity(
+        address tokenX,
+        address tokenY,
+        uint16 binStep,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256[] calldata ids,
+        uint256[] calldata amounts,
+        address to,
+        uint256 deadline
+    ) external returns (uint256 amountX, uint256 amountY);
 }
