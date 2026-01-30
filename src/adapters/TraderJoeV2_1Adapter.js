@@ -11,8 +11,9 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
-import { getTokenBySymbol, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { getTokenBySymbol, getTokenByAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
+import contractData from "../artifacts/contracts.js";
 
 // Trader Joe V2.1 ABIs and addresses from official SDK
 import {
@@ -79,16 +80,201 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   // STUB METHODS - To be implemented
   // =============================================================================
 
+  /**
+   * Get the event filter for monitoring swap events on Trader Joe V2.1
+   *
+   * For Trader Joe V2.1, the poolId IS the LBPair contract address.
+   * Swaps emit directly from the LBPair contract (same pattern as V3).
+   *
+   * LBPair Swap event signature:
+   *   Swap(address sender, address to, uint24 id, bytes32 amountsIn, bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
+   *
+   * @param {string} poolId - LBPair contract address
+   * @returns {Object} Filter object with address and topics array
+   * @throws {Error} If poolId is invalid
+   */
   getSwapEventFilter(poolId) {
-    throw new Error("TraderJoeV2_1Adapter.getSwapEventFilter not implemented");
+    if (!poolId || typeof poolId !== 'string') {
+      throw new Error('poolId parameter is required and must be a string');
+    }
+
+    try {
+      ethers.utils.getAddress(poolId);
+    } catch (error) {
+      throw new Error(`Invalid poolId address: ${poolId}`);
+    }
+
+    return {
+      address: poolId,
+      topics: [ethers.utils.id(this._getSwapEventSignature())]
+    };
   }
 
+  /**
+   * Parse a Trader Joe V2.1 swap event log
+   *
+   * Decodes log data from an LBPair Swap event. Validates the event signature,
+   * extracts indexed parameters (sender, to) from topics, and decodes non-indexed
+   * data including packed bytes32 amounts.
+   *
+   * V2.1 Swap event:
+   *   Swap(address indexed sender, address indexed to, uint24 id, bytes32 amountsIn,
+   *        bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
+   *
+   * bytes32 packed amounts: upper 128 bits = tokenX amount, lower 128 bits = tokenY amount
+   *
+   * @param {Object} log - Raw blockchain event log
+   * @param {string} log.address - LBPair contract address that emitted the event
+   * @param {Array<string>} log.topics - [eventSig, sender, to]
+   * @param {string} log.data - ABI-encoded non-indexed event data
+   * @returns {Object} Parsed swap event data
+   * @returns {number} result.activeId - Active bin ID after the swap (TJ equivalent of tick)
+   * @returns {string} result.sender - Address that initiated the swap (checksummed)
+   * @returns {string} result.to - Address that received the output (checksummed)
+   * @returns {Object} result.amountsIn - Decoded input amounts { amountX: string, amountY: string }
+   * @returns {Object} result.amountsOut - Decoded output amounts { amountX: string, amountY: string }
+   * @returns {number} result.volatilityAccumulator - Protocol volatility tracking value
+   * @returns {Object} result.totalFees - Decoded total fees { amountX: string, amountY: string }
+   * @returns {Object} result.protocolFees - Decoded protocol fees { amountX: string, amountY: string }
+   * @throws {Error} If log is null/undefined or missing required properties
+   * @throws {Error} If log cannot be parsed as a Trader Joe V2.1 Swap event
+   */
   parseSwapEvent(log) {
-    throw new Error("TraderJoeV2_1Adapter.parseSwapEvent not implemented");
+    if (!log) {
+      throw new Error('Log parameter is required');
+    }
+
+    if (!log.address) {
+      throw new Error('Log must have address property');
+    }
+
+    if (!log.topics || !Array.isArray(log.topics)) {
+      throw new Error('Log must have topics array');
+    }
+
+    if (log.topics.length < 3) {
+      throw new Error('Log must have at least 3 topics (event signature, sender, to)');
+    }
+
+    if (!log.data) {
+      throw new Error('Log must have data property');
+    }
+
+    const expectedTopic = ethers.utils.id(this._getSwapEventSignature());
+    if (log.topics[0] !== expectedTopic) {
+      throw new Error(`Invalid swap event signature. Expected ${expectedTopic}, got ${log.topics[0]}`);
+    }
+
+    try {
+      // Extract indexed parameters from topics
+      // topics[1] = sender (address padded to 32 bytes)
+      // topics[2] = to (address padded to 32 bytes)
+      const sender = ethers.utils.getAddress('0x' + log.topics[1].slice(26));
+      const to = ethers.utils.getAddress('0x' + log.topics[2].slice(26));
+
+      // Decode non-indexed data
+      const decoded = ethers.utils.defaultAbiCoder.decode(
+        ['uint24', 'bytes32', 'bytes32', 'uint24', 'bytes32', 'bytes32'],
+        log.data
+      );
+
+      return {
+        activeId: Number(decoded[0]),
+        sender,
+        to,
+        amountsIn: this._decodePackedAmounts(decoded[1]),
+        amountsOut: this._decodePackedAmounts(decoded[2]),
+        volatilityAccumulator: Number(decoded[3]),
+        totalFees: this._decodePackedAmounts(decoded[4]),
+        protocolFees: this._decodePackedAmounts(decoded[5])
+      };
+    } catch (error) {
+      if (error.message.startsWith('Log ') || error.message.startsWith('Invalid swap')) {
+        throw error;
+      }
+      throw new Error(`Failed to parse swap event: ${error.message}`);
+    }
   }
 
+  /**
+   * Evaluate price movement between a baseline and current swap state
+   *
+   * Uses Trader Joe V2.1 bin-based pricing:
+   *   price(id) = (1 + binStep/10000)^(id - 8388608)
+   *
+   * The percentage simplifies to:
+   *   priceRatio = (1 + binStep/10000)^(currentId - baselineId)
+   *   priceMovementPercent = |priceRatio - 1| * 100
+   *
+   * @param {Object} swapData - Parsed swap event from parseSwapEvent
+   * @param {number} swapData.activeId - Current active bin ID
+   * @param {Object} baseline - Baseline from getPoolCurrent ({ activeId, binStep })
+   * @param {number} baseline.activeId - Baseline active bin ID
+   * @param {number} baseline.binStep - Bin step in basis points
+   * @param {Object} token0Data - Token0 data (tokenX, lower address)
+   * @param {string} token0Data.address - Token contract address
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {number} token0Data.decimals - Token decimals
+   * @param {Object} token1Data - Token1 data (tokenY, higher address)
+   * @param {string} token1Data.address - Token contract address
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {number} token1Data.decimals - Token decimals
+   * @returns {{ priceMovementPercent: number, baselinePrice: string, currentPrice: string, direction: string }}
+   * @throws {Error} If any parameter is invalid or missing required properties
+   */
   evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
-    throw new Error("TraderJoeV2_1Adapter.evaluatePriceMovement not implemented");
+    // Validate swapData
+    if (!swapData) {
+      throw new Error('swapData parameter is required');
+    }
+    if (typeof swapData.activeId !== 'number') {
+      throw new Error('swapData must have activeId property as a number');
+    }
+
+    // Validate baseline
+    if (baseline === undefined || baseline === null) {
+      throw new Error('baseline parameter is required');
+    }
+    if (typeof baseline !== 'object' || typeof baseline.activeId !== 'number') {
+      throw new Error('baseline must have activeId property as a number');
+    }
+    if (baseline.binStep === undefined || baseline.binStep === null) {
+      throw new Error('baseline must have binStep property');
+    }
+
+    // Validate token data
+    if (!token0Data || !token0Data.address || !token0Data.symbol || token0Data.decimals === undefined) {
+      throw new Error('token0Data must have address, symbol, and decimals properties');
+    }
+    if (!token1Data || !token1Data.address || !token1Data.symbol || token1Data.decimals === undefined) {
+      throw new Error('token1Data must have address, symbol, and decimals properties');
+    }
+
+    const currentActiveId = swapData.activeId;
+    const baselineActiveId = baseline.activeId;
+    const binStep = baseline.binStep;
+
+    // Convert bin IDs to human-readable prices
+    const baselinePrice = this._binIdToPrice(baselineActiveId, binStep, token0Data.decimals, token1Data.decimals);
+    const currentPrice = this._binIdToPrice(currentActiveId, binStep, token0Data.decimals, token1Data.decimals);
+
+    // Calculate price movement percentage
+    // priceRatio = (1 + binStep/10000)^(currentId - baselineId)
+    // priceMovementPercent = |priceRatio - 1| * 100
+    if (baselinePrice === 0) {
+      throw new Error('Baseline price is zero, cannot calculate movement');
+    }
+
+    const priceRatio = currentPrice / baselinePrice;
+    const priceMovementPercent = Math.abs((priceRatio - 1) * 100);
+    const direction = currentPrice >= baselinePrice ? 'up' : 'down';
+
+    return {
+      priceMovementPercent,
+      baselinePrice: baselinePrice.toString(),
+      currentPrice: currentPrice.toString(),
+      direction
+    };
   }
 
   async getPositionsForVDS(address, provider) {
@@ -96,7 +282,71 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async getPositionById(tokenId, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getPositionById not implemented");
+    // Validate params (same pattern as V3/V4)
+    if (tokenId === null || tokenId === undefined || tokenId === '') {
+      throw new Error('TokenId parameter is required');
+    }
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error('Valid provider parameter is required');
+    }
+
+    try {
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+      if (!positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+
+      const positionData = await positionManager.getPosition(tokenId);
+
+      if (positionData.lbPair === ethers.constants.AddressZero) {
+        throw new Error(`Position ${tokenId} not found`);
+      }
+
+      const depositIds = positionData.depositIds.map(id => Number(id));
+      const liquidityMinted = positionData.liquidityMinted.map(lm => lm.toString());
+
+      if (depositIds.length === 0) {
+        throw new Error(`Position ${tokenId} has no deposit bins`);
+      }
+
+      const poolAddress = positionData.lbPair.toLowerCase();
+      const tokenXInfo = getTokenByAddress(positionData.tokenX, this.chainId);
+      const tokenYInfo = getTokenByAddress(positionData.tokenY, this.chainId);
+
+      return {
+        position: {
+          id: String(tokenId),
+          pool: poolAddress,
+          lowerBinId: Math.min(...depositIds),
+          upperBinId: Math.max(...depositIds),
+          depositIds,
+          liquidityMinted,
+          active: positionData.active,
+          createdAt: Number(positionData.createdAt),
+          lastUpdated: Date.now()
+        },
+        poolData: {
+          [poolAddress]: {
+            token0Symbol: tokenXInfo.symbol,
+            token1Symbol: tokenYInfo.symbol,
+            binStep: Number(positionData.binStep),
+            platform: 'traderjoeV2_1'
+          }
+        }
+      };
+    } catch (error) {
+      if (error.message.includes('TokenId parameter') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('not found') ||
+          error.message.includes('No position manager')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch position ${tokenId}: ${error.message}`);
+    }
   }
 
   async getAccruedFeesUSD(position, tokenPrices, provider) {
@@ -189,8 +439,198 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     throw new Error("TraderJoeV2_1Adapter.calculateTokenAmounts not implemented");
   }
 
+  /**
+   * Generate calldata for removing liquidity from a TJ V2.1 position
+   *
+   * The vault calls decreaseLiquidity() on VaultFactory, which validates via
+   * TJPositionValidator, then executes the calldata against TJPositionManager.removePosition().
+   *
+   * @param {Object} params
+   * @param {Object} params.position - Position object from getPositionById()
+   * @param {string} params.position.id - Position ID (numeric string)
+   * @param {string} params.position.pool - LBPair contract address
+   * @param {number[]} params.position.depositIds - Bin IDs with liquidity
+   * @param {string[]} params.position.liquidityMinted - Liquidity amounts per bin
+   * @param {boolean} params.position.active - Must be true
+   * @param {number} params.percentage - Percentage of liquidity to remove (1-100)
+   * @param {Object} params.provider - Ethers provider instance
+   * @param {string} params.walletAddress - Vault address
+   * @param {number} params.slippageTolerance - Slippage tolerance (0-100)
+   * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
+   * @returns {Promise<{to: string, data: string, value: string, quote: Object}>}
+   */
   async generateRemoveLiquidityData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateRemoveLiquidityData not implemented");
+    const {
+      position,
+      percentage,
+      provider,
+      walletAddress,
+      slippageTolerance,
+      deadlineMinutes
+    } = params;
+
+    // --- Position validation ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position id is required");
+    }
+    if (!/^\d+$/.test(String(position.id))) {
+      throw new Error("Position id must be numeric");
+    }
+    if (!position.pool || typeof position.pool !== 'string') {
+      throw new Error("Position pool is required");
+    }
+    if (!Array.isArray(position.depositIds) || position.depositIds.length === 0) {
+      throw new Error("Position depositIds must be a non-empty array");
+    }
+    if (!Array.isArray(position.liquidityMinted) || position.liquidityMinted.length === 0) {
+      throw new Error("Position liquidityMinted must be a non-empty array");
+    }
+    if (position.depositIds.length !== position.liquidityMinted.length) {
+      throw new Error("Position depositIds and liquidityMinted must have the same length");
+    }
+    if (position.active !== true) {
+      throw new Error("Position must be active");
+    }
+
+    // --- Percentage validation ---
+    if (percentage === null || percentage === undefined) {
+      throw new Error("Percentage is required");
+    }
+    if (!Number.isFinite(percentage)) {
+      throw new Error("Percentage must be a finite number");
+    }
+    if (!Number.isInteger(percentage)) {
+      throw new Error("Percentage must be an integer");
+    }
+    if (percentage < 1 || percentage > 100) {
+      throw new Error("Percentage must be between 1 and 100");
+    }
+
+    // --- Provider validation ---
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    // --- Wallet address validation ---
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
+      throw new Error("Wallet address is required");
+    }
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    // --- Slippage validation ---
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    // --- Deadline validation ---
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
+
+    // --- Position manager address ---
+    if (!this.addresses?.positionManagerAddress) {
+      throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+    }
+    const positionManagerAddress = this.addresses.positionManagerAddress;
+
+    // --- Compute amounts to remove per bin (scale by percentage) ---
+    const amountsToRemove = position.liquidityMinted.map(
+      lm => (BigInt(lm) * BigInt(percentage) / 100n).toString()
+    );
+
+    // --- Fetch bin reserves + total supplies from LBPair ---
+    const lbPair = new ethers.Contract(position.pool, this.lbPairABI, provider);
+    const [activeId, bins, totalSupplies] = await Promise.all([
+      lbPair.getActiveId(),
+      Promise.all(position.depositIds.map(id => lbPair.getBin(id))),
+      Promise.all(position.depositIds.map(id => lbPair.totalSupply(id)))
+    ]);
+
+    // --- Use TJ SDK static method to compute expected amounts ---
+    const { PairV2 } = await import("@traderjoe-xyz/sdk-v2");
+
+    const binReserves = bins.map(b => ({
+      reserveX: b[0].toBigInt(),
+      reserveY: b[1].toBigInt()
+    }));
+    const supplies = totalSupplies.map(ts => ts.toBigInt());
+
+    const { amountX, amountY } = PairV2.calculateAmounts(
+      position.depositIds,
+      Number(activeId),
+      binReserves,
+      supplies,
+      amountsToRemove
+    );
+
+    // Convert JSBI to BigInt strings
+    const amountXStr = amountX.toString();
+    const amountYStr = amountY.toString();
+
+    // --- Apply slippage to compute mins ---
+    const slippageBps = BigInt(Math.round(slippageTolerance * 100));
+    const amountXMin = (BigInt(amountXStr) * (10000n - slippageBps) / 10000n).toString();
+    const amountYMin = (BigInt(amountYStr) * (10000n - slippageBps) / 10000n).toString();
+
+    // --- Compute deadline ---
+    const deadline = this._createDeadline(deadlineMinutes);
+
+    // --- Encode removePosition calldata ---
+    const iface = new ethers.utils.Interface([
+      "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+    ]);
+
+    const calldata = iface.encodeFunctionData("removePosition", [
+      walletAddress,
+      position.id,
+      percentage,
+      amountXMin,
+      amountYMin,
+      deadline
+    ]);
+
+    return {
+      to: positionManagerAddress,
+      data: calldata,
+      value: '0x00',
+      quote: {
+        positionId: position.id,
+        percentage,
+        amountX: amountXStr,
+        amountY: amountYStr,
+        amountXMin,
+        amountYMin,
+        deadline,
+        depositIds: position.depositIds,
+        liquidityMinted: position.liquidityMinted,
+        amountsToRemove
+      }
+    };
   }
 
   async generateAddLiquidityData(params) {
@@ -437,6 +877,55 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
       throw new Error(`Invalid deadline minutes: ${deadlineMinutes}. Must be a non-negative number.`);
     }
     return Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
+  }
+
+  /**
+   * Get the Swap event signature for Trader Joe V2.1 LBPair
+   * @returns {string} Solidity event signature
+   */
+  _getSwapEventSignature() {
+    return 'Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)';
+  }
+
+  /**
+   * Convert a bin ID to a human-readable price
+   *
+   * Trader Joe V2.1 Liquidity Book price formula:
+   *   price(id) = (1 + binStep/10000)^(id - 8388608) * 10^(token0Decimals - token1Decimals)
+   *
+   * The reference bin (8388608 = 2^23) represents a raw price ratio of 1.0.
+   * The decimal adjustment converts from raw token units to human-readable price.
+   *
+   * @param {number} binId - Bin ID to convert
+   * @param {number} binStep - Bin step in basis points (e.g., 20 = 0.20%)
+   * @param {number} token0Decimals - Decimals of token0 (tokenX, lower address)
+   * @param {number} token1Decimals - Decimals of token1 (tokenY, higher address)
+   * @returns {number} Human-readable price (token1 per token0)
+   */
+  _binIdToPrice(binId, binStep, token0Decimals, token1Decimals) {
+    const REFERENCE_BIN = 8388608; // 2^23
+    const base = 1 + binStep / 10000;
+    const rawPrice = Math.pow(base, binId - REFERENCE_BIN);
+    const decimalAdjustment = Math.pow(10, token0Decimals - token1Decimals);
+    return rawPrice * decimalAdjustment;
+  }
+
+  /**
+   * Decode a packed bytes32 value into tokenX and tokenY amounts
+   *
+   * Trader Joe V2.1 packs two 128-bit amounts into a single bytes32:
+   *   - Upper 128 bits = tokenX amount
+   *   - Lower 128 bits = tokenY amount
+   *
+   * @param {string} packedBytes32 - The packed bytes32 value
+   * @returns {{ amountX: string, amountY: string }} Decoded amounts as strings
+   */
+  _decodePackedAmounts(packedBytes32) {
+    const bn = ethers.BigNumber.from(packedBytes32);
+    const mask128 = ethers.BigNumber.from('0x' + 'f'.repeat(32));
+    const amountY = bn.and(mask128);
+    const amountX = bn.shr(128);
+    return { amountX: amountX.toString(), amountY: amountY.toString() };
   }
 
   async batchSwapTransactions(swapInstructions, options) {
@@ -856,19 +1345,27 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Get current pool state value for baseline tracking
    *
-   * For Trader Joe V2.1, the current pool state is represented by the active bin ID.
-   * This is analogous to Uniswap's tick - it identifies where the current price sits.
+   * For Trader Joe V2.1, the current pool state includes both the active bin ID
+   * and the bin step. The bin step is needed by evaluatePriceMovement to convert
+   * bin IDs to prices (it's not available in swap event data).
+   *
+   * The returned object is opaque platform-specific data — the strategy stores it
+   * and passes it back to evaluatePriceMovement without inspecting it.
    *
    * @param {Object} poolData - Pool data object from getPoolData
    * @param {number} poolData.activeId - Current active bin ID
-   * @returns {number} Current active bin ID
-   * @throws {Error} If poolData is invalid or missing activeId property
+   * @param {number} poolData.binStep - Bin step in basis points
+   * @returns {{activeId: number, binStep: number}} Current pool state for baseline tracking
+   * @throws {Error} If poolData is invalid or missing required properties
    */
   getPoolCurrent(poolData) {
     if (!poolData || poolData.activeId === undefined) {
       throw new Error('Pool data must have activeId property');
     }
-    return poolData.activeId;
+    if (poolData.binStep === undefined) {
+      throw new Error('Pool data must have binStep property');
+    }
+    return { activeId: poolData.activeId, binStep: poolData.binStep };
   }
 
   /**

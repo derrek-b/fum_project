@@ -2178,6 +2178,49 @@
         "type": "event"
       },
       {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "percentage",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          }
+        ],
+        "name": "PositionRemoved",
+        "type": "event"
+      },
+      {
         "inputs": [
           {
             "internalType": "address",
@@ -2441,6 +2484,55 @@
             "internalType": "bytes4",
             "name": "",
             "type": "bytes4"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "percentage",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "name": "removePosition",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
           }
         ],
         "stateMutability": "nonpayable",
@@ -2723,12 +2815,12 @@
         "inputs": [
           {
             "internalType": "bytes",
-            "name": "",
+            "name": "data",
             "type": "bytes"
           },
           {
             "internalType": "address",
-            "name": "",
+            "name": "vault",
             "type": "address"
           }
         ],

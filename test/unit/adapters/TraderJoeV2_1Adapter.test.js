@@ -230,10 +230,283 @@ describe('TraderJoeV2_1Adapter', () => {
     });
   });
 
-  describe('Stub methods', () => {
-    it('should throw "not implemented" for getSwapEventFilter', () => {
-      expect(() => adapter.getSwapEventFilter('0x123'))
-        .toThrow('TraderJoeV2_1Adapter.getSwapEventFilter not implemented');
+  describe('_getSwapEventSignature', () => {
+    it('should return the correct Trader Joe V2.1 swap event signature', () => {
+      const signature = adapter._getSwapEventSignature();
+      expect(signature).toBe('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)');
+    });
+
+    it('should generate the correct topic hash for TJ V2.1 swap events', () => {
+      const signature = adapter._getSwapEventSignature();
+      const topicHash = ethers.utils.id(signature);
+      expect(topicHash).toBe(ethers.utils.id('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)'));
+    });
+  });
+
+  describe('getSwapEventFilter', () => {
+    describe('Success Cases', () => {
+      it('should return filter object with address and topics', () => {
+        const poolAddress = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8';
+        const result = adapter.getSwapEventFilter(poolAddress);
+
+        expect(result).toHaveProperty('address');
+        expect(result).toHaveProperty('topics');
+        expect(result.address).toBe(poolAddress);
+        expect(Array.isArray(result.topics)).toBe(true);
+        expect(result.topics.length).toBe(1);
+      });
+
+      it('should return correct swap event topic hash', () => {
+        const poolAddress = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8';
+        const result = adapter.getSwapEventFilter(poolAddress);
+
+        const expectedTopic = ethers.utils.id('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)');
+        expect(result.topics[0]).toBe(expectedTopic);
+      });
+
+      it('should accept lowercase address after validation', () => {
+        const lowercaseAddress = '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8';
+        const result = adapter.getSwapEventFilter(lowercaseAddress);
+
+        expect(result.address).toBe(lowercaseAddress);
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw error for null poolId', () => {
+        expect(() => adapter.getSwapEventFilter(null))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for undefined poolId', () => {
+        expect(() => adapter.getSwapEventFilter(undefined))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for empty string poolId', () => {
+        expect(() => adapter.getSwapEventFilter(''))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for non-string poolId', () => {
+        expect(() => adapter.getSwapEventFilter(123))
+          .toThrow('poolId parameter is required and must be a string');
+      });
+
+      it('should throw error for invalid address format', () => {
+        expect(() => adapter.getSwapEventFilter('not-an-address'))
+          .toThrow('Invalid poolId address: not-an-address');
+      });
+
+      it('should throw error for address with wrong length', () => {
+        expect(() => adapter.getSwapEventFilter('0x1234'))
+          .toThrow('Invalid poolId address: 0x1234');
+      });
+    });
+  });
+
+  describe('parseSwapEvent', () => {
+    // Build a valid V2.1 Swap event log for testing
+    const validSignature = 'Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)';
+    const validTopic0 = ethers.utils.id(validSignature);
+    const validSender = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+    const validTo = ethers.utils.hexZeroPad('0xABCDEF0123456789ABCDEF0123456789ABCDEF01', 32);
+
+    // Pack amounts into bytes32: upper 128 bits = amountX, lower 128 bits = amountY
+    // amountX = 1000000000000000000 (1e18), amountY = 2000000000 (2e9)
+    const amountX = ethers.BigNumber.from('1000000000000000000');
+    const amountY = ethers.BigNumber.from('2000000000');
+    const packedAmountsIn = ethers.utils.hexZeroPad(
+      amountX.shl(128).or(amountY).toHexString(), 32
+    );
+    // amountsOut: amountX = 0, amountY = 500000000 (5e8)
+    const outAmountY = ethers.BigNumber.from('500000000');
+    const packedAmountsOut = ethers.utils.hexZeroPad(outAmountY.toHexString(), 32);
+    // totalFees: amountX = 3000000000000000 (3e15), amountY = 0
+    const feeAmountX = ethers.BigNumber.from('3000000000000000');
+    const packedTotalFees = ethers.utils.hexZeroPad(
+      feeAmountX.shl(128).toHexString(), 32
+    );
+    // protocolFees: amountX = 1000000000000000 (1e15), amountY = 0
+    const protocolFeeX = ethers.BigNumber.from('1000000000000000');
+    const packedProtocolFees = ethers.utils.hexZeroPad(
+      protocolFeeX.shl(128).toHexString(), 32
+    );
+
+    const abiCoder = new ethers.utils.AbiCoder();
+    const validData = abiCoder.encode(
+      ['uint24', 'bytes32', 'bytes32', 'uint24', 'bytes32', 'bytes32'],
+      [8388608, packedAmountsIn, packedAmountsOut, 5000, packedTotalFees, packedProtocolFees]
+    );
+
+    const validLog = {
+      address: '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8',
+      topics: [validTopic0, validSender, validTo],
+      data: validData
+    };
+
+    describe('Validation', () => {
+      it('should throw error for null log', () => {
+        expect(() => adapter.parseSwapEvent(null))
+          .toThrow('Log parameter is required');
+      });
+
+      it('should throw error for undefined log', () => {
+        expect(() => adapter.parseSwapEvent(undefined))
+          .toThrow('Log parameter is required');
+      });
+
+      it('should throw error for log without address', () => {
+        expect(() => adapter.parseSwapEvent({ topics: [], data: '0x' }))
+          .toThrow('Log must have address property');
+      });
+
+      it('should throw error for log without topics', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', data: '0x' }))
+          .toThrow('Log must have topics array');
+      });
+
+      it('should throw error for log with non-array topics', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', topics: 'not-array', data: '0x' }))
+          .toThrow('Log must have topics array');
+      });
+
+      it('should throw error for log with fewer than 3 topics', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', topics: [validTopic0, validSender], data: '0x' }))
+          .toThrow('Log must have at least 3 topics');
+      });
+
+      it('should throw error for log without data', () => {
+        expect(() => adapter.parseSwapEvent({ address: '0x123', topics: [validTopic0, validSender, validTo] }))
+          .toThrow('Log must have data property');
+      });
+
+      it('should throw error for wrong event signature', () => {
+        const wrongLog = {
+          ...validLog,
+          topics: ['0x' + '1'.repeat(64), validSender, validTo]
+        };
+        expect(() => adapter.parseSwapEvent(wrongLog))
+          .toThrow('Invalid swap event signature');
+      });
+    });
+
+    describe('Parsing', () => {
+      it('should parse valid V2.1 swap event correctly', () => {
+        const result = adapter.parseSwapEvent(validLog);
+
+        expect(result.activeId).toBe(8388608);
+        expect(result.volatilityAccumulator).toBe(5000);
+        expect(result.sender).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.to).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      });
+
+      it('should return all expected properties', () => {
+        const result = adapter.parseSwapEvent(validLog);
+
+        expect(result).toHaveProperty('activeId');
+        expect(result).toHaveProperty('sender');
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('amountsIn');
+        expect(result).toHaveProperty('amountsOut');
+        expect(result).toHaveProperty('volatilityAccumulator');
+        expect(result).toHaveProperty('totalFees');
+        expect(result).toHaveProperty('protocolFees');
+      });
+
+      it('should return activeId as number', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(typeof result.activeId).toBe('number');
+      });
+
+      it('should return volatilityAccumulator as number', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(typeof result.volatilityAccumulator).toBe('number');
+      });
+
+      it('should decode packed amountsIn correctly', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(result.amountsIn.amountX).toBe('1000000000000000000');
+        expect(result.amountsIn.amountY).toBe('2000000000');
+      });
+
+      it('should decode packed amountsOut correctly', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(result.amountsOut.amountX).toBe('0');
+        expect(result.amountsOut.amountY).toBe('500000000');
+      });
+
+      it('should decode packed totalFees correctly', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(result.totalFees.amountX).toBe('3000000000000000');
+        expect(result.totalFees.amountY).toBe('0');
+      });
+
+      it('should decode packed protocolFees correctly', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(result.protocolFees.amountX).toBe('1000000000000000');
+        expect(result.protocolFees.amountY).toBe('0');
+      });
+
+      it('should return amounts as strings within decoded objects', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        expect(typeof result.amountsIn.amountX).toBe('string');
+        expect(typeof result.amountsIn.amountY).toBe('string');
+        expect(typeof result.amountsOut.amountX).toBe('string');
+        expect(typeof result.amountsOut.amountY).toBe('string');
+      });
+
+      it('should return checksummed addresses for sender and to', () => {
+        const result = adapter.parseSwapEvent(validLog);
+        // ethers.utils.getAddress returns checksummed addresses
+        expect(result.sender).toBe(ethers.utils.getAddress('0x1234567890123456789012345678901234567890'));
+        expect(result.to).toBe(ethers.utils.getAddress('0xABCDEF0123456789ABCDEF0123456789ABCDEF01'));
+      });
+    });
+  });
+
+  describe('_decodePackedAmounts', () => {
+    it('should decode bytes32 with both amountX and amountY', () => {
+      const x = ethers.BigNumber.from('1000');
+      const y = ethers.BigNumber.from('2000');
+      const packed = ethers.utils.hexZeroPad(x.shl(128).or(y).toHexString(), 32);
+
+      const result = adapter._decodePackedAmounts(packed);
+      expect(result.amountX).toBe('1000');
+      expect(result.amountY).toBe('2000');
+    });
+
+    it('should decode bytes32 with only amountX (amountY = 0)', () => {
+      const x = ethers.BigNumber.from('5000000000');
+      const packed = ethers.utils.hexZeroPad(x.shl(128).toHexString(), 32);
+
+      const result = adapter._decodePackedAmounts(packed);
+      expect(result.amountX).toBe('5000000000');
+      expect(result.amountY).toBe('0');
+    });
+
+    it('should decode bytes32 with only amountY (amountX = 0)', () => {
+      const y = ethers.BigNumber.from('7777777');
+      const packed = ethers.utils.hexZeroPad(y.toHexString(), 32);
+
+      const result = adapter._decodePackedAmounts(packed);
+      expect(result.amountX).toBe('0');
+      expect(result.amountY).toBe('7777777');
+    });
+
+    it('should decode zero bytes32', () => {
+      const packed = ethers.constants.HashZero;
+
+      const result = adapter._decodePackedAmounts(packed);
+      expect(result.amountX).toBe('0');
+      expect(result.amountY).toBe('0');
+    });
+
+    it('should return amounts as strings', () => {
+      const packed = ethers.constants.HashZero;
+      const result = adapter._decodePackedAmounts(packed);
+      expect(typeof result.amountX).toBe('string');
+      expect(typeof result.amountY).toBe('string');
     });
   });
 
@@ -401,22 +674,32 @@ describe('TraderJoeV2_1Adapter', () => {
 
   describe('getPoolCurrent', () => {
     describe('Success Cases', () => {
-      it('should return activeId from pool data', () => {
+      it('should return { activeId, binStep } from pool data', () => {
         const poolData = { activeId: 8388608, binStep: 20, reserveX: '1000', reserveY: '2000' };
-        expect(adapter.getPoolCurrent(poolData)).toBe(8388608);
+        const result = adapter.getPoolCurrent(poolData);
+        expect(result).toEqual({ activeId: 8388608, binStep: 20 });
       });
 
       it('should work with activeId at zero', () => {
-        expect(adapter.getPoolCurrent({ activeId: 0 })).toBe(0);
+        const result = adapter.getPoolCurrent({ activeId: 0, binStep: 20 });
+        expect(result).toEqual({ activeId: 0, binStep: 20 });
       });
 
       it('should work with high activeId values', () => {
         // Trader Joe bin IDs can be large (uint24 range, up to 16777215)
-        expect(adapter.getPoolCurrent({ activeId: 16777215 })).toBe(16777215);
+        const result = adapter.getPoolCurrent({ activeId: 16777215, binStep: 100 });
+        expect(result).toEqual({ activeId: 16777215, binStep: 100 });
       });
 
       it('should work with low activeId values', () => {
-        expect(adapter.getPoolCurrent({ activeId: 1 })).toBe(1);
+        const result = adapter.getPoolCurrent({ activeId: 1, binStep: 10 });
+        expect(result).toEqual({ activeId: 1, binStep: 10 });
+      });
+
+      it('should not include extra properties from poolData', () => {
+        const poolData = { activeId: 8388608, binStep: 20, reserveX: '1000', reserveY: '2000', address: '0x123' };
+        const result = adapter.getPoolCurrent(poolData);
+        expect(Object.keys(result).sort()).toEqual(['activeId', 'binStep']);
       });
     });
 
@@ -432,13 +715,255 @@ describe('TraderJoeV2_1Adapter', () => {
       });
 
       it('should throw if poolData.activeId is undefined', () => {
-        expect(() => adapter.getPoolCurrent({}))
+        expect(() => adapter.getPoolCurrent({ binStep: 20 }))
           .toThrow('Pool data must have activeId property');
       });
 
       it('should throw if poolData has no activeId (other fields present)', () => {
         expect(() => adapter.getPoolCurrent({ binStep: 20, reserveX: '1000' }))
           .toThrow('Pool data must have activeId property');
+      });
+
+      it('should throw if poolData.binStep is undefined', () => {
+        expect(() => adapter.getPoolCurrent({ activeId: 8388608 }))
+          .toThrow('Pool data must have binStep property');
+      });
+    });
+  });
+
+  describe('evaluatePriceMovement', () => {
+    // Standard token data for tests
+    const WETH = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 };
+    const USDC = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 };
+    const BIN_STEP = 20; // 0.20% per bin
+
+    describe('Success Cases', () => {
+      it('should return zero movement when activeIds are equal', () => {
+        const swapData = { activeId: 8388608 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result.priceMovementPercent).toBe(0);
+        expect(result.direction).toBe('up');
+      });
+
+      it('should return priceMovementPercent as a number', () => {
+        const swapData = { activeId: 8388610 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(typeof result.priceMovementPercent).toBe('number');
+      });
+
+      it('should detect upward price movement', () => {
+        const swapData = { activeId: 8388658 }; // 50 bins higher
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+        expect(result.direction).toBe('up');
+      });
+
+      it('should detect downward price movement', () => {
+        const swapData = { activeId: 8388558 }; // 50 bins lower
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+        expect(result.direction).toBe('down');
+      });
+
+      it('should return baselinePrice and currentPrice as strings', () => {
+        const swapData = { activeId: 8388618 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(typeof result.baselinePrice).toBe('string');
+        expect(typeof result.currentPrice).toBe('string');
+      });
+
+      it('should return all expected properties', () => {
+        const swapData = { activeId: 8388618 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result).toHaveProperty('priceMovementPercent');
+        expect(result).toHaveProperty('baselinePrice');
+        expect(result).toHaveProperty('currentPrice');
+        expect(result).toHaveProperty('direction');
+      });
+
+      it('should always return positive priceMovementPercent', () => {
+        const baselineObj = { activeId: 8388608, binStep: BIN_STEP };
+
+        const upResult = adapter.evaluatePriceMovement(
+          { activeId: 8388658 }, baselineObj, WETH, USDC
+        );
+        const downResult = adapter.evaluatePriceMovement(
+          { activeId: 8388558 }, baselineObj, WETH, USDC
+        );
+
+        expect(upResult.priceMovementPercent).toBeGreaterThan(0);
+        expect(downResult.priceMovementPercent).toBeGreaterThan(0);
+      });
+
+      it('should compute accurate percentage for known bin delta', () => {
+        // binStep=20 → 0.20% per bin
+        // 1 bin movement: (1 + 20/10000)^1 - 1 = 0.002 = 0.2%
+        const swapData = { activeId: 8388609 }; // 1 bin up
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        // Expected: |(1.002^1 - 1) * 100| = 0.2%
+        expect(result.priceMovementPercent).toBeCloseTo(0.2, 4);
+      });
+
+      it('should compute accurate percentage for larger bin delta', () => {
+        // 25 bins with binStep=20: (1.002)^25 - 1 ≈ 0.05124 = 5.124%
+        const swapData = { activeId: 8388633 }; // 25 bins up
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        const expected = (Math.pow(1.002, 25) - 1) * 100;
+        expect(result.priceMovementPercent).toBeCloseTo(expected, 4);
+      });
+
+      it('should work with equal-decimal tokens', () => {
+        const tokenA = { address: '0x0000000000000000000000000000000000000001', symbol: 'A', decimals: 18 };
+        const tokenB = { address: '0x0000000000000000000000000000000000000002', symbol: 'B', decimals: 18 };
+
+        const swapData = { activeId: 8388618 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, tokenA, tokenB);
+
+        expect(result.priceMovementPercent).toBeGreaterThan(0);
+        expect(result.direction).toBe('up');
+      });
+    });
+
+    describe('Validation Error Cases', () => {
+      it('should throw if swapData is null', () => {
+        expect(() => adapter.evaluatePriceMovement(null, { activeId: 8388608, binStep: 20 }, WETH, USDC))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw if swapData is undefined', () => {
+        expect(() => adapter.evaluatePriceMovement(undefined, { activeId: 8388608, binStep: 20 }, WETH, USDC))
+          .toThrow('swapData parameter is required');
+      });
+
+      it('should throw if swapData has no activeId', () => {
+        expect(() => adapter.evaluatePriceMovement({}, { activeId: 8388608, binStep: 20 }, WETH, USDC))
+          .toThrow('swapData must have activeId property as a number');
+      });
+
+      it('should throw if swapData.activeId is not a number', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: '8388608' }, { activeId: 8388608, binStep: 20 }, WETH, USDC))
+          .toThrow('swapData must have activeId property as a number');
+      });
+
+      it('should throw if baseline is null', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, null, WETH, USDC))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw if baseline is undefined', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, undefined, WETH, USDC))
+          .toThrow('baseline parameter is required');
+      });
+
+      it('should throw if baseline has no activeId', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { binStep: 20 }, WETH, USDC))
+          .toThrow('baseline must have activeId property as a number');
+      });
+
+      it('should throw if baseline is a plain number (old format)', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, 8388608, WETH, USDC))
+          .toThrow('baseline must have activeId property as a number');
+      });
+
+      it('should throw if baseline has no binStep', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608 }, WETH, USDC))
+          .toThrow('baseline must have binStep property');
+      });
+
+      it('should throw if token0Data is null', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608, binStep: 20 }, null, USDC))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw if token0Data is missing required properties', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608, binStep: 20 }, { address: '0x1' }, USDC))
+          .toThrow('token0Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw if token1Data is null', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608, binStep: 20 }, WETH, null))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+
+      it('should throw if token1Data is missing required properties', () => {
+        expect(() => adapter.evaluatePriceMovement({ activeId: 8388608 }, { activeId: 8388608, binStep: 20 }, WETH, { address: '0x2' }))
+          .toThrow('token1Data must have address, symbol, and decimals properties');
+      });
+    });
+
+    describe('Edge Cases', () => {
+      it('should handle large bin deltas', () => {
+        // 500 bins apart with binStep=20
+        const swapData = { activeId: 8389108 }; // +500 bins
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        // (1.002)^500 - 1 ≈ 171.6% — should be a large number
+        expect(result.priceMovementPercent).toBeGreaterThan(100);
+        expect(result.direction).toBe('up');
+      });
+
+      it('should handle bin at reference point (8388608)', () => {
+        // Both bins at the reference point — zero movement
+        const swapData = { activeId: 8388608 };
+        const baseline = { activeId: 8388608, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result.priceMovementPercent).toBe(0);
+        // At reference point, price = (1.002)^0 * 10^(18-6) = 1e12
+        expect(parseFloat(result.baselinePrice)).toBeGreaterThan(0);
+        expect(result.baselinePrice).toBe(result.currentPrice);
+      });
+
+      it('should handle bins below the reference point', () => {
+        const swapData = { activeId: 8388508 }; // 100 bins below reference
+        const baseline = { activeId: 8388508, binStep: BIN_STEP };
+
+        const result = adapter.evaluatePriceMovement(swapData, baseline, WETH, USDC);
+
+        expect(result.priceMovementPercent).toBe(0);
+        // Price should still be positive (just < reference price)
+        expect(parseFloat(result.baselinePrice)).toBeGreaterThan(0);
+      });
+
+      it('should handle different binStep values', () => {
+        const swapData = { activeId: 8388618 }; // 10 bins up
+        const baseline100 = { activeId: 8388608, binStep: 100 }; // 1% per bin
+        const baseline10 = { activeId: 8388608, binStep: 10 };   // 0.1% per bin
+
+        const result100 = adapter.evaluatePriceMovement(swapData, baseline100, WETH, USDC);
+        const result10 = adapter.evaluatePriceMovement(swapData, baseline10, WETH, USDC);
+
+        // Larger binStep → bigger price change for same bin delta
+        expect(result100.priceMovementPercent).toBeGreaterThan(result10.priceMovementPercent);
       });
     });
   });
@@ -1303,6 +1828,233 @@ describe('TraderJoeV2_1Adapter', () => {
     });
   });
 
+  describe('getPositionById', () => {
+    let positionId;
+    let expectedPoolAddress;
+
+    beforeAll(async () => {
+      // Create a position using the vault from the top-level beforeAll
+      const pmAddress = adapter.addresses.positionManagerAddress;
+      const tjpmAbi = contractData.TJPositionManager.abi;
+      const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
+
+      // Check if a position already exists from the E2E test
+      const positionIds = await tjpm.getPositionsByVault(testVault.address);
+      if (positionIds.length > 0) {
+        positionId = positionIds[0];
+        const pos = await tjpm.getPosition(positionId);
+        expectedPoolAddress = pos.lbPair.toLowerCase();
+        return;
+      }
+
+      // If no position exists, create one
+      let poolData, positionRange;
+      try {
+        const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+        poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+        positionRange = adapter.getPositionRange(poolData, 5, 5);
+      } catch (error) {
+        if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+          console.log('No Trader Joe V2.1 WETH/USDC pools - cannot create position for getPositionById tests');
+          return;
+        }
+        throw error;
+      }
+
+      expectedPoolAddress = poolData.address.toLowerCase();
+
+      // Approve tokens
+      const approvalTxs = await adapter.getRequiredApprovals(
+        'liquidity', testVault.address, [wethAddress, usdcAddress], env.provider
+      );
+      if (approvalTxs.length > 0) {
+        const targets = approvalTxs.map(t => t.to);
+        const data = approvalTxs.map(t => t.data);
+        await (await testVault.approve(targets, data)).wait();
+      }
+
+      // Use 10% of vault balances
+      const vaultWethBal = await weth.balanceOf(testVault.address);
+      const vaultUsdcBal = await usdc.balanceOf(testVault.address);
+      const wethAmount = vaultWethBal.div(10);
+      const usdcAmount = vaultUsdcBal.div(10);
+
+      const txData = await adapter.generateCreatePositionData({
+        position: positionRange,
+        token0Amount: wethAmount.toString(),
+        token1Amount: usdcAmount.toString(),
+        provider: env.provider,
+        walletAddress: testVault.address,
+        poolData,
+        token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+        token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        slippageTolerance: 5,
+        deadlineMinutes: 10,
+      });
+
+      const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
+      await mintTx.wait();
+
+      const newPositionIds = await tjpm.getPositionsByVault(testVault.address);
+      positionId = newPositionIds[newPositionIds.length - 1];
+    }, 120000);
+
+    describe('Success Cases', () => {
+      it('should return { position, poolData } with correct top-level structure', async () => {
+        if (!positionId) return; // skip if no position was created
+        const result = await adapter.getPositionById(positionId, env.provider);
+
+        expect(result).toHaveProperty('position');
+        expect(result).toHaveProperty('poolData');
+        expect(typeof result.position).toBe('object');
+        expect(typeof result.poolData).toBe('object');
+      }, 30000);
+
+      it('should return position with exactly the expected fields', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+
+        const expectedFields = [
+          'id', 'pool', 'lowerBinId', 'upperBinId',
+          'depositIds', 'liquidityMinted', 'active', 'createdAt', 'lastUpdated'
+        ];
+        expect(Object.keys(pos).sort()).toEqual(expectedFields.sort());
+      }, 30000);
+
+      it('should return correct field types', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+
+        expect(typeof pos.id).toBe('string');
+        expect(typeof pos.pool).toBe('string');
+        expect(typeof pos.lowerBinId).toBe('number');
+        expect(typeof pos.upperBinId).toBe('number');
+        expect(Array.isArray(pos.depositIds)).toBe(true);
+        expect(Array.isArray(pos.liquidityMinted)).toBe(true);
+        expect(typeof pos.active).toBe('boolean');
+        expect(typeof pos.createdAt).toBe('number');
+        expect(typeof pos.lastUpdated).toBe('number');
+
+        // depositIds should be numbers, liquidityMinted should be strings
+        pos.depositIds.forEach(id => expect(typeof id).toBe('number'));
+        pos.liquidityMinted.forEach(lm => expect(typeof lm).toBe('string'));
+      }, 30000);
+
+      it('should return poolData keyed by pool address with correct fields', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+        const pool = result.poolData[pos.pool];
+
+        expect(pool).toBeDefined();
+        expect(typeof pool.token0Symbol).toBe('string');
+        expect(typeof pool.token1Symbol).toBe('string');
+        expect(typeof pool.binStep).toBe('number');
+        expect(pool.platform).toBe('traderjoeV2_1');
+      }, 30000);
+
+      it('should return pool address matching expected LBPair', async () => {
+        if (!positionId || !expectedPoolAddress) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+
+        expect(result.position.pool).toBe(expectedPoolAddress);
+      }, 30000);
+
+      it('should return active position with non-empty depositIds and parallel liquidityMinted', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+
+        expect(pos.active).toBe(true);
+        expect(pos.depositIds.length).toBeGreaterThan(0);
+        expect(pos.liquidityMinted.length).toBe(pos.depositIds.length);
+      }, 30000);
+
+      it('should return position compatible with evaluatePositionRange (no throw)', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+
+        // evaluatePositionRange needs lowerBinId, upperBinId, pool
+        // Use swapData mode to avoid extra RPC call
+        const midBin = Math.floor((pos.lowerBinId + pos.upperBinId) / 2);
+        const rangeResult = await adapter.evaluatePositionRange(pos, env.provider, {
+          swapData: { activeId: midBin }
+        });
+
+        expect(rangeResult).toHaveProperty('inRange');
+        expect(rangeResult.inRange).toBe(true);
+      }, 30000);
+
+      it('should return position compatible with extractPositionBounds', async () => {
+        if (!positionId) return;
+        const result = await adapter.getPositionById(positionId, env.provider);
+        const pos = result.position;
+
+        const bounds = adapter.extractPositionBounds(pos);
+
+        expect(bounds.lower).toBe(pos.lowerBinId);
+        expect(bounds.upper).toBe(pos.upperBinId);
+      }, 30000);
+
+      it('should handle both string and numeric tokenId', async () => {
+        if (!positionId) return;
+
+        const numericId = typeof positionId === 'string' ? Number(positionId) : positionId;
+        const stringId = String(positionId);
+
+        const resultFromNumber = await adapter.getPositionById(numericId, env.provider);
+        const resultFromString = await adapter.getPositionById(stringId, env.provider);
+
+        expect(resultFromNumber.position.id).toBe(String(numericId));
+        expect(resultFromString.position.id).toBe(stringId);
+        expect(resultFromNumber.position.pool).toBe(resultFromString.position.pool);
+        expect(resultFromNumber.position.lowerBinId).toBe(resultFromString.position.lowerBinId);
+        expect(resultFromNumber.position.upperBinId).toBe(resultFromString.position.upperBinId);
+      }, 30000);
+    });
+
+    describe('Error Cases', () => {
+      it('should throw for null tokenId', async () => {
+        await expect(adapter.getPositionById(null, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw for undefined tokenId', async () => {
+        await expect(adapter.getPositionById(undefined, env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw for empty string tokenId', async () => {
+        await expect(adapter.getPositionById('', env.provider))
+          .rejects.toThrow('TokenId parameter is required');
+      });
+
+      it('should throw for null provider', async () => {
+        await expect(adapter.getPositionById(1, null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for undefined provider', async () => {
+        await expect(adapter.getPositionById(1, undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for invalid provider (missing getNetwork)', async () => {
+        await expect(adapter.getPositionById(1, { notAProvider: true }))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for non-existent tokenId', async () => {
+        // Use a very large ID that doesn't exist
+        await expect(adapter.getPositionById(999999999, env.provider))
+          .rejects.toThrow();
+      }, 30000);
+    });
+  });
+
   describe('getRequiredApprovals', () => {
     describe('Input Validation', () => {
       it('should throw if operationType is invalid', async () => {
@@ -1407,6 +2159,625 @@ describe('TraderJoeV2_1Adapter', () => {
         const decoded = erc20Iface.decodeFunctionData('approve', txs[0].data);
         expect(decoded.spender.toLowerCase()).toBe(adapter.addresses.lbRouterAddress.toLowerCase());
       }, 30000);
+    });
+  });
+
+  describe('generateRemoveLiquidityData', () => {
+    // ABI for decoding removePosition calldata
+    const removePositionIface = new ethers.utils.Interface([
+      "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+    ]);
+
+    // Shared state for E2E tests — position created in nested beforeAll
+    let e2ePositionId;
+    let e2ePosition;
+    let e2ePoolData;
+
+    describe('Input Validation', () => {
+      // Minimal valid params for validation tests (won't actually call provider)
+      const validPosition = {
+        id: '1',
+        pool: '0x0000000000000000000000000000000000000099',
+        depositIds: [8388608, 8388609, 8388610],
+        liquidityMinted: ['1000000', '2000000', '3000000'],
+        active: true,
+      };
+
+      const validParams = () => ({
+        position: validPosition,
+        percentage: 100,
+        provider: env.provider,
+        walletAddress: '0x0000000000000000000000000000000000000001',
+        slippageTolerance: 5,
+        deadlineMinutes: 10,
+      });
+
+      // --- Position validation ---
+      it('should throw if position is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: null }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position is undefined', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: undefined }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position.id is missing', async () => {
+        const { id, ...noId } = validPosition;
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: { ...noId, active: true } }))
+          .rejects.toThrow('Position id is required');
+      });
+
+      it('should throw if position.id is non-numeric', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: { ...validPosition, id: 'abc' } }))
+          .rejects.toThrow('Position id must be numeric');
+      });
+
+      it('should throw if position.depositIds is missing', async () => {
+        const { depositIds, ...noIds } = validPosition;
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: { ...noIds, active: true } }))
+          .rejects.toThrow('Position depositIds must be a non-empty array');
+      });
+
+      it('should throw if position.depositIds is empty', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: { ...validPosition, depositIds: [] } }))
+          .rejects.toThrow('Position depositIds must be a non-empty array');
+      });
+
+      it('should throw if position.liquidityMinted is missing', async () => {
+        const { liquidityMinted, ...noLM } = validPosition;
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), position: { ...noLM, active: true } }))
+          .rejects.toThrow('Position liquidityMinted must be a non-empty array');
+      });
+
+      it('should throw if position.depositIds and liquidityMinted lengths mismatch', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          ...validParams(),
+          position: { ...validPosition, liquidityMinted: ['1000000', '2000000'] }
+        })).rejects.toThrow('Position depositIds and liquidityMinted must have the same length');
+      });
+
+      it('should throw if position.active is not true', async () => {
+        await expect(adapter.generateRemoveLiquidityData({
+          ...validParams(),
+          position: { ...validPosition, active: false }
+        })).rejects.toThrow('Position must be active');
+      });
+
+      // --- Percentage validation ---
+      it('should throw if percentage is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: null }))
+          .rejects.toThrow('Percentage is required');
+      });
+
+      it('should throw if percentage is undefined', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: undefined }))
+          .rejects.toThrow('Percentage is required');
+      });
+
+      it('should throw if percentage is not finite', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: Infinity }))
+          .rejects.toThrow('Percentage must be a finite number');
+      });
+
+      it('should throw if percentage is 0', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: 0 }))
+          .rejects.toThrow('Percentage must be between 1 and 100');
+      });
+
+      it('should throw if percentage is 101', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: 101 }))
+          .rejects.toThrow('Percentage must be between 1 and 100');
+      });
+
+      it('should throw if percentage is -1', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: -1 }))
+          .rejects.toThrow('Percentage must be between 1 and 100');
+      });
+
+      it('should throw if percentage is not an integer', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), percentage: 50.5 }))
+          .rejects.toThrow('Percentage must be an integer');
+      });
+
+      // --- Wallet address validation ---
+      it('should throw if walletAddress is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: null }))
+          .rejects.toThrow('Wallet address is required');
+      });
+
+      it('should throw if walletAddress is empty', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: '' }))
+          .rejects.toThrow('Wallet address is required');
+      });
+
+      it('should throw if walletAddress is invalid', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: 'invalid' }))
+          .rejects.toThrow('Invalid wallet address');
+      });
+
+      // --- Slippage validation ---
+      it('should throw if slippageTolerance is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), slippageTolerance: null }))
+          .rejects.toThrow('Slippage tolerance is required');
+      });
+
+      it('should throw if slippageTolerance is not finite', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), slippageTolerance: NaN }))
+          .rejects.toThrow('Slippage tolerance must be a finite number');
+      });
+
+      // --- Deadline validation ---
+      it('should throw if deadlineMinutes is null', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), deadlineMinutes: null }))
+          .rejects.toThrow('Deadline minutes is required');
+      });
+
+      it('should throw if deadlineMinutes is 0', async () => {
+        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), deadlineMinutes: 0 }))
+          .rejects.toThrow('Deadline minutes must be greater than 0');
+      });
+
+      // --- Position manager address ---
+      it('should throw if positionManagerAddress is not configured', async () => {
+        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        adapterNoPM.addresses.positionManagerAddress = '';
+        await expect(adapterNoPM.generateRemoveLiquidityData(validParams()))
+          .rejects.toThrow('No position manager address found');
+      });
+    });
+
+    describe('Calldata Encoding', () => {
+      // These tests use real on-chain data from the position created in the top-level beforeAll
+      let onChainPosition;
+      let positionManagerAddress;
+
+      beforeAll(async () => {
+        positionManagerAddress = adapter.addresses.positionManagerAddress;
+        const tjpmAbi = contractData.TJPositionManager.abi;
+        const tjpm = new ethers.Contract(positionManagerAddress, tjpmAbi, env.provider);
+
+        // Use position from top-level E2E test (or create one)
+        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        if (positionIds.length === 0) {
+          console.log('No position available for calldata encoding tests - skipping');
+          return;
+        }
+
+        const posId = positionIds[0];
+        const result = await adapter.getPositionById(posId, env.provider);
+        onChainPosition = result.position;
+      }, 60000);
+
+      it('should return { to, data, value, quote } with correct structure', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+      }, 30000);
+
+      it('should set to = positionManagerAddress', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.to).toBe(positionManagerAddress);
+      }, 30000);
+
+      it('should set value = 0x00', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.value).toBe('0x00');
+      }, 30000);
+
+      it('should encode correct vault, positionId, percentage, deadline in calldata', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 50,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
+        expect(decoded.vault).toBe(testVault.address);
+        expect(decoded.positionId.toString()).toBe(onChainPosition.id);
+        expect(decoded.percentage.toNumber()).toBe(50);
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      }, 30000);
+
+      it('should have non-zero amountXMin and amountYMin in calldata', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
+        // At least one should be non-zero (position has value in at least one token)
+        const xMin = BigInt(decoded.amountXMin.toString());
+        const yMin = BigInt(decoded.amountYMin.toString());
+        expect(xMin + yMin).toBeGreaterThan(0n);
+      }, 30000);
+
+      it('should decrease amountXMin/amountYMin as slippageTolerance increases', async () => {
+        if (!onChainPosition) return;
+
+        const resultLow = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 1,
+          deadlineMinutes: 10,
+        });
+        const resultHigh = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 10,
+          deadlineMinutes: 10,
+        });
+
+        const lowXMin = BigInt(resultLow.quote.amountXMin);
+        const highXMin = BigInt(resultHigh.quote.amountXMin);
+        const lowYMin = BigInt(resultLow.quote.amountYMin);
+        const highYMin = BigInt(resultHigh.quote.amountYMin);
+
+        // Higher slippage means lower mins
+        expect(lowXMin).toBeGreaterThanOrEqual(highXMin);
+        expect(lowYMin).toBeGreaterThanOrEqual(highYMin);
+      }, 30000);
+
+      it('should return quote with all expected fields', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const q = result.quote;
+        expect(q).toHaveProperty('positionId');
+        expect(q).toHaveProperty('percentage');
+        expect(q).toHaveProperty('amountX');
+        expect(q).toHaveProperty('amountY');
+        expect(q).toHaveProperty('amountXMin');
+        expect(q).toHaveProperty('amountYMin');
+        expect(q).toHaveProperty('deadline');
+        expect(q).toHaveProperty('depositIds');
+        expect(q).toHaveProperty('liquidityMinted');
+        expect(q).toHaveProperty('amountsToRemove');
+
+        expect(q.positionId).toBe(onChainPosition.id);
+        expect(q.percentage).toBe(100);
+        expect(Array.isArray(q.depositIds)).toBe(true);
+        expect(Array.isArray(q.liquidityMinted)).toBe(true);
+        expect(Array.isArray(q.amountsToRemove)).toBe(true);
+      }, 30000);
+
+      it('should scale amountsToRemove correctly for different percentages', async () => {
+        if (!onChainPosition) return;
+
+        const result50 = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 50,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const result100 = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        // 50% amounts should be roughly half of 100% amounts
+        for (let i = 0; i < result50.quote.amountsToRemove.length; i++) {
+          const half = BigInt(result100.quote.amountsToRemove[i]) / 2n;
+          const actual = BigInt(result50.quote.amountsToRemove[i]);
+          // Allow rounding difference of 1
+          expect(actual >= half - 1n && actual <= half + 1n).toBe(true);
+        }
+      }, 30000);
+
+      it('should use different deadline values', async () => {
+        if (!onChainPosition) return;
+
+        const result5 = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 5,
+        });
+
+        const result30 = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 30,
+        });
+
+        // 30 min deadline should be later than 5 min deadline
+        expect(result30.quote.deadline).toBeGreaterThan(result5.quote.deadline);
+      }, 30000);
+    });
+
+    describe('E2E Tests', () => {
+      // Create a fresh position for removal tests
+      beforeAll(async () => {
+        // Discover a real pool and create a position
+        let poolData, positionRange;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          e2ePoolData = poolData;
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping removal E2E tests');
+            return;
+          }
+          throw error;
+        }
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Approve tokens if needed
+        const approvalTxs = await adapter.getRequiredApprovals(
+          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+        );
+        if (approvalTxs.length > 0) {
+          const targets = approvalTxs.map(t => t.to);
+          const data = approvalTxs.map(t => t.data);
+          await (await testVault.approve(targets, data)).wait();
+        }
+
+        // Use 5% of vault balances to leave room for multiple tests
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(20);
+        const usdcAmount = vaultUsdcBal.div(20);
+
+        const txData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
+        await mintTx.wait();
+
+        // Get the created position
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        e2ePositionId = positionIds[positionIds.length - 1];
+
+        const result = await adapter.getPositionById(e2ePositionId, env.provider);
+        e2ePosition = result.position;
+
+        console.log(`  E2E removal position created: ID ${e2ePositionId}, bins: ${e2ePosition.depositIds.length}`);
+      }, 180000);
+
+      it('should execute full removal (100%): create -> remove -> verify inactive', async () => {
+        if (!e2ePosition) return;
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Record vault balances before removal
+        const wethBalBefore = await weth.balanceOf(vaultAddress);
+        const usdcBalBefore = await usdc.balanceOf(vaultAddress);
+
+        // Generate remove calldata
+        const txData = await adapter.generateRemoveLiquidityData({
+          position: e2ePosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          slippageTolerance: 50, // Wide slippage for fork stability
+          deadlineMinutes: 10,
+        });
+
+        expect(txData.to).toBe(pmAddress);
+
+        // Execute via vault.decreaseLiquidity()
+        const removeTx = await testVault.decreaseLiquidity([pmAddress], [txData.data]);
+        const receipt = await removeTx.wait();
+        expect(receipt.status).toBe(1);
+
+        // Verify position is now inactive
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const pos = await tjpm.getPosition(e2ePositionId);
+        expect(pos.active).toBe(false);
+
+        // Verify vault received tokens back
+        const wethBalAfter = await weth.balanceOf(vaultAddress);
+        const usdcBalAfter = await usdc.balanceOf(vaultAddress);
+        const wethReceived = wethBalAfter.sub(wethBalBefore);
+        const usdcReceived = usdcBalAfter.sub(usdcBalBefore);
+
+        // At least one token should have been returned
+        expect(wethReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
+
+        console.log(`  Full removal: received ${ethers.utils.formatEther(wethReceived)} WETH, ${ethers.utils.formatUnits(usdcReceived, 6)} USDC`);
+      }, 120000);
+
+      it('should execute partial removal (50%): create -> remove 50% -> verify still active', async () => {
+        // Create a fresh position for partial removal
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        if (!e2ePoolData) return;
+
+        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+
+        // Use small amounts
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(20);
+        const usdcAmount = vaultUsdcBal.div(20);
+
+        const createData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
+
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const partialPosId = positionIds[positionIds.length - 1];
+
+        // Fetch position via adapter
+        const posResult = await adapter.getPositionById(partialPosId, env.provider);
+        const partialPosition = posResult.position;
+
+        // Record original liquidity
+        const origLiquidity = partialPosition.liquidityMinted.map(lm => BigInt(lm));
+
+        // Remove 50%
+        const removeData = await adapter.generateRemoveLiquidityData({
+          position: partialPosition,
+          percentage: 50,
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          slippageTolerance: 50,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.decreaseLiquidity([pmAddress], [removeData.data])).wait();
+
+        // Verify position is still active with reduced liquidity
+        const posAfter = await tjpm.getPosition(partialPosId);
+        expect(posAfter.active).toBe(true);
+
+        // Liquidity should be reduced to ~50%
+        for (let i = 0; i < posAfter.liquidityMinted.length; i++) {
+          const remaining = posAfter.liquidityMinted[i].toBigInt();
+          const expected = origLiquidity[i] / 2n;
+          // Allow rounding tolerance of 1
+          expect(remaining >= expected - 1n && remaining <= expected + 1n).toBe(true);
+        }
+
+        console.log(`  Partial removal (50%): position ${partialPosId} still active`);
+      }, 180000);
+
+      it('should execute via vault.decreaseLiquidity() with full validator chain', async () => {
+        // This test verifies the entire validation chain works:
+        // vault.decreaseLiquidity -> VaultFactory.validateDecreaseLiquidity -> TJPositionValidator.validateDecreaseLiquidity
+        if (!e2ePoolData) return;
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Create position
+        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+
+        const createData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: vaultWethBal.div(20).toString(),
+          token1Amount: vaultUsdcBal.div(20).toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
+
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const posIds = await tjpm.getPositionsByVault(vaultAddress);
+        const posId = posIds[posIds.length - 1];
+        const posResult = await adapter.getPositionById(posId, env.provider);
+
+        // Generate remove calldata
+        const removeData = await adapter.generateRemoveLiquidityData({
+          position: posResult.position,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          slippageTolerance: 50,
+          deadlineMinutes: 10,
+        });
+
+        // Execute via the proper vault interface — this exercises the full validation chain
+        const removeTx = await testVault.decreaseLiquidity([pmAddress], [removeData.data]);
+        const receipt = await removeTx.wait();
+
+        expect(receipt.status).toBe(1);
+
+        // Verify removal succeeded
+        const posAfter = await tjpm.getPosition(posId);
+        expect(posAfter.active).toBe(false);
+
+        console.log(`  Validator chain E2E: position ${posId} removed via decreaseLiquidity()`);
+      }, 180000);
     });
   });
 });
