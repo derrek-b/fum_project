@@ -2201,6 +2201,43 @@
           {
             "indexed": false,
             "internalType": "uint256",
+            "name": "amountXAdded",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountYAdded",
+            "type": "uint256"
+          }
+        ],
+        "name": "PositionIncreased",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
             "name": "percentage",
             "type": "uint256"
           },
@@ -2219,6 +2256,85 @@
         ],
         "name": "PositionRemoved",
         "type": "event"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "activeIdDesired",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "idSlippage",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256[]",
+            "name": "deltaIds",
+            "type": "int256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "distributionX",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "distributionY",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "name": "addToPosition",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "amountXAdded",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYAdded",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
       },
       {
         "inputs": [
@@ -2292,6 +2408,40 @@
           }
         ],
         "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          }
+        ],
+        "name": "getAccruedFees",
+        "outputs": [
+          {
+            "internalType": "uint256[]",
+            "name": "depositIds",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "currentBalances",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "storedBalances",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "feeDeltas",
+            "type": "uint256[]"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       },
       {
@@ -2833,12 +2983,12 @@
         "inputs": [
           {
             "internalType": "bytes",
-            "name": "",
+            "name": "data",
             "type": "bytes"
           },
           {
             "internalType": "address",
-            "name": "",
+            "name": "vault",
             "type": "address"
           }
         ],

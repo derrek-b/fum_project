@@ -634,11 +634,443 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async generateAddLiquidityData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateAddLiquidityData not implemented");
+    const {
+      position,
+      token0Amount,
+      token1Amount,
+      provider,
+      walletAddress,
+      poolData,
+      token0Data,
+      token1Data,
+      slippageTolerance,
+      deadlineMinutes
+    } = params;
+
+    // --- Position validation (hybrid of create + remove patterns) ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position id is required");
+    }
+    if (!/^\d+$/.test(String(position.id))) {
+      throw new Error("Position id must be numeric");
+    }
+    if (position.lowerBinId === null || position.lowerBinId === undefined) {
+      throw new Error("Position lowerBinId is required");
+    }
+    if (!Number.isFinite(position.lowerBinId)) {
+      throw new Error("Position lowerBinId must be a finite number");
+    }
+    if (position.upperBinId === null || position.upperBinId === undefined) {
+      throw new Error("Position upperBinId is required");
+    }
+    if (!Number.isFinite(position.upperBinId)) {
+      throw new Error("Position upperBinId must be a finite number");
+    }
+    if (position.lowerBinId >= position.upperBinId) {
+      throw new Error("Position lowerBinId must be less than upperBinId");
+    }
+
+    // --- Token amount validation ---
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
+      throw new Error("Wallet address is required");
+    }
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.activeId === null || poolData.activeId === undefined) {
+      throw new Error("Pool data activeId is required");
+    }
+    if (!Number.isFinite(poolData.activeId)) {
+      throw new Error("Pool data activeId must be a finite number");
+    }
+    if (poolData.binStep === null || poolData.binStep === undefined) {
+      throw new Error("Pool data binStep is required");
+    }
+    if (!Number.isFinite(poolData.binStep) || poolData.binStep <= 0) {
+      throw new Error("Pool data binStep must be a positive finite number");
+    }
+    if (!poolData.address) {
+      throw new Error("Pool data address is required");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (!token0Data.address) {
+      throw new Error("Token0 address is required");
+    }
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (!token1Data.address) {
+      throw new Error("Token1 address is required");
+    }
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
+
+    // --- Resolve position manager address ---
+    if (!this.addresses?.positionManagerAddress) {
+      throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+    }
+    const positionManagerAddress = this.addresses.positionManagerAddress;
+
+    // --- Sort tokens to TJ canonical order (tokenX = lower address) ---
+    const { sortedToken0: tokenX, sortedToken1: tokenY, tokensSwapped } =
+      this.sortTokens(token0Data, token1Data);
+    const amountX = tokensSwapped ? token1Amount : token0Amount;
+    const amountY = tokensSwapped ? token0Amount : token1Amount;
+
+    // --- Apply slippage to amounts ---
+    const slipMul = BigInt(Math.floor((100 - slippageTolerance) * 100));
+    const amountXMin = (BigInt(amountX) * slipMul / 10000n).toString();
+    const amountYMin = (BigInt(amountY) * slipMul / 10000n).toString();
+
+    // --- Compute idSlippage from price slippage ---
+    const priceSlippage = slippageTolerance / 100;
+    const idSlippage = Math.floor(
+      Math.log(1 + priceSlippage) / Math.log(1 + poolData.binStep / 1e4)
+    );
+
+    // --- Generate bin distribution using SDK ---
+    const { deltaIds, distributionX, distributionY } =
+      getUniformDistributionFromBinRange(poolData.activeId, [position.lowerBinId, position.upperBinId]);
+
+    // --- Compute deadline ---
+    const deadline = this._createDeadline(deadlineMinutes);
+
+    // --- Encode addToPosition calldata ---
+    const iface = new ethers.utils.Interface([
+      "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+    ]);
+
+    const calldata = iface.encodeFunctionData("addToPosition", [
+      walletAddress,
+      position.id,
+      amountX,
+      amountY,
+      amountXMin,
+      amountYMin,
+      poolData.activeId,
+      idSlippage,
+      deltaIds,
+      distributionX.map(d => d.toString()),
+      distributionY.map(d => d.toString()),
+      deadline
+    ]);
+
+    return {
+      to: positionManagerAddress,
+      data: calldata,
+      value: '0x00',
+      quote: {
+        positionId: position.id,
+        amountX,
+        amountY,
+        amountXMin,
+        amountYMin,
+        deltaIds,
+        distributionX: distributionX.map(d => d.toString()),
+        distributionY: distributionY.map(d => d.toString()),
+        tokensSwapped,
+        idSlippage,
+        lbPair: poolData.address,
+        binStep: poolData.binStep,
+        activeId: poolData.activeId
+      }
+    };
   }
 
   async getAddLiquidityAmounts(params) {
-    throw new Error("TraderJoeV2_1Adapter.getAddLiquidityAmounts not implemented");
+    const { position, token0Amount, token1Amount, poolData, token0Data, token1Data, provider } = params;
+
+    // --- Input validation (same pattern as generateCreatePositionData) ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.lowerBinId === null || position.lowerBinId === undefined) {
+      throw new Error("Position lowerBinId is required");
+    }
+    if (!Number.isFinite(position.lowerBinId)) {
+      throw new Error("Position lowerBinId must be a finite number");
+    }
+    if (position.upperBinId === null || position.upperBinId === undefined) {
+      throw new Error("Position upperBinId is required");
+    }
+    if (!Number.isFinite(position.upperBinId)) {
+      throw new Error("Position upperBinId must be a finite number");
+    }
+    if (position.lowerBinId >= position.upperBinId) {
+      throw new Error("Position lowerBinId must be less than upperBinId");
+    }
+
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+    if (token0Amount === '0' && token1Amount === '0') {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.activeId === null || poolData.activeId === undefined) {
+      throw new Error("Pool data activeId is required");
+    }
+    if (!Number.isFinite(poolData.activeId)) {
+      throw new Error("Pool data activeId must be a finite number");
+    }
+    if (poolData.binStep === null || poolData.binStep === undefined) {
+      throw new Error("Pool data binStep is required");
+    }
+    if (!Number.isFinite(poolData.binStep) || poolData.binStep <= 0) {
+      throw new Error("Pool data binStep must be a positive finite number");
+    }
+    if (!poolData.address) {
+      throw new Error("Pool data address is required");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (!token0Data.address) {
+      throw new Error("Token0 address is required");
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (!token1Data.address) {
+      throw new Error("Token1 address is required");
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    // --- Sort tokens to TJ canonical order (tokenX = lower address) ---
+    const { sortedToken0: tokenX, sortedToken1: tokenY, tokensSwapped } =
+      this.sortTokens(token0Data, token1Data);
+    const amountX = tokensSwapped ? token1Amount : token0Amount;
+    const amountY = tokensSwapped ? token0Amount : token1Amount;
+
+    // --- Determine position's range relative to activeId ---
+    const activeId = poolData.activeId;
+    const lowerBin = position.lowerBinId;
+    const upperBin = position.upperBinId;
+    const entirelyAbove = lowerBin > activeId;   // X-only range
+    const entirelyBelow = upperBin < activeId;   // Y-only range
+
+    // --- Handle out-of-range positions (no RPC needed) ---
+    if (entirelyAbove) {
+      // Only tokenX is depositable
+      const resultX = BigInt(amountX) > 0n ? amountX : '0';
+      return {
+        token0Amount: tokensSwapped ? '0' : resultX,
+        token1Amount: tokensSwapped ? resultX : '0',
+        liquidity: resultX
+      };
+    }
+    if (entirelyBelow) {
+      // Only tokenY is depositable
+      const resultY = BigInt(amountY) > 0n ? amountY : '0';
+      return {
+        token0Amount: tokensSwapped ? resultY : '0',
+        token1Amount: tokensSwapped ? '0' : resultY,
+        liquidity: resultY
+      };
+    }
+
+    // --- In-range: compute amounts using distribution and reserves ---
+    try {
+      const { deltaIds, distributionX, distributionY } =
+        getUniformDistributionFromBinRange(activeId, [lowerBin, upperBin]);
+
+      // Find the active bin index (deltaId === 0)
+      const activeBinIndex = deltaIds.indexOf(0);
+
+      // Fetch active bin reserves and total supply from LBPair
+      const lbPair = new ethers.Contract(poolData.address, this.lbPairABI, provider);
+      const [binData, totalSupply] = await Promise.all([
+        lbPair.getBin(activeId),
+        lbPair.totalSupply(activeId)
+      ]);
+
+      const reserveX = binData[0].toBigInt();
+      const reserveY = binData[1].toBigInt();
+
+      // Get distribution weights at the active bin
+      const distXAtActive = distributionX[activeBinIndex];
+      const distYAtActive = distributionY[activeBinIndex];
+
+      let resultX, resultY;
+      const inputX = BigInt(amountX);
+      const inputY = BigInt(amountY);
+
+      if (reserveX === 0n && reserveY === 0n) {
+        // Empty active bin — no ratio constraint, return inputs as-is
+        resultX = inputX;
+        resultY = inputY;
+      } else if (inputX > 0n && inputY === 0n) {
+        // Case 1a: Only X provided → compute Y
+        resultX = inputX;
+        if (reserveX === 0n || distXAtActive === 0n) {
+          // X can't go into active bin — deposit X in above-active bins only
+          resultY = 0n;
+        } else {
+          // amountY = amountX * distXAtActive * reserveY / (distYAtActive * reserveX)
+          resultY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
+        }
+      } else if (inputY > 0n && inputX === 0n) {
+        // Case 1b: Only Y provided → compute X
+        resultY = inputY;
+        if (reserveY === 0n || distYAtActive === 0n) {
+          resultX = 0n;
+        } else {
+          resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
+        }
+      } else {
+        // Case 2: Both provided → determine limiting factor
+        if (reserveX === 0n || distXAtActive === 0n) {
+          resultX = 0n;
+          resultY = inputY;
+        } else if (reserveY === 0n || distYAtActive === 0n) {
+          resultX = inputX;
+          resultY = 0n;
+        } else {
+          const impliedY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
+          if (impliedY <= inputY) {
+            // X is the limiting factor
+            resultX = inputX;
+            resultY = impliedY;
+          } else {
+            // Y is the limiting factor
+            resultY = inputY;
+            resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
+          }
+        }
+      }
+
+      // Estimate liquidity from active bin contribution
+      let estimatedLiquidity;
+      const totalSupplyBigInt = totalSupply.toBigInt();
+      const totalReserve = reserveX + reserveY;
+      if (totalReserve > 0n && totalSupplyBigInt > 0n) {
+        // Estimate deposit amount going to the active bin
+        // Use the proportion of the total amount
+        const depositAtActive = resultX + resultY;
+        estimatedLiquidity = (depositAtActive * totalSupplyBigInt / totalReserve).toString();
+      } else {
+        estimatedLiquidity = (resultX + resultY).toString();
+      }
+
+      // Map results back to caller's token order
+      return {
+        token0Amount: tokensSwapped ? resultY.toString() : resultX.toString(),
+        token1Amount: tokensSwapped ? resultX.toString() : resultY.toString(),
+        liquidity: estimatedLiquidity
+      };
+    } catch (error) {
+      if (error.message.includes('is required') ||
+          error.message.includes('must be') ||
+          error.message.includes('cannot be the same')) {
+        throw error;
+      }
+      throw new Error(`Failed to calculate add liquidity amounts: ${error.message}`);
+    }
   }
 
   /**
@@ -929,7 +1361,137 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async batchSwapTransactions(swapInstructions, options) {
-    throw new Error("TraderJoeV2_1Adapter.batchSwapTransactions not implemented");
+    const { provider, chainId, recipient, slippageTolerance } = options;
+
+    // Validate options (no signer — TJ V2.1 doesn't use Permit2)
+    if (!provider) throw new Error("provider is required");
+    if (!chainId) throw new Error("chainId is required");
+    if (!recipient) throw new Error("recipient is required");
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("slippageTolerance is required");
+    }
+
+    if (!Array.isArray(swapInstructions)) throw new Error("swapInstructions must be an array");
+    if (swapInstructions.length === 0) throw new Error("swapInstructions cannot be empty");
+
+    const transactions = [];
+    const metadata = [];
+
+    for (const instruction of swapInstructions) {
+      if (!instruction.tokenIn || !instruction.tokenIn.symbol) throw new Error("tokenIn with symbol is required");
+      if (!instruction.tokenOut || !instruction.tokenOut.symbol) throw new Error("tokenOut with symbol is required");
+      if (!instruction.amount) throw new Error("amount is required");
+
+      const result = await this._generateSwapTransaction({
+        tokenIn: instruction.tokenIn,
+        tokenOut: instruction.tokenOut,
+        amount: instruction.amount,
+        isAmountIn: instruction.isAmountIn !== undefined ? instruction.isAmountIn : true,
+        provider, chainId, recipient, slippageTolerance,
+      });
+
+      transactions.push(result.transaction);
+      metadata.push({
+        tokenInSymbol: instruction.tokenIn.symbol,
+        tokenOutSymbol: instruction.tokenOut.symbol,
+        tokenInAddress: result.tokenInAddress,
+        tokenOutAddress: result.tokenOutAddress,
+        quotedAmountIn: result.quotedAmountIn,
+        quotedAmountOut: result.quotedAmountOut,
+        isAmountIn: result.isAmountIn,
+      });
+    }
+
+    return { transactions, metadata };
+  }
+
+  /**
+   * Generate a single swap transaction using LBQuoter for routing and LBRouter for calldata.
+   * @private
+   */
+  async _generateSwapTransaction(params) {
+    const { tokenIn, tokenOut, amount, isAmountIn, provider, chainId, recipient, slippageTolerance } = params;
+
+    const tokenInIsNative = !!tokenIn.isNative;
+    const tokenOutIsNative = !!tokenOut.isNative;
+
+    // Resolve addresses: native → WETH for route/quote
+    const wethAddress = getWethAddress(chainId);
+    const tokenInAddress = tokenInIsNative ? wethAddress : tokenIn.address;
+    const tokenOutAddress = tokenOutIsNative ? wethAddress : tokenOut.address;
+
+    // 1. Get quote from LBQuoter
+    const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
+    const route = [tokenInAddress, tokenOutAddress];
+
+    let quote;
+    try {
+      quote = isAmountIn
+        ? await quoter.findBestPathFromAmountIn(route, amount)
+        : await quoter.findBestPathFromAmountOut(route, amount);
+    } catch (error) {
+      throw new Error(`Failed to get swap quote for ${tokenIn.symbol} -> ${tokenOut.symbol}: ${error.message}`);
+    }
+
+    // 2. Extract amounts
+    const quotedAmounts = quote.amounts;
+    const quotedAmountIn = quotedAmounts[0].toString();
+    const quotedAmountOut = quotedAmounts[quotedAmounts.length - 1].toString();
+
+    if (quotedAmountOut === '0') {
+      throw new Error(`No valid route found for ${tokenIn.symbol} -> ${tokenOut.symbol}`);
+    }
+
+    // 3. Build Path struct from quote results
+    const path = {
+      pairBinSteps: quote.binSteps.map(bs => bs.toString()),
+      versions: quote.versions.map(v => Number(v)),
+      tokenPath: quote.route,
+    };
+
+    // 4. Apply slippage and encode router calldata
+    const slippageBps = BigInt(Math.round(slippageTolerance * 100));
+    const deadline = this._createDeadline(30);
+    const routerInterface = new ethers.utils.Interface(this.lbRouterABI);
+
+    let data, value;
+
+    if (isAmountIn) {
+      const amountOutMin = (BigInt(quotedAmountOut) * (10000n - slippageBps) / 10000n).toString();
+
+      if (tokenInIsNative) {
+        data = routerInterface.encodeFunctionData('swapExactNATIVEForTokens', [amountOutMin, path, recipient, deadline]);
+        value = ethers.BigNumber.from(quotedAmountIn).toHexString();
+      } else if (tokenOutIsNative) {
+        data = routerInterface.encodeFunctionData('swapExactTokensForNATIVE', [quotedAmountIn, amountOutMin, path, recipient, deadline]);
+        value = '0x00';
+      } else {
+        data = routerInterface.encodeFunctionData('swapExactTokensForTokens', [quotedAmountIn, amountOutMin, path, recipient, deadline]);
+        value = '0x00';
+      }
+    } else {
+      const amountInMax = (BigInt(quotedAmountIn) * (10000n + slippageBps) / 10000n).toString();
+
+      if (tokenInIsNative) {
+        data = routerInterface.encodeFunctionData('swapNATIVEForExactTokens', [amount, path, recipient, deadline]);
+        value = ethers.BigNumber.from(amountInMax).toHexString();
+      } else if (tokenOutIsNative) {
+        data = routerInterface.encodeFunctionData('swapTokensForExactNATIVE', [amount, amountInMax, path, recipient, deadline]);
+        value = '0x00';
+      } else {
+        data = routerInterface.encodeFunctionData('swapTokensForExactTokens', [amount, amountInMax, path, recipient, deadline]);
+        value = '0x00';
+      }
+    }
+
+    return {
+      transaction: { to: this.addresses.lbRouterAddress, data, value },
+      tokenInAddress,    // WETH address if native (for parseSwapReceipt compatibility)
+      tokenOutAddress,   // WETH address if native
+      quotedAmountIn,
+      quotedAmountOut,
+      isAmountIn,
+    };
   }
 
   async parseClosureReceipt(receipt, positionMetadata, options = {}) {
@@ -941,7 +1503,110 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   parseSwapReceipt(receipt, swapMetadata) {
-    throw new Error("TraderJoeV2_1Adapter.parseSwapReceipt not implemented");
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Validate swapMetadata
+    if (swapMetadata === null || swapMetadata === undefined) {
+      throw new Error("Swap metadata parameter is required");
+    }
+    if (!Array.isArray(swapMetadata)) {
+      throw new Error("Swap metadata must be an array");
+    }
+
+    if (swapMetadata.length === 0) {
+      return [];
+    }
+
+    const swapTopicHash = ethers.utils.id(this._getSwapEventSignature());
+
+    // Collect all TJ V2.1 swap events from receipt
+    const swapEvents = [];
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === swapTopicHash) {
+          const parsed = this.parseSwapEvent(log);
+          swapEvents.push(parsed);
+        }
+      } catch (e) {
+        // Not a valid TJ V2.1 Swap event, skip
+      }
+    }
+
+    // Match events to metadata sequentially
+    let eventIndex = 0;
+    const actualSwaps = [];
+
+    for (const metadata of swapMetadata) {
+      if (!metadata.tokenInAddress) {
+        throw new Error("Swap metadata must have tokenInAddress");
+      }
+      if (!metadata.tokenOutAddress) {
+        throw new Error("Swap metadata must have tokenOutAddress");
+      }
+
+      const tokenInAddress = metadata.tokenInAddress.toLowerCase();
+      const tokenOutAddress = metadata.tokenOutAddress.toLowerCase();
+      let totalAmountIn = BigInt(0);
+      let totalAmountOut = BigInt(0);
+
+      if (metadata.routes && metadata.routes.length > 0) {
+        // MULTI-HOP: use tokenPath for first/last hop extraction
+        for (const route of metadata.routes) {
+          const { tokenPath, poolCount } = route;
+          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
+            if (eventIndex >= swapEvents.length) break;
+            const event = swapEvents[eventIndex];
+
+            if (hopIdx === 0) {
+              const first = tokenPath[0].toLowerCase();
+              const second = tokenPath[1].toLowerCase();
+              const isTokenX = first < second;
+              totalAmountIn += BigInt(isTokenX
+                ? event.amountsIn.amountX : event.amountsIn.amountY);
+            }
+
+            if (hopIdx === poolCount - 1) {
+              const prevToken = tokenPath[poolCount - 1].toLowerCase();
+              const lastToken = tokenPath[poolCount].toLowerCase();
+              const isTokenX = lastToken < prevToken;
+              totalAmountOut += BigInt(isTokenX
+                ? event.amountsOut.amountX : event.amountsOut.amountY);
+            }
+
+            eventIndex++;
+          }
+        }
+      } else {
+        // SIMPLE: single-hop, use token address ordering
+        const isTokenInTokenX = tokenInAddress < tokenOutAddress;
+        const numEvents = metadata.expectedSwapEvents || 1;
+
+        for (let i = 0; i < numEvents; i++) {
+          if (eventIndex >= swapEvents.length) break;
+          const event = swapEvents[eventIndex];
+
+          totalAmountIn += BigInt(isTokenInTokenX
+            ? event.amountsIn.amountX : event.amountsIn.amountY);
+          totalAmountOut += BigInt(isTokenInTokenX
+            ? event.amountsOut.amountY : event.amountsOut.amountX);
+
+          eventIndex++;
+        }
+      }
+
+      actualSwaps.push({
+        actualAmountIn: totalAmountIn.toString(),
+        actualAmountOut: totalAmountOut.toString()
+      });
+    }
+
+    return actualSwaps;
   }
 
   parseIncreaseLiquidityReceipt(receipt, { position, poolData }) {
@@ -949,7 +1614,92 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async getBestSwapQuote(params) {
-    throw new Error("TraderJoeV2_1Adapter.getBestSwapQuote not implemented");
+    const { tokenInAddress, tokenOutAddress, amount, isAmountIn, tokenInIsNative = false, tokenOutIsNative = false, provider } = params;
+
+    // Validate provider (TJ requires it — no cached router like V3/V4's AlphaRouter)
+    if (!provider) {
+      throw new Error("provider is required");
+    }
+
+    // Validate addresses — skip for native ETH
+    if (!tokenInIsNative) {
+      if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+        throw new Error("TokenIn address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenInAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+      }
+    }
+
+    if (!tokenOutIsNative) {
+      if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+        throw new Error("TokenOut address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenOutAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+      }
+    }
+
+    if (!amount) {
+      throw new Error("Amount parameter is required");
+    }
+    if (typeof amount !== 'string') {
+      throw new Error("Amount must be a string");
+    }
+    if (!/^\d+$/.test(amount)) {
+      throw new Error("Amount must be a positive numeric string");
+    }
+    if (amount === '0') {
+      throw new Error("Amount cannot be zero");
+    }
+
+    if (typeof isAmountIn !== 'boolean') {
+      throw new Error("isAmountIn parameter is required and must be a boolean");
+    }
+
+    // Resolve native → WETH for quoter route
+    const wethAddress = getWethAddress(this.chainId);
+    const resolvedTokenIn = tokenInIsNative ? wethAddress : tokenInAddress;
+    const resolvedTokenOut = tokenOutIsNative ? wethAddress : tokenOutAddress;
+
+    // Call LBQuoter — handles pool discovery across all bin steps internally
+    const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
+    const route = [resolvedTokenIn, resolvedTokenOut];
+
+    let quote;
+    try {
+      quote = isAmountIn
+        ? await quoter.findBestPathFromAmountIn(route, amount)
+        : await quoter.findBestPathFromAmountOut(route, amount);
+    } catch (error) {
+      throw new Error(`Failed to get swap quote: ${error.message}`);
+    }
+
+    const quotedAmounts = quote.amounts;
+    const quotedAmountIn = quotedAmounts[0].toString();
+    const quotedAmountOut = quotedAmounts[quotedAmounts.length - 1].toString();
+
+    if (quotedAmountOut === '0') {
+      throw new Error(`No route found for token pair ${resolvedTokenIn}/${resolvedTokenOut}`);
+    }
+
+    if (isAmountIn) {
+      return {
+        amountIn: amount,
+        amountOut: quotedAmountOut,
+        route: quote,
+      };
+    } else {
+      return {
+        amountIn: quotedAmountIn,
+        amountOut: amount,
+        route: quote,
+      };
+    }
   }
 
   /**

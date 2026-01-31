@@ -465,6 +465,279 @@ describe('TraderJoeV2_1Adapter', () => {
     });
   });
 
+  describe('parseSwapReceipt', () => {
+    // Token addresses for tests — TOKEN_A < TOKEN_B so TOKEN_A = tokenX
+    const TOKEN_A = '0x0000000000000000000000000000000000000AAA';
+    const TOKEN_B = '0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+    const TOKEN_MID = '0x7777777777777777777777777777777777777777';
+    const PAIR_ADDRESS = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8';
+
+    const swapSignature = 'Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)';
+    const swapTopicHash = ethers.utils.id(swapSignature);
+    const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+    const toTopic = ethers.utils.hexZeroPad('0xABCDEF0123456789ABCDEF0123456789ABCDEF01', 32);
+
+    /**
+     * Create a mock TJ V2.1 Swap log with packed bytes32 amounts.
+     * @param {object} amountsIn - { amountX: string, amountY: string }
+     * @param {object} amountsOut - { amountX: string, amountY: string }
+     */
+    function createMockTJSwapLog(amountsIn, amountsOut) {
+      const abiCoder = new ethers.utils.AbiCoder();
+
+      const packAmounts = (amountX, amountY) => {
+        const x = ethers.BigNumber.from(amountX);
+        const y = ethers.BigNumber.from(amountY);
+        return ethers.utils.hexZeroPad(x.shl(128).or(y).toHexString(), 32);
+      };
+
+      const packedIn = packAmounts(amountsIn.amountX, amountsIn.amountY);
+      const packedOut = packAmounts(amountsOut.amountX, amountsOut.amountY);
+      const zeroBytes32 = ethers.constants.HashZero;
+
+      const data = abiCoder.encode(
+        ['uint24', 'bytes32', 'bytes32', 'uint24', 'bytes32', 'bytes32'],
+        [8388608, packedIn, packedOut, 0, zeroBytes32, zeroBytes32]
+      );
+
+      return {
+        address: PAIR_ADDRESS,
+        topics: [swapTopicHash, senderTopic, toTopic],
+        data
+      };
+    }
+
+    describe('Validation', () => {
+      it('should throw error for null receipt', () => {
+        expect(() => adapter.parseSwapReceipt(null, []))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw error for undefined receipt', () => {
+        expect(() => adapter.parseSwapReceipt(undefined, []))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw error for receipt without logs', () => {
+        expect(() => adapter.parseSwapReceipt({}, []))
+          .toThrow('Receipt must have logs property');
+      });
+
+      it('should throw error for null metadata', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, null))
+          .toThrow('Swap metadata parameter is required');
+      });
+
+      it('should throw error for undefined metadata', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, undefined))
+          .toThrow('Swap metadata parameter is required');
+      });
+
+      it('should throw error for non-array metadata', () => {
+        expect(() => adapter.parseSwapReceipt({ logs: [] }, {}))
+          .toThrow('Swap metadata must be an array');
+      });
+
+      it('should throw error for metadata missing tokenInAddress', () => {
+        expect(() => adapter.parseSwapReceipt(
+          { logs: [] },
+          [{ tokenOutAddress: TOKEN_B }]
+        )).toThrow('Swap metadata must have tokenInAddress');
+      });
+
+      it('should throw error for metadata missing tokenOutAddress', () => {
+        expect(() => adapter.parseSwapReceipt(
+          { logs: [] },
+          [{ tokenInAddress: TOKEN_A }]
+        )).toThrow('Swap metadata must have tokenOutAddress');
+      });
+    });
+
+    describe('Simple swaps', () => {
+      it('should return empty array for empty metadata', () => {
+        const result = adapter.parseSwapReceipt({ logs: [] }, []);
+        expect(result).toEqual([]);
+      });
+
+      it('should parse swap where tokenIn is tokenX (lower address)', () => {
+        // A < B, so A = tokenX, B = tokenY
+        // Swapping A→B: amountsIn.amountX has the input, amountsOut.amountY has the output
+        const log = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse swap where tokenIn is tokenY (higher address)', () => {
+        // B > A, so B = tokenY, A = tokenX
+        // Swapping B→A: amountsIn.amountY has the input, amountsOut.amountX has the output
+        const log = createMockTJSwapLog(
+          { amountX: '0', amountY: '2000000000' },
+          { amountX: '1000000000000000000', amountY: '0' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{ tokenInAddress: TOKEN_B, tokenOutAddress: TOKEN_A }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('2000000000');
+        expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+
+      it('should parse multiple sequential swaps independently', () => {
+        const log1 = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' }
+        );
+        const log2 = createMockTJSwapLog(
+          { amountX: '0', amountY: '500000000' },
+          { amountX: '250000000000000000', amountY: '0' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log1, log2] },
+          [
+            { tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B },
+            { tokenInAddress: TOKEN_B, tokenOutAddress: TOKEN_A }
+          ]
+        );
+
+        expect(result).toHaveLength(2);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+        expect(result[1].actualAmountIn).toBe('500000000');
+        expect(result[1].actualAmountOut).toBe('250000000000000000');
+      });
+
+      it('should return zeros when no matching swap events found', () => {
+        const result = adapter.parseSwapReceipt(
+          { logs: [] },
+          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('0');
+        expect(result[0].actualAmountOut).toBe('0');
+      });
+
+      it('should skip non-swap logs and parse swap logs', () => {
+        const transferLog = {
+          address: TOKEN_A,
+          topics: [
+            ethers.utils.id('Transfer(address,address,uint256)'),
+            senderTopic,
+            toTopic
+          ],
+          data: ethers.utils.defaultAbiCoder.encode(['uint256'], [1000])
+        };
+        const swapLog = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [transferLog, swapLog] },
+          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should accumulate amounts across expectedSwapEvents', () => {
+        const log1 = createMockTJSwapLog(
+          { amountX: '500000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '1000000000' }
+        );
+        const log2 = createMockTJSwapLog(
+          { amountX: '500000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '1000000000' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log1, log2] },
+          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B, expectedSwapEvents: 2 }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+    });
+
+    describe('Multi-hop swaps', () => {
+      it('should parse 2-hop swap A→MID→B', () => {
+        // Hop 1: A→MID (A < MID, so A=tokenX): amountsIn.X = input, amountsOut not needed from hop1
+        // Hop 2: MID→B (MID < B, so MID=tokenX): amountsOut.Y = output
+        const hop1Log = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '5000000000' }
+        );
+        const hop2Log = createMockTJSwapLog(
+          { amountX: '5000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [hop1Log, hop2Log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A, TOKEN_MID, TOKEN_B],
+              poolCount: 2
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse 2-hop swap B→MID→A (reversed direction)', () => {
+        // Hop 1: B→MID (B > MID, so B=tokenY): amountsIn.Y = input
+        // Hop 2: MID→A (MID > A, so MID=tokenY): amountsOut.X = output (A=tokenX, A < MID)
+        const hop1Log = createMockTJSwapLog(
+          { amountX: '0', amountY: '2000000000' },
+          { amountX: '5000000000', amountY: '0' }
+        );
+        const hop2Log = createMockTJSwapLog(
+          { amountX: '0', amountY: '5000000000' },
+          { amountX: '1000000000000000000', amountY: '0' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [hop1Log, hop2Log] },
+          [{
+            tokenInAddress: TOKEN_B,
+            tokenOutAddress: TOKEN_A,
+            routes: [{
+              tokenPath: [TOKEN_B, TOKEN_MID, TOKEN_A],
+              poolCount: 2
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('2000000000');
+        expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+    });
+  });
+
   describe('_decodePackedAmounts', () => {
     it('should decode bytes32 with both amountX and amountY', () => {
       const x = ethers.BigNumber.from('1000');
@@ -2778,6 +3051,1600 @@ describe('TraderJoeV2_1Adapter', () => {
 
         console.log(`  Validator chain E2E: position ${posId} removed via decreaseLiquidity()`);
       }, 180000);
+    });
+  });
+
+  describe('getAddLiquidityAmounts', () => {
+    // Real Arbitrum token addresses
+    const WETH = {
+      address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+      symbol: 'WETH',
+      decimals: 18,
+    };
+    const USDC = {
+      address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+      symbol: 'USDC',
+      decimals: 6,
+    };
+
+    const validParams = () => ({
+      position: { lowerBinId: 8388500, upperBinId: 8388700 },
+      token0Amount: '1000000000000000000',
+      token1Amount: '0',
+      provider: env.provider,
+      poolData: { activeId: 8388608, binStep: 20, address: '0x0000000000000000000000000000000000000002' },
+      token0Data: WETH,
+      token1Data: USDC,
+    });
+
+    describe('Input Validation', () => {
+      // --- Position validation ---
+      it('should throw if position is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: null }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position is undefined', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: undefined }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position is not an object', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: 'not-an-object' }))
+          .rejects.toThrow('Position must be an object');
+      });
+
+      it('should throw if position is an array', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: [1, 2] }))
+          .rejects.toThrow('Position must be an object');
+      });
+
+      it('should throw if position.lowerBinId is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: { upperBinId: 100 } }))
+          .rejects.toThrow('Position lowerBinId is required');
+      });
+
+      it('should throw if position.upperBinId is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: { lowerBinId: 100 } }))
+          .rejects.toThrow('Position upperBinId is required');
+      });
+
+      it('should throw if position.lowerBinId is not finite', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: { lowerBinId: Infinity, upperBinId: 100 } }))
+          .rejects.toThrow('Position lowerBinId must be a finite number');
+      });
+
+      it('should throw if position.upperBinId is not finite', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: { lowerBinId: 100, upperBinId: NaN } }))
+          .rejects.toThrow('Position upperBinId must be a finite number');
+      });
+
+      it('should throw if lowerBinId >= upperBinId', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), position: { lowerBinId: 200, upperBinId: 100 } }))
+          .rejects.toThrow('Position lowerBinId must be less than upperBinId');
+      });
+
+      // --- Token amount validation ---
+      it('should throw if token0Amount is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Amount: null }))
+          .rejects.toThrow('Token0 amount is required');
+      });
+
+      it('should throw if token0Amount is undefined', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Amount: undefined }))
+          .rejects.toThrow('Token0 amount is required');
+      });
+
+      it('should throw if token0Amount is not a string', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Amount: 123 }))
+          .rejects.toThrow('Token0 amount must be a string');
+      });
+
+      it('should throw if token0Amount is non-numeric', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Amount: 'abc' }))
+          .rejects.toThrow('Token0 amount must be a positive numeric string');
+      });
+
+      it('should throw if token1Amount is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Amount: null }))
+          .rejects.toThrow('Token1 amount is required');
+      });
+
+      it('should throw if token1Amount is not a string', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Amount: 456 }))
+          .rejects.toThrow('Token1 amount must be a string');
+      });
+
+      it('should throw if token1Amount is non-numeric', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Amount: 'xyz' }))
+          .rejects.toThrow('Token1 amount must be a positive numeric string');
+      });
+
+      it('should throw if both amounts are "0"', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Amount: '0', token1Amount: '0' }))
+          .rejects.toThrow('At least one token amount must be greater than 0');
+      });
+
+      // --- Provider validation ---
+      it('should throw if provider is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), provider: null }))
+          .rejects.toThrow('Provider is required');
+      });
+
+      // --- Pool data validation ---
+      it('should throw if poolData is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: null }))
+          .rejects.toThrow('Pool data parameter is required');
+      });
+
+      it('should throw if poolData is not an object', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: 'string' }))
+          .rejects.toThrow('Pool data must be an object');
+      });
+
+      it('should throw if poolData.activeId is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: { binStep: 20, address: '0x01' } }))
+          .rejects.toThrow('Pool data activeId is required');
+      });
+
+      it('should throw if poolData.activeId is not finite', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: { activeId: NaN, binStep: 20, address: '0x01' } }))
+          .rejects.toThrow('Pool data activeId must be a finite number');
+      });
+
+      it('should throw if poolData.binStep is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: { activeId: 100, address: '0x01' } }))
+          .rejects.toThrow('Pool data binStep is required');
+      });
+
+      it('should throw if poolData.binStep is zero', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: { activeId: 100, binStep: 0, address: '0x01' } }))
+          .rejects.toThrow('Pool data binStep must be a positive finite number');
+      });
+
+      it('should throw if poolData.address is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), poolData: { activeId: 100, binStep: 20 } }))
+          .rejects.toThrow('Pool data address is required');
+      });
+
+      // --- Token data validation ---
+      it('should throw if token0Data is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Data: null }))
+          .rejects.toThrow('Token0 data parameter is required');
+      });
+
+      it('should throw if token0Data.address is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Data: { decimals: 18 } }))
+          .rejects.toThrow('Token0 address is required');
+      });
+
+      it('should throw if token0Data.decimals is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token0Data: { address: WETH.address } }))
+          .rejects.toThrow('Token0 decimals is required');
+      });
+
+      it('should throw if token1Data is null', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Data: null }))
+          .rejects.toThrow('Token1 data parameter is required');
+      });
+
+      it('should throw if token1Data.address is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Data: { decimals: 6 } }))
+          .rejects.toThrow('Token1 address is required');
+      });
+
+      it('should throw if token1Data.decimals is missing', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Data: { address: USDC.address } }))
+          .rejects.toThrow('Token1 decimals is required');
+      });
+
+      it('should throw if token0 and token1 have same address', async () => {
+        await expect(adapter.getAddLiquidityAmounts({ ...validParams(), token1Data: WETH }))
+          .rejects.toThrow('Token0 and token1 addresses cannot be the same');
+      });
+    });
+
+    describe('Out-of-Range Positions', () => {
+      it('should return only tokenX when position is entirely above activeId', async () => {
+        // All bins above activeId → X-only range
+        const result = await adapter.getAddLiquidityAmounts({
+          ...validParams(),
+          position: { lowerBinId: 8388700, upperBinId: 8388800 }, // All above activeId 8388608
+          token0Amount: '1000000000000000000', // WETH (tokenX, lower address)
+          token1Amount: '0',
+        });
+
+        // WETH is tokenX (lower address), so token0Amount maps to X
+        expect(result.token0Amount).toBe('1000000000000000000');
+        expect(result.token1Amount).toBe('0');
+        expect(typeof result.liquidity).toBe('string');
+      });
+
+      it('should return only tokenY when position is entirely below activeId', async () => {
+        // All bins below activeId → Y-only range
+        const result = await adapter.getAddLiquidityAmounts({
+          ...validParams(),
+          position: { lowerBinId: 8388400, upperBinId: 8388500 }, // All below activeId 8388608
+          token0Amount: '0',
+          token1Amount: '2000000000', // USDC (tokenY, higher address)
+        });
+
+        expect(result.token0Amount).toBe('0');
+        expect(result.token1Amount).toBe('2000000000');
+        expect(typeof result.liquidity).toBe('string');
+      });
+
+      it('should return both "0" when only tokenY is provided for X-only range', async () => {
+        // Position above activeId (X-only), but only Y provided → can't deposit
+        const result = await adapter.getAddLiquidityAmounts({
+          ...validParams(),
+          position: { lowerBinId: 8388700, upperBinId: 8388800 },
+          token0Amount: '0', // WETH (tokenX) = 0
+          token1Amount: '2000000000', // USDC (tokenY)
+        });
+
+        // X-only range, but no X provided → tokenX is "0"
+        // tokensSwapped = false (WETH < USDC), so token0 = X, token1 = Y
+        expect(result.token0Amount).toBe('0');
+        expect(result.token1Amount).toBe('0');
+      });
+
+      it('should return both "0" when only tokenX is provided for Y-only range', async () => {
+        const result = await adapter.getAddLiquidityAmounts({
+          ...validParams(),
+          position: { lowerBinId: 8388400, upperBinId: 8388500 },
+          token0Amount: '1000000000000000000', // WETH (tokenX)
+          token1Amount: '0', // USDC (tokenY) = 0
+        });
+
+        expect(result.token0Amount).toBe('0');
+        expect(result.token1Amount).toBe('0');
+      });
+
+      it('should handle swapped token order for out-of-range above', async () => {
+        // Pass USDC as token0 (caller order), WETH as token1
+        // tokensSwapped = true since USDC > WETH
+        const result = await adapter.getAddLiquidityAmounts({
+          ...validParams(),
+          position: { lowerBinId: 8388700, upperBinId: 8388800 }, // X-only
+          token0Data: USDC,
+          token1Data: WETH,
+          token0Amount: '0', // USDC = tokenY in SDK
+          token1Amount: '1000000000000000000', // WETH = tokenX in SDK
+        });
+
+        // WETH (caller's token1) is tokenX → it's the one that matters in X-only range
+        // After unswap: token0Amount = USDC = Y = 0, token1Amount = WETH = X = provided
+        expect(result.token0Amount).toBe('0');
+        expect(result.token1Amount).toBe('1000000000000000000');
+      });
+    });
+
+    describe('In-Range Calculations', () => {
+      // These tests need a real pool from the fork
+      let poolData;
+      let poolAddress;
+
+      beforeAll(async () => {
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolAddress = poolResult.bestPool.address;
+          poolData = await adapter.getPoolData(poolAddress, env.provider);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping in-range calculation tests');
+            return;
+          }
+          throw error;
+        }
+      }, 60000);
+
+      it('should return both amounts when token0 is provided and token1 is "0"', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        // Both should be non-zero for in-range position
+        expect(BigInt(result.token0Amount)).toBeGreaterThan(0n);
+        expect(BigInt(result.token1Amount)).toBeGreaterThan(0n);
+        expect(typeof result.token0Amount).toBe('string');
+        expect(typeof result.token1Amount).toBe('string');
+        expect(typeof result.liquidity).toBe('string');
+      }, 30000);
+
+      it('should return both amounts when token1 is provided and token0 is "0"', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: '0',
+          token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        expect(BigInt(result.token0Amount)).toBeGreaterThan(0n);
+        expect(BigInt(result.token1Amount)).toBeGreaterThan(0n);
+      }, 30000);
+
+      it('should return both amounts when both are provided (limiting factor)', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        // At least one should equal the input (the limiting factor)
+        const inputToken0 = BigInt(ethers.utils.parseEther('1').toString());
+        const inputToken1 = BigInt(ethers.utils.parseUnits('2000', 6).toString());
+        const resultToken0 = BigInt(result.token0Amount);
+        const resultToken1 = BigInt(result.token1Amount);
+
+        // One side should be capped at or below the input
+        expect(resultToken0 <= inputToken0 || resultToken1 <= inputToken1).toBe(true);
+      }, 30000);
+
+      it('should return amounts in caller token order (not SDK sorted)', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+
+        // Pass USDC as token0 (swapped from SDK order)
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseUnits('2000', 6).toString(), // USDC as token0
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+        });
+
+        // token0Amount should correspond to USDC (caller's token0)
+        // token1Amount should correspond to WETH (caller's token1)
+        // Both should be non-zero for in-range
+        expect(BigInt(result.token0Amount)).toBeGreaterThan(0n);
+        expect(BigInt(result.token1Amount)).toBeGreaterThan(0n);
+      }, 30000);
+
+      it('should return all values as strings', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        expect(typeof result.token0Amount).toBe('string');
+        expect(typeof result.token1Amount).toBe('string');
+        expect(typeof result.liquidity).toBe('string');
+      }, 30000);
+
+      it('should return non-zero liquidity for in-range positions', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      }, 30000);
+
+      it('should produce consistent results regardless of token input order', async () => {
+        if (!poolData) return;
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+
+        // Call with WETH as token0
+        const resultA = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        // Call with USDC as token0 (swapped), providing the computed USDC amount
+        const resultB = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: resultA.token1Amount, // USDC amount from first call
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+        });
+
+        // The WETH amount from the second call should be close to 1 ETH (within rounding)
+        const wethFromB = BigInt(resultB.token1Amount);
+        const originalWeth = BigInt(ethers.utils.parseEther('1').toString());
+
+        // Allow 1% tolerance for rounding through BigInt division
+        const tolerance = originalWeth / 100n;
+        expect(wethFromB).toBeGreaterThan(originalWeth - tolerance);
+        expect(wethFromB).toBeLessThan(originalWeth + tolerance);
+      }, 60000);
+
+});
+
+    describe('E2E Tests', () => {
+      it('should compute amounts and verify non-zero for a real pool', async () => {
+        let poolData;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping E2E test');
+            return;
+          }
+          throw error;
+        }
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+
+        const result = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('0.1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        expect(BigInt(result.token0Amount)).toBeGreaterThan(0n);
+        expect(BigInt(result.token1Amount)).toBeGreaterThan(0n);
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+
+        // The ratio should be reasonable: ~$200 USDC for 0.1 ETH at ~$2000 ETH price
+        const usdcAmount = Number(result.token1Amount) / 1e6;
+        expect(usdcAmount).toBeGreaterThan(10);   // At least $10 USDC
+        expect(usdcAmount).toBeLessThan(1000);     // At most $1000 USDC
+
+        console.log(`  getAddLiquidityAmounts E2E: 0.1 WETH → ${ethers.utils.formatEther(result.token0Amount)} WETH + ${ethers.utils.formatUnits(result.token1Amount, 6)} USDC`);
+      }, 60000);
+
+      it('should produce consistent amounts when called with swapped token order', async () => {
+        let poolData;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping E2E test');
+            return;
+          }
+          throw error;
+        }
+
+        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+
+        // Call with WETH as token0
+        const resultA = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('0.1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+
+        // Call with USDC as token0 (swapped) using same underlying input
+        const resultB = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: '0',
+          token1Amount: ethers.utils.parseEther('0.1').toString(),
+          provider: env.provider,
+          poolData,
+          token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+        });
+
+        // resultA.token0Amount (WETH) should match resultB.token1Amount (WETH)
+        // resultA.token1Amount (USDC) should match resultB.token0Amount (USDC)
+        expect(resultA.token0Amount).toBe(resultB.token1Amount);
+        expect(resultA.token1Amount).toBe(resultB.token0Amount);
+      }, 60000);
+    });
+  });
+
+  describe('generateAddLiquidityData', () => {
+    // Real Arbitrum token addresses (same as createPosition tests)
+    const WETH = {
+      address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+      symbol: 'WETH',
+      decimals: 18,
+    };
+    const USDC = {
+      address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+      symbol: 'USDC',
+      decimals: 6,
+    };
+
+    // ABI for decoding addToPosition calldata
+    const addToPositionIface = new ethers.utils.Interface([
+      "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+    ]);
+
+    describe('Input Validation', () => {
+      let adapterWithPM;
+
+      beforeAll(() => {
+        adapterWithPM = adapter;
+      });
+
+      const validParams = () => ({
+        position: { id: '1', lowerBinId: 8388500, upperBinId: 8388700 },
+        token0Amount: '1000000000000000000',
+        token1Amount: '1000000000',
+        provider: env.provider,
+        walletAddress: '0x0000000000000000000000000000000000000001',
+        poolData: { activeId: 8388608, binStep: 20, address: '0x0000000000000000000000000000000000000002' },
+        token0Data: WETH,
+        token1Data: USDC,
+        slippageTolerance: 5,
+        deadlineMinutes: 10,
+      });
+
+      // --- Position validation ---
+      it('should throw if position is null', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: null }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position is undefined', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: undefined }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw if position is not an object', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: 'str' }))
+          .rejects.toThrow('Position must be an object');
+      });
+
+      it('should throw if position is an array', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: [1, 2] }))
+          .rejects.toThrow('Position must be an object');
+      });
+
+      it('should throw if position.id is missing', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: { lowerBinId: 8388500, upperBinId: 8388700 } }))
+          .rejects.toThrow('Position id is required');
+      });
+
+      it('should throw if position.id is non-numeric', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: { id: 'abc', lowerBinId: 8388500, upperBinId: 8388700 } }))
+          .rejects.toThrow('Position id must be numeric');
+      });
+
+      it('should throw if position.lowerBinId is missing', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: { id: '1', upperBinId: 100 } }))
+          .rejects.toThrow('Position lowerBinId is required');
+      });
+
+      it('should throw if position.upperBinId is missing', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: { id: '1', lowerBinId: 100 } }))
+          .rejects.toThrow('Position upperBinId is required');
+      });
+
+      it('should throw if lowerBinId >= upperBinId', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), position: { id: '1', lowerBinId: 200, upperBinId: 100 } }))
+          .rejects.toThrow('Position lowerBinId must be less than upperBinId');
+      });
+
+      // --- Token amount validation ---
+      it('should throw if token0Amount is null', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token0Amount: null }))
+          .rejects.toThrow('Token0 amount is required');
+      });
+
+      it('should throw if token0Amount is not a string', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token0Amount: 123 }))
+          .rejects.toThrow('Token0 amount must be a string');
+      });
+
+      it('should throw if token0Amount is not numeric', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token0Amount: 'abc' }))
+          .rejects.toThrow('Token0 amount must be a positive numeric string');
+      });
+
+      it('should throw if both amounts are zero', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token0Amount: '0', token1Amount: '0' }))
+          .rejects.toThrow('At least one token amount must be greater than 0');
+      });
+
+      // --- Provider validation ---
+      it('should throw if provider is missing', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), provider: null }))
+          .rejects.toThrow('Provider is required');
+      });
+
+      // --- Wallet address validation ---
+      it('should throw if walletAddress is empty', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), walletAddress: '' }))
+          .rejects.toThrow('Wallet address is required');
+      });
+
+      it('should throw if walletAddress is invalid', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), walletAddress: 'invalid' }))
+          .rejects.toThrow('Invalid wallet address');
+      });
+
+      // --- Pool data validation ---
+      it('should throw if poolData is null', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), poolData: null }))
+          .rejects.toThrow('Pool data parameter is required');
+      });
+
+      it('should throw if poolData.activeId is missing', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), poolData: { binStep: 20, address: '0x01' } }))
+          .rejects.toThrow('Pool data activeId is required');
+      });
+
+      it('should throw if poolData.binStep is zero', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), poolData: { activeId: 100, binStep: 0, address: '0x01' } }))
+          .rejects.toThrow('Pool data binStep must be a positive finite number');
+      });
+
+      // --- Token data validation ---
+      it('should throw if token0Data is null', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token0Data: null }))
+          .rejects.toThrow('Token0 data parameter is required');
+      });
+
+      it('should throw if token1Data is null', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token1Data: null }))
+          .rejects.toThrow('Token1 data parameter is required');
+      });
+
+      it('should throw if token0 and token1 have same address', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), token1Data: WETH }))
+          .rejects.toThrow('Token0 and token1 addresses cannot be the same');
+      });
+
+      // --- Slippage validation ---
+      it('should throw if slippageTolerance is out of range', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), slippageTolerance: 101 }))
+          .rejects.toThrow('Slippage tolerance must be between 0 and 100');
+      });
+
+      // --- Deadline validation ---
+      it('should throw if deadlineMinutes is zero', async () => {
+        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), deadlineMinutes: 0 }))
+          .rejects.toThrow('Deadline minutes must be greater than 0');
+      });
+
+      // --- Position manager address ---
+      it('should throw if positionManagerAddress is not configured', async () => {
+        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        adapterNoPM.addresses.positionManagerAddress = '';
+        await expect(adapterNoPM.generateAddLiquidityData(validParams()))
+          .rejects.toThrow('No position manager address found');
+      });
+    });
+
+    describe('Success Cases', () => {
+      it('should generate valid calldata for existing position', async () => {
+        // Discover a real pool
+        let poolResult, poolData, positionRange;
+        try {
+          poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+          positionRange = adapter.getPositionRange(poolData, 5, 5);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping');
+            return;
+          }
+          throw error;
+        }
+
+        const result = await adapter.generateAddLiquidityData({
+          position: { id: '999', ...positionRange },
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        // Verify return structure
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+
+        // Verify 'to' is the position manager
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+
+        // Verify value is zero
+        expect(result.value).toBe('0x00');
+
+        // Verify calldata can be decoded
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.vault).toBe('0x0000000000000000000000000000000000000001');
+        expect(decoded.positionId.toString()).toBe('999');
+        expect(decoded.activeIdDesired.toNumber()).toBe(poolData.activeId);
+      }, 60000);
+
+      it('should sort tokens to TJ canonical order (tokenX = lower address)', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
+
+        // Pass USDC as token0 (higher address) and WETH as token1 (lower address)
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '2000000000', // USDC amount
+          token1Amount: '1000000000000000000', // WETH amount
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: USDC,
+          token1Data: WETH,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+
+        // tokensSwapped should be true (USDC > WETH, so inputs were swapped)
+        expect(result.quote.tokensSwapped).toBe(true);
+
+        // amountX should be the WETH amount (lower address = tokenX)
+        expect(decoded.amountX.toString()).toBe('1000000000000000000');
+        // amountY should be the USDC amount (higher address = tokenY)
+        expect(decoded.amountY.toString()).toBe('2000000000');
+      });
+
+      it('should not swap when tokens are already in canonical order', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000', // WETH
+          token1Amount: '2000000000', // USDC
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.quote.tokensSwapped).toBe(false);
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.amountX.toString()).toBe('1000000000000000000'); // WETH
+        expect(decoded.amountY.toString()).toBe('2000000000'); // USDC
+      });
+
+      it('should apply slippage correctly to min amounts', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '10000',
+          token1Amount: '20000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 10, // 10% slippage
+          deadlineMinutes: 10,
+        });
+
+        // 10% slippage: min = amount * 90% = amount * 9000 / 10000
+        expect(result.quote.amountXMin).toBe('9000');
+        expect(result.quote.amountYMin).toBe('18000');
+      });
+
+      it('should include deltaIds and distributions from SDK in quote', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '1', lowerBinId: 8388605, upperBinId: 8388611 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(Array.isArray(result.quote.deltaIds)).toBe(true);
+        expect(Array.isArray(result.quote.distributionX)).toBe(true);
+        expect(Array.isArray(result.quote.distributionY)).toBe(true);
+
+        // Number of bins should match the range
+        const expectedBins = position.upperBinId - position.lowerBinId + 1;
+        expect(result.quote.deltaIds.length).toBe(expectedBins);
+        expect(result.quote.distributionX.length).toBe(expectedBins);
+        expect(result.quote.distributionY.length).toBe(expectedBins);
+
+        // deltaIds should be relative to activeId
+        expect(result.quote.deltaIds[0]).toBe(-3); // 8388605 - 8388608
+        expect(result.quote.deltaIds[result.quote.deltaIds.length - 1]).toBe(3); // 8388611 - 8388608
+
+        // Verify distributions are present in calldata too
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.deltaIds.length).toBe(expectedBins);
+        expect(decoded.distributionX.length).toBe(expectedBins);
+        expect(decoded.distributionY.length).toBe(expectedBins);
+      });
+
+      it('should encode all 12 addToPosition parameters correctly', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '42', lowerBinId: 8388605, upperBinId: 8388611 };
+        const vaultAddress = '0x0000000000000000000000000000000000000001';
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+
+        // 1. vault
+        expect(decoded.vault).toBe(vaultAddress);
+        // 2. positionId (key difference from createPosition)
+        expect(decoded.positionId.toString()).toBe('42');
+        // 3. amountX (WETH = lower address = tokenX)
+        expect(decoded.amountX.toString()).toBe('1000000000000000000');
+        // 4. amountY (USDC = higher address = tokenY)
+        expect(decoded.amountY.toString()).toBe('2000000000');
+        // 5. amountXMin (95% of amountX with 5% slippage)
+        expect(decoded.amountXMin.toString()).toBe('950000000000000000');
+        // 6. amountYMin (95% of amountY)
+        expect(decoded.amountYMin.toString()).toBe('1900000000');
+        // 7. activeIdDesired
+        expect(decoded.activeIdDesired.toNumber()).toBe(8388608);
+        // 8. idSlippage (should be > 0 for 5% slippage)
+        expect(decoded.idSlippage.toNumber()).toBeGreaterThan(0);
+        // 9-11. deltaIds, distributionX, distributionY
+        expect(decoded.deltaIds.length).toBe(7);
+        // 12. deadline (should be in the future)
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      });
+
+      it('should include positionId in quote', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20,
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '777', lowerBinId: 8388500, upperBinId: 8388700 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.quote.positionId).toBe('777');
+        expect(result.quote.lbPair).toBe(poolData.address);
+        expect(result.quote.binStep).toBe(poolData.binStep);
+        expect(result.quote.activeId).toBe(poolData.activeId);
+      });
+
+      it('should compute idSlippage correctly for known values', async () => {
+        const poolData = {
+          activeId: 8388608,
+          binStep: 20, // 0.20% per bin
+          address: '0x0000000000000000000000000000000000000002',
+        };
+        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        // Formula: floor(log(1 + 0.05) / log(1 + 20/10000))
+        // = floor(log(1.05) / log(1.002))
+        // = floor(0.04879 / 0.001998) = floor(24.42) = 24
+        const expected = Math.floor(Math.log(1.05) / Math.log(1.002));
+        expect(result.quote.idSlippage).toBe(expected);
+      });
+    });
+
+    describe('E2E Tests', () => {
+      let e2ePoolData;
+      let e2ePositionId;
+      let e2ePosition;
+
+      beforeAll(async () => {
+        // Discover a real pool and create a position
+        let poolData, positionRange;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          e2ePoolData = poolData;
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping addLiquidity E2E tests');
+            return;
+          }
+          throw error;
+        }
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Approve tokens if needed
+        const approvalTxs = await adapter.getRequiredApprovals(
+          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+        );
+        if (approvalTxs.length > 0) {
+          const targets = approvalTxs.map(t => t.to);
+          const data = approvalTxs.map(t => t.data);
+          await (await testVault.approve(targets, data)).wait();
+        }
+
+        // Use 5% of vault balances
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(20);
+        const usdcAmount = vaultUsdcBal.div(20);
+
+        const txData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
+        await mintTx.wait();
+
+        // Get the created position
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        e2ePositionId = positionIds[positionIds.length - 1];
+
+        const result = await adapter.getPositionById(e2ePositionId, env.provider);
+        e2ePosition = result.position;
+
+        console.log(`  E2E addLiquidity position created: ID ${e2ePositionId}, bins: ${e2ePosition.depositIds.length}`);
+      }, 180000);
+
+      it('should add liquidity to existing position via vault.increaseLiquidity()', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Record liquidity before
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const posBefore = await tjpm.getPosition(e2ePositionId);
+        const liquidityBefore = posBefore.liquidityMinted.map(lm => lm.toBigInt());
+
+        // Use small amounts for adding
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(40);
+        const usdcAmount = vaultUsdcBal.div(40);
+
+        const addData = await adapter.generateAddLiquidityData({
+          position: { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId },
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 50, // Wide slippage for fork stability
+          deadlineMinutes: 10,
+        });
+
+        expect(addData.to).toBe(pmAddress);
+
+        // Execute via vault.increaseLiquidity()
+        const addTx = await testVault.increaseLiquidity([pmAddress], [addData.data], [0]);
+        const receipt = await addTx.wait();
+        expect(receipt.status).toBe(1);
+
+        // Verify position is still active with increased liquidity
+        const posAfter = await tjpm.getPosition(e2ePositionId);
+        expect(posAfter.active).toBe(true);
+
+        // At least one bin should have more liquidity
+        let anyIncreased = false;
+        for (let i = 0; i < posAfter.liquidityMinted.length; i++) {
+          if (posAfter.liquidityMinted[i].toBigInt() > liquidityBefore[i]) {
+            anyIncreased = true;
+            break;
+          }
+        }
+        expect(anyIncreased).toBe(true);
+
+        console.log(`  Add liquidity succeeded: position ${e2ePositionId} liquidity increased`);
+      }, 120000);
+
+      it('should execute full lifecycle: create → add → remove', async () => {
+        if (!e2ePoolData) return;
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+
+        // 1. Create a fresh position
+        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(40);
+        const usdcAmount = vaultUsdcBal.div(40);
+
+        const createData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
+
+        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const newPosId = positionIds[positionIds.length - 1];
+        const posResult = await adapter.getPositionById(newPosId, env.provider);
+        const newPos = posResult.position;
+        expect(newPos.active).toBe(true);
+
+        // 2. Add liquidity to the position
+        const addWethAmount = vaultWethBal.div(80);
+        const addUsdcAmount = vaultUsdcBal.div(80);
+
+        const addData = await adapter.generateAddLiquidityData({
+          position: { id: newPosId.toString(), lowerBinId: newPos.lowerBinId, upperBinId: newPos.upperBinId },
+          token0Amount: addWethAmount.toString(),
+          token1Amount: addUsdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 50,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.increaseLiquidity([pmAddress], [addData.data], [0])).wait();
+
+        // Verify still active after adding
+        const posAfterAdd = await tjpm.getPosition(newPosId);
+        expect(posAfterAdd.active).toBe(true);
+
+        // 3. Remove 100% of the position
+        const posForRemoval = await adapter.getPositionById(newPosId, env.provider);
+
+        const wethBalBefore = await weth.balanceOf(vaultAddress);
+        const usdcBalBefore = await usdc.balanceOf(vaultAddress);
+
+        const removeData = await adapter.generateRemoveLiquidityData({
+          position: posForRemoval.position,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          slippageTolerance: 50,
+          deadlineMinutes: 10,
+        });
+
+        await (await testVault.decreaseLiquidity([pmAddress], [removeData.data])).wait();
+
+        // Verify position is now inactive
+        const posAfterRemove = await tjpm.getPosition(newPosId);
+        expect(posAfterRemove.active).toBe(false);
+
+        // Verify vault received tokens back
+        const wethBalAfter = await weth.balanceOf(vaultAddress);
+        const usdcBalAfter = await usdc.balanceOf(vaultAddress);
+        const wethReceived = wethBalAfter.sub(wethBalBefore);
+        const usdcReceived = usdcBalAfter.sub(usdcBalBefore);
+
+        expect(wethReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
+
+        console.log(`  Full lifecycle: create → add → remove complete for position ${newPosId}`);
+      }, 180000);
+    });
+  });
+
+  describe('batchSwapTransactions', () => {
+    describe('Validation Error Cases', () => {
+      it('should throw error for missing provider', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+        ).rejects.toThrow('provider is required');
+      });
+
+      it('should throw error for missing chainId', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, recipient: '0x1234', slippageTolerance: 0.5 })
+        ).rejects.toThrow('chainId is required');
+      });
+
+      it('should throw error for missing recipient', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, slippageTolerance: 0.5 })
+        ).rejects.toThrow('recipient is required');
+      });
+
+      it('should throw error for missing slippageTolerance', async () => {
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: '0x1234' })
+        ).rejects.toThrow('slippageTolerance is required');
+      });
+
+      it('should not require signer (TJ V2.1 has no Permit2)', async () => {
+        // Without signer, should pass option validation and hit instruction validation
+        await expect(
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+        ).rejects.toThrow('swapInstructions cannot be empty');
+      });
+
+      it('should silently accept signer if provided', async () => {
+        const mockSigner = { _signTypedData: () => Promise.resolve('0x') };
+        // Should pass option validation and hit instruction validation
+        await expect(
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+        ).rejects.toThrow('swapInstructions cannot be empty');
+      });
+
+      it('should throw error for non-array swapInstructions', async () => {
+        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions('not an array', options)
+        ).rejects.toThrow('swapInstructions must be an array');
+      });
+
+      it('should throw error for empty swapInstructions array', async () => {
+        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([], options)
+        ).rejects.toThrow('swapInstructions cannot be empty');
+      });
+
+      it('should throw error for missing tokenIn', async () => {
+        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenOut: { symbol: 'USDC' }, amount: '1000' }], options)
+        ).rejects.toThrow('tokenIn with symbol is required');
+      });
+
+      it('should throw error for missing tokenOut', async () => {
+        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, amount: '1000' }], options)
+        ).rejects.toThrow('tokenOut with symbol is required');
+      });
+
+      it('should throw error for missing amount', async () => {
+        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        await expect(
+          adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, tokenOut: { symbol: 'USDC' } }], options)
+        ).rejects.toThrow('amount is required');
+      });
+    });
+
+    describe('E2E Swap Transaction Generation', () => {
+      const vaultAddress = () => testVault.address;
+
+      it('should generate ERC20→ERC20 swap (WETH→USDC exact input)', async () => {
+        const amount = ethers.utils.parseEther('0.1').toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'WETH', address: wethAddress },
+            tokenOut: { symbol: 'USDC', address: usdcAddress },
+            amount,
+            isAmountIn: true,
+          }],
+          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+        );
+
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        const tx = result.transactions[0];
+        expect(tx.to).toBe(adapter.addresses.lbRouterAddress);
+        expect(tx.data).toMatch(/^0x[a-fA-F0-9]+$/);
+        expect(tx.value).toBe('0x00');
+
+        const meta = result.metadata[0];
+        expect(meta.tokenInSymbol).toBe('WETH');
+        expect(meta.tokenOutSymbol).toBe('USDC');
+        expect(meta.tokenInAddress).toBe(wethAddress);
+        expect(meta.tokenOutAddress).toBe(usdcAddress);
+        expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+        expect(meta.isAmountIn).toBe(true);
+      }, 60000);
+
+      it('should generate Native→ERC20 swap (ETH→USDC exact input)', async () => {
+        const amount = ethers.utils.parseEther('0.1').toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'ETH', isNative: true },
+            tokenOut: { symbol: 'USDC', address: usdcAddress },
+            amount,
+            isAmountIn: true,
+          }],
+          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+        );
+
+        expect(result.transactions).toHaveLength(1);
+        const tx = result.transactions[0];
+        expect(tx.to).toBe(adapter.addresses.lbRouterAddress);
+        // Native swap should have ETH value attached
+        expect(BigInt(tx.value)).toBeGreaterThan(0n);
+
+        const meta = result.metadata[0];
+        // tokenInAddress should be WETH for parseSwapReceipt compatibility
+        expect(meta.tokenInAddress).toBe(wethAddress);
+        expect(meta.tokenOutAddress).toBe(usdcAddress);
+        expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+      }, 60000);
+
+      it('should generate ERC20→Native swap (USDC→ETH exact input)', async () => {
+        const amount = ethers.utils.parseUnits('100', 6).toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'USDC', address: usdcAddress },
+            tokenOut: { symbol: 'ETH', isNative: true },
+            amount,
+            isAmountIn: true,
+          }],
+          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+        );
+
+        expect(result.transactions).toHaveLength(1);
+        const tx = result.transactions[0];
+        expect(tx.to).toBe(adapter.addresses.lbRouterAddress);
+        expect(tx.value).toBe('0x00');
+
+        const meta = result.metadata[0];
+        expect(meta.tokenInAddress).toBe(usdcAddress);
+        // tokenOutAddress should be WETH for parseSwapReceipt compatibility
+        expect(meta.tokenOutAddress).toBe(wethAddress);
+        expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+      }, 60000);
+
+      it('should generate multiple batch swap transactions', async () => {
+        const result = await adapter.batchSwapTransactions(
+          [
+            {
+              tokenIn: { symbol: 'WETH', address: wethAddress },
+              tokenOut: { symbol: 'USDC', address: usdcAddress },
+              amount: ethers.utils.parseEther('0.1').toString(),
+              isAmountIn: true,
+            },
+            {
+              tokenIn: { symbol: 'USDC', address: usdcAddress },
+              tokenOut: { symbol: 'WETH', address: wethAddress },
+              amount: ethers.utils.parseUnits('100', 6).toString(),
+              isAmountIn: true,
+            },
+          ],
+          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+        );
+
+        expect(result.transactions).toHaveLength(2);
+        expect(result.metadata).toHaveLength(2);
+
+        expect(result.metadata[0].tokenInSymbol).toBe('WETH');
+        expect(result.metadata[0].tokenOutSymbol).toBe('USDC');
+        expect(result.metadata[1].tokenInSymbol).toBe('USDC');
+        expect(result.metadata[1].tokenOutSymbol).toBe('WETH');
+
+        // Both should target the router
+        expect(result.transactions[0].to).toBe(adapter.addresses.lbRouterAddress);
+        expect(result.transactions[1].to).toBe(adapter.addresses.lbRouterAddress);
+      }, 60000);
+
+      it('should generate exact output swap (WETH→exact USDC)', async () => {
+        const exactUsdcOut = ethers.utils.parseUnits('100', 6).toString();
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'WETH', address: wethAddress },
+            tokenOut: { symbol: 'USDC', address: usdcAddress },
+            amount: exactUsdcOut,
+            isAmountIn: false,
+          }],
+          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+        );
+
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        const meta = result.metadata[0];
+        expect(meta.isAmountIn).toBe(false);
+        expect(BigInt(meta.quotedAmountIn)).toBeGreaterThan(0n);
+        expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+      }, 60000);
+    });
+  });
+
+  describe('getBestSwapQuote', () => {
+    describe('Validation Error Cases', () => {
+      it('should throw error for missing provider', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+        })).rejects.toThrow('provider is required');
+      });
+
+      it('should throw error for null tokenInAddress', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: null,
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('TokenIn address parameter is required');
+      });
+
+      it('should throw error for invalid tokenInAddress', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: 'invalid-address',
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('Invalid tokenIn address');
+      });
+
+      it('should skip tokenIn validation when tokenInIsNative is true', async () => {
+        // Should NOT throw an address validation error — it should proceed past address validation
+        // It will likely fail at the quoter call or succeed, but the key assertion is no address error
+        const result = adapter.getBestSwapQuote({
+          tokenInIsNative: true,
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        });
+
+        // If it rejects, the error should NOT be about tokenIn address
+        try {
+          await result;
+        } catch (error) {
+          expect(error.message).not.toMatch(/TokenIn address/);
+        }
+      }, 60000);
+
+      it('should throw error for null tokenOutAddress', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: null,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('TokenOut address parameter is required');
+      });
+
+      it('should throw error for non-string amount', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: 123,
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('Amount must be a string');
+      });
+
+      it('should throw error for non-numeric amount string', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: 'abc',
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('Amount must be a positive numeric string');
+      });
+
+      it('should throw error for zero amount', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: '0',
+          isAmountIn: true,
+          provider: env.provider,
+        })).rejects.toThrow('Amount cannot be zero');
+      });
+
+      it('should throw error for missing isAmountIn', async () => {
+        await expect(adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: null,
+          provider: env.provider,
+        })).rejects.toThrow('isAmountIn parameter is required and must be a boolean');
+      });
+    });
+
+    describe('E2E Swap Quotes', () => {
+      it('should get EXACT_INPUT quote for ERC20→ERC20 (WETH→USDC)', async () => {
+        const amountIn = ethers.utils.parseEther('0.1').toString();
+
+        const result = await adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: amountIn,
+          isAmountIn: true,
+          provider: env.provider,
+        });
+
+        expect(result.amountIn).toBe(amountIn);
+        expect(BigInt(result.amountOut)).toBeGreaterThan(0n);
+        expect(result.route).toBeDefined();
+      }, 60000);
+
+      it('should get EXACT_OUTPUT quote for ERC20→ERC20 (WETH→USDC)', async () => {
+        const amountOut = ethers.utils.parseUnits('100', 6).toString();
+
+        const result = await adapter.getBestSwapQuote({
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: amountOut,
+          isAmountIn: false,
+          provider: env.provider,
+        });
+
+        expect(result.amountOut).toBe(amountOut);
+        expect(BigInt(result.amountIn)).toBeGreaterThan(0n);
+        expect(result.route).toBeDefined();
+      }, 60000);
+
+      it('should get quote with native ETH input (tokenInIsNative)', async () => {
+        const amountIn = ethers.utils.parseEther('0.1').toString();
+
+        const result = await adapter.getBestSwapQuote({
+          tokenInIsNative: true,
+          tokenOutAddress: usdcAddress,
+          amount: amountIn,
+          isAmountIn: true,
+          provider: env.provider,
+        });
+
+        expect(result.amountIn).toBe(amountIn);
+        expect(BigInt(result.amountOut)).toBeGreaterThan(0n);
+        expect(result.route).toBeDefined();
+      }, 60000);
+
+      it('should get quote with native ETH output (tokenOutIsNative)', async () => {
+        const amountIn = ethers.utils.parseUnits('100', 6).toString();
+
+        const result = await adapter.getBestSwapQuote({
+          tokenInAddress: usdcAddress,
+          tokenOutIsNative: true,
+          amount: amountIn,
+          isAmountIn: true,
+          provider: env.provider,
+        });
+
+        expect(result.amountIn).toBe(amountIn);
+        expect(BigInt(result.amountOut)).toBeGreaterThan(0n);
+        expect(result.route).toBeDefined();
+      }, 60000);
+
+      it('should return deterministic quotes for same params', async () => {
+        const params = {
+          tokenInAddress: wethAddress,
+          tokenOutAddress: usdcAddress,
+          amount: ethers.utils.parseEther('0.1').toString(),
+          isAmountIn: true,
+          provider: env.provider,
+        };
+
+        const result1 = await adapter.getBestSwapQuote(params);
+        const result2 = await adapter.getBestSwapQuote(params);
+
+        expect(result1.amountIn).toBe(result2.amountIn);
+        expect(result1.amountOut).toBe(result2.amountOut);
+      }, 60000);
     });
   });
 });
