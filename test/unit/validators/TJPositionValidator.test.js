@@ -87,9 +87,66 @@ describe("TJPositionValidator", function() {
   });
 
   describe("validateIncreaseLiquidity", function() {
-    it("should revert with not yet implemented", async function() {
-      await expect(validator.validateIncreaseLiquidity("0x", vaultAddress))
-        .to.be.revertedWith("TJPositionValidator: not yet implemented");
+    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+    function encodeAddToPosition(vault, positionId, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
+      const iface = new ethers.Interface([
+        "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      ]);
+      return iface.encodeFunctionData("addToPosition", [
+        vault, positionId, amountX, amountY, amountXMin, amountYMin,
+        activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl
+      ]);
+    }
+
+    it("should accept addToPosition calldata with correct vault", async function() {
+      const calldata = encodeAddToPosition(
+        vaultAddress, 1,
+        ethers.parseEther("1"), ethers.parseEther("1000"),
+        0, 0,
+        8388608, 5,
+        [-1, 0, 1],
+        [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
+        deadline
+      );
+
+      await expect(validator.validateIncreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject addToPosition calldata with wrong vault", async function() {
+      const calldata = encodeAddToPosition(
+        otherAddress, 1, // wrong vault
+        ethers.parseEther("1"), ethers.parseEther("1000"),
+        0, 0,
+        8388608, 5,
+        [-1, 0, 1],
+        [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
+        deadline
+      );
+
+      await expect(validator.validateIncreaseLiquidity(calldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: vault mismatch");
+    });
+
+    it("should reject non-addToPosition selector", async function() {
+      const fakeCalldata = "0xdeadbeef" + "00".repeat(32);
+
+      await expect(validator.validateIncreaseLiquidity(fakeCalldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: not addToPosition");
+    });
+
+    it("should reject calldata shorter than 36 bytes", async function() {
+      await expect(validator.validateIncreaseLiquidity("0xdeadbeef", vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: invalid data");
+    });
+
+    it("should reject calldata of exactly 35 bytes", async function() {
+      const shortCalldata = "0xdeadbeef" + "00".repeat(31);
+
+      await expect(validator.validateIncreaseLiquidity(shortCalldata, vaultAddress))
+        .to.be.revertedWith("TJPositionValidator: invalid data");
     });
   });
 
