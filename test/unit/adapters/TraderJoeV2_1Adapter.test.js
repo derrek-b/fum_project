@@ -2101,6 +2101,151 @@ describe('TraderJoeV2_1Adapter', () => {
     });
   });
 
+  describe('getPositionsForVDS', () => {
+    describe('Error Cases', () => {
+      it('should throw when address is null', async () => {
+        await expect(adapter.getPositionsForVDS(null, env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw when address is undefined', async () => {
+        await expect(adapter.getPositionsForVDS(undefined, env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw when address is empty string', async () => {
+        await expect(adapter.getPositionsForVDS('', env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw when address is invalid', async () => {
+        await expect(adapter.getPositionsForVDS('not-an-address', env.provider))
+          .rejects.toThrow('Invalid address: not-an-address');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.getPositionsForVDS('0x0000000000000000000000000000000000000001', null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider is undefined', async () => {
+        await expect(adapter.getPositionsForVDS('0x0000000000000000000000000000000000000001', undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider lacks getNetwork', async () => {
+        await expect(adapter.getPositionsForVDS('0x0000000000000000000000000000000000000001', {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+
+    describe('E2E Tests', () => {
+      it('should return { positions, poolData } with correct top-level structure', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        expect(result).toHaveProperty('positions');
+        expect(result).toHaveProperty('poolData');
+        expect(typeof result.positions).toBe('object');
+        expect(typeof result.poolData).toBe('object');
+        expect(Array.isArray(result.positions)).toBe(false);
+        expect(Array.isArray(result.poolData)).toBe(false);
+      }, 60000);
+
+      it('should return positions keyed by position ID', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        const positionKeys = Object.keys(result.positions);
+        expect(positionKeys.length).toBeGreaterThan(0);
+
+        for (const [key, position] of Object.entries(result.positions)) {
+          expect(position.id).toBe(key);
+        }
+      }, 60000);
+
+      it('should return positions with correct TJ V2.1 fields', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        const positionKeys = Object.keys(result.positions);
+        if (positionKeys.length === 0) return;
+
+        const position = result.positions[positionKeys[0]];
+        const expectedFields = [
+          'id', 'pool', 'lowerBinId', 'upperBinId',
+          'depositIds', 'liquidityMinted', 'active', 'createdAt', 'lastUpdated'
+        ];
+        expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
+      }, 60000);
+
+      it('should return correct field types for positions', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        for (const position of Object.values(result.positions)) {
+          expect(typeof position.id).toBe('string');
+          expect(typeof position.pool).toBe('string');
+          expect(typeof position.lowerBinId).toBe('number');
+          expect(typeof position.upperBinId).toBe('number');
+          expect(Array.isArray(position.depositIds)).toBe(true);
+          expect(Array.isArray(position.liquidityMinted)).toBe(true);
+          expect(typeof position.active).toBe('boolean');
+          expect(typeof position.createdAt).toBe('number');
+          expect(typeof position.lastUpdated).toBe('number');
+        }
+      }, 60000);
+
+      it('should only return active positions', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        for (const position of Object.values(result.positions)) {
+          expect(position.active).toBe(true);
+        }
+      }, 60000);
+
+      it('should return poolData keyed by pool address', async () => {
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+
+        for (const [poolAddress, poolInfo] of Object.entries(result.poolData)) {
+          expect(poolAddress).toMatch(/^0x[a-f0-9]{40}$/);
+          expect(poolInfo).toHaveProperty('token0Symbol');
+          expect(poolInfo).toHaveProperty('token1Symbol');
+          expect(poolInfo).toHaveProperty('binStep');
+          expect(poolInfo).toHaveProperty('platform');
+          expect(poolInfo.platform).toBe('traderjoeV2_1');
+          expect(typeof poolInfo.binStep).toBe('number');
+        }
+      }, 60000);
+
+      it('should return empty results for address with no positions', async () => {
+        // Use a random address that has no positions
+        const randomAddress = '0x0000000000000000000000000000000000000001';
+        const result = await adapter.getPositionsForVDS(randomAddress, env.provider);
+
+        expect(result.positions).toEqual({});
+        expect(result.poolData).toEqual({});
+      }, 30000);
+
+      it('should filter out inactive positions from removed liquidity', async () => {
+        // Get all positions from the contract (includes inactive ones from removal E2E tests)
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const allPositionIds = await tjpm.getPositionsByVault(testVault.address);
+
+        // Count active vs total on-chain
+        let activeCount = 0;
+        for (const id of allPositionIds) {
+          const pos = await tjpm.getPosition(id);
+          if (pos.active) activeCount++;
+        }
+
+        // getPositionsForVDS should only return active positions
+        const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
+        const vdsCount = Object.keys(result.positions).length;
+
+        expect(vdsCount).toBe(activeCount);
+        expect(vdsCount).toBeLessThanOrEqual(allPositionIds.length);
+      }, 60000);
+    });
+  });
+
   describe('getPositionById', () => {
     let positionId;
     let expectedPoolAddress;
@@ -2324,6 +2469,233 @@ describe('TraderJoeV2_1Adapter', () => {
         // Use a very large ID that doesn't exist
         await expect(adapter.getPositionById(999999999, env.provider))
           .rejects.toThrow();
+      }, 30000);
+    });
+  });
+
+  describe('getAccruedFeesUSD', () => {
+    describe('Error Cases', () => {
+      it('should throw when position is null', async () => {
+        await expect(adapter.getAccruedFeesUSD(null, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position is undefined', async () => {
+        await expect(adapter.getAccruedFeesUSD(undefined, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position is a string', async () => {
+        await expect(adapter.getAccruedFeesUSD('invalid', { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position is required and must be an object');
+      });
+
+      it('should throw when position.id is undefined', async () => {
+        await expect(adapter.getAccruedFeesUSD({}, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when position.id is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: null }, { token0: 1, token1: 1 }, env.provider))
+          .rejects.toThrow('position.id is required');
+      });
+
+      it('should throw when tokenPrices is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, null, env.provider))
+          .rejects.toThrow('tokenPrices is required and must be an object');
+      });
+
+      it('should throw when tokenPrices is a string', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, 'invalid', env.provider))
+          .rejects.toThrow('tokenPrices is required and must be an object');
+      });
+
+      it('should throw when tokenPrices.token0 is not a number', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, { token0: '1', token1: 1 }, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+      });
+
+      it('should throw when tokenPrices.token1 is missing', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, { token0: 1 }, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+      });
+
+      it('should throw when tokenPrices is empty object', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, {}, env.provider))
+          .rejects.toThrow('tokenPrices must have token0 and token1 as numbers');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, { token0: 1, token1: 1 }, null))
+          .rejects.toThrow('provider is required');
+      });
+
+      it('should throw when provider is undefined', async () => {
+        await expect(adapter.getAccruedFeesUSD({ id: '1' }, { token0: 1, token1: 1 }, undefined))
+          .rejects.toThrow('provider is required');
+      });
+    });
+
+    describe('E2E Tests', () => {
+      let positionId;
+
+      beforeAll(async () => {
+        // Reuse existing position or create one (same pattern as getPositionById tests)
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpmAbi = contractData.TJPositionManager.abi;
+        const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
+
+        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        if (positionIds.length > 0) {
+          positionId = positionIds[0];
+          return;
+        }
+
+        // If no position exists, create one
+        let poolData, positionRange;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+          positionRange = adapter.getPositionRange(poolData, 5, 5);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No TJ V2.1 WETH/USDC pools - cannot create position for getAccruedFeesUSD tests');
+            return;
+          }
+          throw error;
+        }
+
+        const approvalTxs = await adapter.getRequiredApprovals(
+          'liquidity', testVault.address, [wethAddress, usdcAddress], env.provider
+        );
+        if (approvalTxs.length > 0) {
+          const targets = approvalTxs.map(t => t.to);
+          const data = approvalTxs.map(t => t.data);
+          await (await testVault.approve(targets, data)).wait();
+        }
+
+        const vaultWethBal = await weth.balanceOf(testVault.address);
+        const vaultUsdcBal = await usdc.balanceOf(testVault.address);
+        const wethAmount = vaultWethBal.div(10);
+        const usdcAmount = vaultUsdcBal.div(10);
+
+        const txData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: testVault.address,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
+        await mintTx.wait();
+
+        const newPositionIds = await tjpm.getPositionsByVault(testVault.address);
+        positionId = newPositionIds[newPositionIds.length - 1];
+      }, 120000);
+
+      it('should return correct structure with all required fields', async () => {
+        if (!positionId) return;
+
+        const result = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        expect(result).toHaveProperty('totalUSD');
+        expect(result).toHaveProperty('token0Fees');
+        expect(result).toHaveProperty('token1Fees');
+        expect(result).toHaveProperty('token0USD');
+        expect(result).toHaveProperty('token1USD');
+        expect(result).toHaveProperty('fees0');
+        expect(result).toHaveProperty('fees1');
+      }, 30000);
+
+      it('should return correct types for all fields', async () => {
+        if (!positionId) return;
+
+        const result = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        expect(typeof result.totalUSD).toBe('number');
+        expect(typeof result.token0Fees).toBe('number');
+        expect(typeof result.token1Fees).toBe('number');
+        expect(typeof result.token0USD).toBe('number');
+        expect(typeof result.token1USD).toBe('number');
+        expect(typeof result.fees0).toBe('string');
+        expect(typeof result.fees1).toBe('string');
+      }, 30000);
+
+      it('should return non-negative values', async () => {
+        if (!positionId) return;
+
+        const result = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 3000, token1: 1 },
+          env.provider
+        );
+
+        expect(result.totalUSD).toBeGreaterThanOrEqual(0);
+        expect(result.token0Fees).toBeGreaterThanOrEqual(0);
+        expect(result.token1Fees).toBeGreaterThanOrEqual(0);
+        expect(result.token0USD).toBeGreaterThanOrEqual(0);
+        expect(result.token1USD).toBeGreaterThanOrEqual(0);
+      }, 30000);
+
+      it('should correctly convert fees to USD using token prices', async () => {
+        if (!positionId) return;
+
+        const result = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 100, token1: 1 },
+          env.provider
+        );
+
+        // Verify arithmetic consistency
+        expect(result.token0USD).toBeCloseTo(result.token0Fees * 100, 10);
+        expect(result.token1USD).toBeCloseTo(result.token1Fees * 1, 10);
+        expect(result.totalUSD).toBeCloseTo(result.token0USD + result.token1USD, 10);
+      }, 30000);
+
+      it('should accept both string and numeric position.id', async () => {
+        if (!positionId) return;
+
+        const resultFromString = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 1, token1: 1 },
+          env.provider
+        );
+        const resultFromNumber = await adapter.getAccruedFeesUSD(
+          { id: Number(positionId) },
+          { token0: 1, token1: 1 },
+          env.provider
+        );
+
+        expect(resultFromString.totalUSD).toBe(resultFromNumber.totalUSD);
+        expect(resultFromString.fees0).toBe(resultFromNumber.fees0);
+        expect(resultFromString.fees1).toBe(resultFromNumber.fees1);
+      }, 30000);
+
+      it('should return exactly 7 fields', async () => {
+        if (!positionId) return;
+
+        const result = await adapter.getAccruedFeesUSD(
+          { id: String(positionId) },
+          { token0: 1, token1: 1 },
+          env.provider
+        );
+
+        const expectedKeys = ['totalUSD', 'token0Fees', 'token1Fees', 'token0USD', 'token1USD', 'fees0', 'fees1'];
+        expect(Object.keys(result).sort()).toEqual(expectedKeys.sort());
       }, 30000);
     });
   });

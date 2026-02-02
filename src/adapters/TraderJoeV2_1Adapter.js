@@ -278,7 +278,70 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async getPositionsForVDS(address, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getPositionsForVDS not implemented");
+    // Validate address
+    if (!address) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(address);
+    } catch (error) {
+      throw new Error(`Invalid address: ${address}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+      if (!positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+
+      // Get all position IDs for this vault
+      const positionIds = await positionManager.getPositionsByVault(address);
+
+      if (positionIds.length === 0) {
+        return { positions: {}, poolData: {} };
+      }
+
+      // Fetch each position via getPositionById and aggregate results
+      const positions = {};
+      const poolData = {};
+
+      for (const positionId of positionIds) {
+        try {
+          const result = await this.getPositionById(positionId, provider);
+
+          // Filter out inactive positions (TJ equivalent of zero-liquidity filter)
+          if (!result.position.active) {
+            continue;
+          }
+
+          positions[result.position.id] = result.position;
+          Object.assign(poolData, result.poolData);
+        } catch (error) {
+          // Skip positions that fail to fetch (e.g., no deposit bins)
+          continue;
+        }
+      }
+
+      return { positions, poolData };
+
+    } catch (error) {
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('No position manager')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch positions for VDS: ${error.message}`);
+    }
   }
 
   async getPositionById(tokenId, provider) {
@@ -350,7 +413,71 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async getAccruedFeesUSD(position, tokenPrices, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getAccruedFeesUSD not implemented");
+    // Validate inputs
+    if (!position || typeof position !== 'object') {
+      throw new Error('position is required and must be an object');
+    }
+    if (position.id === undefined || position.id === null) {
+      throw new Error('position.id is required');
+    }
+    if (!tokenPrices || typeof tokenPrices !== 'object') {
+      throw new Error('tokenPrices is required and must be an object');
+    }
+    if (typeof tokenPrices.token0 !== 'number' || typeof tokenPrices.token1 !== 'number') {
+      throw new Error('tokenPrices must have token0 and token1 as numbers');
+    }
+    if (!provider) {
+      throw new Error('provider is required');
+    }
+
+    // Create position manager contract instance
+    const positionManager = new ethers.Contract(
+      this.addresses.positionManagerAddress,
+      contractData.TJPositionManager.abi,
+      provider
+    );
+
+    // Fetch accrued fees and position data in parallel
+    // getAccruedFees returns per-bin fee arrays (feesX[], feesY[])
+    // getPosition returns struct with tokenX/tokenY addresses for decimal lookup
+    const [feeData, positionData] = await Promise.all([
+      positionManager.getAccruedFees(position.id),
+      positionManager.getPosition(position.id),
+    ]);
+
+    // Sum per-bin fees using BigInt for precision
+    let totalFeesX = BigInt(0);
+    let totalFeesY = BigInt(0);
+
+    for (const feeX of feeData.feesX) {
+      totalFeesX += BigInt(feeX.toString());
+    }
+    for (const feeY of feeData.feesY) {
+      totalFeesY += BigInt(feeY.toString());
+    }
+
+    // Look up token decimals (tokenX = lower address = token0)
+    const tokenXData = getTokenByAddress(positionData.tokenX, this.chainId);
+    const tokenYData = getTokenByAddress(positionData.tokenY, this.chainId);
+
+    // Format fees (divide by 10^decimals)
+    const token0Fees = Number(totalFeesX) / Math.pow(10, tokenXData.decimals);
+    const token1Fees = Number(totalFeesY) / Math.pow(10, tokenYData.decimals);
+
+    // Convert to USD
+    const token0USD = token0Fees * tokenPrices.token0;
+    const token1USD = token1Fees * tokenPrices.token1;
+    const totalUSD = token0USD + token1USD;
+
+    return {
+      totalUSD,
+      token0Fees,
+      token1Fees,
+      token0USD,
+      token1USD,
+      fees0: totalFeesX.toString(),
+      fees1: totalFeesY.toString(),
+    };
   }
 
   async generateClaimFeesData(params) {

@@ -7,8 +7,8 @@
  * =============================================================================
  * PLATFORM ADAPTER INTERFACE TRACKING
  * =============================================================================
- * This tracks which methods are confirmed as required interface methods vs
- * platform-specific helpers. Update as we build out the automation service.
+ * This tracks which methods are confirmed as required interface methods
+ * Update as we build out the automation service.
  *
  * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
  * ----------------------------------------------------------------------------------
