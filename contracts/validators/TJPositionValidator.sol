@@ -45,21 +45,38 @@ contract TJPositionValidator is ILiquidityValidator {
         require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    // removePosition(address,uint256,uint256,uint256,uint256,uint256)
+    // collectFees(address,uint256)
+    bytes4 constant internal COLLECT_FEES_SELECTOR = bytes4(keccak256(
+        "collectFees(address,uint256)"
+    ));
+
+    // decreaseLiquidity(address,uint256,uint256,uint256,uint256,uint256)
+    bytes4 constant internal DECREASE_LIQUIDITY_SELECTOR = bytes4(keccak256(
+        "decreaseLiquidity(address,uint256,uint256,uint256,uint256,uint256)"
+    ));
+
+    // removePosition(address,uint256,uint256,uint256,uint256) — 5-param (no percentage)
     bytes4 constant internal REMOVE_POSITION_SELECTOR = bytes4(keccak256(
-        "removePosition(address,uint256,uint256,uint256,uint256,uint256)"
+        "removePosition(address,uint256,uint256,uint256,uint256)"
     ));
 
     function validateDecreaseLiquidity(bytes calldata data, address vault) external pure override {
         require(data.length >= 36, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
-        require(selector == REMOVE_POSITION_SELECTOR, "TJPositionValidator: not removePosition");
+        require(
+            selector == REMOVE_POSITION_SELECTOR || selector == DECREASE_LIQUIDITY_SELECTOR,
+            "TJPositionValidator: not removePosition or decreaseLiquidity"
+        );
         address calldataVault = abi.decode(data[4:36], (address));
         require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    function validateCollect(bytes calldata, address) external pure override {
-        revert("TJPositionValidator: not yet implemented");
+    function validateCollect(bytes calldata data, address vault) external pure override {
+        require(data.length >= 36, "TJPositionValidator: invalid data");
+        bytes4 selector = bytes4(data[:4]);
+        require(selector == COLLECT_FEES_SELECTOR, "TJPositionValidator: not collectFees");
+        address calldataVault = abi.decode(data[4:36], (address));
+        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
     function validateBurn(bytes calldata, address) external pure override {

@@ -144,6 +144,14 @@ describe("TJPositionManager", function() {
       const lbPairAddr = await mockLBPair.getAddress();
       const pmAddr = await positionManager.getAddress();
 
+      // Set up totalSupply and reserves so originalShareX/Y are computed
+      await mockLBPair.setTotalSupply(8388607, 10000);
+      await mockLBPair.setTotalSupply(8388608, 10000);
+      await mockLBPair.setTotalSupply(8388609, 10000);
+      await mockLBPair.setBinReserves(8388607, 0, 10000);
+      await mockLBPair.setBinReserves(8388608, 5000, 5000);
+      await mockLBPair.setBinReserves(8388609, 10000, 0);
+
       const calldata = encodeCreatePosition(
         vaultAddr, lbPairAddr,
         ethers.parseEther("1"), 1000n * 10n ** 6n,
@@ -167,6 +175,20 @@ describe("TJPositionManager", function() {
       expect(position.active).to.equal(true);
       expect(position.depositIds.length).to.equal(3);
       expect(position.liquidityMinted.length).to.equal(3);
+
+      // Verify originalShareX/Y baselines computed from reserves
+      // Mock liquidityMinted=[1000,2000,1000], totalSupply=10000 per bin
+      // Bin 8388607 (Y-only): shareX = 1000*0/10000 = 0, shareY = 1000*10000/10000 = 1000
+      // Bin 8388608 (active): shareX = 2000*5000/10000 = 1000, shareY = 1000
+      // Bin 8388609 (X-only): shareX = 1000*10000/10000 = 1000, shareY = 0
+      expect(position.originalShareX.length).to.equal(3);
+      expect(position.originalShareY.length).to.equal(3);
+      expect(position.originalShareX[0]).to.equal(0);
+      expect(position.originalShareY[0]).to.equal(1000);
+      expect(position.originalShareX[1]).to.equal(1000);
+      expect(position.originalShareY[1]).to.equal(1000);
+      expect(position.originalShareX[2]).to.equal(1000);
+      expect(position.originalShareY[2]).to.equal(0);
     });
 
     it("should emit PositionCreated event", async function() {
@@ -192,7 +214,9 @@ describe("TJPositionManager", function() {
           vaultAddr,
           lbPairAddr,
           [8388607n, 8388608n, 8388609n], // depositIds from mock
-          [1000n, 2000n, 1000n] // liquidityMinted from mock
+          [1000n, 2000n, 1000n], // liquidityMinted from mock
+          ethers.parseEther("1"), // amountXAdded from mock
+          1000n * 10n ** 6n // amountYAdded from mock
         );
     });
 
@@ -455,6 +479,16 @@ describe("TJPositionManager", function() {
     }
 
     // Helper to create a position and return its ID (also funds router for removals)
+    // Default mock returns: depositIds=[8388607,8388608,8388609], liquidityMinted=[1000,2000,1000]
+    // totalSupply=10000 per bin, reserves:
+    //   8388607 (below active): Y-only  → reserveX=0,     reserveY=10000
+    //   8388608 (active):       both    → reserveX=5000,   reserveY=5000
+    //   8388609 (above active): X-only  → reserveX=10000,  reserveY=0
+    //
+    // Resulting originalShare baselines:
+    //   8388607: shareX=0,    shareY=1000
+    //   8388608: shareX=1000, shareY=1000
+    //   8388609: shareX=1000, shareY=0
     async function createTestPosition() {
       const vaultAddr = await vault.getAddress();
       const lbPairAddr = await mockLBPair.getAddress();
@@ -463,6 +497,14 @@ describe("TJPositionManager", function() {
       const routerAddr = await mockLBRouter.getAddress();
       await tokenX.mint(routerAddr, ethers.parseEther("100"));
       await tokenY.mint(routerAddr, 100000n * 10n ** 6n);
+
+      // Set up totalSupply and reserves BEFORE position creation
+      await mockLBPair.setTotalSupply(8388607, 10000);
+      await mockLBPair.setTotalSupply(8388608, 10000);
+      await mockLBPair.setTotalSupply(8388609, 10000);
+      await mockLBPair.setBinReserves(8388607, 0, 10000);
+      await mockLBPair.setBinReserves(8388608, 5000, 5000);
+      await mockLBPair.setBinReserves(8388609, 10000, 0);
 
       const calldata = encodeCreatePosition(
         vaultAddr, lbPairAddr,
@@ -510,15 +552,15 @@ describe("TJPositionManager", function() {
         expect(pos.liquidityMinted[2]).to.equal(2000); // 1000 + 1000
       });
 
-      it("should add liquidity with new bins extending the range", async function() {
+      it("should revert when adding bins outside the position range", async function() {
         const positionId = await createTestPosition();
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
-        // Reconfigure mock to return entirely new bins
+        // Reconfigure mock to return entirely new bins not in position
         await mockLBRouter.setReturnValues(
           ethers.parseEther("1"), 1000n * 10n ** 6n, 0, 0,
-          [8388610, 8388611], // new bins beyond original range
+          [8388610, 8388611], // not in original [8388607, 8388608, 8388609]
           [500, 500]
         );
 
@@ -533,28 +575,18 @@ describe("TJPositionManager", function() {
           deadline
         );
 
-        await vault.increaseLiquidity([pmAddr], [calldata], [0n]);
-
-        const pos = await positionManager.getPosition(positionId);
-        // Original 3 + 2 new = 5 bins
-        expect(pos.depositIds.length).to.equal(5);
-        expect(pos.depositIds[3]).to.equal(8388610n);
-        expect(pos.depositIds[4]).to.equal(8388611n);
-        expect(pos.liquidityMinted[3]).to.equal(500);
-        expect(pos.liquidityMinted[4]).to.equal(500);
-        // Original bins unchanged
-        expect(pos.liquidityMinted[0]).to.equal(1000);
-        expect(pos.liquidityMinted[1]).to.equal(2000);
-        expect(pos.liquidityMinted[2]).to.equal(1000);
+        await expect(
+          vault.increaseLiquidity([pmAddr], [calldata], [0n])
+        ).to.be.revertedWith("TJPositionManager: bin not in position");
       });
 
-      it("should add liquidity with partially overlapping bins", async function() {
+      it("should revert when adding partially overlapping bins", async function() {
         const positionId = await createTestPosition();
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
         // Reconfigure mock: bins [8388608, 8388609, 8388610]
-        // overlaps original [8388607, 8388608, 8388609] on bins 8388608 and 8388609
+        // 8388610 is NOT in original [8388607, 8388608, 8388609]
         await mockLBRouter.setReturnValues(
           ethers.parseEther("1"), 1000n * 10n ** 6n, 0, 0,
           [8388608, 8388609, 8388610],
@@ -572,20 +604,9 @@ describe("TJPositionManager", function() {
           deadline
         );
 
-        await vault.increaseLiquidity([pmAddr], [calldata], [0n]);
-
-        const pos = await positionManager.getPosition(positionId);
-        // Original 3 bins + 1 new = 4 total
-        expect(pos.depositIds.length).to.equal(4);
-        // Bin 8388607: unchanged
-        expect(pos.liquidityMinted[0]).to.equal(1000);
-        // Bin 8388608: 2000 + 300 = 2300
-        expect(pos.liquidityMinted[1]).to.equal(2300);
-        // Bin 8388609: 1000 + 400 = 1400
-        expect(pos.liquidityMinted[2]).to.equal(1400);
-        // Bin 8388610: new, 500
-        expect(pos.depositIds[3]).to.equal(8388610n);
-        expect(pos.liquidityMinted[3]).to.equal(500);
+        await expect(
+          vault.increaseLiquidity([pmAddr], [calldata], [0n])
+        ).to.be.revertedWith("TJPositionManager: bin not in position");
       });
 
       it("should emit PositionIncreased event with correct args", async function() {
@@ -731,9 +752,9 @@ describe("TJPositionManager", function() {
 
         // Remove 50%
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
-        const removeCalldata = removeIface.encodeFunctionData("removePosition", [
+        const removeCalldata = removeIface.encodeFunctionData("decreaseLiquidity", [
           vaultAddr, positionId, 50, 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
@@ -815,10 +836,10 @@ describe("TJPositionManager", function() {
 
         // Remove 100%
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, 100, 0, 0, deadline
+          vaultAddr, positionId, 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
@@ -945,32 +966,35 @@ describe("TJPositionManager", function() {
 
         // Remove 100%
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, 100, 0, 0, deadline
+          vaultAddr, positionId, 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
+        // Struct should be fully deleted
         pos = await positionManager.getPosition(positionId);
+        expect(pos.vault).to.equal(ethers.ZeroAddress);
+        expect(pos.lbPair).to.equal(ethers.ZeroAddress);
         expect(pos.active).to.equal(false);
         expect(pos.depositIds.length).to.equal(0);
         expect(pos.liquidityMinted.length).to.equal(0);
       });
 
-      it("should correctly merge bins across multiple additions", async function() {
+      it("should revert if router returns bins not in position", async function() {
         const positionId = await createTestPosition();
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
-        // First add: extend right with [8388609, 8388610]
+        // Router returns bin 8388610 which is NOT in the original position [8388607, 8388608, 8388609]
         await mockLBRouter.setReturnValues(
           ethers.parseEther("1"), 1000n * 10n ** 6n, 0, 0,
           [8388609, 8388610],
           [100, 200]
         );
 
-        let calldata = encodeAddToPosition(
+        const calldata = encodeAddToPosition(
           vaultAddr, positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
@@ -980,57 +1004,83 @@ describe("TJPositionManager", function() {
           [0, 0],
           deadline
         );
-        await vault.increaseLiquidity([pmAddr], [calldata], [0n]);
 
-        // Second add: extend left with [8388606, 8388607]
+        await expect(
+          vault.increaseLiquidity([pmAddr], [calldata], [0n])
+        ).to.be.revertedWith("TJPositionManager: bin not in position");
+      });
+
+      it("should update baselines when adding to existing bins only", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Router returns only bins already in the position [8388607, 8388608, 8388609]
         await mockLBRouter.setReturnValues(
           ethers.parseEther("1"), 1000n * 10n ** 6n, 0, 0,
-          [8388606, 8388607],
-          [300, 400]
+          [8388607, 8388608, 8388609],
+          [100, 200, 100]
         );
 
-        calldata = encodeAddToPosition(
+        const calldata = encodeAddToPosition(
           vaultAddr, positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
-          [-2, -1],
-          [0, 0],
-          [ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+          [-1, 0, 1],
+          [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+          [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
           deadline
         );
         await vault.increaseLiquidity([pmAddr], [calldata], [0n]);
 
         const pos = await positionManager.getPosition(positionId);
-        // Original: [8388607, 8388608, 8388609]
-        // After first add: [8388607, 8388608, 8388609, 8388610]
-        // After second add: [8388607, 8388608, 8388609, 8388610, 8388606]
-        expect(pos.depositIds.length).to.equal(5);
-
-        // Bin 8388607: 1000 + 400 = 1400
-        expect(pos.depositIds[0]).to.equal(8388607n);
-        expect(pos.liquidityMinted[0]).to.equal(1400);
-        // Bin 8388608: unchanged at 2000
-        expect(pos.depositIds[1]).to.equal(8388608n);
-        expect(pos.liquidityMinted[1]).to.equal(2000);
-        // Bin 8388609: 1000 + 100 = 1100
-        expect(pos.depositIds[2]).to.equal(8388609n);
+        expect(pos.depositIds.length).to.equal(3);
+        // Original [1000, 2000, 1000] + [100, 200, 100]
+        expect(pos.liquidityMinted[0]).to.equal(1100);
+        expect(pos.liquidityMinted[1]).to.equal(2200);
         expect(pos.liquidityMinted[2]).to.equal(1100);
-        // Bin 8388610: new at 200
-        expect(pos.depositIds[3]).to.equal(8388610n);
-        expect(pos.liquidityMinted[3]).to.equal(200);
-        // Bin 8388606: new at 300
-        expect(pos.depositIds[4]).to.equal(8388606n);
-        expect(pos.liquidityMinted[4]).to.equal(300);
+
+        // Baselines should reflect new current shares (no fees, so baseline = currentShare)
+        // Bin 8388607 (Y-only): shareX=0, shareY=1100*10000/10000=1100
+        // Bin 8388608 (active): shareX=2200*5000/10000=1100, shareY=1100
+        // Bin 8388609 (X-only): shareX=1100*10000/10000=1100, shareY=0
+        expect(pos.originalShareX[0]).to.equal(0);
+        expect(pos.originalShareY[0]).to.equal(1100);
+        expect(pos.originalShareX[1]).to.equal(1100);
+        expect(pos.originalShareY[1]).to.equal(1100);
+        expect(pos.originalShareX[2]).to.equal(1100);
+        expect(pos.originalShareY[2]).to.equal(0);
       });
     });
   });
 
   describe("stub validator methods", function() {
-    it("validateCollect should revert", async function() {
+    it("validateCollect should accept collectFees with correct vault", async function() {
+      const iface = new ethers.Interface([
+        "function collectFees(address vault, uint256 positionId)"
+      ]);
+      const calldata = iface.encodeFunctionData("collectFees", [owner.address, 1]);
       await expect(
-        tjValidator.validateCollect("0x", owner.address)
-      ).to.be.revertedWith("TJPositionValidator: not yet implemented");
+        tjValidator.validateCollect(calldata, owner.address)
+      ).to.not.be.reverted;
+    });
+
+    it("validateCollect should reject invalid selector", async function() {
+      const fakeCalldata = "0xdeadbeef" + "00".repeat(32);
+      await expect(
+        tjValidator.validateCollect(fakeCalldata, owner.address)
+      ).to.be.revertedWith("TJPositionValidator: not collectFees");
+    });
+
+    it("validateCollect should reject vault mismatch", async function() {
+      const iface = new ethers.Interface([
+        "function collectFees(address vault, uint256 positionId)"
+      ]);
+      const calldata = iface.encodeFunctionData("collectFees", [user1.address, 1]);
+      await expect(
+        tjValidator.validateCollect(calldata, owner.address)
+      ).to.be.revertedWith("TJPositionValidator: vault mismatch");
     });
 
     it("validateBurn should revert", async function() {
@@ -1043,17 +1093,36 @@ describe("TJPositionManager", function() {
   describe("removePosition via vault.decreaseLiquidity()", function() {
 
 
-    // Helper to encode removePosition calldata
+    // Helper to encode removePosition (100%) or decreaseLiquidity (partial) calldata
     function encodeRemovePosition(vaultAddr, positionId, percentage, amountXMin, amountYMin, dl) {
-      const iface = new ethers.Interface([
-        "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
-      ]);
-      return iface.encodeFunctionData("removePosition", [
-        vaultAddr, positionId, percentage, amountXMin, amountYMin, dl
-      ]);
+      if (percentage === 100) {
+        const iface = new ethers.Interface([
+          "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        ]);
+        return iface.encodeFunctionData("removePosition", [
+          vaultAddr, positionId, amountXMin, amountYMin, dl
+        ]);
+      } else {
+        const iface = new ethers.Interface([
+          "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        ]);
+        return iface.encodeFunctionData("decreaseLiquidity", [
+          vaultAddr, positionId, percentage, amountXMin, amountYMin, dl
+        ]);
+      }
     }
 
     // Helper to create a position and return its ID
+    // Default mock returns: depositIds=[8388607,8388608,8388609], liquidityMinted=[1000,2000,1000]
+    // totalSupply=10000 per bin, reserves:
+    //   8388607 (below active): Y-only  → reserveX=0,     reserveY=10000
+    //   8388608 (active):       both    → reserveX=5000,   reserveY=5000
+    //   8388609 (above active): X-only  → reserveX=10000,  reserveY=0
+    //
+    // Resulting originalShare baselines:
+    //   8388607: shareX=0,    shareY=1000
+    //   8388608: shareX=1000, shareY=1000
+    //   8388609: shareX=1000, shareY=0
     async function createTestPosition() {
       const vaultAddr = await vault.getAddress();
       const lbPairAddr = await mockLBPair.getAddress();
@@ -1063,6 +1132,14 @@ describe("TJPositionManager", function() {
       const routerAddr = await mockLBRouter.getAddress();
       await tokenX.mint(routerAddr, ethers.parseEther("100"));
       await tokenY.mint(routerAddr, 100000n * 10n ** 6n);
+
+      // Set up totalSupply and reserves BEFORE position creation
+      await mockLBPair.setTotalSupply(8388607, 10000);
+      await mockLBPair.setTotalSupply(8388608, 10000);
+      await mockLBPair.setTotalSupply(8388609, 10000);
+      await mockLBPair.setBinReserves(8388607, 0, 10000);
+      await mockLBPair.setBinReserves(8388608, 5000, 5000);
+      await mockLBPair.setBinReserves(8388609, 10000, 0);
 
       const calldata = encodeCreatePosition(
         vaultAddr, lbPairAddr,
@@ -1089,10 +1166,15 @@ describe("TJPositionManager", function() {
       const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
+      // Struct should be fully deleted (all fields zeroed)
       const pos = await positionManager.getPosition(positionId);
+      expect(pos.vault).to.equal(ethers.ZeroAddress);
+      expect(pos.lbPair).to.equal(ethers.ZeroAddress);
       expect(pos.active).to.equal(false);
       expect(pos.depositIds.length).to.equal(0);
       expect(pos.liquidityMinted.length).to.equal(0);
+      expect(pos.originalShareX.length).to.equal(0);
+      expect(pos.originalShareY.length).to.equal(0);
     });
 
     it("should remove 50% of a position and keep active with reduced liquidity", async function() {
@@ -1116,6 +1198,17 @@ describe("TJPositionManager", function() {
       for (let i = 0; i < posAfter.liquidityMinted.length; i++) {
         expect(posAfter.liquidityMinted[i]).to.equal(origLiquidity[i] / 2n);
       }
+
+      // originalShareX/Y baselines should be recalculated for reduced position
+      // Bin 8388607 (Y-only): shareX=0, shareY=500*10000/10000=500
+      // Bin 8388608 (active): shareX=1000*5000/10000=500, shareY=500
+      // Bin 8388609 (X-only): shareX=500*10000/10000=500, shareY=0
+      expect(posAfter.originalShareX[0]).to.equal(0);
+      expect(posAfter.originalShareY[0]).to.equal(500);
+      expect(posAfter.originalShareX[1]).to.equal(500);
+      expect(posAfter.originalShareY[1]).to.equal(500);
+      expect(posAfter.originalShareX[2]).to.equal(500);
+      expect(posAfter.originalShareY[2]).to.equal(0);
     });
 
     it("should emit PositionRemoved event", async function() {
@@ -1249,7 +1342,7 @@ describe("TJPositionManager", function() {
         // This should fail because msg.sender != vault param
         await expect(
           positionManager.connect(user1).removePosition(
-            user1.address, positionId, 100, 0, 0, deadline
+            user1.address, positionId, 0, 0, deadline
           )
         ).to.be.revertedWith("TJPositionManager: not position owner");
       });
@@ -1311,7 +1404,7 @@ describe("TJPositionManager", function() {
 
         await expect(
           vault.decreaseLiquidity([pmAddr], [fakeCalldata])
-        ).to.be.revertedWith("TJPositionValidator: not removePosition");
+        ).to.be.revertedWith("TJPositionValidator: not removePosition or decreaseLiquidity");
       });
     });
 
@@ -1333,10 +1426,15 @@ describe("TJPositionManager", function() {
         const calldata2 = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
         await vault.decreaseLiquidity([pmAddr], [calldata2]);
 
+        // Struct should be fully deleted
         pos = await positionManager.getPosition(positionId);
+        expect(pos.vault).to.equal(ethers.ZeroAddress);
+        expect(pos.lbPair).to.equal(ethers.ZeroAddress);
         expect(pos.active).to.equal(false);
         expect(pos.depositIds.length).to.equal(0);
         expect(pos.liquidityMinted.length).to.equal(0);
+        expect(pos.originalShareX.length).to.equal(0);
+        expect(pos.originalShareY.length).to.equal(0);
       });
 
       it("should allow multiple partial removals", async function() {
@@ -1362,11 +1460,165 @@ describe("TJPositionManager", function() {
         expect(pos.liquidityMinted[2]).to.equal(423);
       });
     });
+
+    describe("fee collection during removal", function() {
+      it("should collect fees before 100% removal", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate 10% fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        // First removeLiquidity call = fee collection, second = principal removal
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"),  // fee amountX
+          100n * 10n ** 6n            // fee amountY
+        );
+        await mockLBRouter.setRemoveReturnValues2(
+          ethers.parseEther("0.5"),   // principal amountX
+          500n * 10n ** 6n            // principal amountY
+        );
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
+        const receipt = await tx.wait();
+
+        // Both FeesCollected and PositionRemoved should be emitted
+        const events = receipt.logs.map(log => {
+          try { return positionManager.interface.parseLog(log); }
+          catch { return null; }
+        }).filter(e => e !== null);
+
+        const feesEvent = events.find(e => e.name === "FeesCollected");
+        const removedEvent = events.find(e => e.name === "PositionRemoved");
+
+        expect(feesEvent).to.not.be.undefined;
+        expect(removedEvent).to.not.be.undefined;
+        expect(feesEvent.args.amountX).to.equal(ethers.parseEther("0.01"));
+        expect(feesEvent.args.amountY).to.equal(100n * 10n ** 6n);
+        expect(removedEvent.args.percentage).to.equal(100);
+
+        // Position should be inactive
+        const pos = await positionManager.getPosition(positionId);
+        expect(pos.active).to.equal(false);
+      });
+
+      it("should collect fees before 50% partial removal", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate 10% fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"), 100n * 10n ** 6n
+        );
+        await mockLBRouter.setRemoveReturnValues2(
+          ethers.parseEther("0.25"), 250n * 10n ** 6n
+        );
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 50, 0, 0, deadline);
+        const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
+        const receipt = await tx.wait();
+
+        // Both events should be emitted
+        const events = receipt.logs.map(log => {
+          try { return positionManager.interface.parseLog(log); }
+          catch { return null; }
+        }).filter(e => e !== null);
+
+        expect(events.some(e => e.name === "FeesCollected")).to.be.true;
+        expect(events.some(e => e.name === "PositionRemoved")).to.be.true;
+
+        // Position should still be active with reduced liquidityMinted
+        const pos = await positionManager.getPosition(positionId);
+        expect(pos.active).to.equal(true);
+
+        // After fee collection, liquidityMinted was reduced by fee LB tokens,
+        // then 50% of the remaining was removed.
+        // Fee LB tokens per bin (10% reserve increase):
+        //   8388607: principalLb = 1000*10000/11000 = 909, feeLb = 1000-909 = 91 → lm: 909
+        //   8388608: principalLb = 1000*10000/5500 = 1818, feeLb = 2000-1818 = 182 → lm: 1818
+        //   8388609: principalLb = 1000*10000/11000 = 909, feeLb = 1000-909 = 91 → lm: 909
+        // Then 50% removal: [909/2=454, 1818/2=909, 909/2=454]
+        // Final: [909-454=455, 1818-909=909, 909-454=455]
+        expect(pos.liquidityMinted[0]).to.equal(455);
+        expect(pos.liquidityMinted[1]).to.equal(909);
+        expect(pos.liquidityMinted[2]).to.equal(455);
+      });
+
+      it("should skip fee collection when no fees accrued during removal", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Reserves unchanged — no fees
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.5"), 500n * 10n ** 6n
+        );
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
+        const receipt = await tx.wait();
+
+        // Only PositionRemoved should be emitted, no FeesCollected
+        const events = receipt.logs.map(log => {
+          try { return positionManager.interface.parseLog(log); }
+          catch { return null; }
+        }).filter(e => e !== null);
+
+        expect(events.some(e => e.name === "FeesCollected")).to.be.false;
+        expect(events.some(e => e.name === "PositionRemoved")).to.be.true;
+
+        // Only one removeLiquidity call should have been made (principal only)
+        expect(await mockLBRouter.removeCallCount()).to.equal(1);
+      });
+
+      it("should make two router calls when fees are present", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"), 100n * 10n ** 6n
+        );
+        await mockLBRouter.setRemoveReturnValues2(
+          ethers.parseEther("0.5"), 500n * 10n ** 6n
+        );
+
+        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, 0, 0, deadline);
+        await vault.decreaseLiquidity([pmAddr], [calldata]);
+
+        // Two removeLiquidity calls: fee collection + principal removal
+        expect(await mockLBRouter.removeCallCount()).to.equal(2);
+      });
+    });
   });
 
   describe("getAccruedFees", function() {
 
-    // Helper to create a position and return its ID
+    // Helper to create a position with reserves and totalSupply initialized
+    // Default mock returns: depositIds=[8388607,8388608,8388609], liquidityMinted=[1000,2000,1000]
+    // We set totalSupply=10000 per bin and realistic reserves:
+    //   8388607 (below active): Y-only  → reserveX=0,     reserveY=10000
+    //   8388608 (active):       both    → reserveX=5000,   reserveY=5000
+    //   8388609 (above active): X-only  → reserveX=10000,  reserveY=0
+    //
+    // Resulting originalShare baselines:
+    //   8388607: shareX=0,    shareY=1000
+    //   8388608: shareX=1000, shareY=1000
+    //   8388609: shareX=1000, shareY=0
     async function createTestPosition() {
       const vaultAddr = await vault.getAddress();
       const lbPairAddr = await mockLBPair.getAddress();
@@ -1375,6 +1627,14 @@ describe("TJPositionManager", function() {
       const routerAddr = await mockLBRouter.getAddress();
       await tokenX.mint(routerAddr, ethers.parseEther("100"));
       await tokenY.mint(routerAddr, 100000n * 10n ** 6n);
+
+      // Set up totalSupply and reserves BEFORE position creation
+      await mockLBPair.setTotalSupply(8388607, 10000);
+      await mockLBPair.setTotalSupply(8388608, 10000);
+      await mockLBPair.setTotalSupply(8388609, 10000);
+      await mockLBPair.setBinReserves(8388607, 0, 10000);
+      await mockLBPair.setBinReserves(8388608, 5000, 5000);
+      await mockLBPair.setBinReserves(8388609, 10000, 0);
 
       const calldata = encodeCreatePosition(
         vaultAddr, lbPairAddr,
@@ -1418,10 +1678,10 @@ describe("TJPositionManager", function() {
 
         // Remove 100%
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, 100, 0, 0, deadline
+          vaultAddr, positionId, 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
@@ -1432,145 +1692,112 @@ describe("TJPositionManager", function() {
     });
 
     describe("zero-fee cases", function() {
-      it("should return zero deltas when balances match baselines", async function() {
+      it("should return zero fees when reserves unchanged", async function() {
         const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
 
-        // Set MockLBPair balances to match stored liquidityMinted
-        await mockLBPair.setBalance(pmAddr, 8388607, 1000);
-        await mockLBPair.setBalance(pmAddr, 8388608, 2000);
-        await mockLBPair.setBalance(pmAddr, 8388609, 1000);
+        // Reserves unchanged since creation — no fee accrual
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        const [depositIds, currentBalances, storedBalances, feeDeltas] =
-          await positionManager.getAccruedFees(positionId);
-
-        expect(feeDeltas[0]).to.equal(0);
-        expect(feeDeltas[1]).to.equal(0);
-        expect(feeDeltas[2]).to.equal(0);
+        expect(feesX[0]).to.equal(0);
+        expect(feesX[1]).to.equal(0);
+        expect(feesX[2]).to.equal(0);
+        expect(feesY[0]).to.equal(0);
+        expect(feesY[1]).to.equal(0);
+        expect(feesY[2]).to.equal(0);
       });
     });
 
     describe("fee accrual detection", function() {
-      it("should detect fee accrual in all bins", async function() {
+      it("should detect fee accrual in all bins via reserve growth", async function() {
         const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
 
-        // Simulate fee growth: each bin has 10% more than baseline
-        await mockLBPair.setBalance(pmAddr, 8388607, 1100);
-        await mockLBPair.setBalance(pmAddr, 8388608, 2200);
-        await mockLBPair.setBalance(pmAddr, 8388609, 1100);
+        // Increase reserves by 10% in each bin
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
 
-        const [,,, feeDeltas] = await positionManager.getAccruedFees(positionId);
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        expect(feeDeltas[0]).to.equal(100);
-        expect(feeDeltas[1]).to.equal(200);
-        expect(feeDeltas[2]).to.equal(100);
+        // 8388607 (Y-only): feeY = 1000*11000/10000 - 1000 = 100
+        expect(feesX[0]).to.equal(0);
+        expect(feesY[0]).to.equal(100);
+        // 8388608 (active): feeX = 2000*5500/10000 - 1000 = 100, feeY same
+        expect(feesX[1]).to.equal(100);
+        expect(feesY[1]).to.equal(100);
+        // 8388609 (X-only): feeX = 1000*11000/10000 - 1000 = 100
+        expect(feesX[2]).to.equal(100);
+        expect(feesY[2]).to.equal(0);
       });
 
-      it("should detect fee accrual in only one bin", async function() {
+      it("should detect fee accrual in only the active bin", async function() {
         const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
 
-        // Only middle bin has grown
-        await mockLBPair.setBalance(pmAddr, 8388607, 1000);
-        await mockLBPair.setBalance(pmAddr, 8388608, 2500);
-        await mockLBPair.setBalance(pmAddr, 8388609, 1000);
+        // Only increase reserves in the active bin (50% increase)
+        await mockLBPair.setBinReserves(8388608, 7500, 7500);
 
-        const [,,, feeDeltas] = await positionManager.getAccruedFees(positionId);
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        expect(feeDeltas[0]).to.equal(0);
-        expect(feeDeltas[1]).to.equal(500);
-        expect(feeDeltas[2]).to.equal(0);
+        expect(feesX[0]).to.equal(0);
+        expect(feesY[0]).to.equal(0);
+        // 8388608: feeX = 2000*7500/10000 - 1000 = 500
+        expect(feesX[1]).to.equal(500);
+        expect(feesY[1]).to.equal(500);
+        expect(feesX[2]).to.equal(0);
+        expect(feesY[2]).to.equal(0);
       });
 
-      it("should detect large fee accrual (100% increase)", async function() {
+      it("should detect large fee accrual (100% reserve increase)", async function() {
         const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
 
-        // 100% increase in all bins
-        await mockLBPair.setBalance(pmAddr, 8388607, 2000);
-        await mockLBPair.setBalance(pmAddr, 8388608, 4000);
-        await mockLBPair.setBalance(pmAddr, 8388609, 2000);
+        // Double all reserves
+        await mockLBPair.setBinReserves(8388607, 0, 20000);
+        await mockLBPair.setBinReserves(8388608, 10000, 10000);
+        await mockLBPair.setBinReserves(8388609, 20000, 0);
 
-        const [,,, feeDeltas] = await positionManager.getAccruedFees(positionId);
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        expect(feeDeltas[0]).to.equal(1000);
-        expect(feeDeltas[1]).to.equal(2000);
-        expect(feeDeltas[2]).to.equal(1000);
+        // 8388607: feeY = 1000*20000/10000 - 1000 = 1000
+        expect(feesX[0]).to.equal(0);
+        expect(feesY[0]).to.equal(1000);
+        // 8388608: feeX = 2000*10000/10000 - 1000 = 1000
+        expect(feesX[1]).to.equal(1000);
+        expect(feesY[1]).to.equal(1000);
+        // 8388609: feeX = 1000*20000/10000 - 1000 = 1000
+        expect(feesX[2]).to.equal(1000);
+        expect(feesY[2]).to.equal(0);
       });
 
-      it("should return zero delta when current is less than stored (defensive)", async function() {
+      it("should return zero fees when reserves decrease (defensive)", async function() {
         const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
 
-        // Set balances below stored (rounding edge case)
-        await mockLBPair.setBalance(pmAddr, 8388607, 999);
-        await mockLBPair.setBalance(pmAddr, 8388608, 1999);
-        await mockLBPair.setBalance(pmAddr, 8388609, 999);
+        // Decrease reserves (shouldn't happen normally, but defensive)
+        await mockLBPair.setBinReserves(8388607, 0, 9000);
+        await mockLBPair.setBinReserves(8388608, 4500, 4500);
+        await mockLBPair.setBinReserves(8388609, 9000, 0);
 
-        const [,,, feeDeltas] = await positionManager.getAccruedFees(positionId);
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        expect(feeDeltas[0]).to.equal(0);
-        expect(feeDeltas[1]).to.equal(0);
-        expect(feeDeltas[2]).to.equal(0);
-      });
-    });
-
-    describe("return structure verification", function() {
-      it("should return correct depositIds matching position", async function() {
-        const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
-
-        await mockLBPair.setBalance(pmAddr, 8388607, 1000);
-        await mockLBPair.setBalance(pmAddr, 8388608, 2000);
-        await mockLBPair.setBalance(pmAddr, 8388609, 1000);
-
-        const [depositIds] = await positionManager.getAccruedFees(positionId);
-
-        expect(depositIds.length).to.equal(3);
-        expect(depositIds[0]).to.equal(8388607n);
-        expect(depositIds[1]).to.equal(8388608n);
-        expect(depositIds[2]).to.equal(8388609n);
-      });
-
-      it("should return correct storedBalances matching liquidityMinted", async function() {
-        const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
-
-        await mockLBPair.setBalance(pmAddr, 8388607, 1100);
-        await mockLBPair.setBalance(pmAddr, 8388608, 2200);
-        await mockLBPair.setBalance(pmAddr, 8388609, 1100);
-
-        const [,, storedBalances] = await positionManager.getAccruedFees(positionId);
-
-        expect(storedBalances[0]).to.equal(1000);
-        expect(storedBalances[1]).to.equal(2000);
-        expect(storedBalances[2]).to.equal(1000);
-      });
-
-      it("should return correct currentBalances from MockLBPair.balanceOf", async function() {
-        const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
-
-        await mockLBPair.setBalance(pmAddr, 8388607, 1234);
-        await mockLBPair.setBalance(pmAddr, 8388608, 5678);
-        await mockLBPair.setBalance(pmAddr, 8388609, 9012);
-
-        const [, currentBalances] = await positionManager.getAccruedFees(positionId);
-
-        expect(currentBalances[0]).to.equal(1234);
-        expect(currentBalances[1]).to.equal(5678);
-        expect(currentBalances[2]).to.equal(9012);
+        expect(feesX[0]).to.equal(0);
+        expect(feesY[0]).to.equal(0);
+        expect(feesX[1]).to.equal(0);
+        expect(feesY[1]).to.equal(0);
+        expect(feesX[2]).to.equal(0);
+        expect(feesY[2]).to.equal(0);
       });
     });
 
     describe("post-addToPosition baseline updates", function() {
-      it("should reflect updated baselines after addToPosition", async function() {
+      it("should preserve accrued fees across addToPosition", async function() {
         const positionId = await createTestPosition();
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
-        // Add to position with same bins (default mock: +[1000, 2000, 1000])
+        // Simulate 10% fee accrual via reserve growth
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        // Add to position (default mock returns +[1000, 2000, 1000])
         const addCalldata = encodeAddToPosition(
           vaultAddr, positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
@@ -1583,24 +1810,229 @@ describe("TJPositionManager", function() {
         );
         await vault.increaseLiquidity([pmAddr], [addCalldata], [0n]);
 
-        // Stored baselines should now be doubled: [2000, 4000, 2000]
-        // Simulate fee accrual of 100 per bin on top of new baseline
-        await mockLBPair.setBalance(pmAddr, 8388607, 2100);
-        await mockLBPair.setBalance(pmAddr, 8388608, 4100);
-        await mockLBPair.setBalance(pmAddr, 8388609, 2100);
+        // Without changing reserves further, original fees should still be reported
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
 
-        const [depositIds, currentBalances, storedBalances, feeDeltas] =
-          await positionManager.getAccruedFees(positionId);
+        expect(feesX[0]).to.equal(0);
+        expect(feesY[0]).to.equal(100);
+        expect(feesX[1]).to.equal(100);
+        expect(feesY[1]).to.equal(100);
+        expect(feesX[2]).to.equal(100);
+        expect(feesY[2]).to.equal(0);
+      });
+    });
+  });
 
-        // Stored baselines should be updated
-        expect(storedBalances[0]).to.equal(2000);
-        expect(storedBalances[1]).to.equal(4000);
-        expect(storedBalances[2]).to.equal(2000);
+  describe("collectFees", function() {
 
-        // Fee deltas should be 100 each
-        expect(feeDeltas[0]).to.equal(100);
-        expect(feeDeltas[1]).to.equal(100);
-        expect(feeDeltas[2]).to.equal(100);
+    // Helper matching getAccruedFees setup:
+    // depositIds=[8388607,8388608,8388609], liquidityMinted=[1000,2000,1000]
+    // totalSupply=10000 per bin
+    // originalShare baselines: 8388607: X=0,Y=1000 | 8388608: X=1000,Y=1000 | 8388609: X=1000,Y=0
+    async function createTestPosition() {
+      const vaultAddr = await vault.getAddress();
+      const lbPairAddr = await mockLBPair.getAddress();
+      const pmAddr = await positionManager.getAddress();
+
+      const routerAddr = await mockLBRouter.getAddress();
+      await tokenX.mint(routerAddr, ethers.parseEther("100"));
+      await tokenY.mint(routerAddr, 100000n * 10n ** 6n);
+
+      await mockLBPair.setTotalSupply(8388607, 10000);
+      await mockLBPair.setTotalSupply(8388608, 10000);
+      await mockLBPair.setTotalSupply(8388609, 10000);
+      await mockLBPair.setBinReserves(8388607, 0, 10000);
+      await mockLBPair.setBinReserves(8388608, 5000, 5000);
+      await mockLBPair.setBinReserves(8388609, 10000, 0);
+
+      const calldata = encodeCreatePosition(
+        vaultAddr, lbPairAddr,
+        ethers.parseEther("1"), 1000n * 10n ** 6n,
+        0, 0,
+        8388608, 5,
+        [-1, 0, 1],
+        [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
+        deadline
+      );
+
+      await vault.mint([pmAddr], [calldata], [0n]);
+
+      const posIds = await positionManager.getPositionsByVault(vaultAddr);
+      return posIds[posIds.length - 1];
+    }
+
+    function encodeCollectFees(vaultAddr, positionId) {
+      const iface = new ethers.Interface([
+        "function collectFees(address vault, uint256 positionId)"
+      ]);
+      return iface.encodeFunctionData("collectFees", [vaultAddr, positionId]);
+    }
+
+    describe("validation", function() {
+      it("should revert if vault is not msg.sender", async function() {
+        const positionId = await createTestPosition();
+        const pmAddr = await positionManager.getAddress();
+
+        // Call directly (not through vault) — msg.sender != vault param
+        await expect(
+          positionManager.collectFees(await vault.getAddress(), positionId)
+        ).to.be.revertedWith("TJPositionManager: vault must be caller");
+      });
+
+      it("should revert for position not owned by vault", async function() {
+        const positionId = await createTestPosition();
+        const pmAddr = await positionManager.getAddress();
+
+        // Use a different address as vault param (matching msg.sender but not position owner)
+        const [, user1] = await ethers.getSigners();
+        await expect(
+          positionManager.connect(user1).collectFees(user1.address, positionId)
+        ).to.be.revertedWith("TJPositionManager: not position owner");
+      });
+
+      it("should revert for inactive position", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Remove position first
+        const removeIface = new ethers.Interface([
+          "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        ]);
+        const removeCalldata = removeIface.encodeFunctionData("removePosition", [
+          vaultAddr, positionId, 0, 0, deadline
+        ]);
+        await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
+
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        await expect(
+          vault.collect([pmAddr], [collectCalldata])
+        ).to.be.reverted;
+      });
+    });
+
+    describe("zero fees", function() {
+      it("should return (0,0) when no fees accrued", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Reserves unchanged — no fees
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        const tx = await vault.collect([pmAddr], [collectCalldata]);
+        const receipt = await tx.wait();
+
+        // No FeesCollected event should be emitted (count == 0, early return)
+        const feesCollectedEvents = receipt.logs.filter(log => {
+          try {
+            const parsed = positionManager.interface.parseLog(log);
+            return parsed && parsed.name === "FeesCollected";
+          } catch { return false; }
+        });
+        expect(feesCollectedEvents.length).to.equal(0);
+      });
+    });
+
+    describe("fee collection", function() {
+      it("should collect fees and emit FeesCollected event", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate 10% fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        // Configure mock router return values for removeLiquidity
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"),  // feeAmountX
+          100n * 10n ** 6n            // feeAmountY
+        );
+
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        const tx = await vault.collect([pmAddr], [collectCalldata]);
+        const receipt = await tx.wait();
+
+        // Verify FeesCollected event was emitted
+        const feesCollectedEvents = receipt.logs.filter(log => {
+          try {
+            const parsed = positionManager.interface.parseLog(log);
+            return parsed && parsed.name === "FeesCollected";
+          } catch { return false; }
+        });
+        expect(feesCollectedEvents.length).to.equal(1);
+
+        const parsed = positionManager.interface.parseLog(feesCollectedEvents[0]);
+        expect(parsed.args.positionId).to.equal(positionId);
+        expect(parsed.args.vault).to.equal(vaultAddr);
+        expect(parsed.args.amountX).to.equal(ethers.parseEther("0.01"));
+        expect(parsed.args.amountY).to.equal(100n * 10n ** 6n);
+      });
+
+      it("should reduce liquidityMinted after fee collection", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Get liquidityMinted before
+        const posBefore = await positionManager.getPosition(positionId);
+        const lmBefore = posBefore.liquidityMinted.map(lm => lm);
+
+        // Simulate 10% fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"), 100n * 10n ** 6n
+        );
+
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        await vault.collect([pmAddr], [collectCalldata]);
+
+        // liquidityMinted should have decreased (fee LB tokens were burned)
+        const posAfter = await positionManager.getPosition(positionId);
+        for (let i = 0; i < posAfter.liquidityMinted.length; i++) {
+          expect(posAfter.liquidityMinted[i]).to.be.lt(lmBefore[i]);
+        }
+
+        // Position should still be active
+        expect(posAfter.active).to.be.true;
+      });
+
+      it("should reset baselines so getAccruedFees returns zero after collection", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate fee accrual
+        await mockLBPair.setBinReserves(8388607, 0, 11000);
+        await mockLBPair.setBinReserves(8388608, 5500, 5500);
+        await mockLBPair.setBinReserves(8388609, 11000, 0);
+
+        // Verify fees exist before collection
+        const [feesXBefore, feesYBefore] = await positionManager.getAccruedFees(positionId);
+        expect(feesYBefore[0]).to.equal(100);
+        expect(feesXBefore[1]).to.equal(100);
+        expect(feesXBefore[2]).to.equal(100);
+
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"), 100n * 10n ** 6n
+        );
+
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        await vault.collect([pmAddr], [collectCalldata]);
+
+        // After collection, fees should be zero (baselines reset)
+        const [feesXAfter, feesYAfter] = await positionManager.getAccruedFees(positionId);
+        expect(feesXAfter[0]).to.equal(0);
+        expect(feesYAfter[0]).to.equal(0);
+        expect(feesXAfter[1]).to.equal(0);
+        expect(feesYAfter[1]).to.equal(0);
+        expect(feesXAfter[2]).to.equal(0);
+        expect(feesYAfter[2]).to.equal(0);
       });
     });
   });

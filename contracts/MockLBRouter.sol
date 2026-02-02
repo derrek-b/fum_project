@@ -44,6 +44,11 @@ contract MockLBRouter {
     uint256 public returnRemoveAmountX;
     uint256 public returnRemoveAmountY;
 
+    // Second removeLiquidity return values (for sequential calls, e.g. fee + principal)
+    uint256 public returnRemoveAmountX2;
+    uint256 public returnRemoveAmountY2;
+    uint256 public removeCallCount;
+
     // Control flags
     bool public shouldFail;
     bool public shouldFailRemove;
@@ -95,6 +100,15 @@ contract MockLBRouter {
     function setRemoveReturnValues(uint256 amountX, uint256 amountY) external {
         returnRemoveAmountX = amountX;
         returnRemoveAmountY = amountY;
+    }
+
+    function setRemoveReturnValues2(uint256 amountX, uint256 amountY) external {
+        returnRemoveAmountX2 = amountX;
+        returnRemoveAmountY2 = amountY;
+    }
+
+    function resetRemoveCallCount() external {
+        removeCallCount = 0;
     }
 
     function setReturnValues(
@@ -201,9 +215,17 @@ contract MockLBRouter {
             lastRemoveAmounts.push(amounts[i]);
         }
 
-        // Use configured return values, or defaults based on amountXMin/amountYMin
-        amountX = returnRemoveAmountX > 0 ? returnRemoveAmountX : amountXMin;
-        amountY = returnRemoveAmountY > 0 ? returnRemoveAmountY : amountYMin;
+        // Track call count for sequential removeLiquidity calls (e.g. fee + principal)
+        removeCallCount++;
+
+        // Use first or second return values depending on call count
+        if (removeCallCount > 1 && (returnRemoveAmountX2 > 0 || returnRemoveAmountY2 > 0)) {
+            amountX = returnRemoveAmountX2;
+            amountY = returnRemoveAmountY2;
+        } else {
+            amountX = returnRemoveAmountX > 0 ? returnRemoveAmountX : amountXMin;
+            amountY = returnRemoveAmountY > 0 ? returnRemoveAmountY : amountYMin;
+        }
 
         // Send tokens to the recipient (simulating real router behavior)
         if (amountX > 0) {
