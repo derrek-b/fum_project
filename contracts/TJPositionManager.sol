@@ -41,6 +41,8 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         uint16 binStep;
         uint256[] depositIds;
         uint256[] liquidityMinted;
+        uint256[] originalShareX;
+        uint256[] originalShareY;
         uint256 createdAt;
         bool active;
     }
@@ -55,7 +57,9 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address indexed vault,
         address indexed lbPair,
         uint256[] depositIds,
-        uint256[] liquidityMinted
+        uint256[] liquidityMinted,
+        uint256 amountXAdded,
+        uint256 amountYAdded
     );
 
     event PositionRemoved(
@@ -73,6 +77,14 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address indexed lbPair,
         uint256 amountXAdded,
         uint256 amountYAdded
+    );
+
+    event FeesCollected(
+        uint256 indexed positionId,
+        address indexed vault,
+        address indexed lbPair,
+        uint256 amountX,
+        uint256 amountY
     );
 
     constructor(address _lbRouter) {
@@ -145,7 +157,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             deadline: deadline
         });
 
-        (,,,,uint256[] memory depositedIds, uint256[] memory liquidityAmounts)
+        (uint256 amountXAdded, uint256 amountYAdded,,,uint256[] memory depositedIds, uint256[] memory liquidityAmounts)
             = ILBRouter(lbRouter).addLiquidity(params);
 
         // Belt-and-suspenders: refund any tokens remaining in this contract
@@ -158,6 +170,19 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         IERC20(tokenX).approve(lbRouter, 0);
         IERC20(tokenY).approve(lbRouter, 0);
 
+        // Calculate original share of reserves per bin
+        uint256 len = depositedIds.length;
+        uint256[] memory origShareX = new uint256[](len);
+        uint256[] memory origShareY = new uint256[](len);
+        for (uint256 i = 0; i < len; i++) {
+            uint256 supply = ILBPair(lbPair).totalSupply(depositedIds[i]);
+            if (supply > 0) {
+                (uint128 reserveX, uint128 reserveY) = ILBPair(lbPair).getBin(uint24(depositedIds[i]));
+                origShareX[i] = liquidityAmounts[i] * uint256(reserveX) / supply;
+                origShareY[i] = liquidityAmounts[i] * uint256(reserveY) / supply;
+            }
+        }
+
         // Record position
         positionId = _nextPositionId++;
         _positions[positionId] = Position({
@@ -168,12 +193,14 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             binStep: binStep,
             depositIds: depositedIds,
             liquidityMinted: liquidityAmounts,
+            originalShareX: origShareX,
+            originalShareY: origShareY,
             createdAt: block.timestamp,
             active: true
         });
         _vaultPositions[vault].push(positionId);
 
-        emit PositionCreated(positionId, vault, lbPair, depositedIds, liquidityAmounts);
+        emit PositionCreated(positionId, vault, lbPair, depositedIds, liquidityAmounts, amountXAdded, amountYAdded);
     }
 
     /**
@@ -216,6 +243,9 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address tokenX = pos.tokenX;
         address tokenY = pos.tokenY;
 
+        // Step 1: Snapshot accrued fees before adding liquidity
+        (uint256[] memory feesX, uint256[] memory feesY) = _getAccruedFees(positionId);
+
         // Pull tokens from vault
         IERC20(tokenX).safeTransferFrom(vault, address(this), amountX);
         IERC20(tokenY).safeTransferFrom(vault, address(this), amountY);
@@ -248,7 +278,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         (amountXAdded, amountYAdded,,, depositedIds, liquidityAmounts)
             = ILBRouter(lbRouter).addLiquidity(params);
 
-        // Merge returned bins into existing position
+        // Step 2: Update liquidityMinted — reject any bins not already in the position
         for (uint256 i = 0; i < depositedIds.length; i++) {
             bool found = false;
             for (uint256 j = 0; j < pos.depositIds.length; j++) {
@@ -258,9 +288,18 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
                     break;
                 }
             }
-            if (!found) {
-                pos.depositIds.push(depositedIds[i]);
-                pos.liquidityMinted.push(liquidityAmounts[i]);
+            require(found, "TJPositionManager: bin not in position");
+        }
+
+        // Step 3: Get new current shares and reset baselines preserving accrued fees
+        for (uint256 i = 0; i < pos.depositIds.length; i++) {
+            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
+            if (supply > 0) {
+                (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
+                uint256 newCurrentShareX = pos.liquidityMinted[i] * uint256(rX) / supply;
+                uint256 newCurrentShareY = pos.liquidityMinted[i] * uint256(rY) / supply;
+                pos.originalShareX[i] = newCurrentShareX - feesX[i];
+                pos.originalShareY[i] = newCurrentShareY - feesY[i];
             }
         }
 
@@ -278,17 +317,36 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
     }
 
     /**
-     * @notice Remove liquidity from an existing position
+     * @notice Collect accrued fees from a position
+     * @param vault Must equal msg.sender; validator checks this in calldata
+     * @param positionId The position to collect fees from
+     * @return amountX Amount of tokenX fees collected
+     * @return amountY Amount of tokenY fees collected
+     */
+    function collectFees(
+        address vault,
+        uint256 positionId
+    ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
+        require(vault == msg.sender, "TJPositionManager: vault must be caller");
+        Position storage pos = _positions[positionId];
+        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.active, "TJPositionManager: position not active");
+
+        (amountX, amountY) = _collectFees(positionId);
+    }
+
+    /**
+     * @notice Decrease liquidity from an existing position (partial or full)
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to remove liquidity from
-     * @param percentage Percentage of liquidity to remove (1-100)
+     * @param percentage Percentage of baseline liquidity to remove (1-100)
      * @param amountXMin Minimum tokenX to receive (slippage protection)
      * @param amountYMin Minimum tokenY to receive (slippage protection)
      * @param deadline Transaction deadline timestamp
-     * @return amountX Amount of tokenX received
-     * @return amountY Amount of tokenY received
+     * @return amountX Amount of tokenX received (principal only)
+     * @return amountY Amount of tokenY received (principal only)
      */
-    function removePosition(
+    function decreaseLiquidity(
         address vault,
         uint256 positionId,
         uint256 percentage,
@@ -297,52 +355,37 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
         require(vault == msg.sender, "TJPositionManager: vault must be caller");
-
         Position storage pos = _positions[positionId];
         require(pos.vault == vault, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
         require(percentage > 0 && percentage <= 100, "TJPositionManager: invalid percentage");
 
-        uint256 len = pos.depositIds.length;
-        uint256[] memory ids = new uint256[](len);
-        uint256[] memory amounts = new uint256[](len);
+        (amountX, amountY) = _decreaseLiquidity(positionId, percentage, amountXMin, amountYMin, deadline);
+    }
 
-        for (uint256 i = 0; i < len; i++) {
-            ids[i] = pos.depositIds[i];
-            amounts[i] = pos.liquidityMinted[i] * percentage / 100;
-        }
+    /**
+     * @notice Remove a position entirely (100% removal with fee collection)
+     * @param vault Must equal msg.sender; validator checks this in calldata
+     * @param positionId The position to remove
+     * @param amountXMin Minimum tokenX to receive (slippage protection)
+     * @param amountYMin Minimum tokenY to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
+     * @return amountX Amount of tokenX received (principal only)
+     * @return amountY Amount of tokenY received (principal only)
+     */
+    function removePosition(
+        address vault,
+        uint256 positionId,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
+        require(vault == msg.sender, "TJPositionManager: vault must be caller");
+        Position storage pos = _positions[positionId];
+        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.active, "TJPositionManager: position not active");
 
-        // Approve LBRouter to burn our ERC1155 LB tokens
-        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
-
-        // Remove liquidity — tokens sent directly to vault
-        (amountX, amountY) = ILBRouter(lbRouter).removeLiquidity(
-            pos.tokenX,
-            pos.tokenY,
-            pos.binStep,
-            amountXMin,
-            amountYMin,
-            ids,
-            amounts,
-            vault,
-            deadline
-        );
-
-        // Reset ERC1155 approval
-        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
-
-        // Update position state
-        if (percentage == 100) {
-            pos.active = false;
-            delete pos.depositIds;
-            delete pos.liquidityMinted;
-        } else {
-            for (uint256 i = 0; i < len; i++) {
-                pos.liquidityMinted[i] -= amounts[i];
-            }
-        }
-
-        emit PositionRemoved(positionId, vault, pos.lbPair, percentage, amountX, amountY);
+        (amountX, amountY) = _decreaseLiquidity(positionId, 100, amountXMin, amountYMin, deadline);
     }
 
     /**
@@ -373,45 +416,204 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
     }
 
     /**
-     * @notice Get accrued fees for a position by comparing stored baselines to current LB token balances
-     * @dev Fees in TJ V2.1 are autocompounded into bins, increasing the LB token balance.
-     *      This function compares the stored liquidityMinted (baseline from create/add) against
-     *      the actual ERC-1155 balance held by this contract to detect fee growth.
+     * @notice Get accrued fees for a position using reserve-based accounting
+     * @dev Compares current reserve share (liquidityMinted * reserve / totalSupply)
+     *      against originalShare baselines to calculate per-bin fee accrual.
      * @param positionId The position ID to query
-     * @return depositIds Array of bin IDs in the position
-     * @return currentBalances Current ERC-1155 LB token balances per bin
-     * @return storedBalances Stored baseline (liquidityMinted) per bin
-     * @return feeDeltas Per-bin fee accrual (current - stored, floored at 0)
+     * @return feesX Per-bin accrued tokenX fees
+     * @return feesY Per-bin accrued tokenY fees
      */
     function getAccruedFees(uint256 positionId)
         external
         view
-        returns (
-            uint256[] memory depositIds,
-            uint256[] memory currentBalances,
-            uint256[] memory storedBalances,
-            uint256[] memory feeDeltas
-        )
+        returns (uint256[] memory feesX, uint256[] memory feesY)
+    {
+        return _getAccruedFees(positionId);
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────
+
+    function _getAccruedFees(uint256 positionId)
+        internal
+        view
+        returns (uint256[] memory feesX, uint256[] memory feesY)
     {
         Position storage pos = _positions[positionId];
         require(pos.active, "TJPositionManager: position not active");
 
         uint256 len = pos.depositIds.length;
-        depositIds = new uint256[](len);
-        currentBalances = new uint256[](len);
-        storedBalances = new uint256[](len);
-        feeDeltas = new uint256[](len);
+        feesX = new uint256[](len);
+        feesY = new uint256[](len);
 
         for (uint256 i = 0; i < len; i++) {
-            depositIds[i] = pos.depositIds[i];
-            storedBalances[i] = pos.liquidityMinted[i];
+            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
+            if (supply > 0) {
+                (uint128 reserveX, uint128 reserveY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
+                uint256 currentShareX = pos.liquidityMinted[i] * uint256(reserveX) / supply;
+                uint256 currentShareY = pos.liquidityMinted[i] * uint256(reserveY) / supply;
 
-            // Query actual ERC-1155 balance held by this contract for this bin
-            uint256 current = ILBPair(pos.lbPair).balanceOf(address(this), pos.depositIds[i]);
-            currentBalances[i] = current;
-
-            // Fee delta: current - stored (0 if somehow current < stored)
-            feeDeltas[i] = current > storedBalances[i] ? current - storedBalances[i] : 0;
+                if (currentShareX > pos.originalShareX[i]) {
+                    feesX[i] = currentShareX - pos.originalShareX[i];
+                }
+                if (currentShareY > pos.originalShareY[i]) {
+                    feesY[i] = currentShareY - pos.originalShareY[i];
+                }
+            }
         }
+    }
+
+    function _collectFees(uint256 positionId) internal returns (uint256 feeAmountX, uint256 feeAmountY) {
+        Position storage pos = _positions[positionId];
+
+        (uint256[] memory feesX, uint256[] memory feesY) = _getAccruedFees(positionId);
+
+        // Convert per-bin token fees to LB tokens to burn
+        uint256 len = pos.depositIds.length;
+        uint256[] memory burnIds = new uint256[](len);
+        uint256[] memory burnAmounts = new uint256[](len);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < len; i++) {
+            if (feesX[i] == 0 && feesY[i] == 0) continue;
+
+            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
+            if (supply == 0) continue;
+
+            (uint128 reserveX, uint128 reserveY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
+
+            // Calculate LB tokens that represent the fee value:
+            // principalLb = originalShare * supply / reserve
+            // feeLb = liquidityMinted - principalLb
+            uint256 feeLbTokens;
+            if (uint256(reserveX) > 0) {
+                uint256 principalLb = pos.originalShareX[i] * supply / uint256(reserveX);
+                feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
+            } else if (uint256(reserveY) > 0) {
+                uint256 principalLb = pos.originalShareY[i] * supply / uint256(reserveY);
+                feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
+            }
+
+            if (feeLbTokens > 0) {
+                burnIds[count] = pos.depositIds[i];
+                burnAmounts[count] = feeLbTokens;
+                count++;
+            }
+        }
+
+        // No fees accrued — skip router call entirely
+        if (count == 0) {
+            return (0, 0);
+        }
+
+        // Trim to actual count
+        uint256[] memory trimmedIds = new uint256[](count);
+        uint256[] memory trimmedAmounts = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            trimmedIds[i] = burnIds[i];
+            trimmedAmounts[i] = burnAmounts[i];
+        }
+
+        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
+
+        (feeAmountX, feeAmountY) = ILBRouter(lbRouter).removeLiquidity(
+            pos.tokenX,
+            pos.tokenY,
+            pos.binStep,
+            0,
+            0,
+            trimmedIds,
+            trimmedAmounts,
+            pos.vault,
+            block.timestamp
+        );
+
+        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
+
+        // Update state: reduce liquidityMinted and reset originalShare baselines
+        for (uint256 i = 0; i < count; i++) {
+            for (uint256 j = 0; j < pos.depositIds.length; j++) {
+                if (pos.depositIds[j] == trimmedIds[i]) {
+                    pos.liquidityMinted[j] -= trimmedAmounts[i];
+
+                    // Reset baseline to current share (fees now extracted)
+                    uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[j]);
+                    if (supply > 0) {
+                        (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[j]));
+                        pos.originalShareX[j] = pos.liquidityMinted[j] * uint256(rX) / supply;
+                        pos.originalShareY[j] = pos.liquidityMinted[j] * uint256(rY) / supply;
+                    } else {
+                        pos.originalShareX[j] = 0;
+                        pos.originalShareY[j] = 0;
+                    }
+                    break;
+                }
+            }
+        }
+
+        emit FeesCollected(positionId, pos.vault, pos.lbPair, feeAmountX, feeAmountY);
+    }
+
+    function _decreaseLiquidity(
+        uint256 positionId,
+        uint256 percentage,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256 deadline
+    ) internal returns (uint256 amountX, uint256 amountY) {
+        Position storage pos = _positions[positionId];
+
+        // Step 1: Collect fees first
+        _collectFees(positionId);
+
+        // Step 2: Build amounts from baseline
+        uint256 len = pos.depositIds.length;
+        uint256[] memory ids = new uint256[](len);
+        uint256[] memory amounts = new uint256[](len);
+        for (uint256 i = 0; i < len; i++) {
+            ids[i] = pos.depositIds[i];
+            amounts[i] = pos.liquidityMinted[i] * percentage / 100;
+        }
+
+        // Step 3: Remove principal via router
+        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
+
+        (amountX, amountY) = ILBRouter(lbRouter).removeLiquidity(
+            pos.tokenX,
+            pos.tokenY,
+            pos.binStep,
+            amountXMin,
+            amountYMin,
+            ids,
+            amounts,
+            pos.vault,
+            deadline
+        );
+
+        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
+
+        // Step 4: Update state — cache for event since full removal deletes struct
+        address posVault = pos.vault;
+        address posLbPair = pos.lbPair;
+
+        if (percentage == 100) {
+            delete _positions[positionId];
+        } else {
+            for (uint256 i = 0; i < len; i++) {
+                pos.liquidityMinted[i] -= amounts[i];
+
+                // Reset baseline to current share of reduced position
+                uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
+                if (supply > 0) {
+                    (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
+                    pos.originalShareX[i] = pos.liquidityMinted[i] * uint256(rX) / supply;
+                    pos.originalShareY[i] = pos.liquidityMinted[i] * uint256(rY) / supply;
+                } else {
+                    pos.originalShareX[i] = 0;
+                    pos.originalShareY[i] = 0;
+                }
+            }
+        }
+
+        emit PositionRemoved(positionId, posVault, posLbPair, percentage, amountX, amountY);
     }
 }
