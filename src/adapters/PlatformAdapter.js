@@ -10,7 +10,7 @@
  * This tracks which methods are confirmed as required interface methods
  * Update as we build out the automation service.
  *
- * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
+ * CONFIRMED AUTOMATION SERVICE INTERFACE METHODS (platform-agnostic, required for all adapters):
  * ----------------------------------------------------------------------------------
  * | Method                       | Used By                             | Status    |
  * |------------------------------|-------------------------------------|-----------|
