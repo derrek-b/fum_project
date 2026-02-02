@@ -5955,6 +5955,41 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         await expect(adapter.getPositionById(nonExistentId, env.provider))
           .rejects.toThrow();
       });
+
+      it('should throw error for zero-liquidity position', async () => {
+        // Snapshot before destructive drain so subsequent tests aren't affected
+        const localSnapshot = await env.snapshot();
+
+        // Remove all liquidity from the test position via the vault
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          position: {
+            id: env.testPosition.id,
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper,
+          },
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: env.testVault.address,
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          slippageTolerance: 1,
+          deadlineMinutes: 2
+        });
+
+        const removeTx = await env.testVault.decreaseLiquidity(
+          [removeTxData.to],
+          [removeTxData.data]
+        );
+        await removeTx.wait();
+
+        // Position NFT still exists but has zero liquidity — should throw
+        await expect(adapter.getPositionById(env.positionTokenId, env.provider))
+          .rejects.toThrow('zero liquidity');
+
+        // Revert to restore the position's liquidity for subsequent tests
+        await env.revert(localSnapshot);
+      }, 180000);
     });
   });
 

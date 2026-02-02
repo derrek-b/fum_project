@@ -1532,6 +1532,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Direct on-chain call - contract reverts with "Invalid token ID" for burned/non-existent positions
       const positionData = await positionManager.positions(tokenId);
 
+      // Zero-liquidity positions are closed — reject like burned/non-existent
+      if (BigInt(positionData.liquidity.toString()) === 0n) {
+        throw new Error(`Position ${tokenId} has zero liquidity`);
+      }
+
       // Get pool address
       const poolAddress = await this._getPoolAddress(
         positionData.token0,
@@ -1569,7 +1574,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       // Re-throw validation errors as-is
       if (error.message.includes('TokenId parameter') ||
-          error.message.includes('Valid provider')) {
+          error.message.includes('Valid provider') ||
+          error.message.includes('zero liquidity')) {
         throw error;
       }
       throw new Error(`Failed to fetch position ${tokenId}: ${error.message}`);
@@ -2428,9 +2434,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} token1Data - Token1 data
    * @param {string} token1Data.address - Token contract address
    * @param {number} token1Data.decimals - Token decimals
+   * @param {Object} [provider] - Ethers provider (unused by V3, accepted for interface compatibility)
    * @returns {Promise<Array<bigint>>} Array of [token0Raw, token1Raw] amounts
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
     // Validate position parameter
     if (!position) {
       throw new Error("position parameter is required");
@@ -3906,17 +3913,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount0Min = positionToIncreaseBy.mintAmounts.amount0;
       const amount1Min = positionToIncreaseBy.mintAmounts.amount1;
 
-      // 🔍 DEBUG: Log slippage info
-      console.log(`🔍 [V3 generateAddLiquidityData] Position Debug:`);
-      console.log(`   tokenId: ${position.id}`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   tokensSwapped: ${tokensSwapped}`);
-      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
-      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
-      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
 
       // Encode the increaseLiquidity function directly
       const calldata = this.positionManagerInterface.encodeFunctionData('increaseLiquidity', [{
@@ -5560,16 +5557,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount0Min = newPosition.mintAmounts.amount0;
       const amount1Min = newPosition.mintAmounts.amount1;
 
-      // 🔍 DEBUG: Log slippage info
-      console.log(`🔍 [V3 generateCreatePositionData] Position Debug:`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   tokensSwapped: ${tokensSwapped}`);
-      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
-      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
-      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
 
       // Encode the mint function directly using the position manager interface
       const calldata = this.positionManagerInterface.encodeFunctionData('mint', [{

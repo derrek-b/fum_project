@@ -354,7 +354,23 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async generateClaimFeesData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateClaimFeesData not implemented");
+    const { position, walletAddress } = params;
+
+    if (!position || typeof position !== 'object') throw new Error("Position parameter is required");
+    if (position.id === null || position.id === undefined) throw new Error("Position id is required");
+    if (!walletAddress) throw new Error("walletAddress is required");
+    try { ethers.utils.getAddress(walletAddress); } catch { throw new Error(`Invalid wallet address: ${walletAddress}`); }
+    if (!this.addresses?.positionManagerAddress) throw new Error("No position manager address configured");
+
+    const iface = new ethers.utils.Interface([
+      "function collectFees(address vault, uint256 positionId)"
+    ]);
+
+    return {
+      to: this.addresses.positionManagerAddress,
+      data: iface.encodeFunctionData("collectFees", [walletAddress, position.id]),
+      value: '0x00',
+    };
   }
 
   /**
@@ -435,15 +451,100 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     };
   }
 
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
-    throw new Error("TraderJoeV2_1Adapter.calculateTokenAmounts not implemented");
+  /**
+   * Calculate the current token amounts for a Trader Joe V2.1 position.
+   *
+   * Unlike V3/V4 (pure math from liquidity + price), TJ requires RPC calls
+   * to fetch per-bin reserves and total supplies from the LBPair contract,
+   * then delegates to PairV2.calculateAmounts() from the TJ SDK.
+   *
+   * @param {Object} position - Position from getPositionById()
+   * @param {string} position.pool - LBPair contract address
+   * @param {number[]} position.depositIds - Bin IDs with liquidity
+   * @param {string[]} position.liquidityMinted - Liquidity shares per bin
+   * @param {Object} poolData - Pool data from getPoolData()
+   * @param {Object} token0Data - Token0 metadata
+   * @param {Object} token1Data - Token1 metadata
+   * @param {Object} provider - Ethers provider instance (REQUIRED for TJ)
+   * @returns {Promise<[BigInt, BigInt]>} [amountX, amountY] as native BigInts
+   */
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
+    // --- Provider validation (required for TJ) ---
+    if (!provider) {
+      throw new Error('provider is required for Trader Joe V2.1 calculateTokenAmounts');
+    }
+
+    // --- Position validation ---
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position is required and must be an object');
+    }
+    if (!position.pool || typeof position.pool !== 'string') {
+      throw new Error('position.pool is required and must be a string');
+    }
+    if (!Array.isArray(position.depositIds) || position.depositIds.length === 0) {
+      throw new Error('position.depositIds is required and must be a non-empty array');
+    }
+    if (!Array.isArray(position.liquidityMinted) || position.liquidityMinted.length === 0) {
+      throw new Error('position.liquidityMinted is required and must be a non-empty array');
+    }
+    if (position.depositIds.length !== position.liquidityMinted.length) {
+      throw new Error(
+        `position.depositIds length (${position.depositIds.length}) must match ` +
+        `position.liquidityMinted length (${position.liquidityMinted.length})`
+      );
+    }
+
+    // --- Pool/token data validation ---
+    if (!poolData || typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (!token0Data || typeof token0Data !== 'object') {
+      throw new Error('token0Data is required and must be an object');
+    }
+    if (!token1Data || typeof token1Data !== 'object') {
+      throw new Error('token1Data is required and must be an object');
+    }
+
+    // --- Early return for zero liquidity ---
+    const allZero = position.liquidityMinted.every(lm => BigInt(lm) === 0n);
+    if (allZero) {
+      return [0n, 0n];
+    }
+
+    // --- Fetch per-bin reserves + total supplies from LBPair ---
+    const lbPair = new ethers.Contract(position.pool, this.lbPairABI, provider);
+    const [activeId, bins, totalSupplies] = await Promise.all([
+      lbPair.getActiveId(),
+      Promise.all(position.depositIds.map(id => lbPair.getBin(id))),
+      Promise.all(position.depositIds.map(id => lbPair.totalSupply(id)))
+    ]);
+
+    // --- Use TJ SDK to compute token amounts ---
+    const { PairV2 } = await import("@traderjoe-xyz/sdk-v2");
+
+    const binReserves = bins.map(b => ({
+      reserveX: b[0].toBigInt(),
+      reserveY: b[1].toBigInt()
+    }));
+    const supplies = totalSupplies.map(ts => ts.toBigInt());
+
+    const { amountX, amountY } = PairV2.calculateAmounts(
+      position.depositIds,
+      Number(activeId),
+      binReserves,
+      supplies,
+      position.liquidityMinted
+    );
+
+    return [BigInt(amountX.toString()), BigInt(amountY.toString())];
   }
 
   /**
    * Generate calldata for removing liquidity from a TJ V2.1 position
    *
    * The vault calls decreaseLiquidity() on VaultFactory, which validates via
-   * TJPositionValidator, then executes the calldata against TJPositionManager.removePosition().
+   * TJPositionValidator, then executes the calldata against TJPositionManager.
+   * Uses removePosition() for 100% removal, decreaseLiquidity() for partial.
    *
    * @param {Object} params
    * @param {Object} params.position - Position object from getPositionById()
@@ -600,19 +701,24 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     // --- Compute deadline ---
     const deadline = this._createDeadline(deadlineMinutes);
 
-    // --- Encode removePosition calldata ---
-    const iface = new ethers.utils.Interface([
-      "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
-    ]);
+    // --- Encode calldata: removePosition (100%) or decreaseLiquidity (partial) ---
+    let calldata;
 
-    const calldata = iface.encodeFunctionData("removePosition", [
-      walletAddress,
-      position.id,
-      percentage,
-      amountXMin,
-      amountYMin,
-      deadline
-    ]);
+    if (percentage === 100) {
+      const iface = new ethers.utils.Interface([
+        "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      calldata = iface.encodeFunctionData("removePosition", [
+        walletAddress, position.id, amountXMin, amountYMin, deadline
+      ]);
+    } else {
+      const iface = new ethers.utils.Interface([
+        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      calldata = iface.encodeFunctionData("decreaseLiquidity", [
+        walletAddress, position.id, percentage, amountXMin, amountYMin, deadline
+      ]);
+    }
 
     return {
       to: positionManagerAddress,
@@ -1495,11 +1601,96 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   async parseClosureReceipt(receipt, positionMetadata, options = {}) {
-    throw new Error("TraderJoeV2_1Adapter.parseClosureReceipt not implemented");
+    if (receipt === null || receipt === undefined) throw new Error("Receipt parameter is required");
+    if (!receipt.logs) throw new Error("Receipt must have logs property");
+    if (!positionMetadata || typeof positionMetadata !== 'object' || Array.isArray(positionMetadata))
+      throw new Error("Position metadata parameter is required");
+
+    const principalByPosition = {};
+    const feesByPosition = {};
+
+    const feesIface = new ethers.utils.Interface([
+      'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+    ]);
+    const removedIface = new ethers.utils.Interface([
+      'event PositionRemoved(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 percentage, uint256 amountX, uint256 amountY)'
+    ]);
+    const feesTopic = feesIface.getEventTopic('FeesCollected');
+    const removedTopic = removedIface.getEventTopic('PositionRemoved');
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === removedTopic) {
+          const decoded = removedIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            principalByPosition[positionId] = {
+              amount0: decoded.args.amountX,
+              amount1: decoded.args.amountY,
+            };
+          }
+        } else if (log.topics && log.topics[0] === feesTopic) {
+          const decoded = feesIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            feesByPosition[positionId] = {
+              token0: decoded.args.amountX,
+              token1: decoded.args.amountY,
+              metadata: positionMetadata[positionId],
+            };
+          }
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    // Fill zero fees for positions with no FeesCollected event
+    for (const positionId of Object.keys(positionMetadata)) {
+      if (!feesByPosition[positionId] && principalByPosition[positionId]) {
+        feesByPosition[positionId] = {
+          token0: ethers.BigNumber.from(0),
+          token1: ethers.BigNumber.from(0),
+          metadata: positionMetadata[positionId],
+        };
+      }
+    }
+
+    return { principalByPosition, feesByPosition };
   }
 
   async parseCollectReceipt(receipt, positionMetadata, options = {}) {
-    throw new Error("TraderJoeV2_1Adapter.parseCollectReceipt not implemented");
+    if (receipt === null || receipt === undefined) throw new Error("Receipt parameter is required");
+    if (!receipt.logs) throw new Error("Receipt must have logs property");
+    if (!positionMetadata || typeof positionMetadata !== 'object' || Array.isArray(positionMetadata))
+      throw new Error("Position metadata parameter is required");
+
+    const feesByPosition = {};
+
+    const feesIface = new ethers.utils.Interface([
+      'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+    ]);
+    const feesTopic = feesIface.getEventTopic('FeesCollected');
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === feesTopic) {
+          const decoded = feesIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            feesByPosition[positionId] = {
+              token0: decoded.args.amountX,
+              token1: decoded.args.amountY,
+              metadata: positionMetadata[positionId],
+            };
+          }
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    return { feesByPosition };
   }
 
   parseSwapReceipt(receipt, swapMetadata) {
@@ -1609,8 +1800,69 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     return actualSwaps;
   }
 
-  parseIncreaseLiquidityReceipt(receipt, { position, poolData }) {
-    throw new Error("TraderJoeV2_1Adapter.parseIncreaseLiquidityReceipt not implemented");
+  parseIncreaseLiquidityReceipt(receipt, { position, poolData } = {}) {
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    const positionCreatedIface = new ethers.utils.Interface([
+      'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+    ]);
+    const positionCreatedTopic = positionCreatedIface.getEventTopic('PositionCreated');
+
+    const positionIncreasedIface = new ethers.utils.Interface([
+      'event PositionIncreased(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountXAdded, uint256 amountYAdded)'
+    ]);
+    const positionIncreasedTopic = positionIncreasedIface.getEventTopic('PositionIncreased');
+
+    let createdEvent = null;
+    let increasedEvent = null;
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === positionCreatedTopic) {
+          createdEvent = positionCreatedIface.parseLog(log);
+        } else if (log.topics && log.topics[0] === positionIncreasedTopic) {
+          increasedEvent = positionIncreasedIface.parseLog(log);
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    if (createdEvent) {
+      const depositIds = createdEvent.args.depositIds.map(id => Number(id));
+      const totalLiquidity = createdEvent.args.liquidityMinted.reduce(
+        (sum, val) => (BigInt(sum) + BigInt(val.toString())).toString(), '0'
+      );
+
+      return {
+        tokenId: createdEvent.args.positionId.toString(),
+        liquidity: totalLiquidity,
+        amount0: createdEvent.args.amountXAdded.toString(),
+        amount1: createdEvent.args.amountYAdded.toString(),
+        tickLower: Math.min(...depositIds),
+        tickUpper: Math.max(...depositIds),
+        poolAddress: createdEvent.args.lbPair,
+      };
+    }
+
+    if (increasedEvent) {
+      return {
+        tokenId: increasedEvent.args.positionId.toString(),
+        liquidity: null,
+        amount0: increasedEvent.args.amountXAdded.toString(),
+        amount1: increasedEvent.args.amountYAdded.toString(),
+        tickLower: null,
+        tickUpper: null,
+        poolAddress: null,
+      };
+    }
+
+    throw new Error('PositionCreated or PositionIncreased event not found in receipt');
   }
 
   async getBestSwapQuote(params) {
@@ -1917,8 +2169,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
           totalReserves: reserves.reserveX.add(reserves.reserveY)
         };
       } catch (error) {
-        // 🔵 DEBUG: Pool query failed
-        console.error(`🔵 DEBUG: Failed to query pool ${pairAddress}: ${error.message}`);
+        // Pool query failed — skip this pair
         return null;
       }
     });

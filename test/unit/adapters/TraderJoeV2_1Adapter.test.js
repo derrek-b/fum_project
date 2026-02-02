@@ -2436,9 +2436,14 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('generateRemoveLiquidityData', () => {
-    // ABI for decoding removePosition calldata
+    // ABI for decoding removePosition calldata (new 5-param, no percentage)
     const removePositionIface = new ethers.utils.Interface([
-      "function removePosition(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+    ]);
+
+    // ABI for decoding decreaseLiquidity calldata (6-param with percentage)
+    const decreaseLiquidityIface = new ethers.utils.Interface([
+      "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
     // Shared state for E2E tests — position created in nested beforeAll
@@ -2668,7 +2673,24 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(result.value).toBe('0x00');
       }, 30000);
 
-      it('should encode correct vault, positionId, percentage, deadline in calldata', async () => {
+      it('should encode removePosition (no percentage) for 100% removal', async () => {
+        if (!onChainPosition) return;
+        const result = await adapter.generateRemoveLiquidityData({
+          position: onChainPosition,
+          percentage: 100,
+          provider: env.provider,
+          walletAddress: testVault.address,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
+        expect(decoded.vault).toBe(testVault.address);
+        expect(decoded.positionId.toString()).toBe(onChainPosition.id);
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      }, 30000);
+
+      it('should encode decreaseLiquidity (with percentage) for partial removal', async () => {
         if (!onChainPosition) return;
         const result = await adapter.generateRemoveLiquidityData({
           position: onChainPosition,
@@ -2679,7 +2701,7 @@ describe('TraderJoeV2_1Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
+        const decoded = decreaseLiquidityIface.decodeFunctionData('decreaseLiquidity', result.data);
         expect(decoded.vault).toBe(testVault.address);
         expect(decoded.positionId.toString()).toBe(onChainPosition.id);
         expect(decoded.percentage.toNumber()).toBe(50);
@@ -4645,6 +4667,788 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(result1.amountIn).toBe(result2.amountIn);
         expect(result1.amountOut).toBe(result2.amountOut);
       }, 60000);
+    });
+  });
+
+  describe('calculateTokenAmounts', () => {
+    const validPosition = {
+      pool: '0x0000000000000000000000000000000000000001',
+      depositIds: [8388608],
+      liquidityMinted: ['1000000'],
+    };
+    const validPoolData = { activeId: 8388608, binStep: 20 };
+    const validToken0Data = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 };
+    const validToken1Data = { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 };
+
+    describe('Error Cases', () => {
+      it('should throw error for missing provider', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          validPosition, validPoolData, validToken0Data, validToken1Data
+        )).rejects.toThrow('provider is required');
+      });
+
+      it('should throw error for null position', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          null, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position is required');
+      });
+
+      it('should throw error for missing position.pool', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          { depositIds: [1], liquidityMinted: ['1'] }, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position.pool is required');
+      });
+
+      it('should throw error for empty depositIds', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          { pool: '0x01', depositIds: [], liquidityMinted: [] }, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position.depositIds is required and must be a non-empty array');
+      });
+
+      it('should throw error for missing depositIds', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          { pool: '0x01', liquidityMinted: ['1'] }, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position.depositIds is required and must be a non-empty array');
+      });
+
+      it('should throw error for empty liquidityMinted', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          { pool: '0x01', depositIds: [1], liquidityMinted: [] }, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position.liquidityMinted is required and must be a non-empty array');
+      });
+
+      it('should throw error for depositIds/liquidityMinted length mismatch', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          { pool: '0x01', depositIds: [1, 2], liquidityMinted: ['1'] }, validPoolData, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('position.depositIds length (2) must match position.liquidityMinted length (1)');
+      });
+
+      it('should throw error for missing poolData', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          validPosition, null, validToken0Data, validToken1Data, env.provider
+        )).rejects.toThrow('poolData is required');
+      });
+
+      it('should throw error for missing token0Data', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          validPosition, validPoolData, null, validToken1Data, env.provider
+        )).rejects.toThrow('token0Data is required');
+      });
+
+      it('should throw error for missing token1Data', async () => {
+        await expect(adapter.calculateTokenAmounts(
+          validPosition, validPoolData, validToken0Data, null, env.provider
+        )).rejects.toThrow('token1Data is required');
+      });
+
+      it('should return [0n, 0n] for zero liquidity', async () => {
+        const zeroPosition = {
+          pool: '0x0000000000000000000000000000000000000001',
+          depositIds: [8388608],
+          liquidityMinted: ['0'],
+        };
+        const result = await adapter.calculateTokenAmounts(
+          zeroPosition, validPoolData, validToken0Data, validToken1Data, env.provider
+        );
+        expect(result).toEqual([0n, 0n]);
+      });
+    });
+
+    describe('E2E', () => {
+      let e2ePosition;
+      let e2ePoolData;
+
+      beforeAll(async () => {
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpmAbi = contractData.TJPositionManager.abi;
+        const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
+
+        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        if (positionIds.length === 0) {
+          console.log('No positions available for calculateTokenAmounts E2E tests');
+          return;
+        }
+
+        const result = await adapter.getPositionById(positionIds[0], env.provider);
+        e2ePosition = result.position;
+
+        e2ePoolData = await adapter.getPoolData(e2ePosition.pool, env.provider);
+      }, 60000);
+
+      it('should calculate amounts for an existing position', async () => {
+        if (!e2ePosition) return;
+
+        const result = await adapter.calculateTokenAmounts(
+          e2ePosition, e2ePoolData,
+          { address: wethAddress, decimals: 18 },
+          { address: usdcAddress, decimals: 6 },
+          env.provider
+        );
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toHaveLength(2);
+        expect(typeof result[0]).toBe('bigint');
+        expect(typeof result[1]).toBe('bigint');
+        expect(result[0]).toBeGreaterThanOrEqual(0n);
+        expect(result[1]).toBeGreaterThanOrEqual(0n);
+        // At least one amount should be non-zero for an active position
+        expect(result[0] + result[1]).toBeGreaterThan(0n);
+      }, 60000);
+
+      it('should return deterministic results', async () => {
+        if (!e2ePosition) return;
+
+        const tokenData0 = { address: wethAddress, decimals: 18 };
+        const tokenData1 = { address: usdcAddress, decimals: 6 };
+
+        const result1 = await adapter.calculateTokenAmounts(
+          e2ePosition, e2ePoolData, tokenData0, tokenData1, env.provider
+        );
+        const result2 = await adapter.calculateTokenAmounts(
+          e2ePosition, e2ePoolData, tokenData0, tokenData1, env.provider
+        );
+
+        expect(result1[0]).toBe(result2[0]);
+        expect(result1[1]).toBe(result2[1]);
+      }, 60000);
+
+      it('should return both tokens for an in-range position', async () => {
+        if (!e2ePosition) return;
+
+        // Verify position is in-range (activeId within bounds)
+        const activeId = e2ePoolData.activeId;
+        const inRange = activeId >= e2ePosition.lowerBinId && activeId <= e2ePosition.upperBinId;
+        if (!inRange) {
+          console.log('Position is out of range, skipping in-range assertion');
+          return;
+        }
+
+        const result = await adapter.calculateTokenAmounts(
+          e2ePosition, e2ePoolData,
+          { address: wethAddress, decimals: 18 },
+          { address: usdcAddress, decimals: 6 },
+          env.provider
+        );
+
+        expect(result[0]).toBeGreaterThan(0n);
+        expect(result[1]).toBeGreaterThan(0n);
+      }, 60000);
+    });
+  });
+
+  describe('parseIncreaseLiquidityReceipt', () => {
+    // Helper: encode a PositionCreated event log
+    function createPositionCreatedLog(positionId, vault, lbPair, depositIds, liquidityMinted, amountXAdded, amountYAdded) {
+      const iface = new ethers.utils.Interface([
+        'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+      ]);
+      const topic0 = iface.getEventTopic('PositionCreated');
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ['uint256[]', 'uint256[]', 'uint256', 'uint256'],
+        [depositIds, liquidityMinted, amountXAdded, amountYAdded]
+      );
+      return {
+        address: lbPair,
+        topics: [
+          topic0,
+          ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32),
+          ethers.utils.hexZeroPad(vault, 32),
+          ethers.utils.hexZeroPad(lbPair, 32),
+        ],
+        data,
+      };
+    }
+
+    // Helper: encode a PositionIncreased event log
+    function createPositionIncreasedLog(positionId, vault, lbPair, amountXAdded, amountYAdded) {
+      const iface = new ethers.utils.Interface([
+        'event PositionIncreased(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountXAdded, uint256 amountYAdded)'
+      ]);
+      const topic0 = iface.getEventTopic('PositionIncreased');
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ['uint256', 'uint256'],
+        [amountXAdded, amountYAdded]
+      );
+      return {
+        address: lbPair,
+        topics: [
+          topic0,
+          ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32),
+          ethers.utils.hexZeroPad(vault, 32),
+          ethers.utils.hexZeroPad(lbPair, 32),
+        ],
+        data,
+      };
+    }
+
+    const VAULT_ADDR = '0x1111111111111111111111111111111111111111';
+    const LB_PAIR_ADDR = '0x2222222222222222222222222222222222222222';
+
+    describe('Validation', () => {
+      it('should throw error for null receipt', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt(null))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw error for undefined receipt', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt(undefined))
+          .toThrow('Receipt parameter is required');
+      });
+
+      it('should throw error for receipt without logs', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt({}))
+          .toThrow('Receipt must have logs property');
+      });
+
+      it('should throw error for empty logs (no matching events)', () => {
+        expect(() => adapter.parseIncreaseLiquidityReceipt({ logs: [] }))
+          .toThrow('PositionCreated or PositionIncreased event not found');
+      });
+
+      it('should throw error for non-matching logs', () => {
+        const receipt = {
+          logs: [{
+            address: '0x3333333333333333333333333333333333333333',
+            topics: [ethers.utils.id('Transfer(address,address,uint256)')],
+            data: '0x',
+          }],
+        };
+        expect(() => adapter.parseIncreaseLiquidityReceipt(receipt))
+          .toThrow('PositionCreated or PositionIncreased event not found');
+      });
+    });
+
+    describe('PositionCreated parsing', () => {
+      it('should parse PositionCreated event from a new position', () => {
+        const log = createPositionCreatedLog(
+          1,
+          VAULT_ADDR,
+          LB_PAIR_ADDR,
+          [8388607, 8388608, 8388609],
+          [1000, 2000, 1000],
+          ethers.utils.parseEther('1'),
+          ethers.BigNumber.from('1000000000') // 1000 USDC
+        );
+
+        const result = adapter.parseIncreaseLiquidityReceipt({ logs: [log] });
+
+        expect(result.tokenId).toBe('1');
+        expect(result.liquidity).toBe('4000'); // 1000 + 2000 + 1000
+        expect(result.amount0).toBe(ethers.utils.parseEther('1').toString());
+        expect(result.amount1).toBe('1000000000');
+        expect(result.tickLower).toBe(8388607);
+        expect(result.tickUpper).toBe(8388609);
+        expect(result.poolAddress).toBe(LB_PAIR_ADDR);
+      });
+    });
+
+    describe('PositionIncreased parsing', () => {
+      it('should parse PositionIncreased event from add-to-position', () => {
+        const log = createPositionIncreasedLog(
+          5,
+          VAULT_ADDR,
+          LB_PAIR_ADDR,
+          ethers.utils.parseEther('0.5'),
+          ethers.BigNumber.from('500000000')
+        );
+
+        const result = adapter.parseIncreaseLiquidityReceipt({ logs: [log] });
+
+        expect(result.tokenId).toBe('5');
+        expect(result.liquidity).toBeNull();
+        expect(result.amount0).toBe(ethers.utils.parseEther('0.5').toString());
+        expect(result.amount1).toBe('500000000');
+        expect(result.tickLower).toBeNull();
+        expect(result.tickUpper).toBeNull();
+        expect(result.poolAddress).toBeNull();
+      });
+    });
+
+    describe('Event precedence', () => {
+      it('should prefer PositionCreated when both events are present', () => {
+        const createdLog = createPositionCreatedLog(
+          1,
+          VAULT_ADDR,
+          LB_PAIR_ADDR,
+          [8388607, 8388608, 8388609],
+          [1000, 2000, 1000],
+          ethers.utils.parseEther('1'),
+          ethers.BigNumber.from('1000000000')
+        );
+        const increasedLog = createPositionIncreasedLog(
+          1,
+          VAULT_ADDR,
+          LB_PAIR_ADDR,
+          ethers.utils.parseEther('0.5'),
+          ethers.BigNumber.from('500000000')
+        );
+
+        const result = adapter.parseIncreaseLiquidityReceipt({ logs: [createdLog, increasedLog] });
+
+        // Should use PositionCreated data (has poolAddress, liquidity, tick bounds)
+        expect(result.poolAddress).toBe(LB_PAIR_ADDR);
+        expect(result.liquidity).toBe('4000');
+        expect(result.amount0).toBe(ethers.utils.parseEther('1').toString());
+        expect(result.amount1).toBe('1000000000');
+      });
+    });
+
+    describe('E2E Tests', () => {
+      it('should parse receipt from real createPosition transaction', async () => {
+        if (!testVault || !env) return;
+
+        let poolData, positionRange;
+        try {
+          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
+          positionRange = adapter.getPositionRange(poolData, 5, 5);
+        } catch (error) {
+          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
+            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping parseIncreaseLiquidityReceipt E2E');
+            return;
+          }
+          throw error;
+        }
+
+        const vaultAddress = testVault.address;
+        const pmAddress = adapter.addresses.positionManagerAddress;
+
+        // Ensure approvals
+        const approvalTxs = await adapter.getRequiredApprovals(
+          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+        );
+        if (approvalTxs.length > 0) {
+          const targets = approvalTxs.map(t => t.to);
+          const data = approvalTxs.map(t => t.data);
+          await (await testVault.approve(targets, data)).wait();
+        }
+
+        // Use small amounts
+        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
+        const wethAmount = vaultWethBal.div(40);
+        const usdcAmount = vaultUsdcBal.div(40);
+
+        const txData = await adapter.generateCreatePositionData({
+          position: positionRange,
+          token0Amount: wethAmount.toString(),
+          token1Amount: usdcAmount.toString(),
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData,
+          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
+        const receipt = await mintTx.wait();
+
+        const result = adapter.parseIncreaseLiquidityReceipt(receipt);
+
+        // tokenId should be a valid positive number
+        expect(Number(result.tokenId)).toBeGreaterThan(0);
+        // At least one of amount0/amount1 should be > 0
+        expect(BigInt(result.amount0) > 0n || BigInt(result.amount1) > 0n).toBe(true);
+        // poolAddress should match the LB pair
+        expect(result.poolAddress.toLowerCase()).toBe(poolData.address.toLowerCase());
+        // tickLower <= tickUpper
+        expect(result.tickLower).toBeLessThanOrEqual(result.tickUpper);
+        // liquidity should be non-null for createPosition
+        expect(result.liquidity).not.toBeNull();
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      }, 180000);
+    });
+  });
+
+  describe('generateClaimFeesData', () => {
+    const PM_ADDR = '0x4444444444444444444444444444444444444444';
+
+    describe('Validation', () => {
+      it('should throw for null position', async () => {
+        await expect(adapter.generateClaimFeesData({ position: null, walletAddress: '0x0000000000000000000000000000000000000001' }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw for undefined position', async () => {
+        await expect(adapter.generateClaimFeesData({ position: undefined, walletAddress: '0x0000000000000000000000000000000000000001' }))
+          .rejects.toThrow('Position parameter is required');
+      });
+
+      it('should throw for position without id', async () => {
+        await expect(adapter.generateClaimFeesData({ position: {}, walletAddress: '0x0000000000000000000000000000000000000001' }))
+          .rejects.toThrow('Position id is required');
+      });
+
+      it('should throw for missing walletAddress', async () => {
+        await expect(adapter.generateClaimFeesData({ position: { id: '1' }, walletAddress: '' }))
+          .rejects.toThrow('walletAddress is required');
+      });
+
+      it('should throw for invalid walletAddress', async () => {
+        await expect(adapter.generateClaimFeesData({ position: { id: '1' }, walletAddress: 'invalid' }))
+          .rejects.toThrow('Invalid wallet address');
+      });
+
+      it('should throw if positionManagerAddress is not configured', async () => {
+        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        adapterNoPM.addresses.positionManagerAddress = '';
+        await expect(adapterNoPM.generateClaimFeesData({ position: { id: '1' }, walletAddress: '0x0000000000000000000000000000000000000001' }))
+          .rejects.toThrow('No position manager address configured');
+      });
+    });
+
+    describe('Happy path', () => {
+      it('should return { to, data, value } with correct structure', async () => {
+        const result = await adapter.generateClaimFeesData({
+          position: { id: '42' },
+          walletAddress: '0x0000000000000000000000000000000000000001',
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.value).toBe('0x00');
+      });
+
+      it('should encode collectFees selector with correct params', async () => {
+        const walletAddress = '0x0000000000000000000000000000000000000001';
+        const result = await adapter.generateClaimFeesData({
+          position: { id: '42' },
+          walletAddress,
+        });
+
+        const iface = new ethers.utils.Interface([
+          "function collectFees(address vault, uint256 positionId)"
+        ]);
+        const decoded = iface.decodeFunctionData('collectFees', result.data);
+        expect(decoded.vault).toBe(walletAddress);
+        expect(decoded.positionId.toString()).toBe('42');
+      });
+
+      it('should accept position.id = 0', async () => {
+        const result = await adapter.generateClaimFeesData({
+          position: { id: 0 },
+          walletAddress: '0x0000000000000000000000000000000000000001',
+        });
+
+        const iface = new ethers.utils.Interface([
+          "function collectFees(address vault, uint256 positionId)"
+        ]);
+        const decoded = iface.decodeFunctionData('collectFees', result.data);
+        expect(decoded.positionId.toString()).toBe('0');
+      });
+    });
+  });
+
+  describe('parseClosureReceipt', () => {
+    // Helper: encode a FeesCollected event log
+    function createFeesCollectedLog(positionId, vault, lbPair, amountX, amountY) {
+      const iface = new ethers.utils.Interface([
+        'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+      ]);
+      const topic0 = iface.getEventTopic('FeesCollected');
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ['uint256', 'uint256'],
+        [amountX, amountY]
+      );
+      return {
+        address: lbPair,
+        topics: [
+          topic0,
+          ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32),
+          ethers.utils.hexZeroPad(vault, 32),
+          ethers.utils.hexZeroPad(lbPair, 32),
+        ],
+        data,
+      };
+    }
+
+    // Helper: encode a PositionRemoved event log
+    function createPositionRemovedLog(positionId, vault, lbPair, percentage, amountX, amountY) {
+      const iface = new ethers.utils.Interface([
+        'event PositionRemoved(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 percentage, uint256 amountX, uint256 amountY)'
+      ]);
+      const topic0 = iface.getEventTopic('PositionRemoved');
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ['uint256', 'uint256', 'uint256'],
+        [percentage, amountX, amountY]
+      );
+      return {
+        address: lbPair,
+        topics: [
+          topic0,
+          ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32),
+          ethers.utils.hexZeroPad(vault, 32),
+          ethers.utils.hexZeroPad(lbPair, 32),
+        ],
+        data,
+      };
+    }
+
+    const VAULT_ADDR = '0x1111111111111111111111111111111111111111';
+    const LB_PAIR_ADDR = '0x2222222222222222222222222222222222222222';
+
+    describe('Validation', () => {
+      it('should throw for null receipt', async () => {
+        await expect(adapter.parseClosureReceipt(null, { '1': {} }))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', async () => {
+        await expect(adapter.parseClosureReceipt(undefined, { '1': {} }))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs', async () => {
+        await expect(adapter.parseClosureReceipt({}, { '1': {} }))
+          .rejects.toThrow('Receipt must have logs property');
+      });
+
+      it('should throw for null positionMetadata', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, null))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for array positionMetadata', async () => {
+        await expect(adapter.parseClosureReceipt({ logs: [] }, []))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+    });
+
+    describe('Event parsing', () => {
+      it('should parse FeesCollected + PositionRemoved into feesByPosition and principalByPosition', async () => {
+        const metadata = { '1': { someField: 'value' } };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '500000', '300000'),
+            createPositionRemovedLog(1, VAULT_ADDR, LB_PAIR_ADDR, 100, '1000000000000000000', '2000000'),
+          ],
+        };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+
+        expect(result.principalByPosition['1']).toBeDefined();
+        expect(result.principalByPosition['1'].amount0.toString()).toBe('1000000000000000000');
+        expect(result.principalByPosition['1'].amount1.toString()).toBe('2000000');
+
+        expect(result.feesByPosition['1']).toBeDefined();
+        expect(result.feesByPosition['1'].token0.toString()).toBe('500000');
+        expect(result.feesByPosition['1'].token1.toString()).toBe('300000');
+        expect(result.feesByPosition['1'].metadata).toEqual({ someField: 'value' });
+      });
+
+      it('should fill zero fees when no FeesCollected event exists', async () => {
+        const metadata = { '1': { someField: 'value' } };
+        const receipt = {
+          logs: [
+            createPositionRemovedLog(1, VAULT_ADDR, LB_PAIR_ADDR, 100, '1000000000000000000', '2000000'),
+          ],
+        };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+
+        expect(result.principalByPosition['1']).toBeDefined();
+        expect(result.feesByPosition['1']).toBeDefined();
+        expect(result.feesByPosition['1'].token0.toString()).toBe('0');
+        expect(result.feesByPosition['1'].token1.toString()).toBe('0');
+        expect(result.feesByPosition['1'].metadata).toEqual({ someField: 'value' });
+      });
+
+      it('should handle multiple positions in one receipt', async () => {
+        const metadata = { '1': { pair: 'A' }, '2': { pair: 'B' } };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '100', '200'),
+            createPositionRemovedLog(1, VAULT_ADDR, LB_PAIR_ADDR, 100, '1000', '2000'),
+            createFeesCollectedLog(2, VAULT_ADDR, LB_PAIR_ADDR, '300', '400'),
+            createPositionRemovedLog(2, VAULT_ADDR, LB_PAIR_ADDR, 100, '3000', '4000'),
+          ],
+        };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+
+        expect(Object.keys(result.principalByPosition)).toHaveLength(2);
+        expect(Object.keys(result.feesByPosition)).toHaveLength(2);
+
+        expect(result.principalByPosition['1'].amount0.toString()).toBe('1000');
+        expect(result.principalByPosition['2'].amount0.toString()).toBe('3000');
+        expect(result.feesByPosition['1'].token0.toString()).toBe('100');
+        expect(result.feesByPosition['2'].token0.toString()).toBe('300');
+      });
+
+      it('should ignore positions not in positionMetadata', async () => {
+        const metadata = { '1': { pair: 'A' } };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '100', '200'),
+            createPositionRemovedLog(1, VAULT_ADDR, LB_PAIR_ADDR, 100, '1000', '2000'),
+            createFeesCollectedLog(99, VAULT_ADDR, LB_PAIR_ADDR, '999', '999'),
+            createPositionRemovedLog(99, VAULT_ADDR, LB_PAIR_ADDR, 100, '9999', '9999'),
+          ],
+        };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+
+        expect(Object.keys(result.principalByPosition)).toHaveLength(1);
+        expect(Object.keys(result.feesByPosition)).toHaveLength(1);
+        expect(result.principalByPosition['99']).toBeUndefined();
+      });
+
+      it('should ignore unrelated logs without errors', async () => {
+        const metadata = { '1': {} };
+        const receipt = {
+          logs: [
+            {
+              address: '0x3333333333333333333333333333333333333333',
+              topics: [ethers.utils.id('Transfer(address,address,uint256)')],
+              data: '0x',
+            },
+            createPositionRemovedLog(1, VAULT_ADDR, LB_PAIR_ADDR, 100, '1000', '2000'),
+          ],
+        };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+        expect(result.principalByPosition['1']).toBeDefined();
+      });
+
+      it('should return empty objects for empty logs', async () => {
+        const metadata = { '1': {} };
+        const receipt = { logs: [] };
+
+        const result = await adapter.parseClosureReceipt(receipt, metadata);
+        expect(Object.keys(result.principalByPosition)).toHaveLength(0);
+        expect(Object.keys(result.feesByPosition)).toHaveLength(0);
+      });
+    });
+  });
+
+  describe('parseCollectReceipt', () => {
+    // Reuse the FeesCollected log helper
+    function createFeesCollectedLog(positionId, vault, lbPair, amountX, amountY) {
+      const iface = new ethers.utils.Interface([
+        'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+      ]);
+      const topic0 = iface.getEventTopic('FeesCollected');
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ['uint256', 'uint256'],
+        [amountX, amountY]
+      );
+      return {
+        address: lbPair,
+        topics: [
+          topic0,
+          ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32),
+          ethers.utils.hexZeroPad(vault, 32),
+          ethers.utils.hexZeroPad(lbPair, 32),
+        ],
+        data,
+      };
+    }
+
+    const VAULT_ADDR = '0x1111111111111111111111111111111111111111';
+    const LB_PAIR_ADDR = '0x2222222222222222222222222222222222222222';
+
+    describe('Validation', () => {
+      it('should throw for null receipt', async () => {
+        await expect(adapter.parseCollectReceipt(null, { '1': {} }))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for undefined receipt', async () => {
+        await expect(adapter.parseCollectReceipt(undefined, { '1': {} }))
+          .rejects.toThrow('Receipt parameter is required');
+      });
+
+      it('should throw for receipt without logs', async () => {
+        await expect(adapter.parseCollectReceipt({}, { '1': {} }))
+          .rejects.toThrow('Receipt must have logs property');
+      });
+
+      it('should throw for null positionMetadata', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, null))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+
+      it('should throw for array positionMetadata', async () => {
+        await expect(adapter.parseCollectReceipt({ logs: [] }, []))
+          .rejects.toThrow('Position metadata parameter is required');
+      });
+    });
+
+    describe('Event parsing', () => {
+      it('should parse FeesCollected into feesByPosition', async () => {
+        const metadata = { '1': { someField: 'value' } };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '500000', '300000'),
+          ],
+        };
+
+        const result = await adapter.parseCollectReceipt(receipt, metadata);
+
+        expect(result.feesByPosition['1']).toBeDefined();
+        expect(result.feesByPosition['1'].token0.toString()).toBe('500000');
+        expect(result.feesByPosition['1'].token1.toString()).toBe('300000');
+        expect(result.feesByPosition['1'].metadata).toEqual({ someField: 'value' });
+      });
+
+      it('should handle multiple positions', async () => {
+        const metadata = { '1': { pair: 'A' }, '2': { pair: 'B' } };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '100', '200'),
+            createFeesCollectedLog(2, VAULT_ADDR, LB_PAIR_ADDR, '300', '400'),
+          ],
+        };
+
+        const result = await adapter.parseCollectReceipt(receipt, metadata);
+
+        expect(Object.keys(result.feesByPosition)).toHaveLength(2);
+        expect(result.feesByPosition['1'].token0.toString()).toBe('100');
+        expect(result.feesByPosition['2'].token0.toString()).toBe('300');
+      });
+
+      it('should ignore positions not in positionMetadata', async () => {
+        const metadata = { '1': {} };
+        const receipt = {
+          logs: [
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '100', '200'),
+            createFeesCollectedLog(99, VAULT_ADDR, LB_PAIR_ADDR, '999', '999'),
+          ],
+        };
+
+        const result = await adapter.parseCollectReceipt(receipt, metadata);
+        expect(Object.keys(result.feesByPosition)).toHaveLength(1);
+        expect(result.feesByPosition['99']).toBeUndefined();
+      });
+
+      it('should return empty feesByPosition for empty logs', async () => {
+        const metadata = { '1': {} };
+        const receipt = { logs: [] };
+
+        const result = await adapter.parseCollectReceipt(receipt, metadata);
+        expect(Object.keys(result.feesByPosition)).toHaveLength(0);
+      });
+
+      it('should ignore unrelated logs without errors', async () => {
+        const metadata = { '1': {} };
+        const receipt = {
+          logs: [
+            {
+              address: '0x3333333333333333333333333333333333333333',
+              topics: [ethers.utils.id('Transfer(address,address,uint256)')],
+              data: '0x',
+            },
+            createFeesCollectedLog(1, VAULT_ADDR, LB_PAIR_ADDR, '100', '200'),
+          ],
+        };
+
+        const result = await adapter.parseCollectReceipt(receipt, metadata);
+        expect(result.feesByPosition['1']).toBeDefined();
+      });
     });
   });
 });

@@ -209,6 +209,7 @@ async function setupV4Environment(coreEnv) {
 
   const testPosition = {
     id: positionTokenId.toString(),
+    pool: poolData.poolId,
     liquidity: createPositionData.quote.liquidity,
     tickLower,
     tickUpper,

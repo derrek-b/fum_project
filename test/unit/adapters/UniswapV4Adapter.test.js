@@ -2602,20 +2602,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 120000);
 
       it('should execute partial remove successfully', async () => {
-        // Get vault address for walletAddress parameter
+        const localSnapshot = await env.snapshot();
+
         const vaultAddress = env.testVault.address;
 
-        // Get initial liquidity using pre-created test position
-        const feesBefore = await adapter.getAccruedFeesUSD(
-          {
-            id: env.testPosition.id,
-            token0Decimals: env.poolData.token0.decimals,
-            token1Decimals: env.poolData.token1.decimals
-          },
-          { token0: 3000, token1: 1 },
-          env.provider
-        );
-        const initialLiquidity = BigInt(feesBefore.liquidity);
+        // Get initial liquidity via getPositionById
+        const beforeResult = await adapter.getPositionById(env.testPosition.id, env.provider);
+        const initialLiquidity = BigInt(beforeResult.position.liquidity);
 
         // Generate remove 50% liquidity data
         const removeTxData = await adapter.generateRemoveLiquidityData({
@@ -2638,24 +2631,19 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(removeReceipt.status).toBe(1);
 
         // Verify position still exists with reduced liquidity
-        const feesAfter = await adapter.getAccruedFeesUSD(
-          {
-            id: env.testPosition.id,
-            token0Decimals: env.poolData.token0.decimals,
-            token1Decimals: env.poolData.token1.decimals
-          },
-          { token0: 3000, token1: 1 },
-          env.provider
-        );
-        const remainingLiquidity = BigInt(feesAfter.liquidity);
+        const afterResult = await adapter.getPositionById(env.testPosition.id, env.provider);
+        const remainingLiquidity = BigInt(afterResult.position.liquidity);
 
         // Liquidity should be roughly half (allow for some rounding)
         expect(remainingLiquidity).toBeLessThan(initialLiquidity);
         expect(remainingLiquidity).toBeGreaterThan(0n);
+
+        await env.revert(localSnapshot);
       }, 180000);
 
       it('should execute full remove (100%) successfully', async () => {
-        // Get vault address for walletAddress parameter
+        const localSnapshot = await env.snapshot();
+
         const vaultAddress = env.testVault.address;
 
         // Generate remove 100% liquidity data using pre-created test position
@@ -2679,17 +2667,10 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(removeReceipt.status).toBe(1);
 
         // Verify position has zero liquidity after full removal
-        const feesAfter = await adapter.getAccruedFeesUSD(
-          {
-            id: env.testPosition.id,
-            token0Decimals: env.poolData.token0.decimals,
-            token1Decimals: env.poolData.token1.decimals
-          },
-          { token0: 3000, token1: 1 },
-          env.provider
-        );
+        await expect(adapter.getPositionById(env.testPosition.id, env.provider))
+          .rejects.toThrow('zero liquidity');
 
-        expect(BigInt(feesAfter.liquidity)).toBe(0n);
+        await env.revert(localSnapshot);
       }, 180000);
     });
   });
@@ -3146,6 +3127,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 180000);
 
       it('should execute add liquidity and increase position', async () => {
+        const localSnapshot = await env.snapshot();
         const { ethers } = require('ethers');
 
         // Get signer from environment
@@ -3185,17 +3167,9 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           poolData: env.poolData
         });
 
-        // Get initial liquidity
-        const feesBefore = await adapter.getAccruedFeesUSD(
-          {
-            id: parsed.tokenId,
-            token0Decimals: env.poolData.token0.decimals,
-            token1Decimals: env.poolData.token1.decimals
-          },
-          { token0: 3000, token1: 1 },
-          env.provider
-        );
-        const initialLiquidity = BigInt(feesBefore.liquidity);
+        // Get initial liquidity via getPositionById
+        const beforeResult = await adapter.getPositionById(parsed.tokenId, env.provider);
+        const initialLiquidity = BigInt(beforeResult.position.liquidity);
 
         // Generate add liquidity data
         const addTxData = await adapter.generateAddLiquidityData({
@@ -3219,19 +3193,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const addReceipt = await addTx.wait();
         expect(addReceipt.status).toBe(1);
 
-        // Verify liquidity increased
-        const feesAfter = await adapter.getAccruedFeesUSD(
-          {
-            id: parsed.tokenId,
-            token0Decimals: env.poolData.token0.decimals,
-            token1Decimals: env.poolData.token1.decimals
-          },
-          { token0: 3000, token1: 1 },
-          env.provider
-        );
-        const newLiquidity = BigInt(feesAfter.liquidity);
+        // Verify liquidity increased via getPositionById
+        const afterResult = await adapter.getPositionById(parsed.tokenId, env.provider);
+        const newLiquidity = BigInt(afterResult.position.liquidity);
 
         expect(newLiquidity).toBeGreaterThan(initialLiquidity);
+
+        await env.revert(localSnapshot);
       }, 180000);
     });
   });
@@ -5438,7 +5406,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
         // Now claim the fees using the position we created
         const claimFeesData = await adapter.generateClaimFeesData({
-          position: { id: parsed.tokenId, tickLower: range.tickLower, tickUpper: range.tickUpper },
+          position: { id: parsed.tokenId, pool: env.poolData.poolId, tickLower: range.tickLower, tickUpper: range.tickUpper },
           walletAddress,
           provider: env.provider,
           poolData: env.poolData
@@ -7301,6 +7269,35 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(adapter.getPositionById(nonExistentId, env.provider))
           .rejects.toThrow('not found or has been burned');
       });
+
+      it('should throw error for zero-liquidity position', async () => {
+        // Snapshot before destructive drain so subsequent tests aren't affected
+        const localSnapshot = await env.snapshot();
+
+        // Remove all liquidity from the test position via the vault
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          position: env.testPosition,
+          percentage: 100,
+          walletAddress: env.testVault.address,
+          provider: env.provider,
+          poolData: env.poolData,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        const removeTx = await env.testVault.decreaseLiquidity(
+          [removeTxData.to],
+          [removeTxData.data]
+        );
+        await removeTx.wait();
+
+        // Position NFT still exists but has zero liquidity — should throw
+        await expect(adapter.getPositionById(env.positionTokenId, env.provider))
+          .rejects.toThrow('zero liquidity');
+
+        // Revert to restore the position's liquidity for subsequent tests
+        await env.revert(localSnapshot);
+      }, 180000);
     });
   });
 

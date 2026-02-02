@@ -2163,6 +2163,43 @@
           },
           {
             "indexed": false,
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          }
+        ],
+        "name": "FeesCollected",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "indexed": false,
             "internalType": "uint256[]",
             "name": "depositIds",
             "type": "uint256[]"
@@ -2172,6 +2209,18 @@
             "internalType": "uint256[]",
             "name": "liquidityMinted",
             "type": "uint256[]"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountXAdded",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amountYAdded",
+            "type": "uint256"
           }
         ],
         "name": "PositionCreated",
@@ -2344,6 +2393,35 @@
             "type": "address"
           },
           {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          }
+        ],
+        "name": "collectFees",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
             "internalType": "address",
             "name": "lbPair",
             "type": "address"
@@ -2413,6 +2491,55 @@
       {
         "inputs": [
           {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "percentage",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "name": "decreaseLiquidity",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
             "internalType": "uint256",
             "name": "positionId",
             "type": "uint256"
@@ -2422,22 +2549,12 @@
         "outputs": [
           {
             "internalType": "uint256[]",
-            "name": "depositIds",
+            "name": "feesX",
             "type": "uint256[]"
           },
           {
             "internalType": "uint256[]",
-            "name": "currentBalances",
-            "type": "uint256[]"
-          },
-          {
-            "internalType": "uint256[]",
-            "name": "storedBalances",
-            "type": "uint256[]"
-          },
-          {
-            "internalType": "uint256[]",
-            "name": "feeDeltas",
+            "name": "feesY",
             "type": "uint256[]"
           }
         ],
@@ -2489,6 +2606,16 @@
               {
                 "internalType": "uint256[]",
                 "name": "liquidityMinted",
+                "type": "uint256[]"
+              },
+              {
+                "internalType": "uint256[]",
+                "name": "originalShareX",
+                "type": "uint256[]"
+              },
+              {
+                "internalType": "uint256[]",
+                "name": "originalShareY",
                 "type": "uint256[]"
               },
               {
@@ -2649,11 +2776,6 @@
           {
             "internalType": "uint256",
             "name": "positionId",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "percentage",
             "type": "uint256"
           },
           {
@@ -2947,12 +3069,12 @@
         "inputs": [
           {
             "internalType": "bytes",
-            "name": "",
+            "name": "data",
             "type": "bytes"
           },
           {
             "internalType": "address",
-            "name": "",
+            "name": "vault",
             "type": "address"
           }
         ],
