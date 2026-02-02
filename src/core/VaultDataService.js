@@ -641,7 +641,7 @@ class VaultDataService {
         if (!token0Data || !token1Data) continue;
 
         const tokenAmounts = await retryRpcCall(
-          () => adapter.calculateTokenAmounts(position, freshPoolData, token0Data, token1Data),
+          () => adapter.calculateTokenAmounts(position, freshPoolData, token0Data, token1Data, this.provider, this.provider),
           `calculateTokenAmounts(${positionId})`
         );
 

@@ -2699,7 +2699,8 @@ export default class BabyStepsStrategy extends StrategyBase {
           amount: targetDeficit.toString(),
           isAmountIn: false,
           tokenInIsNative,
-          tokenOutIsNative
+          tokenOutIsNative,
+          provider: this.provider
         }),
         `getBestSwapQuote EXACT_OUTPUT ${tokenInData.symbol}→${tokenOutData.symbol}`
       );
@@ -2716,7 +2717,8 @@ export default class BabyStepsStrategy extends StrategyBase {
             amount: availableAmount.toString(),
             isAmountIn: true,
             tokenInIsNative,
-            tokenOutIsNative
+            tokenOutIsNative,
+            provider: this.provider
           }),
           `getBestSwapQuote EXACT_INPUT ${tokenInData.symbol}→${tokenOutData.symbol}`
         );
