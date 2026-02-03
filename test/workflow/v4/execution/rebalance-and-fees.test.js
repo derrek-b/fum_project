@@ -39,10 +39,11 @@ describe('V4 Rebalance and Fee Collection', () => {
     console.log('V4 Test blockchain connected');
 
     // Setup swap wallet with capital for market manipulation
+    // No USDC pre-funding needed - round-trip swaps use what they receive
     console.log('Setting up V4 swap wallet...');
     swapWallet = await setupV4SwapWallet(testEnv, {
       ethAmount: '1000',
-      usdcAmount: '300' // Build USDC reserves for reverse swaps
+      usdcAmount: '0'
     });
 
     // Create test vault with NO positions - service will create one during setup
@@ -135,12 +136,19 @@ describe('V4 Rebalance and Fee Collection', () => {
       // Get token addresses
       const usdcAddress = getV4TokenAddress('USDC', 1337);
 
+      // Create USDC contract for balance queries
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        ['function balanceOf(address) view returns (uint256)'],
+        testEnv.hardhatServer.provider
+      );
+
       // Execute round-trip swaps to generate fees
       // V4 500 bps pool = 5 bps per swap
       // Strategy requires swapCount >= 50 before checking fees
       // Use smaller amounts to avoid pushing price out of range
       const ethSwapAmount = ethers.utils.parseEther('5');
-      const usdcSwapAmount = ethers.utils.parseUnits('12500', 6); // ~5 ETH worth
+      let usdcSwapAmount; // Will be set dynamically based on actual balance received
       const maxSwaps = 60;
 
       console.log(`Executing up to ${maxSwaps} round-trip V4 swaps to generate fees...`);
@@ -154,6 +162,11 @@ describe('V4 Rebalance and Fee Collection', () => {
 
         // Alternate swap direction
         const isEthToUsdc = i % 2 === 0;
+
+        // For USDC→ETH swaps, use the actual USDC balance from the previous swap
+        if (!isEthToUsdc) {
+          usdcSwapAmount = await usdcContract.balanceOf(swapWallet.wallet.address);
+        }
 
         try {
           await executeV4PoolSwap(testEnv, {

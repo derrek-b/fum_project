@@ -101,10 +101,11 @@ export async function setupV4SwapWallet(testEnv, options = {}) {
   console.log(`  Funded V4 swap wallet with ${ethAmount} ETH`);
 
   // Build USDC reserves if requested via V4 swap
+  const adapter = new UniswapV4Adapter(1337, testEnv.hardhatServer.provider);
+  const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, swapWallet);
   let usdcBalance = ethers.BigNumber.from(0);
-  if (parseFloat(usdcAmount) > 0) {
-    const adapter = new UniswapV4Adapter(1337, testEnv.hardhatServer.provider);
 
+  if (parseFloat(usdcAmount) > 0) {
     // Swap native ETH for USDC
     const swapAmountWei = ethers.utils.parseEther(usdcAmount);
     const swapData = await adapter._generateSwapData({
@@ -123,15 +124,14 @@ export async function setupV4SwapWallet(testEnv, options = {}) {
     });
     await swapTx.wait();
 
-    const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, swapWallet);
     usdcBalance = await usdcContract.balanceOf(swapWallet.address);
     console.log(`  Built USDC reserves via V4: ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
-
-    // Setup Permit2 approval for USDC (needed for USDC -> ETH swaps)
-    // Note: Swaps go through Universal Router, not Position Manager
-    await setupPermit2Approval(usdcContract, adapter.addresses.universalRouterAddress, swapWallet);
-    console.log(`  Permit2 approval set for USDC`);
   }
+
+  // Always setup Permit2 approval for USDC (needed for USDC -> ETH return swaps)
+  // Note: Swaps go through Universal Router, not Position Manager
+  await setupPermit2Approval(usdcContract, adapter.addresses.universalRouterAddress, swapWallet);
+  console.log(`  Permit2 approval set for USDC`);
 
   return {
     wallet: swapWallet,

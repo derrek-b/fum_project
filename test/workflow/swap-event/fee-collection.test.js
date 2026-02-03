@@ -129,11 +129,18 @@ describe('Fee Collection Trigger', () => {
     const wethData = service.tokens['WETH'];
     const usdcData = service.tokens['USDC'];
 
+    // Create USDC contract for balance queries
+    const usdcContract = new ethers.Contract(
+      usdcData.address,
+      ['function balanceOf(address) view returns (uint256)'],
+      testEnv.hardhatServer.provider
+    );
+
     // Execute round-trip swaps to generate fees without depleting capital
     // Each swap generates 0.05% fee (500 bps pool = 5 bps per swap)
     // Strategy requires 50 swaps before checking fees, so we need at least 55
     const wethSwapAmount = ethers.utils.parseUnits('10', wethData.decimals);
-    const usdcSwapAmount = ethers.utils.parseUnits('25000', usdcData.decimals); // ~10 WETH worth
+    let usdcSwapAmount; // Will be set dynamically based on actual balance received
     const maxSwaps = 55;
 
     console.log(`Executing up to ${maxSwaps} round-trip swaps to generate fees...`);
@@ -147,6 +154,11 @@ describe('Fee Collection Trigger', () => {
 
       // Alternate swap direction for round-trips
       const isEvenSwap = i % 2 === 0;
+
+      // For USDC→WETH swaps, use the actual USDC balance from the previous swap
+      if (!isEvenSwap) {
+        usdcSwapAmount = await usdcContract.balanceOf(swapWallet.wallet.address);
+      }
 
       await executeSwap(testEnv, {
         tokenIn: isEvenSwap ? wethData.address : usdcData.address,

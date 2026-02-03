@@ -1833,15 +1833,27 @@ export default class BabyStepsStrategy extends StrategyBase {
       Object.keys(this.tokens)
     );
 
-    // Step 8: Get final token balances to pass to adapter
+    // Step 8: Re-fetch pool data at current price (swaps may have moved it)
+    // getPoolData returns fresh tick/sqrtPriceX96/liquidity but not poolKey
+    // Merge fresh state with original targetPool to preserve poolKey
+    const freshPoolState = await retryRpcCall(
+      () => adapter.getPoolData(targetPool.address, this.provider),
+      'getPoolData (post-swap refresh)'
+    );
+    const freshPoolData = {
+      ...targetPool,        // Preserve poolKey and other metadata
+      ...freshPoolState     // Override with fresh tick, sqrtPriceX96, liquidity
+    };
+
+    // Step 9: Get final token balances to pass to adapter
     const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
     const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
     const maxSlippage = vault.strategy.parameters.maxSlippage;
 
     this.log(`🔄 Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
-    // Step 9: Execute increaseLiquidity transaction
-    // 9a. Generate add liquidity transaction data
+    // Step 10: Execute increaseLiquidity transaction
+    // 10a. Generate add liquidity transaction data
     // Pass full balances - adapter applies slippage internally and uses balances as max amounts
     const addLiquidityData = await retryRpcCall(
       () => adapter.generateAddLiquidityData({
@@ -1849,7 +1861,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         token0Amount: finalToken0Balance.toString(),
         token1Amount: finalToken1Balance.toString(),
         provider: this.provider,
-        poolData: targetPool,
+        poolData: freshPoolData,
         token0Data,
         token1Data,
         slippageTolerance: maxSlippage,
@@ -1858,7 +1870,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       'generateAddLiquidityData'
     );
 
-    // 9b. Execute add liquidity transaction
+    // 10b. Execute add liquidity transaction
     this.log(`Executing increaseLiquidity for position ${position.id}`);
     const { receipt, gasEstimated } = await this.executeBatchTransactions(
       vault,
@@ -1867,15 +1879,15 @@ export default class BabyStepsStrategy extends StrategyBase {
       'addliq'
     );
 
-    // 9d. Parse receipt for actual amounts consumed
+    // 10c. Parse receipt for actual amounts consumed
     const receiptData = adapter.parseIncreaseLiquidityReceipt(receipt, {
       position,
-      poolData: targetPool
+      poolData: freshPoolData
     });
 
     this.log(`✅ Liquidity added: ${ethers.utils.formatUnits(receiptData.amount0, token0Data.decimals)} ${token0Data.symbol}, ${ethers.utils.formatUnits(receiptData.amount1, token1Data.decimals)} ${token1Data.symbol} (liquidity: ${receiptData.liquidity})`);
 
-    // Step 10: Emit LiquidityAddedToPosition event
+    // Step 11: Emit LiquidityAddedToPosition event
     this.eventManager.emit('LiquidityAddedToPosition', {
       // Identity
       vaultAddress: vault.address,
@@ -1892,7 +1904,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       position,
 
       // Pool state at time of add (platform-agnostic via adapter)
-      current: adapter.getPoolCurrent(targetPool),
+      current: adapter.getPoolCurrent(freshPoolData),
 
       // Transaction
       transactionHash: receipt.transactionHash,
@@ -2253,18 +2265,19 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now()
     });
 
-    // Step 13: Set emergency exit baseline for new position
-    // This overwrites any previous baseline (e.g., from aligned position at init, or previous position before rebalance)
-    const currentPool = adapter.getPoolCurrent(targetPool);
-    this.emergencyExitBaseline[vault.address] = currentPool;
-    this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
-
-    // Step 14: Update cache with new position (direct on-chain, no Graph latency)
+    // Step 13: Update cache with new position (direct on-chain, no Graph latency)
     const { position: newPosition, poolData: newPoolData } = await retryRpcCall(
       () => adapter.getPositionById(receiptData.tokenId, this.provider),
       'getPositionById'
     );
     this.log(`🔍 [createNewPosition] FINAL ON-CHAIN POSITION - ID ${newPosition.id}: tickLower=${newPosition.tickLower}, tickUpper=${newPosition.tickUpper}`);
+
+    // Step 14: Set emergency exit baseline from fresh pool data (after swaps)
+    // This overwrites any previous baseline (e.g., from aligned position at init, or previous position before rebalance)
+    // Note: Use freshPoolData (has tick), not newPoolData (only has metadata from getPositionById)
+    const currentPool = adapter.getPoolCurrent(freshPoolData);
+    this.emergencyExitBaseline[vault.address] = currentPool;
+    this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
     await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
     await this.vaultDataService.refreshTokens(vault.address);
   }

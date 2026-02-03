@@ -213,12 +213,15 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
       // Verify vault.tokens exists
       expect(vault.tokens).toBeDefined();
 
-      // After token preparation (Step 7), native ETH is wrapped to WETH
-      // to cover WETH deficit for the USDC/WETH position.
-      // ETH balance may be 0 or near-0 (gas dust only)
+      // After token preparation (Step 7), native ETH is used for:
+      // 1. Wrapping to WETH (for the WETH portion of the position)
+      // 2. Swapping via UniversalRouter (accepts native ETH directly for USDC deficit)
+      // Leftover ETH should be under 1% of initial deposit (matching strategy's
+      // vault-relative minimum threshold for deployment)
       const ethBalance = BigInt(vault.tokens.ETH || '0');
+      const onePercentOfDeposit = BigInt(ethers.utils.parseEther('0.1').toString()); // 1% of 10 ETH
       expect(ethBalance).toBeGreaterThanOrEqual(0n);
-      expect(ethBalance).toBeLessThanOrEqual(100n);
+      expect(ethBalance).toBeLessThanOrEqual(onePercentOfDeposit);
 
       // WETH should have been used for liquidity (may be partially consumed)
       // But we should at least have the WETH token entry
