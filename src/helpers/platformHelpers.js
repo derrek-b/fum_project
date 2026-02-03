@@ -6,7 +6,7 @@
  */
 
 import platforms from '../configs/platforms.js';
-import { getPlatformAddresses, validateChainId } from './chainHelpers.js';
+import { getPlatformAddresses, lookupChainPlatformIds, validateChainId } from './chainHelpers.js';
 
 /**
  * Validate platformId parameter using established validation pattern
@@ -368,12 +368,11 @@ export function getAvailablePlatforms(chainId) {
 
   const availablePlatforms = [];
 
-  // Get platform IDs from the chain that are enabled
-  for (const platformId in platforms) {
-    const platformAddresses = getPlatformAddresses(chainId, platformId);
+  // Only iterate platforms actually configured on this chain
+  const chainPlatformIds = lookupChainPlatformIds(chainId);
 
-    // Skip if platform not available on this chain (business logic - disabled or not configured for chain)
-    if (!platformAddresses) continue;
+  for (const platformId of chainPlatformIds) {
+    const platformAddresses = getPlatformAddresses(chainId, platformId);
 
     const metadata = platforms[platformId];
     if (!metadata) {

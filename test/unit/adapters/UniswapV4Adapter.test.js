@@ -652,11 +652,15 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const balanceAfter = await usdcContract.balanceOf(signerAddress);
         const actualUsdcReceived = balanceAfter.sub(balanceBefore);
 
+        // Count V4 Swap events in receipt to handle split routes
+        const swapTopicHash = ethers.utils.id('Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)');
+        const swapEventCount = receipt.logs.filter(log => log.topics[0] === swapTopicHash).length;
+
         // Parse the receipt with V4 swap metadata
         const metadata = [{
           tokenInAddress: NATIVE_ETH,
           tokenOutAddress: USDC,
-          expectedSwapEvents: 1
+          expectedSwapEvents: swapEventCount
         }];
         const parsed = adapter.parseSwapReceipt(receipt, metadata);
 
@@ -5209,7 +5213,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should gracefully return null when block explorer fails (local fork tx)', async () => {
         // Configure API key but use a fake local transaction hash
         // The API will return no results since this tx doesn't exist on Arbiscan
-        configureBlockExplorer({ arbiscanApiKey: process.env.ARBISCAN_API_KEY || 'test-key' });
+        configureBlockExplorer({ blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY || 'test-key' });
 
         const positionMetadata = {
           '12345': {
@@ -5234,7 +5238,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
 
       it('should not attempt ETH tracking when chainId missing from options', async () => {
-        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
 
         const positionMetadata = {
           '12345': {
@@ -5252,7 +5256,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
 
       it('should not attempt ETH tracking when walletAddress missing from options', async () => {
-        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
 
         const positionMetadata = {
           '12345': {
@@ -5270,7 +5274,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
 
       it('should not attempt ETH tracking for non-ETH positions', async () => {
-        configureBlockExplorer({ arbiscanApiKey: 'test-key' });
+        configureBlockExplorer({ blockExplorerApiKey: 'test-key' });
 
         // Position with two ERC20 tokens (no native ETH)
         const WETH_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1';
