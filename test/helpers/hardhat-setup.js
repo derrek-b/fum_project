@@ -179,11 +179,13 @@ export async function setupTestBlockchain(options = {}) {
   // Use account #4 from standard Hardhat test accounts as automation service
   const automationServiceAddress = TEST_ACCOUNTS[4].address; // 0xabA472B2EA519490EE10E643A422D578a507197A
 
+  // Get chainId from shared state (1337 for Arbitrum, 1338 for Avalanche)
+  const chainId = shared.chainId || 1337;
+
   // Standard test configuration for AutomationService
-  // Always use port 8545 since we have a shared instance
   const testConfig = {
     automationServiceAddress,
-    chainId: 1337,
+    chainId,
     wsUrl: `ws://localhost:${shared.port}`,
     debug: true,
     envPath: path.join(__dirname, '../.env.test'),

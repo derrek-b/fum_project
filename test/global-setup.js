@@ -40,10 +40,15 @@ export default async function globalSetup() {
   // Clear any stale state from previous runs
   clearSharedState();
 
-  // Start single Hardhat instance on port 8545
+  // Determine fork chain from environment (arbitrum or avalanche)
+  const forkChain = process.env.FORK_CHAIN || 'arbitrum';
+  const port = forkChain === 'avalanche' ? 8546 : 8545;
+  const chainId = forkChain === 'avalanche' ? 1338 : 1337;
+
+  // Start single Hardhat instance
   // quiet: true suppresses transaction logging from Hardhat
-  console.log('Starting shared Hardhat instance on port 8545...');
-  const hardhat = await startHardhat({ port: 8545, quiet: true });
+  console.log(`Starting shared Hardhat instance on port ${port} (${forkChain} fork, chainId ${chainId})...`);
+  const hardhat = await startHardhat({ port, quiet: true });
   console.log('Hardhat started successfully');
 
   // Deploy FUM contracts once
@@ -64,7 +69,9 @@ export default async function globalSetup() {
   // Keep original casing for compatibility with existing tests
   saveSharedState({
     pid: hardhat.process.pid,
-    port: 8545,
+    port,
+    chainId,
+    forkChain,
     baseSnapshotId,
     deployedContracts: deployment.addresses
   });
