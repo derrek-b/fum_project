@@ -11,8 +11,9 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
-import { getTokenBySymbol, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { getTokenBySymbol, getTokenByAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
+import contractData from "../artifacts/contracts.js";
 
 // Trader Joe V2.1 ABIs and addresses from official SDK
 import {
@@ -79,32 +80,424 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   // STUB METHODS - To be implemented
   // =============================================================================
 
+  /**
+   * Get the event filter for monitoring swap events on Trader Joe V2.1
+   *
+   * For Trader Joe V2.1, the poolId IS the LBPair contract address.
+   * Swaps emit directly from the LBPair contract (same pattern as V3).
+   *
+   * LBPair Swap event signature:
+   *   Swap(address sender, address to, uint24 id, bytes32 amountsIn, bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
+   *
+   * @param {string} poolId - LBPair contract address
+   * @returns {Object} Filter object with address and topics array
+   * @throws {Error} If poolId is invalid
+   */
   getSwapEventFilter(poolId) {
-    throw new Error("TraderJoeV2_1Adapter.getSwapEventFilter not implemented");
+    if (!poolId || typeof poolId !== 'string') {
+      throw new Error('poolId parameter is required and must be a string');
+    }
+
+    try {
+      ethers.utils.getAddress(poolId);
+    } catch (error) {
+      throw new Error(`Invalid poolId address: ${poolId}`);
+    }
+
+    return {
+      address: poolId,
+      topics: [ethers.utils.id(this._getSwapEventSignature())]
+    };
   }
 
+  /**
+   * Parse a Trader Joe V2.1 swap event log
+   *
+   * Decodes log data from an LBPair Swap event. Validates the event signature,
+   * extracts indexed parameters (sender, to) from topics, and decodes non-indexed
+   * data including packed bytes32 amounts.
+   *
+   * V2.1 Swap event:
+   *   Swap(address indexed sender, address indexed to, uint24 id, bytes32 amountsIn,
+   *        bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
+   *
+   * bytes32 packed amounts: upper 128 bits = tokenX amount, lower 128 bits = tokenY amount
+   *
+   * @param {Object} log - Raw blockchain event log
+   * @param {string} log.address - LBPair contract address that emitted the event
+   * @param {Array<string>} log.topics - [eventSig, sender, to]
+   * @param {string} log.data - ABI-encoded non-indexed event data
+   * @returns {Object} Parsed swap event data
+   * @returns {number} result.activeId - Active bin ID after the swap (TJ equivalent of tick)
+   * @returns {string} result.sender - Address that initiated the swap (checksummed)
+   * @returns {string} result.to - Address that received the output (checksummed)
+   * @returns {Object} result.amountsIn - Decoded input amounts { amountX: string, amountY: string }
+   * @returns {Object} result.amountsOut - Decoded output amounts { amountX: string, amountY: string }
+   * @returns {number} result.volatilityAccumulator - Protocol volatility tracking value
+   * @returns {Object} result.totalFees - Decoded total fees { amountX: string, amountY: string }
+   * @returns {Object} result.protocolFees - Decoded protocol fees { amountX: string, amountY: string }
+   * @throws {Error} If log is null/undefined or missing required properties
+   * @throws {Error} If log cannot be parsed as a Trader Joe V2.1 Swap event
+   */
   parseSwapEvent(log) {
-    throw new Error("TraderJoeV2_1Adapter.parseSwapEvent not implemented");
+    if (!log) {
+      throw new Error('Log parameter is required');
+    }
+
+    if (!log.address) {
+      throw new Error('Log must have address property');
+    }
+
+    if (!log.topics || !Array.isArray(log.topics)) {
+      throw new Error('Log must have topics array');
+    }
+
+    if (log.topics.length < 3) {
+      throw new Error('Log must have at least 3 topics (event signature, sender, to)');
+    }
+
+    if (!log.data) {
+      throw new Error('Log must have data property');
+    }
+
+    const expectedTopic = ethers.utils.id(this._getSwapEventSignature());
+    if (log.topics[0] !== expectedTopic) {
+      throw new Error(`Invalid swap event signature. Expected ${expectedTopic}, got ${log.topics[0]}`);
+    }
+
+    try {
+      // Extract indexed parameters from topics
+      // topics[1] = sender (address padded to 32 bytes)
+      // topics[2] = to (address padded to 32 bytes)
+      const sender = ethers.utils.getAddress('0x' + log.topics[1].slice(26));
+      const to = ethers.utils.getAddress('0x' + log.topics[2].slice(26));
+
+      // Decode non-indexed data
+      const decoded = ethers.utils.defaultAbiCoder.decode(
+        ['uint24', 'bytes32', 'bytes32', 'uint24', 'bytes32', 'bytes32'],
+        log.data
+      );
+
+      return {
+        activeId: Number(decoded[0]),
+        sender,
+        to,
+        amountsIn: this._decodePackedAmounts(decoded[1]),
+        amountsOut: this._decodePackedAmounts(decoded[2]),
+        volatilityAccumulator: Number(decoded[3]),
+        totalFees: this._decodePackedAmounts(decoded[4]),
+        protocolFees: this._decodePackedAmounts(decoded[5])
+      };
+    } catch (error) {
+      if (error.message.startsWith('Log ') || error.message.startsWith('Invalid swap')) {
+        throw error;
+      }
+      throw new Error(`Failed to parse swap event: ${error.message}`);
+    }
   }
 
+  /**
+   * Evaluate price movement between a baseline and current swap state
+   *
+   * Uses Trader Joe V2.1 bin-based pricing:
+   *   price(id) = (1 + binStep/10000)^(id - 8388608)
+   *
+   * The percentage simplifies to:
+   *   priceRatio = (1 + binStep/10000)^(currentId - baselineId)
+   *   priceMovementPercent = |priceRatio - 1| * 100
+   *
+   * @param {Object} swapData - Parsed swap event from parseSwapEvent
+   * @param {number} swapData.activeId - Current active bin ID
+   * @param {Object} baseline - Baseline from getPoolCurrent ({ activeId, binStep })
+   * @param {number} baseline.activeId - Baseline active bin ID
+   * @param {number} baseline.binStep - Bin step in basis points
+   * @param {Object} token0Data - Token0 data (tokenX, lower address)
+   * @param {string} token0Data.address - Token contract address
+   * @param {string} token0Data.symbol - Token symbol
+   * @param {number} token0Data.decimals - Token decimals
+   * @param {Object} token1Data - Token1 data (tokenY, higher address)
+   * @param {string} token1Data.address - Token contract address
+   * @param {string} token1Data.symbol - Token symbol
+   * @param {number} token1Data.decimals - Token decimals
+   * @returns {{ priceMovementPercent: number, baselinePrice: string, currentPrice: string, direction: string }}
+   * @throws {Error} If any parameter is invalid or missing required properties
+   */
   evaluatePriceMovement(swapData, baseline, token0Data, token1Data) {
-    throw new Error("TraderJoeV2_1Adapter.evaluatePriceMovement not implemented");
+    // Validate swapData
+    if (!swapData) {
+      throw new Error('swapData parameter is required');
+    }
+    if (typeof swapData.activeId !== 'number') {
+      throw new Error('swapData must have activeId property as a number');
+    }
+
+    // Validate baseline
+    if (baseline === undefined || baseline === null) {
+      throw new Error('baseline parameter is required');
+    }
+    if (typeof baseline !== 'object' || typeof baseline.activeId !== 'number') {
+      throw new Error('baseline must have activeId property as a number');
+    }
+    if (baseline.binStep === undefined || baseline.binStep === null) {
+      throw new Error('baseline must have binStep property');
+    }
+
+    // Validate token data
+    if (!token0Data || !token0Data.address || !token0Data.symbol || token0Data.decimals === undefined) {
+      throw new Error('token0Data must have address, symbol, and decimals properties');
+    }
+    if (!token1Data || !token1Data.address || !token1Data.symbol || token1Data.decimals === undefined) {
+      throw new Error('token1Data must have address, symbol, and decimals properties');
+    }
+
+    const currentActiveId = swapData.activeId;
+    const baselineActiveId = baseline.activeId;
+    const binStep = baseline.binStep;
+
+    // Convert bin IDs to human-readable prices
+    const baselinePrice = this._binIdToPrice(baselineActiveId, binStep, token0Data.decimals, token1Data.decimals);
+    const currentPrice = this._binIdToPrice(currentActiveId, binStep, token0Data.decimals, token1Data.decimals);
+
+    // Calculate price movement percentage
+    // priceRatio = (1 + binStep/10000)^(currentId - baselineId)
+    // priceMovementPercent = |priceRatio - 1| * 100
+    if (baselinePrice === 0) {
+      throw new Error('Baseline price is zero, cannot calculate movement');
+    }
+
+    const priceRatio = currentPrice / baselinePrice;
+    const priceMovementPercent = Math.abs((priceRatio - 1) * 100);
+    const direction = currentPrice >= baselinePrice ? 'up' : 'down';
+
+    return {
+      priceMovementPercent,
+      baselinePrice: baselinePrice.toString(),
+      currentPrice: currentPrice.toString(),
+      direction
+    };
   }
 
   async getPositionsForVDS(address, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getPositionsForVDS not implemented");
+    // Validate address
+    if (!address) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(address);
+    } catch (error) {
+      throw new Error(`Invalid address: ${address}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+      if (!positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+
+      // Get all position IDs for this vault
+      const positionIds = await positionManager.getPositionsByVault(address);
+
+      if (positionIds.length === 0) {
+        return { positions: {}, poolData: {} };
+      }
+
+      // Fetch each position via getPositionById and aggregate results
+      const positions = {};
+      const poolData = {};
+
+      for (const positionId of positionIds) {
+        try {
+          const result = await this.getPositionById(positionId, provider);
+
+          // Filter out inactive positions (TJ equivalent of zero-liquidity filter)
+          if (!result.position.active) {
+            continue;
+          }
+
+          positions[result.position.id] = result.position;
+          Object.assign(poolData, result.poolData);
+        } catch (error) {
+          // Skip positions that fail to fetch (e.g., no deposit bins)
+          continue;
+        }
+      }
+
+      return { positions, poolData };
+
+    } catch (error) {
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('No position manager')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch positions for VDS: ${error.message}`);
+    }
   }
 
   async getPositionById(tokenId, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getPositionById not implemented");
+    // Validate params (same pattern as V3/V4)
+    if (tokenId === null || tokenId === undefined || tokenId === '') {
+      throw new Error('TokenId parameter is required');
+    }
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error('Valid provider parameter is required');
+    }
+
+    try {
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+      if (!positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+
+      const positionData = await positionManager.getPosition(tokenId);
+
+      if (positionData.lbPair === ethers.constants.AddressZero) {
+        throw new Error(`Position ${tokenId} not found`);
+      }
+
+      const depositIds = positionData.depositIds.map(id => Number(id));
+      const liquidityMinted = positionData.liquidityMinted.map(lm => lm.toString());
+
+      if (depositIds.length === 0) {
+        throw new Error(`Position ${tokenId} has no deposit bins`);
+      }
+
+      const poolAddress = positionData.lbPair.toLowerCase();
+      const tokenXInfo = getTokenByAddress(positionData.tokenX, this.chainId);
+      const tokenYInfo = getTokenByAddress(positionData.tokenY, this.chainId);
+
+      return {
+        position: {
+          id: String(tokenId),
+          pool: poolAddress,
+          lowerBinId: Math.min(...depositIds),
+          upperBinId: Math.max(...depositIds),
+          depositIds,
+          liquidityMinted,
+          active: positionData.active,
+          createdAt: Number(positionData.createdAt),
+          lastUpdated: Date.now()
+        },
+        poolData: {
+          [poolAddress]: {
+            token0Symbol: tokenXInfo.symbol,
+            token1Symbol: tokenYInfo.symbol,
+            binStep: Number(positionData.binStep),
+            platform: 'traderjoeV2_1'
+          }
+        }
+      };
+    } catch (error) {
+      if (error.message.includes('TokenId parameter') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('not found') ||
+          error.message.includes('No position manager')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch position ${tokenId}: ${error.message}`);
+    }
   }
 
   async getAccruedFeesUSD(position, tokenPrices, provider) {
-    throw new Error("TraderJoeV2_1Adapter.getAccruedFeesUSD not implemented");
+    // Validate inputs
+    if (!position || typeof position !== 'object') {
+      throw new Error('position is required and must be an object');
+    }
+    if (position.id === undefined || position.id === null) {
+      throw new Error('position.id is required');
+    }
+    if (!tokenPrices || typeof tokenPrices !== 'object') {
+      throw new Error('tokenPrices is required and must be an object');
+    }
+    if (typeof tokenPrices.token0 !== 'number' || typeof tokenPrices.token1 !== 'number') {
+      throw new Error('tokenPrices must have token0 and token1 as numbers');
+    }
+    if (!provider) {
+      throw new Error('provider is required');
+    }
+
+    // Create position manager contract instance
+    const positionManager = new ethers.Contract(
+      this.addresses.positionManagerAddress,
+      contractData.TJPositionManager.abi,
+      provider
+    );
+
+    // Fetch accrued fees and position data in parallel
+    // getAccruedFees returns per-bin fee arrays (feesX[], feesY[])
+    // getPosition returns struct with tokenX/tokenY addresses for decimal lookup
+    const [feeData, positionData] = await Promise.all([
+      positionManager.getAccruedFees(position.id),
+      positionManager.getPosition(position.id),
+    ]);
+
+    // Sum per-bin fees using BigInt for precision
+    let totalFeesX = BigInt(0);
+    let totalFeesY = BigInt(0);
+
+    for (const feeX of feeData.feesX) {
+      totalFeesX += BigInt(feeX.toString());
+    }
+    for (const feeY of feeData.feesY) {
+      totalFeesY += BigInt(feeY.toString());
+    }
+
+    // Look up token decimals (tokenX = lower address = token0)
+    const tokenXData = getTokenByAddress(positionData.tokenX, this.chainId);
+    const tokenYData = getTokenByAddress(positionData.tokenY, this.chainId);
+
+    // Format fees (divide by 10^decimals)
+    const token0Fees = Number(totalFeesX) / Math.pow(10, tokenXData.decimals);
+    const token1Fees = Number(totalFeesY) / Math.pow(10, tokenYData.decimals);
+
+    // Convert to USD
+    const token0USD = token0Fees * tokenPrices.token0;
+    const token1USD = token1Fees * tokenPrices.token1;
+    const totalUSD = token0USD + token1USD;
+
+    return {
+      totalUSD,
+      token0Fees,
+      token1Fees,
+      token0USD,
+      token1USD,
+      fees0: totalFeesX.toString(),
+      fees1: totalFeesY.toString(),
+    };
   }
 
   async generateClaimFeesData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateClaimFeesData not implemented");
+    const { position, walletAddress } = params;
+
+    if (!position || typeof position !== 'object') throw new Error("Position parameter is required");
+    if (position.id === null || position.id === undefined) throw new Error("Position id is required");
+    if (!walletAddress) throw new Error("walletAddress is required");
+    try { ethers.utils.getAddress(walletAddress); } catch { throw new Error(`Invalid wallet address: ${walletAddress}`); }
+    if (!this.addresses?.positionManagerAddress) throw new Error("No position manager address configured");
+
+    const iface = new ethers.utils.Interface([
+      "function collectFees(address vault, uint256 positionId)"
+    ]);
+
+    return {
+      to: this.addresses.positionManagerAddress,
+      data: iface.encodeFunctionData("collectFees", [walletAddress, position.id]),
+      value: '0x00',
+    };
   }
 
   /**
@@ -185,20 +578,732 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     };
   }
 
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
-    throw new Error("TraderJoeV2_1Adapter.calculateTokenAmounts not implemented");
+  /**
+   * Calculate the current token amounts for a Trader Joe V2.1 position.
+   *
+   * Unlike V3/V4 (pure math from liquidity + price), TJ requires RPC calls
+   * to fetch per-bin reserves and total supplies from the LBPair contract,
+   * then delegates to PairV2.calculateAmounts() from the TJ SDK.
+   *
+   * @param {Object} position - Position from getPositionById()
+   * @param {string} position.pool - LBPair contract address
+   * @param {number[]} position.depositIds - Bin IDs with liquidity
+   * @param {string[]} position.liquidityMinted - Liquidity shares per bin
+   * @param {Object} poolData - Pool data from getPoolData()
+   * @param {Object} token0Data - Token0 metadata
+   * @param {Object} token1Data - Token1 metadata
+   * @param {Object} provider - Ethers provider instance (REQUIRED for TJ)
+   * @returns {Promise<[BigInt, BigInt]>} [amountX, amountY] as native BigInts
+   */
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
+    // --- Provider validation (required for TJ) ---
+    if (!provider) {
+      throw new Error('provider is required for Trader Joe V2.1 calculateTokenAmounts');
+    }
+
+    // --- Position validation ---
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position is required and must be an object');
+    }
+    if (!position.pool || typeof position.pool !== 'string') {
+      throw new Error('position.pool is required and must be a string');
+    }
+    if (!Array.isArray(position.depositIds) || position.depositIds.length === 0) {
+      throw new Error('position.depositIds is required and must be a non-empty array');
+    }
+    if (!Array.isArray(position.liquidityMinted) || position.liquidityMinted.length === 0) {
+      throw new Error('position.liquidityMinted is required and must be a non-empty array');
+    }
+    if (position.depositIds.length !== position.liquidityMinted.length) {
+      throw new Error(
+        `position.depositIds length (${position.depositIds.length}) must match ` +
+        `position.liquidityMinted length (${position.liquidityMinted.length})`
+      );
+    }
+
+    // --- Pool/token data validation ---
+    if (!poolData || typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (!token0Data || typeof token0Data !== 'object') {
+      throw new Error('token0Data is required and must be an object');
+    }
+    if (!token1Data || typeof token1Data !== 'object') {
+      throw new Error('token1Data is required and must be an object');
+    }
+
+    // --- Early return for zero liquidity ---
+    const allZero = position.liquidityMinted.every(lm => BigInt(lm) === 0n);
+    if (allZero) {
+      return [0n, 0n];
+    }
+
+    // --- Fetch per-bin reserves + total supplies from LBPair ---
+    const lbPair = new ethers.Contract(position.pool, this.lbPairABI, provider);
+    const [activeId, bins, totalSupplies] = await Promise.all([
+      lbPair.getActiveId(),
+      Promise.all(position.depositIds.map(id => lbPair.getBin(id))),
+      Promise.all(position.depositIds.map(id => lbPair.totalSupply(id)))
+    ]);
+
+    // --- Use TJ SDK to compute token amounts ---
+    const { PairV2 } = await import("@traderjoe-xyz/sdk-v2");
+
+    const binReserves = bins.map(b => ({
+      reserveX: b[0].toBigInt(),
+      reserveY: b[1].toBigInt()
+    }));
+    const supplies = totalSupplies.map(ts => ts.toBigInt());
+
+    const { amountX, amountY } = PairV2.calculateAmounts(
+      position.depositIds,
+      Number(activeId),
+      binReserves,
+      supplies,
+      position.liquidityMinted
+    );
+
+    return [BigInt(amountX.toString()), BigInt(amountY.toString())];
   }
 
+  /**
+   * Generate calldata for removing liquidity from a TJ V2.1 position
+   *
+   * The vault calls decreaseLiquidity() on VaultFactory, which validates via
+   * TJPositionValidator, then executes the calldata against TJPositionManager.
+   * Uses removePosition() for 100% removal, decreaseLiquidity() for partial.
+   *
+   * @param {Object} params
+   * @param {Object} params.position - Position object from getPositionById()
+   * @param {string} params.position.id - Position ID (numeric string)
+   * @param {string} params.position.pool - LBPair contract address
+   * @param {number[]} params.position.depositIds - Bin IDs with liquidity
+   * @param {string[]} params.position.liquidityMinted - Liquidity amounts per bin
+   * @param {boolean} params.position.active - Must be true
+   * @param {number} params.percentage - Percentage of liquidity to remove (1-100)
+   * @param {Object} params.provider - Ethers provider instance
+   * @param {string} params.walletAddress - Vault address
+   * @param {number} params.slippageTolerance - Slippage tolerance (0-100)
+   * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
+   * @returns {Promise<{to: string, data: string, value: string, quote: Object}>}
+   */
   async generateRemoveLiquidityData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateRemoveLiquidityData not implemented");
+    const {
+      position,
+      percentage,
+      provider,
+      walletAddress,
+      slippageTolerance,
+      deadlineMinutes
+    } = params;
+
+    // --- Position validation ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position id is required");
+    }
+    if (!/^\d+$/.test(String(position.id))) {
+      throw new Error("Position id must be numeric");
+    }
+    if (!position.pool || typeof position.pool !== 'string') {
+      throw new Error("Position pool is required");
+    }
+    if (!Array.isArray(position.depositIds) || position.depositIds.length === 0) {
+      throw new Error("Position depositIds must be a non-empty array");
+    }
+    if (!Array.isArray(position.liquidityMinted) || position.liquidityMinted.length === 0) {
+      throw new Error("Position liquidityMinted must be a non-empty array");
+    }
+    if (position.depositIds.length !== position.liquidityMinted.length) {
+      throw new Error("Position depositIds and liquidityMinted must have the same length");
+    }
+    if (position.active !== true) {
+      throw new Error("Position must be active");
+    }
+
+    // --- Percentage validation ---
+    if (percentage === null || percentage === undefined) {
+      throw new Error("Percentage is required");
+    }
+    if (!Number.isFinite(percentage)) {
+      throw new Error("Percentage must be a finite number");
+    }
+    if (!Number.isInteger(percentage)) {
+      throw new Error("Percentage must be an integer");
+    }
+    if (percentage < 1 || percentage > 100) {
+      throw new Error("Percentage must be between 1 and 100");
+    }
+
+    // --- Provider validation ---
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    // --- Wallet address validation ---
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
+      throw new Error("Wallet address is required");
+    }
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    // --- Slippage validation ---
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    // --- Deadline validation ---
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
+
+    // --- Position manager address ---
+    if (!this.addresses?.positionManagerAddress) {
+      throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+    }
+    const positionManagerAddress = this.addresses.positionManagerAddress;
+
+    // --- Compute amounts to remove per bin (scale by percentage) ---
+    const amountsToRemove = position.liquidityMinted.map(
+      lm => (BigInt(lm) * BigInt(percentage) / 100n).toString()
+    );
+
+    // --- Fetch bin reserves + total supplies from LBPair ---
+    const lbPair = new ethers.Contract(position.pool, this.lbPairABI, provider);
+    const [activeId, bins, totalSupplies] = await Promise.all([
+      lbPair.getActiveId(),
+      Promise.all(position.depositIds.map(id => lbPair.getBin(id))),
+      Promise.all(position.depositIds.map(id => lbPair.totalSupply(id)))
+    ]);
+
+    // --- Use TJ SDK static method to compute expected amounts ---
+    const { PairV2 } = await import("@traderjoe-xyz/sdk-v2");
+
+    const binReserves = bins.map(b => ({
+      reserveX: b[0].toBigInt(),
+      reserveY: b[1].toBigInt()
+    }));
+    const supplies = totalSupplies.map(ts => ts.toBigInt());
+
+    const { amountX, amountY } = PairV2.calculateAmounts(
+      position.depositIds,
+      Number(activeId),
+      binReserves,
+      supplies,
+      amountsToRemove
+    );
+
+    // Convert JSBI to BigInt strings
+    const amountXStr = amountX.toString();
+    const amountYStr = amountY.toString();
+
+    // --- Apply slippage to compute mins ---
+    const slippageBps = BigInt(Math.round(slippageTolerance * 100));
+    const amountXMin = (BigInt(amountXStr) * (10000n - slippageBps) / 10000n).toString();
+    const amountYMin = (BigInt(amountYStr) * (10000n - slippageBps) / 10000n).toString();
+
+    // --- Compute deadline ---
+    const deadline = this._createDeadline(deadlineMinutes);
+
+    // --- Encode calldata: removePosition (100%) or decreaseLiquidity (partial) ---
+    let calldata;
+
+    if (percentage === 100) {
+      const iface = new ethers.utils.Interface([
+        "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      calldata = iface.encodeFunctionData("removePosition", [
+        walletAddress, position.id, amountXMin, amountYMin, deadline
+      ]);
+    } else {
+      const iface = new ethers.utils.Interface([
+        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      calldata = iface.encodeFunctionData("decreaseLiquidity", [
+        walletAddress, position.id, percentage, amountXMin, amountYMin, deadline
+      ]);
+    }
+
+    return {
+      to: positionManagerAddress,
+      data: calldata,
+      value: '0x00',
+      quote: {
+        positionId: position.id,
+        percentage,
+        amountX: amountXStr,
+        amountY: amountYStr,
+        amountXMin,
+        amountYMin,
+        deadline,
+        depositIds: position.depositIds,
+        liquidityMinted: position.liquidityMinted,
+        amountsToRemove
+      }
+    };
   }
 
   async generateAddLiquidityData(params) {
-    throw new Error("TraderJoeV2_1Adapter.generateAddLiquidityData not implemented");
+    const {
+      position,
+      token0Amount,
+      token1Amount,
+      provider,
+      walletAddress,
+      poolData,
+      token0Data,
+      token1Data,
+      slippageTolerance,
+      deadlineMinutes
+    } = params;
+
+    // --- Position validation (hybrid of create + remove patterns) ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.id === null || position.id === undefined) {
+      throw new Error("Position id is required");
+    }
+    if (!/^\d+$/.test(String(position.id))) {
+      throw new Error("Position id must be numeric");
+    }
+    if (position.lowerBinId === null || position.lowerBinId === undefined) {
+      throw new Error("Position lowerBinId is required");
+    }
+    if (!Number.isFinite(position.lowerBinId)) {
+      throw new Error("Position lowerBinId must be a finite number");
+    }
+    if (position.upperBinId === null || position.upperBinId === undefined) {
+      throw new Error("Position upperBinId is required");
+    }
+    if (!Number.isFinite(position.upperBinId)) {
+      throw new Error("Position upperBinId must be a finite number");
+    }
+    if (position.lowerBinId >= position.upperBinId) {
+      throw new Error("Position lowerBinId must be less than upperBinId");
+    }
+
+    // --- Token amount validation ---
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+    if (parseInt(token0Amount) === 0 && parseInt(token1Amount) === 0) {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
+      throw new Error("Wallet address is required");
+    }
+    if (typeof walletAddress !== 'string') {
+      throw new Error("Wallet address must be a string");
+    }
+    try {
+      ethers.utils.getAddress(walletAddress);
+    } catch (error) {
+      throw new Error(`Invalid wallet address: ${walletAddress}`);
+    }
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.activeId === null || poolData.activeId === undefined) {
+      throw new Error("Pool data activeId is required");
+    }
+    if (!Number.isFinite(poolData.activeId)) {
+      throw new Error("Pool data activeId must be a finite number");
+    }
+    if (poolData.binStep === null || poolData.binStep === undefined) {
+      throw new Error("Pool data binStep is required");
+    }
+    if (!Number.isFinite(poolData.binStep) || poolData.binStep <= 0) {
+      throw new Error("Pool data binStep must be a positive finite number");
+    }
+    if (!poolData.address) {
+      throw new Error("Pool data address is required");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (!token0Data.address) {
+      throw new Error("Token0 address is required");
+    }
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (!token1Data.address) {
+      throw new Error("Token1 address is required");
+    }
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    if (slippageTolerance === null || slippageTolerance === undefined) {
+      throw new Error("Slippage tolerance is required");
+    }
+    if (!Number.isFinite(slippageTolerance)) {
+      throw new Error("Slippage tolerance must be a finite number");
+    }
+    if (slippageTolerance < 0 || slippageTolerance > 100) {
+      throw new Error("Slippage tolerance must be between 0 and 100");
+    }
+
+    if (deadlineMinutes === null || deadlineMinutes === undefined) {
+      throw new Error("Deadline minutes is required");
+    }
+    if (!Number.isFinite(deadlineMinutes)) {
+      throw new Error("Deadline minutes must be a finite number");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Deadline minutes must be greater than 0");
+    }
+
+    // --- Resolve position manager address ---
+    if (!this.addresses?.positionManagerAddress) {
+      throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+    }
+    const positionManagerAddress = this.addresses.positionManagerAddress;
+
+    // --- Sort tokens to TJ canonical order (tokenX = lower address) ---
+    const { sortedToken0: tokenX, sortedToken1: tokenY, tokensSwapped } =
+      this.sortTokens(token0Data, token1Data);
+    const amountX = tokensSwapped ? token1Amount : token0Amount;
+    const amountY = tokensSwapped ? token0Amount : token1Amount;
+
+    // --- Apply slippage to amounts ---
+    const slipMul = BigInt(Math.floor((100 - slippageTolerance) * 100));
+    const amountXMin = (BigInt(amountX) * slipMul / 10000n).toString();
+    const amountYMin = (BigInt(amountY) * slipMul / 10000n).toString();
+
+    // --- Compute idSlippage from price slippage ---
+    const priceSlippage = slippageTolerance / 100;
+    const idSlippage = Math.floor(
+      Math.log(1 + priceSlippage) / Math.log(1 + poolData.binStep / 1e4)
+    );
+
+    // --- Generate bin distribution using SDK ---
+    const { deltaIds, distributionX, distributionY } =
+      getUniformDistributionFromBinRange(poolData.activeId, [position.lowerBinId, position.upperBinId]);
+
+    // --- Compute deadline ---
+    const deadline = this._createDeadline(deadlineMinutes);
+
+    // --- Encode addToPosition calldata ---
+    const iface = new ethers.utils.Interface([
+      "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+    ]);
+
+    const calldata = iface.encodeFunctionData("addToPosition", [
+      walletAddress,
+      position.id,
+      amountX,
+      amountY,
+      amountXMin,
+      amountYMin,
+      poolData.activeId,
+      idSlippage,
+      deltaIds,
+      distributionX.map(d => d.toString()),
+      distributionY.map(d => d.toString()),
+      deadline
+    ]);
+
+    return {
+      to: positionManagerAddress,
+      data: calldata,
+      value: '0x00',
+      quote: {
+        positionId: position.id,
+        amountX,
+        amountY,
+        amountXMin,
+        amountYMin,
+        deltaIds,
+        distributionX: distributionX.map(d => d.toString()),
+        distributionY: distributionY.map(d => d.toString()),
+        tokensSwapped,
+        idSlippage,
+        lbPair: poolData.address,
+        binStep: poolData.binStep,
+        activeId: poolData.activeId
+      }
+    };
   }
 
   async getAddLiquidityAmounts(params) {
-    throw new Error("TraderJoeV2_1Adapter.getAddLiquidityAmounts not implemented");
+    const { position, token0Amount, token1Amount, poolData, token0Data, token1Data, provider } = params;
+
+    // --- Input validation (same pattern as generateCreatePositionData) ---
+    if (position === null || position === undefined) {
+      throw new Error("Position parameter is required");
+    }
+    if (typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error("Position must be an object");
+    }
+    if (position.lowerBinId === null || position.lowerBinId === undefined) {
+      throw new Error("Position lowerBinId is required");
+    }
+    if (!Number.isFinite(position.lowerBinId)) {
+      throw new Error("Position lowerBinId must be a finite number");
+    }
+    if (position.upperBinId === null || position.upperBinId === undefined) {
+      throw new Error("Position upperBinId is required");
+    }
+    if (!Number.isFinite(position.upperBinId)) {
+      throw new Error("Position upperBinId must be a finite number");
+    }
+    if (position.lowerBinId >= position.upperBinId) {
+      throw new Error("Position lowerBinId must be less than upperBinId");
+    }
+
+    if (token0Amount === null || token0Amount === undefined) {
+      throw new Error("Token0 amount is required");
+    }
+    if (typeof token0Amount !== 'string') {
+      throw new Error("Token0 amount must be a string");
+    }
+    if (!/^\d+$/.test(token0Amount)) {
+      throw new Error("Token0 amount must be a positive numeric string");
+    }
+    if (token1Amount === null || token1Amount === undefined) {
+      throw new Error("Token1 amount is required");
+    }
+    if (typeof token1Amount !== 'string') {
+      throw new Error("Token1 amount must be a string");
+    }
+    if (!/^\d+$/.test(token1Amount)) {
+      throw new Error("Token1 amount must be a positive numeric string");
+    }
+    if (token0Amount === '0' && token1Amount === '0') {
+      throw new Error("At least one token amount must be greater than 0");
+    }
+
+    if (!provider) {
+      throw new Error("Provider is required");
+    }
+
+    if (poolData === null || poolData === undefined) {
+      throw new Error("Pool data parameter is required");
+    }
+    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
+      throw new Error("Pool data must be an object");
+    }
+    if (poolData.activeId === null || poolData.activeId === undefined) {
+      throw new Error("Pool data activeId is required");
+    }
+    if (!Number.isFinite(poolData.activeId)) {
+      throw new Error("Pool data activeId must be a finite number");
+    }
+    if (poolData.binStep === null || poolData.binStep === undefined) {
+      throw new Error("Pool data binStep is required");
+    }
+    if (!Number.isFinite(poolData.binStep) || poolData.binStep <= 0) {
+      throw new Error("Pool data binStep must be a positive finite number");
+    }
+    if (!poolData.address) {
+      throw new Error("Pool data address is required");
+    }
+
+    if (token0Data === null || token0Data === undefined) {
+      throw new Error("Token0 data parameter is required");
+    }
+    if (!token0Data.address) {
+      throw new Error("Token0 address is required");
+    }
+    if (token0Data.decimals === null || token0Data.decimals === undefined) {
+      throw new Error("Token0 decimals is required");
+    }
+    if (token1Data === null || token1Data === undefined) {
+      throw new Error("Token1 data parameter is required");
+    }
+    if (!token1Data.address) {
+      throw new Error("Token1 address is required");
+    }
+    if (token1Data.decimals === null || token1Data.decimals === undefined) {
+      throw new Error("Token1 decimals is required");
+    }
+    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
+      throw new Error("Token0 and token1 addresses cannot be the same");
+    }
+
+    // --- Sort tokens to TJ canonical order (tokenX = lower address) ---
+    const { sortedToken0: tokenX, sortedToken1: tokenY, tokensSwapped } =
+      this.sortTokens(token0Data, token1Data);
+    const amountX = tokensSwapped ? token1Amount : token0Amount;
+    const amountY = tokensSwapped ? token0Amount : token1Amount;
+
+    // --- Determine position's range relative to activeId ---
+    const activeId = poolData.activeId;
+    const lowerBin = position.lowerBinId;
+    const upperBin = position.upperBinId;
+    const entirelyAbove = lowerBin > activeId;   // X-only range
+    const entirelyBelow = upperBin < activeId;   // Y-only range
+
+    // --- Handle out-of-range positions (no RPC needed) ---
+    if (entirelyAbove) {
+      // Only tokenX is depositable
+      const resultX = BigInt(amountX) > 0n ? amountX : '0';
+      return {
+        token0Amount: tokensSwapped ? '0' : resultX,
+        token1Amount: tokensSwapped ? resultX : '0',
+        liquidity: resultX
+      };
+    }
+    if (entirelyBelow) {
+      // Only tokenY is depositable
+      const resultY = BigInt(amountY) > 0n ? amountY : '0';
+      return {
+        token0Amount: tokensSwapped ? resultY : '0',
+        token1Amount: tokensSwapped ? '0' : resultY,
+        liquidity: resultY
+      };
+    }
+
+    // --- In-range: compute amounts using distribution and reserves ---
+    try {
+      const { deltaIds, distributionX, distributionY } =
+        getUniformDistributionFromBinRange(activeId, [lowerBin, upperBin]);
+
+      // Find the active bin index (deltaId === 0)
+      const activeBinIndex = deltaIds.indexOf(0);
+
+      // Fetch active bin reserves and total supply from LBPair
+      const lbPair = new ethers.Contract(poolData.address, this.lbPairABI, provider);
+      const [binData, totalSupply] = await Promise.all([
+        lbPair.getBin(activeId),
+        lbPair.totalSupply(activeId)
+      ]);
+
+      const reserveX = binData[0].toBigInt();
+      const reserveY = binData[1].toBigInt();
+
+      // Get distribution weights at the active bin
+      const distXAtActive = distributionX[activeBinIndex];
+      const distYAtActive = distributionY[activeBinIndex];
+
+      let resultX, resultY;
+      const inputX = BigInt(amountX);
+      const inputY = BigInt(amountY);
+
+      if (reserveX === 0n && reserveY === 0n) {
+        // Empty active bin — no ratio constraint, return inputs as-is
+        resultX = inputX;
+        resultY = inputY;
+      } else if (inputX > 0n && inputY === 0n) {
+        // Case 1a: Only X provided → compute Y
+        resultX = inputX;
+        if (reserveX === 0n || distXAtActive === 0n) {
+          // X can't go into active bin — deposit X in above-active bins only
+          resultY = 0n;
+        } else {
+          // amountY = amountX * distXAtActive * reserveY / (distYAtActive * reserveX)
+          resultY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
+        }
+      } else if (inputY > 0n && inputX === 0n) {
+        // Case 1b: Only Y provided → compute X
+        resultY = inputY;
+        if (reserveY === 0n || distYAtActive === 0n) {
+          resultX = 0n;
+        } else {
+          resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
+        }
+      } else {
+        // Case 2: Both provided → determine limiting factor
+        if (reserveX === 0n || distXAtActive === 0n) {
+          resultX = 0n;
+          resultY = inputY;
+        } else if (reserveY === 0n || distYAtActive === 0n) {
+          resultX = inputX;
+          resultY = 0n;
+        } else {
+          const impliedY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
+          if (impliedY <= inputY) {
+            // X is the limiting factor
+            resultX = inputX;
+            resultY = impliedY;
+          } else {
+            // Y is the limiting factor
+            resultY = inputY;
+            resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
+          }
+        }
+      }
+
+      // Estimate liquidity from active bin contribution
+      let estimatedLiquidity;
+      const totalSupplyBigInt = totalSupply.toBigInt();
+      const totalReserve = reserveX + reserveY;
+      if (totalReserve > 0n && totalSupplyBigInt > 0n) {
+        // Estimate deposit amount going to the active bin
+        // Use the proportion of the total amount
+        const depositAtActive = resultX + resultY;
+        estimatedLiquidity = (depositAtActive * totalSupplyBigInt / totalReserve).toString();
+      } else {
+        estimatedLiquidity = (resultX + resultY).toString();
+      }
+
+      // Map results back to caller's token order
+      return {
+        token0Amount: tokensSwapped ? resultY.toString() : resultX.toString(),
+        token1Amount: tokensSwapped ? resultX.toString() : resultY.toString(),
+        liquidity: estimatedLiquidity
+      };
+    } catch (error) {
+      if (error.message.includes('is required') ||
+          error.message.includes('must be') ||
+          error.message.includes('cannot be the same')) {
+        throw error;
+      }
+      throw new Error(`Failed to calculate add liquidity amounts: ${error.message}`);
+    }
   }
 
   /**
@@ -439,28 +1544,541 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     return Math.floor(Date.now() / 1000) + (deadlineMinutes * 60);
   }
 
+  /**
+   * Get the Swap event signature for Trader Joe V2.1 LBPair
+   * @returns {string} Solidity event signature
+   */
+  _getSwapEventSignature() {
+    return 'Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)';
+  }
+
+  /**
+   * Convert a bin ID to a human-readable price
+   *
+   * Trader Joe V2.1 Liquidity Book price formula:
+   *   price(id) = (1 + binStep/10000)^(id - 8388608) * 10^(token0Decimals - token1Decimals)
+   *
+   * The reference bin (8388608 = 2^23) represents a raw price ratio of 1.0.
+   * The decimal adjustment converts from raw token units to human-readable price.
+   *
+   * @param {number} binId - Bin ID to convert
+   * @param {number} binStep - Bin step in basis points (e.g., 20 = 0.20%)
+   * @param {number} token0Decimals - Decimals of token0 (tokenX, lower address)
+   * @param {number} token1Decimals - Decimals of token1 (tokenY, higher address)
+   * @returns {number} Human-readable price (token1 per token0)
+   */
+  _binIdToPrice(binId, binStep, token0Decimals, token1Decimals) {
+    const REFERENCE_BIN = 8388608; // 2^23
+    const base = 1 + binStep / 10000;
+    const rawPrice = Math.pow(base, binId - REFERENCE_BIN);
+    const decimalAdjustment = Math.pow(10, token0Decimals - token1Decimals);
+    return rawPrice * decimalAdjustment;
+  }
+
+  /**
+   * Decode a packed bytes32 value into tokenX and tokenY amounts
+   *
+   * Trader Joe V2.1 packs two 128-bit amounts into a single bytes32:
+   *   - Upper 128 bits = tokenX amount
+   *   - Lower 128 bits = tokenY amount
+   *
+   * @param {string} packedBytes32 - The packed bytes32 value
+   * @returns {{ amountX: string, amountY: string }} Decoded amounts as strings
+   */
+  _decodePackedAmounts(packedBytes32) {
+    const bn = ethers.BigNumber.from(packedBytes32);
+    const mask128 = ethers.BigNumber.from('0x' + 'f'.repeat(32));
+    const amountY = bn.and(mask128);
+    const amountX = bn.shr(128);
+    return { amountX: amountX.toString(), amountY: amountY.toString() };
+  }
+
   async batchSwapTransactions(swapInstructions, options) {
-    throw new Error("TraderJoeV2_1Adapter.batchSwapTransactions not implemented");
+    const { provider, chainId, recipient, slippageTolerance } = options;
+
+    // Validate options (no signer — TJ V2.1 doesn't use Permit2)
+    if (!provider) throw new Error("provider is required");
+    if (!chainId) throw new Error("chainId is required");
+    if (!recipient) throw new Error("recipient is required");
+    if (slippageTolerance === undefined || slippageTolerance === null) {
+      throw new Error("slippageTolerance is required");
+    }
+
+    if (!Array.isArray(swapInstructions)) throw new Error("swapInstructions must be an array");
+    if (swapInstructions.length === 0) throw new Error("swapInstructions cannot be empty");
+
+    const transactions = [];
+    const metadata = [];
+
+    for (const instruction of swapInstructions) {
+      if (!instruction.tokenIn || !instruction.tokenIn.symbol) throw new Error("tokenIn with symbol is required");
+      if (!instruction.tokenOut || !instruction.tokenOut.symbol) throw new Error("tokenOut with symbol is required");
+      if (!instruction.amount) throw new Error("amount is required");
+
+      const result = await this._generateSwapTransaction({
+        tokenIn: instruction.tokenIn,
+        tokenOut: instruction.tokenOut,
+        amount: instruction.amount,
+        isAmountIn: instruction.isAmountIn !== undefined ? instruction.isAmountIn : true,
+        provider, chainId, recipient, slippageTolerance,
+      });
+
+      transactions.push(result.transaction);
+      metadata.push({
+        tokenInSymbol: instruction.tokenIn.symbol,
+        tokenOutSymbol: instruction.tokenOut.symbol,
+        tokenInAddress: result.tokenInAddress,
+        tokenOutAddress: result.tokenOutAddress,
+        quotedAmountIn: result.quotedAmountIn,
+        quotedAmountOut: result.quotedAmountOut,
+        isAmountIn: result.isAmountIn,
+      });
+    }
+
+    return { transactions, metadata };
+  }
+
+  /**
+   * Generate a single swap transaction using LBQuoter for routing and LBRouter for calldata.
+   * @private
+   */
+  async _generateSwapTransaction(params) {
+    const { tokenIn, tokenOut, amount, isAmountIn, provider, chainId, recipient, slippageTolerance } = params;
+
+    const tokenInIsNative = !!tokenIn.isNative;
+    const tokenOutIsNative = !!tokenOut.isNative;
+
+    // Resolve addresses: native → WETH for route/quote
+    const wethAddress = getWethAddress(chainId);
+    const tokenInAddress = tokenInIsNative ? wethAddress : tokenIn.address;
+    const tokenOutAddress = tokenOutIsNative ? wethAddress : tokenOut.address;
+
+    // 1. Get quote from LBQuoter
+    const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
+    const route = [tokenInAddress, tokenOutAddress];
+
+    let quote;
+    try {
+      quote = isAmountIn
+        ? await quoter.findBestPathFromAmountIn(route, amount)
+        : await quoter.findBestPathFromAmountOut(route, amount);
+    } catch (error) {
+      throw new Error(`Failed to get swap quote for ${tokenIn.symbol} -> ${tokenOut.symbol}: ${error.message}`);
+    }
+
+    // 2. Extract amounts
+    const quotedAmounts = quote.amounts;
+    const quotedAmountIn = quotedAmounts[0].toString();
+    const quotedAmountOut = quotedAmounts[quotedAmounts.length - 1].toString();
+
+    if (quotedAmountOut === '0') {
+      throw new Error(`No valid route found for ${tokenIn.symbol} -> ${tokenOut.symbol}`);
+    }
+
+    // 3. Build Path struct from quote results
+    const path = {
+      pairBinSteps: quote.binSteps.map(bs => bs.toString()),
+      versions: quote.versions.map(v => Number(v)),
+      tokenPath: quote.route,
+    };
+
+    // 4. Apply slippage and encode router calldata
+    const slippageBps = BigInt(Math.round(slippageTolerance * 100));
+    const deadline = this._createDeadline(30);
+    const routerInterface = new ethers.utils.Interface(this.lbRouterABI);
+
+    let data, value;
+
+    if (isAmountIn) {
+      const amountOutMin = (BigInt(quotedAmountOut) * (10000n - slippageBps) / 10000n).toString();
+
+      if (tokenInIsNative) {
+        data = routerInterface.encodeFunctionData('swapExactNATIVEForTokens', [amountOutMin, path, recipient, deadline]);
+        value = ethers.BigNumber.from(quotedAmountIn).toHexString();
+      } else if (tokenOutIsNative) {
+        data = routerInterface.encodeFunctionData('swapExactTokensForNATIVE', [quotedAmountIn, amountOutMin, path, recipient, deadline]);
+        value = '0x00';
+      } else {
+        data = routerInterface.encodeFunctionData('swapExactTokensForTokens', [quotedAmountIn, amountOutMin, path, recipient, deadline]);
+        value = '0x00';
+      }
+    } else {
+      const amountInMax = (BigInt(quotedAmountIn) * (10000n + slippageBps) / 10000n).toString();
+
+      if (tokenInIsNative) {
+        data = routerInterface.encodeFunctionData('swapNATIVEForExactTokens', [amount, path, recipient, deadline]);
+        value = ethers.BigNumber.from(amountInMax).toHexString();
+      } else if (tokenOutIsNative) {
+        data = routerInterface.encodeFunctionData('swapTokensForExactNATIVE', [amount, amountInMax, path, recipient, deadline]);
+        value = '0x00';
+      } else {
+        data = routerInterface.encodeFunctionData('swapTokensForExactTokens', [amount, amountInMax, path, recipient, deadline]);
+        value = '0x00';
+      }
+    }
+
+    return {
+      transaction: { to: this.addresses.lbRouterAddress, data, value },
+      tokenInAddress,    // WETH address if native (for parseSwapReceipt compatibility)
+      tokenOutAddress,   // WETH address if native
+      quotedAmountIn,
+      quotedAmountOut,
+      isAmountIn,
+    };
   }
 
   async parseClosureReceipt(receipt, positionMetadata, options = {}) {
-    throw new Error("TraderJoeV2_1Adapter.parseClosureReceipt not implemented");
+    if (receipt === null || receipt === undefined) throw new Error("Receipt parameter is required");
+    if (!receipt.logs) throw new Error("Receipt must have logs property");
+    if (!positionMetadata || typeof positionMetadata !== 'object' || Array.isArray(positionMetadata))
+      throw new Error("Position metadata parameter is required");
+
+    const principalByPosition = {};
+    const feesByPosition = {};
+
+    const feesIface = new ethers.utils.Interface([
+      'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+    ]);
+    const removedIface = new ethers.utils.Interface([
+      'event PositionRemoved(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 percentage, uint256 amountX, uint256 amountY)'
+    ]);
+    const feesTopic = feesIface.getEventTopic('FeesCollected');
+    const removedTopic = removedIface.getEventTopic('PositionRemoved');
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === removedTopic) {
+          const decoded = removedIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            principalByPosition[positionId] = {
+              amount0: decoded.args.amountX,
+              amount1: decoded.args.amountY,
+            };
+          }
+        } else if (log.topics && log.topics[0] === feesTopic) {
+          const decoded = feesIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            feesByPosition[positionId] = {
+              token0: decoded.args.amountX,
+              token1: decoded.args.amountY,
+              metadata: positionMetadata[positionId],
+            };
+          }
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    // Fill zero fees for positions with no FeesCollected event
+    for (const positionId of Object.keys(positionMetadata)) {
+      if (!feesByPosition[positionId] && principalByPosition[positionId]) {
+        feesByPosition[positionId] = {
+          token0: ethers.BigNumber.from(0),
+          token1: ethers.BigNumber.from(0),
+          metadata: positionMetadata[positionId],
+        };
+      }
+    }
+
+    return { principalByPosition, feesByPosition };
   }
 
   async parseCollectReceipt(receipt, positionMetadata, options = {}) {
-    throw new Error("TraderJoeV2_1Adapter.parseCollectReceipt not implemented");
+    if (receipt === null || receipt === undefined) throw new Error("Receipt parameter is required");
+    if (!receipt.logs) throw new Error("Receipt must have logs property");
+    if (!positionMetadata || typeof positionMetadata !== 'object' || Array.isArray(positionMetadata))
+      throw new Error("Position metadata parameter is required");
+
+    const feesByPosition = {};
+
+    const feesIface = new ethers.utils.Interface([
+      'event FeesCollected(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountX, uint256 amountY)'
+    ]);
+    const feesTopic = feesIface.getEventTopic('FeesCollected');
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === feesTopic) {
+          const decoded = feesIface.parseLog(log);
+          const positionId = decoded.args.positionId.toString();
+          if (positionMetadata[positionId]) {
+            feesByPosition[positionId] = {
+              token0: decoded.args.amountX,
+              token1: decoded.args.amountY,
+              metadata: positionMetadata[positionId],
+            };
+          }
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    return { feesByPosition };
   }
 
   parseSwapReceipt(receipt, swapMetadata) {
-    throw new Error("TraderJoeV2_1Adapter.parseSwapReceipt not implemented");
+    // Validate receipt
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    // Validate swapMetadata
+    if (swapMetadata === null || swapMetadata === undefined) {
+      throw new Error("Swap metadata parameter is required");
+    }
+    if (!Array.isArray(swapMetadata)) {
+      throw new Error("Swap metadata must be an array");
+    }
+
+    if (swapMetadata.length === 0) {
+      return [];
+    }
+
+    const swapTopicHash = ethers.utils.id(this._getSwapEventSignature());
+
+    // Collect all TJ V2.1 swap events from receipt
+    const swapEvents = [];
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === swapTopicHash) {
+          const parsed = this.parseSwapEvent(log);
+          swapEvents.push(parsed);
+        }
+      } catch (e) {
+        // Not a valid TJ V2.1 Swap event, skip
+      }
+    }
+
+    // Match events to metadata sequentially
+    let eventIndex = 0;
+    const actualSwaps = [];
+
+    for (const metadata of swapMetadata) {
+      if (!metadata.tokenInAddress) {
+        throw new Error("Swap metadata must have tokenInAddress");
+      }
+      if (!metadata.tokenOutAddress) {
+        throw new Error("Swap metadata must have tokenOutAddress");
+      }
+
+      const tokenInAddress = metadata.tokenInAddress.toLowerCase();
+      const tokenOutAddress = metadata.tokenOutAddress.toLowerCase();
+      let totalAmountIn = BigInt(0);
+      let totalAmountOut = BigInt(0);
+
+      if (metadata.routes && metadata.routes.length > 0) {
+        // MULTI-HOP: use tokenPath for first/last hop extraction
+        for (const route of metadata.routes) {
+          const { tokenPath, poolCount } = route;
+          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
+            if (eventIndex >= swapEvents.length) break;
+            const event = swapEvents[eventIndex];
+
+            if (hopIdx === 0) {
+              const first = tokenPath[0].toLowerCase();
+              const second = tokenPath[1].toLowerCase();
+              const isTokenX = first < second;
+              totalAmountIn += BigInt(isTokenX
+                ? event.amountsIn.amountX : event.amountsIn.amountY);
+            }
+
+            if (hopIdx === poolCount - 1) {
+              const prevToken = tokenPath[poolCount - 1].toLowerCase();
+              const lastToken = tokenPath[poolCount].toLowerCase();
+              const isTokenX = lastToken < prevToken;
+              totalAmountOut += BigInt(isTokenX
+                ? event.amountsOut.amountX : event.amountsOut.amountY);
+            }
+
+            eventIndex++;
+          }
+        }
+      } else {
+        // SIMPLE: single-hop, use token address ordering
+        const isTokenInTokenX = tokenInAddress < tokenOutAddress;
+        const numEvents = metadata.expectedSwapEvents || 1;
+
+        for (let i = 0; i < numEvents; i++) {
+          if (eventIndex >= swapEvents.length) break;
+          const event = swapEvents[eventIndex];
+
+          totalAmountIn += BigInt(isTokenInTokenX
+            ? event.amountsIn.amountX : event.amountsIn.amountY);
+          totalAmountOut += BigInt(isTokenInTokenX
+            ? event.amountsOut.amountY : event.amountsOut.amountX);
+
+          eventIndex++;
+        }
+      }
+
+      actualSwaps.push({
+        actualAmountIn: totalAmountIn.toString(),
+        actualAmountOut: totalAmountOut.toString()
+      });
+    }
+
+    return actualSwaps;
   }
 
-  parseIncreaseLiquidityReceipt(receipt, { position, poolData }) {
-    throw new Error("TraderJoeV2_1Adapter.parseIncreaseLiquidityReceipt not implemented");
+  parseIncreaseLiquidityReceipt(receipt, { position, poolData } = {}) {
+    if (receipt === null || receipt === undefined) {
+      throw new Error("Receipt parameter is required");
+    }
+    if (!receipt.logs) {
+      throw new Error("Receipt must have logs property");
+    }
+
+    const positionCreatedIface = new ethers.utils.Interface([
+      'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+    ]);
+    const positionCreatedTopic = positionCreatedIface.getEventTopic('PositionCreated');
+
+    const positionIncreasedIface = new ethers.utils.Interface([
+      'event PositionIncreased(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256 amountXAdded, uint256 amountYAdded)'
+    ]);
+    const positionIncreasedTopic = positionIncreasedIface.getEventTopic('PositionIncreased');
+
+    let createdEvent = null;
+    let increasedEvent = null;
+
+    for (const log of receipt.logs) {
+      try {
+        if (log.topics && log.topics[0] === positionCreatedTopic) {
+          createdEvent = positionCreatedIface.parseLog(log);
+        } else if (log.topics && log.topics[0] === positionIncreasedTopic) {
+          increasedEvent = positionIncreasedIface.parseLog(log);
+        }
+      } catch (e) {
+        // Not a matching event, continue
+      }
+    }
+
+    if (createdEvent) {
+      const depositIds = createdEvent.args.depositIds.map(id => Number(id));
+      const totalLiquidity = createdEvent.args.liquidityMinted.reduce(
+        (sum, val) => (BigInt(sum) + BigInt(val.toString())).toString(), '0'
+      );
+
+      return {
+        tokenId: createdEvent.args.positionId.toString(),
+        liquidity: totalLiquidity,
+        amount0: createdEvent.args.amountXAdded.toString(),
+        amount1: createdEvent.args.amountYAdded.toString(),
+        tickLower: Math.min(...depositIds),
+        tickUpper: Math.max(...depositIds),
+        poolAddress: createdEvent.args.lbPair,
+      };
+    }
+
+    if (increasedEvent) {
+      return {
+        tokenId: increasedEvent.args.positionId.toString(),
+        liquidity: null,
+        amount0: increasedEvent.args.amountXAdded.toString(),
+        amount1: increasedEvent.args.amountYAdded.toString(),
+        tickLower: null,
+        tickUpper: null,
+        poolAddress: null,
+      };
+    }
+
+    throw new Error('PositionCreated or PositionIncreased event not found in receipt');
   }
 
   async getBestSwapQuote(params) {
-    throw new Error("TraderJoeV2_1Adapter.getBestSwapQuote not implemented");
+    const { tokenInAddress, tokenOutAddress, amount, isAmountIn, tokenInIsNative = false, tokenOutIsNative = false, provider } = params;
+
+    // Validate provider (TJ requires it — no cached router like V3/V4's AlphaRouter)
+    if (!provider) {
+      throw new Error("provider is required");
+    }
+
+    // Validate addresses — skip for native ETH
+    if (!tokenInIsNative) {
+      if (!tokenInAddress || typeof tokenInAddress !== 'string') {
+        throw new Error("TokenIn address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenInAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenIn address: ${tokenInAddress}`);
+      }
+    }
+
+    if (!tokenOutIsNative) {
+      if (!tokenOutAddress || typeof tokenOutAddress !== 'string') {
+        throw new Error("TokenOut address parameter is required");
+      }
+      try {
+        ethers.utils.getAddress(tokenOutAddress);
+      } catch (error) {
+        throw new Error(`Invalid tokenOut address: ${tokenOutAddress}`);
+      }
+    }
+
+    if (!amount) {
+      throw new Error("Amount parameter is required");
+    }
+    if (typeof amount !== 'string') {
+      throw new Error("Amount must be a string");
+    }
+    if (!/^\d+$/.test(amount)) {
+      throw new Error("Amount must be a positive numeric string");
+    }
+    if (amount === '0') {
+      throw new Error("Amount cannot be zero");
+    }
+
+    if (typeof isAmountIn !== 'boolean') {
+      throw new Error("isAmountIn parameter is required and must be a boolean");
+    }
+
+    // Resolve native → WETH for quoter route
+    const wethAddress = getWethAddress(this.chainId);
+    const resolvedTokenIn = tokenInIsNative ? wethAddress : tokenInAddress;
+    const resolvedTokenOut = tokenOutIsNative ? wethAddress : tokenOutAddress;
+
+    // Call LBQuoter — handles pool discovery across all bin steps internally
+    const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
+    const route = [resolvedTokenIn, resolvedTokenOut];
+
+    let quote;
+    try {
+      quote = isAmountIn
+        ? await quoter.findBestPathFromAmountIn(route, amount)
+        : await quoter.findBestPathFromAmountOut(route, amount);
+    } catch (error) {
+      throw new Error(`Failed to get swap quote: ${error.message}`);
+    }
+
+    const quotedAmounts = quote.amounts;
+    const quotedAmountIn = quotedAmounts[0].toString();
+    const quotedAmountOut = quotedAmounts[quotedAmounts.length - 1].toString();
+
+    if (quotedAmountOut === '0') {
+      throw new Error(`No route found for token pair ${resolvedTokenIn}/${resolvedTokenOut}`);
+    }
+
+    if (isAmountIn) {
+      return {
+        amountIn: amount,
+        amountOut: quotedAmountOut,
+        route: quote,
+      };
+    } else {
+      return {
+        amountIn: quotedAmountIn,
+        amountOut: amount,
+        route: quote,
+      };
+    }
   }
 
   /**
@@ -678,8 +2296,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
           totalReserves: reserves.reserveX.add(reserves.reserveY)
         };
       } catch (error) {
-        // 🔵 DEBUG: Pool query failed
-        console.error(`🔵 DEBUG: Failed to query pool ${pairAddress}: ${error.message}`);
+        // Pool query failed — skip this pair
         return null;
       }
     });
@@ -856,19 +2473,27 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Get current pool state value for baseline tracking
    *
-   * For Trader Joe V2.1, the current pool state is represented by the active bin ID.
-   * This is analogous to Uniswap's tick - it identifies where the current price sits.
+   * For Trader Joe V2.1, the current pool state includes both the active bin ID
+   * and the bin step. The bin step is needed by evaluatePriceMovement to convert
+   * bin IDs to prices (it's not available in swap event data).
+   *
+   * The returned object is opaque platform-specific data — the strategy stores it
+   * and passes it back to evaluatePriceMovement without inspecting it.
    *
    * @param {Object} poolData - Pool data object from getPoolData
    * @param {number} poolData.activeId - Current active bin ID
-   * @returns {number} Current active bin ID
-   * @throws {Error} If poolData is invalid or missing activeId property
+   * @param {number} poolData.binStep - Bin step in basis points
+   * @returns {{activeId: number, binStep: number}} Current pool state for baseline tracking
+   * @throws {Error} If poolData is invalid or missing required properties
    */
   getPoolCurrent(poolData) {
     if (!poolData || poolData.activeId === undefined) {
       throw new Error('Pool data must have activeId property');
     }
-    return poolData.activeId;
+    if (poolData.binStep === undefined) {
+      throw new Error('Pool data must have binStep property');
+    }
+    return { activeId: poolData.activeId, binStep: poolData.binStep };
   }
 
   /**

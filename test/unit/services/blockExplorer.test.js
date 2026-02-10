@@ -22,11 +22,11 @@ describe('Block Explorer Service', () => {
   });
 
   describe('configureBlockExplorer', () => {
-    it('should set arbiscan API key', () => {
-      configureBlockExplorer({ arbiscanApiKey: 'test-arbiscan-key' });
+    it('should set block explorer API key', () => {
+      configureBlockExplorer({ blockExplorerApiKey: 'test-arbiscan-key' });
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBe('test-arbiscan-key');
+      expect(config.blockExplorerApiKey).toBe('test-arbiscan-key');
     });
 
     it('should set alchemy API key', () => {
@@ -38,21 +38,21 @@ describe('Block Explorer Service', () => {
 
     it('should set both API keys', () => {
       configureBlockExplorer({
-        arbiscanApiKey: 'test-arbiscan-key',
+        blockExplorerApiKey: 'test-arbiscan-key',
         alchemyApiKey: 'test-alchemy-key',
       });
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBe('test-arbiscan-key');
+      expect(config.blockExplorerApiKey).toBe('test-arbiscan-key');
       expect(config.alchemyApiKey).toBe('test-alchemy-key');
     });
 
     it('should not overwrite unspecified keys', () => {
-      configureBlockExplorer({ arbiscanApiKey: 'test-arbiscan-key' });
+      configureBlockExplorer({ blockExplorerApiKey: 'test-arbiscan-key' });
       configureBlockExplorer({ alchemyApiKey: 'test-alchemy-key' });
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBe('test-arbiscan-key');
+      expect(config.blockExplorerApiKey).toBe('test-arbiscan-key');
       expect(config.alchemyApiKey).toBe('test-alchemy-key');
     });
 
@@ -60,7 +60,7 @@ describe('Block Explorer Service', () => {
       configureBlockExplorer({});
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBeNull();
+      expect(config.blockExplorerApiKey).toBeNull();
       expect(config.alchemyApiKey).toBeNull();
     });
 
@@ -68,7 +68,7 @@ describe('Block Explorer Service', () => {
       configureBlockExplorer();
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBeNull();
+      expect(config.blockExplorerApiKey).toBeNull();
       expect(config.alchemyApiKey).toBeNull();
     });
   });
@@ -76,27 +76,27 @@ describe('Block Explorer Service', () => {
   describe('resetBlockExplorerConfig', () => {
     it('should reset all config to null', () => {
       configureBlockExplorer({
-        arbiscanApiKey: 'test-key',
+        blockExplorerApiKey: 'test-key',
         alchemyApiKey: 'test-key',
       });
 
       resetBlockExplorerConfig();
 
       const config = getBlockExplorerConfig();
-      expect(config.arbiscanApiKey).toBeNull();
+      expect(config.blockExplorerApiKey).toBeNull();
       expect(config.alchemyApiKey).toBeNull();
     });
   });
 
   describe('getBlockExplorerConfig', () => {
     it('should return a copy of config (not the original)', () => {
-      configureBlockExplorer({ arbiscanApiKey: 'original' });
+      configureBlockExplorer({ blockExplorerApiKey: 'original' });
 
       const config = getBlockExplorerConfig();
-      config.arbiscanApiKey = 'modified';
+      config.blockExplorerApiKey = 'modified';
 
       const config2 = getBlockExplorerConfig();
-      expect(config2.arbiscanApiKey).toBe('original');
+      expect(config2.blockExplorerApiKey).toBe('original');
     });
   });
 
@@ -253,7 +253,7 @@ describe('Block Explorer Service', () => {
         });
 
         it('should include API key in request when configured', async () => {
-          configureBlockExplorer({ arbiscanApiKey: 'test-api-key' });
+          configureBlockExplorer({ blockExplorerApiKey: 'test-api-key' });
           const serviceWithKey = getBlockExplorerService(42161);
 
           const mockFetch = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
@@ -618,9 +618,9 @@ describe('Block Explorer Service', () => {
 });
 
 // Integration tests - only run if API key is available
-describe.skipIf(!process.env.ARBISCAN_API_KEY)('Block Explorer Service - Integration', () => {
+describe.skipIf(!process.env.BLOCK_EXPLORER_API_KEY)('Block Explorer Service - Integration', () => {
   beforeEach(() => {
-    configureBlockExplorer({ arbiscanApiKey: process.env.ARBISCAN_API_KEY });
+    configureBlockExplorer({ blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY });
   });
 
   afterEach(() => {

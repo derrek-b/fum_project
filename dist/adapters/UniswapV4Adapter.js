@@ -590,6 +590,12 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       );
 
       const liquidity = positionInfo[0];
+
+      // Zero-liquidity positions are closed — reject like burned/non-existent
+      if (BigInt(liquidity.toString()) === 0n) {
+        throw new Error(`Position ${tokenId} has zero liquidity`);
+      }
+
       const feeGrowthInside0LastX128 = positionInfo[1];
       const feeGrowthInside1LastX128 = positionInfo[2];
 
@@ -626,7 +632,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       // Re-throw validation errors as-is
       if (error.message.includes('TokenId parameter') ||
           error.message.includes('Valid provider') ||
-          error.message.includes('not found or has been burned')) {
+          error.message.includes('not found or has been burned') ||
+          error.message.includes('zero liquidity')) {
         throw error;
       }
       throw new Error(`Failed to fetch V4 position ${tokenId}: ${error.message}`);
@@ -830,10 +837,11 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @param {number} poolData.tick - Current pool tick
    * @param {Object} token0Data - Token0 metadata (address, decimals)
    * @param {Object} token1Data - Token1 metadata (address, decimals)
+   * @param {Object} [provider] - Ethers provider (unused by V4, accepted for interface compatibility)
    * @returns {Promise<[BigInt, BigInt]>} [amount0, amount1] as BigInts in wei
    * @throws {Error} If parameters are invalid
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
     // === VALIDATION ===
 
     // Position validation
@@ -1439,15 +1447,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       const amount0Max = balance0;
       const amount1Max = balance1;
 
-      // 🔍 DEBUG: Log slippage info
-      console.log(`🔍 [V4 generateAddLiquidityData] Position Debug:`);
-      console.log(`   tokenId: ${tokenId}`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   Balances: balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0.toString()}, forPosition1=${forPosition1.toString()}`);
-      console.log(`   mintAmounts: amount0=${v4Position.mintAmounts.amount0.toString()}, amount1=${v4Position.mintAmounts.amount1.toString()}`);
-      console.log(`   amount0Max: ${amount0Max.toString()} (= full balance, hard cap)`);
-      console.log(`   amount1Max: ${amount1Max.toString()} (= full balance, hard cap)`);
+
 
       // Build calldata using V4PositionPlanner directly
       const planner = new V4PositionPlanner();
@@ -2080,17 +2080,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       const amount0Max = balance0;
       const amount1Max = balance1;
 
-      // 🔍 DEBUG: Log position info
-      console.log(`🔍 [V4 generateCreatePositionData] Position Debug:`);
-      console.log(`   Position tick range: ${position.tickLower} to ${position.tickUpper} (pool tick: ${poolData.tick})`);
-      console.log(`   Range width: ${position.tickUpper - position.tickLower} ticks`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   isToken0Native: ${isToken0Native}`);
-      console.log(`   Balances (SDK order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0.toString()}, forPosition1=${forPosition1.toString()}`);
-      console.log(`   mintAmounts: amount0=${v4Position.mintAmounts.amount0.toString()}, amount1=${v4Position.mintAmounts.amount1.toString()}`);
-      console.log(`   amount0Max: ${amount0Max.toString()} (= full balance, hard cap)`);
-      console.log(`   amount1Max: ${amount1Max.toString()} (= full balance, hard cap)`);
+
 
       // Build calldata using V4PositionPlanner directly
       const planner = new V4PositionPlanner();

@@ -155,8 +155,8 @@ export function getChainRpcUrls(chainId) {
     throw new Error(`Chain ${chainId} RPC URLs not configured`);
   }
 
-  // Chains that require API key appended at runtime
-  if (chainId === 42161) {
+  // Chains that require API key appended at runtime (Alchemy endpoints)
+  if (chainId === 42161 || chainId === 43114) {
     const apiKey = _chainConfig.alchemyApiKey;
     if (!apiKey) {
       throw new Error('Alchemy API key not configured. Call configureChainHelpers({ alchemyApiKey }) or initFumLibrary({ alchemyApiKey }) first.');

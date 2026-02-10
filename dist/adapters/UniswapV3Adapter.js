@@ -598,7 +598,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {{tickLower: number, tickUpper: number}} Tick range aligned to tick spacing
    * @throws {Error} If fee tier is invalid
    */
-  calculateTickRangeFromPercentages(currentTick, upperPercent, lowerPercent, fee) {
+  _calculateTickRangeFromPercentages(currentTick, upperPercent, lowerPercent, fee) {
     // Validate currentTick
     if (!Number.isFinite(currentTick)) {
       throw new Error(`Invalid currentTick: ${currentTick}. Must be a finite number.`);
@@ -669,7 +669,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Calculate position range bounds from percentage parameters
    *
-   * Wraps calculateTickRangeFromPercentages and returns a position object
+   * Wraps _calculateTickRangeFromPercentages and returns a position object
    * suitable for passing to getAddLiquidityAmounts and generateCreatePositionData.
    *
    * @param {Object} poolData - Pool data object with tick and fee properties
@@ -721,7 +721,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     // Delegate to existing method for tick calculation
-    const { tickLower, tickUpper } = this.calculateTickRangeFromPercentages(
+    const { tickLower, tickUpper } = this._calculateTickRangeFromPercentages(
       poolData.tick,
       upperPercent,
       lowerPercent,
@@ -880,7 +880,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{exists: boolean, poolAddress: string|null, slot0: Object|null}>} Pool existence check result
    */
-  async checkPoolExists(token0, token1, fee, provider) {
+  async _checkPoolExists(token0, token1, fee, provider) {
     // Validate token0
     if (!token0) {
       throw new Error("Token0 parameter is required");
@@ -1129,7 +1129,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Get pool data by address
    *
    * Returns core pool state needed for position management and price calculations.
-   * Use fetchTickData() separately if tick-specific data is needed.
+   * Use _fetchTickData() separately if tick-specific data is needed.
    *
    * @param {string} poolAddress - Pool contract address
    * @param {Object} provider - Ethers provider instance
@@ -1197,7 +1197,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} provider - Ethers provider instance
    * @returns {Promise<{tickLower: Object, tickUpper: Object}>} Tick data
    */
-  async fetchTickData(poolAddress, tickLower, tickUpper, provider) {
+  async _fetchTickData(poolAddress, tickLower, tickUpper, provider) {
     // Validate pool address
     if (!poolAddress) {
       throw new Error("Pool address parameter is required");
@@ -1269,8 +1269,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<number>} Current tick value
    * @throws {Error} If parameters invalid or pool query fails
    */
-  async getCurrentTick(poolAddress, provider) {
-    // Parameter validation (follows fetchTickData pattern)
+  async _getCurrentTick(poolAddress, provider) {
+    // Parameter validation (follows _fetchTickData pattern)
     if (!poolAddress) {
       throw new Error("Pool address parameter is required");
     }
@@ -1299,7 +1299,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Get the pool contract ABI
    * @returns {Array} Pool contract ABI
    */
-  getPoolABI() {
+  _getPoolABI() {
     return this.uniswapV3PoolABI;
   }
 
@@ -1404,7 +1404,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
           const tickLowerNum = Number(tickLower);
           const tickUpperNum = Number(tickUpper);
           if (!cachedPoolData.ticks[tickLowerNum] || !cachedPoolData.ticks[tickUpperNum]) {
-            const tickData = await this.fetchTickData(poolAddress, tickLowerNum, tickUpperNum, provider);
+            const tickData = await this._fetchTickData(poolAddress, tickLowerNum, tickUpperNum, provider);
             cachedPoolData.ticks[tickLowerNum] = tickData.tickLower;
             cachedPoolData.ticks[tickUpperNum] = tickData.tickUpper;
           }
@@ -1532,6 +1532,11 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       // Direct on-chain call - contract reverts with "Invalid token ID" for burned/non-existent positions
       const positionData = await positionManager.positions(tokenId);
 
+      // Zero-liquidity positions are closed — reject like burned/non-existent
+      if (BigInt(positionData.liquidity.toString()) === 0n) {
+        throw new Error(`Position ${tokenId} has zero liquidity`);
+      }
+
       // Get pool address
       const poolAddress = await this._getPoolAddress(
         positionData.token0,
@@ -1569,7 +1574,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     } catch (error) {
       // Re-throw validation errors as-is
       if (error.message.includes('TokenId parameter') ||
-          error.message.includes('Valid provider')) {
+          error.message.includes('Valid provider') ||
+          error.message.includes('zero liquidity')) {
         throw error;
       }
       throw new Error(`Failed to fetch position ${tokenId}: ${error.message}`);
@@ -1657,7 +1663,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       if (!position.pool) {
         throw new Error('Position missing pool address');
       }
-      currentTick = await this.getCurrentTick(position.pool, provider);
+      currentTick = await this._getCurrentTick(position.pool, provider);
     }
 
     // Calculate range metrics
@@ -1962,7 +1968,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @throws {Error} If target range percentages are invalid
    *
    * @example
-   * const originalTick = adapter.calculateOriginalTick(
+   * const originalTick = adapter._calculateOriginalTick(
    *   { tickLower: 195000, tickUpper: 205000, fee: 500 },
    *   10, // 10% upper range
    *   10  // 10% lower range
@@ -1970,7 +1976,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * // Returns: 200000 (the original tick)
    * @since 1.0.0
    */
-  calculateOriginalTick(position, targetRangeUpper, targetRangeLower) {
+  _calculateOriginalTick(position, targetRangeUpper, targetRangeLower) {
     // Parameter validation following adapter patterns
     if (!position) {
       throw new Error("Position parameter is required");
@@ -2371,7 +2377,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     const poolContract = new ethers.Contract(position.pool, this.uniswapV3PoolABI, provider);
     const [poolData, tickData, token0Address, token1Address] = await Promise.all([
       this.getPoolData(position.pool, provider),
-      this.fetchTickData(position.pool, position.tickLower, position.tickUpper, provider),
+      this._fetchTickData(position.pool, position.tickLower, position.tickUpper, provider),
       poolContract.token0(),
       poolContract.token1()
     ]);
@@ -2428,9 +2434,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {Object} token1Data - Token1 data
    * @param {string} token1Data.address - Token contract address
    * @param {number} token1Data.decimals - Token decimals
+   * @param {Object} [provider] - Ethers provider (unused by V3, accepted for interface compatibility)
    * @returns {Promise<Array<bigint>>} Array of [token0Raw, token1Raw] amounts
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
     // Validate position parameter
     if (!position) {
       throw new Error("position parameter is required");
@@ -3668,7 +3675,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.token1Data.decimals - Token1 decimal places
    * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
    * @param {number} [params.deadlineMinutes=20] - Transaction deadline in minutes
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full getAddLiquidityQuote result
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full _getAddLiquidityQuote result
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateAddLiquidityData(params) {
@@ -3883,7 +3890,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const forPosition1 = (balance1 * slippageMultiplier / slippageDivisor).toString();
 
       // Calculate position from reduced amounts to get conservative mintAmounts
-      const quote = await this.getAddLiquidityQuote({
+      const quote = await this._getAddLiquidityQuote({
         position,
         token0Amount: forPosition0,
         token1Amount: forPosition1,
@@ -3906,17 +3913,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount0Min = positionToIncreaseBy.mintAmounts.amount0;
       const amount1Min = positionToIncreaseBy.mintAmounts.amount1;
 
-      // 🔍 DEBUG: Log slippage info
-      console.log(`🔍 [V3 generateAddLiquidityData] Position Debug:`);
-      console.log(`   tokenId: ${position.id}`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   tokensSwapped: ${tokensSwapped}`);
-      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
-      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
-      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
 
       // Encode the increaseLiquidity function directly
       const calldata = this.positionManagerInterface.encodeFunctionData('increaseLiquidity', [{
@@ -3967,7 +3964,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Position object with calculated amounts
    * @throws {Error} If parameters are invalid or quote cannot be calculated
    */
-  async getAddLiquidityQuote(params) {
+  async _getAddLiquidityQuote(params) {
     const {
       position,
       token0Amount,
@@ -4203,7 +4200,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * Get the token amounts required to add liquidity to a position
    *
    * Returns amounts in the CALLER's token order (not SDK-sorted order).
-   * Internally uses getAddLiquidityQuote and maps amounts back to caller's order.
+   * Internally uses _getAddLiquidityQuote and maps amounts back to caller's order.
    *
    * @param {Object} params - Parameters for calculating amounts
    * @param {Object} params.position - Position range definition
@@ -4388,7 +4385,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Use internal getAddLiquidityQuote for SDK calculations
-      const quote = await this.getAddLiquidityQuote({
+      const quote = await this._getAddLiquidityQuote({
         position,
         token0Amount,
         token1Amount,
@@ -4426,7 +4423,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<string>} Expected output amount in wei string
    * @throws {Error} If quote cannot be calculated
    */
-  async getSwapQuote(params) {
+  async _getSwapQuote(params) {
     const { tokenInAddress, tokenOutAddress, fee, amountIn, provider } = params;
 
     // Validate tokenIn address
@@ -4637,7 +4634,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Route with { amountIn: string, amountOut: string, route: SwapRoute, methodParameters: MethodParameters }
    * @throws {Error} If no valid route can be found or if parameters are invalid
    */
-  async getSwapRoute(params) {
+  async _getSwapRoute(params) {
     const {
       tokenInAddress,
       tokenOutAddress,
@@ -4801,7 +4798,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * methodParameters are returned directly (no approval needed for native ETH).
    *
    * @param {Object} params - Parameters for swap
-   * @param {Object} params.route - Route object from getSwapRoute() with methodParameters
+   * @param {Object} params.route - Route object from _getSwapRoute() with methodParameters
    * @param {string} params.recipient - Address to receive output tokens (also the token owner)
    * @param {string} params.tokenInAddress - Address of input token (WETH address for native ETH routing)
    * @param {string} params.amountIn - Amount of input tokens (as string)
@@ -4812,7 +4809,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @returns {Promise<Object>} Transaction data with {to, data, value}
    * @throws {Error} If parameters are invalid
    */
-  async generateAlphaSwapData(params) {
+  async _generateAlphaSwapData(params) {
     const {
       route, recipient, tokenInAddress, amountIn,
       permit2Signature, permit2Nonce, permit2Deadline,
@@ -4824,7 +4821,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('Route parameter is required and must be an object');
     }
     if (!route.methodParameters) {
-      throw new Error('Route must include methodParameters from getSwapRoute()');
+      throw new Error('Route must include methodParameters from _getSwapRoute()');
     }
     if (!route.methodParameters.calldata || typeof route.methodParameters.calldata !== 'string') {
       throw new Error('Route methodParameters must include calldata');
@@ -5038,7 +5035,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     try {
       // Get quote for the swap
-      const expectedAmountOut = await this.getSwapQuote({
+      const expectedAmountOut = await this._getSwapQuote({
         tokenInAddress: tokenIn,
         tokenOutAddress: tokenOut,
         fee,
@@ -5211,7 +5208,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
 
     // 1. Get route from adapter using AlphaRouter
     // For native ETH, address is not required - adapter uses Ether.onChain() internally
-    const routeResult = await this.getSwapRoute({
+    const routeResult = await this._getSwapRoute({
       tokenInAddress: tokenIn.address,
       tokenOutAddress: tokenOut.address,
       amount,
@@ -5226,7 +5223,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     // 2. Branch: native ETH input skips Permit2
     if (tokenIn.isNative) {
       // Native ETH - use route directly, no Permit2 needed
-      const swapData = await this.generateAlphaSwapData({
+      const swapData = await this._generateAlphaSwapData({
         route: routeResult.route,
         recipient,
         tokenInAddress: undefined,
@@ -5277,7 +5274,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     );
 
     // 5. Generate wrapped swap calldata via adapter
-    const swapData = await this.generateAlphaSwapData({
+    const swapData = await this._generateAlphaSwapData({
       route: routeResult.route,
       recipient,
       tokenInAddress: tokenIn.address,
@@ -5318,7 +5315,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @param {number} params.token1Data.decimals - Token1 decimal places
    * @param {number} params.slippageTolerance - Slippage tolerance percentage (0-100)
    * @param {number} [params.deadlineMinutes=20] - Transaction deadline in minutes
-   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full getAddLiquidityQuote result
+   * @returns {Object} Transaction data object with `to`, `data`, `value` properties and `quote` with full _getAddLiquidityQuote result
    * @throws {Error} If parameters are invalid or transaction data cannot be generated
    */
   async generateCreatePositionData(params) {
@@ -5537,7 +5534,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const forPosition1 = (balance1 * slippageMultiplier / slippageDivisor).toString();
 
       // Calculate position from reduced amounts to get conservative mintAmounts
-      const quote = await this.getAddLiquidityQuote({
+      const quote = await this._getAddLiquidityQuote({
         position,
         token0Amount: forPosition0,
         token1Amount: forPosition1,
@@ -5560,16 +5557,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const amount0Min = newPosition.mintAmounts.amount0;
       const amount1Min = newPosition.mintAmounts.amount1;
 
-      // 🔍 DEBUG: Log slippage info
-      console.log(`🔍 [V3 generateCreatePositionData] Position Debug:`);
-      console.log(`   slippageTolerance: ${slippageTolerance}% (utilization: ${100 - slippageTolerance}%)`);
-      console.log(`   tokensSwapped: ${tokensSwapped}`);
-      console.log(`   Balances (caller order): balance0=${balance0.toString()}, balance1=${balance1.toString()}`);
-      console.log(`   For position calc: forPosition0=${forPosition0}, forPosition1=${forPosition1}`);
-      console.log(`   amount0Desired: ${amount0Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount1Desired: ${amount1Desired.toString()} (sorted order, full balance)`);
-      console.log(`   amount0Min: ${amount0Min.toString()} (sorted order, conservative mintAmount)`);
-      console.log(`   amount1Min: ${amount1Min.toString()} (sorted order, conservative mintAmount)`);
+
 
       // Encode the mint function directly using the position manager interface
       const calldata = this.positionManagerInterface.encodeFunctionData('mint', [{

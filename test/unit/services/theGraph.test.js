@@ -18,33 +18,18 @@ describe('The Graph Service - Real API Tests', () => {
 
   // Real test parameters using actual platform config
   const validParams = {
-    poolAddress: '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640', // USDC/WETH 0.05% pool on Ethereum
-    chainId: 1,
+    poolAddress: '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443', // WETH/USDC pool on Arbitrum
+    chainId: 42161,
     platformId: 'uniswapV3',
     days: 7
   };
 
   describe('getPoolTVLAverage', () => {
     describe('Success Cases', () => {
-      it('should fetch USDC/WETH pool TVL on Ethereum mainnet with Uniswap V3 schema', async () => {
+      it('should fetch WETH/USDC pool TVL on Arbitrum with Messari schema', async () => {
         const result = await getPoolTVLAverage(
           validParams.poolAddress,
           validParams.chainId,
-          validParams.platformId,
-          validParams.days
-        );
-
-        expect(typeof result).toBe('number');
-        expect(result).toBeGreaterThan(100000);
-        expect(Number.isFinite(result)).toBe(true);
-      });
-
-      it('should fetch WETH/USDC pool TVL on Arbitrum with Messari schema', async () => {
-        const arbitrumPoolAddress = '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443'; // WETH/USDC on Arbitrum
-
-        const result = await getPoolTVLAverage(
-          arbitrumPoolAddress,
-          42161, // Arbitrum One (uses Messari schema)
           validParams.platformId,
           validParams.days
         );
@@ -76,11 +61,11 @@ describe('The Graph Service - Real API Tests', () => {
       });
 
       it('should handle different pool addresses on same chain', async () => {
-        // Test different pool on Ethereum mainnet
-        const wbtcEthPool = '0xcbcdf9626bc03e24f779434178a73a0b4bad62ed'; // WBTC/WETH pool
+        // Test different pool on Arbitrum - WBTC/WETH 0.05% pool
+        const wbtcWethPool = '0x2f5e87c9312fa29aed5c179e456625d79015299c'; // WBTC/WETH on Arbitrum
 
         const result = await getPoolTVLAverage(
-          wbtcEthPool,
+          wbtcWethPool,
           validParams.chainId,
           validParams.platformId,
           3 // Shorter period for faster test
@@ -333,7 +318,7 @@ describe('The Graph Service - Real API Tests', () => {
 
   describe('getPoolAge', () => {
     describe('Success Cases', () => {
-      it('should fetch USDC/WETH pool creation timestamp on Ethereum mainnet with Uniswap V3 schema', async () => {
+      it('should fetch WETH/USDC pool creation timestamp on Arbitrum with Messari schema', async () => {
         const result = await getPoolAge(
           validParams.poolAddress,
           validParams.chainId,
@@ -342,21 +327,6 @@ describe('The Graph Service - Real API Tests', () => {
 
         expect(typeof result).toBe('number');
         expect(result).toBeGreaterThan(1620000000); // After May 2021 (Uniswap V3 launch)
-        expect(result).toBeLessThan(Math.floor(Date.now() / 1000)); // Before now
-        expect(Number.isInteger(result)).toBe(true);
-      });
-
-      it('should fetch WETH/USDC pool creation timestamp on Arbitrum with Messari schema', async () => {
-        const arbitrumPoolAddress = '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443'; // WETH/USDC on Arbitrum
-
-        const result = await getPoolAge(
-          arbitrumPoolAddress,
-          42161, // Arbitrum One (uses Messari schema)
-          validParams.platformId
-        );
-
-        expect(typeof result).toBe('number');
-        expect(result).toBeGreaterThan(1620000000); // After May 2021
         expect(result).toBeLessThan(Math.floor(Date.now() / 1000)); // Before now
         expect(Number.isInteger(result)).toBe(true);
       });

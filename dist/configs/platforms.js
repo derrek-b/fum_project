@@ -28,10 +28,6 @@ const platforms = {
     maxTick: 887272,
     // The Graph subgraph IDs and query types for different chains
     subgraphs: {
-      1: {
-        id: "5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
-        queryType: "uniswap"
-      },      // Ethereum mainnet (Official Uniswap V3)
       42161: {
         id: "FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
         queryType: "uniswap"
@@ -66,10 +62,6 @@ const platforms = {
     maxTick: 887272,
     // The Graph subgraph IDs for V4
     subgraphs: {
-      1: {
-        id: "6XvRX3WHSvzBVTiPdF66XSBVbxWuHqijWANbjJxRDyzr",
-        queryType: "uniswapV4"
-      },      // Ethereum mainnet
       42161: {
         id: "G5TsTKNi8yhPSV7kycaE23oWbqv9zzNqR49FoEQjzq1r",
         queryType: "uniswapV4"

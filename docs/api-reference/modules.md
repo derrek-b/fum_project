@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-01-29T21:56:52.051Z
+Generated on: 2026-02-04T16:04:13.711Z
 
 ## Table of Contents
 
@@ -74,6 +74,7 @@ Adapter for Trader Joe V2.1 Liquidity Book on Arbitrum
 **Path:** `src/adapters/TraderJoeV2_1Adapter.js`
 
 **Imports:**
+- from `../artifacts/contracts.js`
 - from `../helpers/chainHelpers.js`
 - from `../helpers/tokenHelpers.js`
 - from `./PlatformAdapter.js`

@@ -159,44 +159,75 @@ function validateSubgraphs(platformId, subgraphs, chains) {
   }
 }
 
+/**
+ * Platform-specific required properties
+ * Different platform types have different requirements
+ */
+const PLATFORM_REQUIREMENTS = {
+  // Tick-based concentrated liquidity platforms (Uniswap style)
+  uniswapV3: {
+    numberProperties: ['minTick', 'maxTick'],
+    objectProperties: ['features', 'subgraphs'],
+    requiresFeeTiers: true,
+  },
+  uniswapV4: {
+    numberProperties: ['minTick', 'maxTick'],
+    objectProperties: ['features', 'subgraphs'],
+    requiresFeeTiers: false, // V4 has flexible fees
+  },
+  // Bin-based liquidity platforms (Trader Joe style)
+  traderjoeV2_1: {
+    numberProperties: [], // Uses bins, not ticks
+    objectProperties: ['features'], // Uses on-chain queries, not subgraphs
+    requiresFeeTiers: false, // Bin step is per-pool
+  },
+};
+
 describe('Platform Configuration Validation', () => {
   it('should have all required properties for every platform', () => {
+    // Universal requirements for ALL platforms
     const requiredStringProperties = ['id', 'name', 'logo', 'color', 'description'];
-    const requiredObjectProperties = ['features', 'subgraphs'];
-    const requiredNumberProperties = ['minTick', 'maxTick'];
 
     const errors = [];
 
     Object.entries(platforms).forEach(([platformKey, platform]) => {
       const platformErrors = [];
 
+      // Get platform-specific requirements
+      const platformReqs = PLATFORM_REQUIREMENTS[platformKey];
+      if (!platformReqs) {
+        platformErrors.push(`Platform '${platformKey}' has no defined requirements in PLATFORM_REQUIREMENTS`);
+      }
+
       // Validate that platform key matches platform id
       if (platform.id !== platformKey) {
         platformErrors.push(`Platform key '${platformKey}' must match platform.id '${platform.id}'`);
       }
 
-      // Validate required string properties
+      // Validate required string properties (universal)
       requiredStringProperties.forEach(prop => {
         if (!platform[prop] || typeof platform[prop] !== 'string' || platform[prop].trim() === '') {
           platformErrors.push(`Missing or empty string property: ${prop}`);
         }
       });
 
-      // Validate required object properties
-      requiredObjectProperties.forEach(prop => {
-        if (!platform[prop] || typeof platform[prop] !== 'object' || Array.isArray(platform[prop])) {
-          platformErrors.push(`Missing or invalid object property: ${prop}`);
-        }
-      });
+      // Validate platform-specific object properties
+      if (platformReqs) {
+        platformReqs.objectProperties.forEach(prop => {
+          if (!platform[prop] || typeof platform[prop] !== 'object' || Array.isArray(platform[prop])) {
+            platformErrors.push(`Missing or invalid object property: ${prop}`);
+          }
+        });
 
-      // Validate required number properties
-      requiredNumberProperties.forEach(prop => {
-        if (!Number.isFinite(platform[prop])) {
-          platformErrors.push(`Missing or invalid number property: ${prop}`);
-        }
-      });
+        // Validate platform-specific number properties
+        platformReqs.numberProperties.forEach(prop => {
+          if (!Number.isFinite(platform[prop])) {
+            platformErrors.push(`Missing or invalid number property: ${prop}`);
+          }
+        });
+      }
 
-      // Validate tick bounds relationship
+      // Validate tick bounds relationship (only for tick-based platforms)
       if (Number.isFinite(platform.minTick) && Number.isFinite(platform.maxTick)) {
         if (platform.minTick >= platform.maxTick) {
           platformErrors.push(`minTick (${platform.minTick}) must be less than maxTick (${platform.maxTick})`);
@@ -212,10 +243,8 @@ describe('Platform Configuration Validation', () => {
         platformErrors.push(`Property logo must be a valid path format, got: ${platform.logo}`);
       }
 
-      // Validate fee tiers structure (only for platforms with fixed fee tiers)
-      // V4 has flexible fees where fee and tickSpacing are independent PoolKey parameters
-      const hasFlexibleFees = platform.features?.flexibleFees === true;
-      if (!hasFlexibleFees) {
+      // Validate fee tiers structure (only for platforms that require it)
+      if (platformReqs?.requiresFeeTiers) {
         try {
           validateFeeTiers(platformKey, platform.feeTiers);
         } catch (error) {
@@ -223,18 +252,20 @@ describe('Platform Configuration Validation', () => {
         }
       }
 
-      // Validate features structure
+      // Validate features structure (universal)
       try {
         validateFeatures(platformKey, platform.features);
       } catch (error) {
         platformErrors.push(`features validation failed: ${error.message}`);
       }
 
-      // Validate subgraphs structure and cross-dependencies
-      try {
-        validateSubgraphs(platformKey, platform.subgraphs, chains);
-      } catch (error) {
-        platformErrors.push(`subgraphs validation failed: ${error.message}`);
+      // Validate subgraphs structure (only for platforms that require it)
+      if (platformReqs?.objectProperties.includes('subgraphs')) {
+        try {
+          validateSubgraphs(platformKey, platform.subgraphs, chains);
+        } catch (error) {
+          platformErrors.push(`subgraphs validation failed: ${error.message}`);
+        }
       }
 
       // If there are errors for this platform, add them to the main errors array

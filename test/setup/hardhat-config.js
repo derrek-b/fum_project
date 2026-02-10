@@ -18,24 +18,35 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LIBRARY_ROOT = path.resolve(__dirname, '../..');
 
+// Determine which chain to fork based on FORK_CHAIN environment variable
+const forkChain = process.env.FORK_CHAIN || 'arbitrum';
+const isAvalanche = forkChain === 'avalanche';
+
 // Configuration constants
 export const TEST_CONFIG = {
-  // Network settings
-  chainId: 1337,
-  port: 8545,
+  // Network settings - dynamic based on fork chain
+  chainId: isAvalanche ? 1338 : 1337,
+  port: isAvalanche ? 8546 : 8545,
 
-  // Fork settings - Arbitrum mainnet
+  // Fork settings - Arbitrum or Avalanche mainnet
   forkUrl: process.env.ALCHEMY_API_KEY
-    ? `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
-    : 'https://arb1.arbitrum.io/rpc', // Fallback to public RPC
+    ? isAvalanche
+      ? `https://avax-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+      : `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+    : isAvalanche
+      ? 'https://api.avax.network/ext/bc/C/rpc'  // Fallback to public RPC
+      : 'https://arb1.arbitrum.io/rpc',
 
   // Test mnemonic - ⚠️ PUBLIC - DO NOT USE ON MAINNET
   mnemonic: 'debris coral coral sleep shed prison nation mountain fatigue prosper dose portion',
   accountCount: 10,
-  defaultBalance: 10000, // ETH per account
+  defaultBalance: 10000, // ETH/AVAX per account
 
   // Logging
   quiet: process.env.NODE_ENV === 'test',
+
+  // Chain info for logging
+  forkChain,
 };
 
 // Test accounts derived from the mnemonic
@@ -80,6 +91,23 @@ export const ARBITRUM_ADDRESSES = {
   // Example pools
   WETH_USDC_005: '0xC6962004f452bE9203591991D15f6b388e09E8D0', // 0.05% fee
   WETH_USDC_03: '0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443',  // 0.3% fee
+};
+
+// Avalanche mainnet contract addresses
+export const AVALANCHE_ADDRESSES = {
+  // Trader Joe V2.1 contracts
+  LB_FACTORY: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
+  LB_ROUTER: '0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30',
+  LB_QUOTER: '0xd76019A16606FDa4651f636D9751f500Ed776250',
+
+  // Common tokens
+  WAVAX: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7',
+  USDC: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+  USDT: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
+
+  // Example LBPair pools
+  WAVAX_USDC_15: '0xD446eb1660F766d533BeCeEf890Df7A69d26f7d1', // binStep 15 (0.15%)
+  WAVAX_USDC_20: '0xB5352A39C11a81FE6748993D586EC448A01f08b5', // binStep 20 (0.20%)
 };
 
 /**
@@ -205,7 +233,7 @@ export async function startHardhat(options = {}) {
     signers,
     config,
     stop,
-    addresses: ARBITRUM_ADDRESSES,
+    addresses: config.chainId === 1338 ? AVALANCHE_ADDRESSES : ARBITRUM_ADDRESSES,
   };
 }
 

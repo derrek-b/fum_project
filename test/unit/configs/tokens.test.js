@@ -42,10 +42,10 @@ function validatePath(path) {
  * Validate token addresses object
  * @param {string} tokenKey - Token key for error reporting
  * @param {Object} token - Full token object to validate
- * @param {Array<string>} expectedChainIds - Expected chain IDs for consistency
+ * @param {Array<string>} validChainIds - Valid chain IDs from chains config
  * @throws {Error} If addresses are invalid
  */
-function validateTokenAddresses(tokenKey, token, expectedChainIds) {
+function validateTokenAddresses(tokenKey, token, validChainIds) {
   const addresses = token.addresses;
   const isNativeToken = token.isNative === true;
 
@@ -55,17 +55,15 @@ function validateTokenAddresses(tokenKey, token, expectedChainIds) {
 
   const addressChainIds = Object.keys(addresses);
 
-  // Check that all expected chain IDs are present
-  expectedChainIds.forEach(chainId => {
-    if (!addressChainIds.includes(chainId)) {
-      throw new Error(`Token ${tokenKey} missing address for chain ID: ${chainId}`);
-    }
-  });
+  // Token must have at least one address
+  if (addressChainIds.length === 0) {
+    throw new Error(`Token ${tokenKey} must have at least one address`);
+  }
 
-  // Check that no extra chain IDs are present
+  // Check that token only references valid chain IDs (chains in our config)
   addressChainIds.forEach(chainId => {
-    if (!expectedChainIds.includes(chainId)) {
-      throw new Error(`Token ${tokenKey} has unexpected chain ID: ${chainId}. Expected: [${expectedChainIds.join(', ')}]`);
+    if (!validChainIds.includes(chainId)) {
+      throw new Error(`Token ${tokenKey} references non-existent chain ID: ${chainId}. Valid: [${validChainIds.join(', ')}]`);
     }
   });
 
@@ -108,14 +106,8 @@ describe('Token Configuration Validation', () => {
 
     const errors = [];
 
-    // First pass: collect all chain IDs from all tokens to ensure consistency
-    const allChainIds = new Set();
-    Object.values(tokens).forEach(token => {
-      if (token.addresses && typeof token.addresses === 'object') {
-        Object.keys(token.addresses).forEach(chainId => allChainIds.add(chainId));
-      }
-    });
-    const expectedChainIds = Array.from(allChainIds).sort();
+    // Get valid chain IDs from chains config - tokens can support any subset of these
+    const validChainIds = Object.keys(chains);
 
     Object.entries(tokens).forEach(([tokenKey, token]) => {
       const tokenErrors = [];
@@ -155,9 +147,10 @@ describe('Token Configuration Validation', () => {
         tokenErrors.push(`Property logoURI must be a valid path format, got: ${token.logoURI}`);
       }
 
-      // Validate token addresses structure and consistency
+      // Validate token addresses structure and format
+      // Note: Tokens don't need to support all chains - they can support any subset
       try {
-        validateTokenAddresses(tokenKey, token, expectedChainIds);
+        validateTokenAddresses(tokenKey, token, validChainIds);
       } catch (error) {
         tokenErrors.push(`addresses validation failed: ${error.message}`);
       }
@@ -187,13 +180,9 @@ describe('Token Configuration Validation', () => {
       errors.push('Tokens configuration cannot be empty');
     }
 
-    // Validate chain ID consistency across all tokens
-    if (expectedChainIds.length === 0) {
-      errors.push('No chain IDs found in any token addresses');
-    } else {
-      // Report the chain IDs for informational purposes
-      const chainIdInfo = `Expected chain IDs across all tokens: [${expectedChainIds.join(', ')}]`;
-      // This is just informational, not an error
+    // Validate that we have valid chain IDs configured
+    if (validChainIds.length === 0) {
+      errors.push('No chain IDs found in chains configuration');
     }
 
     // If there are any validation errors, fail the test with detailed information

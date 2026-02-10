@@ -2,6 +2,21 @@
 // Must be .cjs because package.json has "type": "module"
 require('dotenv').config({ path: '.env.local' });
 
+// Determine fork chain from environment variable
+const forkChain = process.env.FORK_CHAIN || 'arbitrum';
+const isAvalanche = forkChain === 'avalanche';
+
+// Dynamic fork configuration based on FORK_CHAIN
+const forkConfig = isAvalanche
+  ? {
+      chainId: 1338,
+      url: `https://avax-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+    }
+  : {
+      chainId: 1337,
+      url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+    };
+
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
@@ -15,9 +30,9 @@ module.exports = {
   },
   networks: {
     hardhat: {
-      chainId: 1337,
+      chainId: forkConfig.chainId,
       forking: {
-        url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+        url: forkConfig.url,
         // Optionally pin to a block for consistent testing:
         // blockNumber: 280000000
       },
@@ -27,7 +42,7 @@ module.exports = {
       accounts: {
         mnemonic: "debris coral coral sleep shed prison nation mountain fatigue prosper dose portion",
         count: 10,
-        accountsBalance: "10000000000000000000000" // 10000 ETH
+        accountsBalance: "10000000000000000000000" // 10000 ETH/AVAX
       },
       mining: {
         auto: true,
@@ -39,6 +54,23 @@ module.exports = {
       url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
       chainId: 42161,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : []
+    },
+    // Avalanche Hardhat Fork (uses port 8546 to avoid conflict with Arbitrum on 8545)
+    avalanche: {
+      chainId: 1338,
+      forking: {
+        url: `https://avax-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+      },
+      hardfork: "cancun",
+      accounts: {
+        mnemonic: "debris coral coral sleep shed prison nation mountain fatigue prosper dose portion",
+        count: 10,
+        accountsBalance: "10000000000000000000000" // 10000 AVAX
+      },
+      mining: {
+        auto: true,
+        interval: 0
+      }
     }
   },
   paths: {

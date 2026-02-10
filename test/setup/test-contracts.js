@@ -267,6 +267,14 @@ export async function deployFUMContracts(deployer, config = {}) {
       BabyStepsStrategy: contracts.babySteps.address,
     };
 
+    // Add TJ addresses if deployed
+    if (contracts.tjPositionManager) {
+      addresses.TJPositionManager = contracts.tjPositionManager.address;
+    }
+    if (contracts.tjPositionValidator) {
+      addresses.TJPositionValidator = contracts.tjPositionValidator.address;
+    }
+
     // Validate deterministic addresses - fail fast if they don't match expected values
     await validateDeterministicAddresses(addresses);
 

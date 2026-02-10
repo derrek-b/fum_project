@@ -84,7 +84,7 @@ describe('Token Helpers', () => {
         expect(weth.isNative).toBe(false);
         expect(weth.addresses).toBeDefined();
         // WETH addresses should come from ETH's wethAddresses
-        expect(weth.addresses[1]).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+        expect(weth.addresses[42161]).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
       });
     });
   });
@@ -153,22 +153,22 @@ describe('Token Helpers', () => {
   describe('getTokenAddress', () => {
     describe('Success Cases', () => {
       it('should return address for valid symbol and chain', () => {
-        const result = getTokenAddress('USDC', 1);
-        expect(result).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-      });
-
-      it('should return address for Arbitrum chain', () => {
         const result = getTokenAddress('USDC', 42161);
         expect(result).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
       });
 
+      it('should return address for local fork chain', () => {
+        const result = getTokenAddress('USDC', 1337);
+        expect(result).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+      });
+
       it('should return AddressZero for native ETH token', () => {
-        const result = getTokenAddress('ETH', 1);
+        const result = getTokenAddress('ETH', 42161);
         expect(result).toBe('0x0000000000000000000000000000000000000000');
       });
 
       it('should return AddressZero for ETH on all supported chains', () => {
-        const chainIds = [1, 42161, 1337];
+        const chainIds = [42161, 1337];
         chainIds.forEach(chainId => {
           const result = getTokenAddress('ETH', chainId);
           expect(result).toBe('0x0000000000000000000000000000000000000000');
@@ -177,7 +177,7 @@ describe('Token Helpers', () => {
 
 
       it('should work with all configured chains', () => {
-        const chainIds = [1, 42161, 1337];
+        const chainIds = [42161, 1337];
         chainIds.forEach(chainId => {
           const result = getTokenAddress('USDC', chainId);
           expect(result).toBeDefined();
@@ -189,8 +189,8 @@ describe('Token Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for invalid symbol', () => {
-        expect(() => getTokenAddress(null, 1)).toThrow('Token symbol parameter is required');
-        expect(() => getTokenAddress('', 1)).toThrow('Token symbol cannot be empty');
+        expect(() => getTokenAddress(null, 42161)).toThrow('Token symbol parameter is required');
+        expect(() => getTokenAddress('', 42161)).toThrow('Token symbol cannot be empty');
       });
 
       it('should throw error for invalid chainId', () => {
@@ -201,7 +201,7 @@ describe('Token Helpers', () => {
       });
 
       it('should throw error for unknown token', () => {
-        expect(() => getTokenAddress('UNKNOWN', 1))
+        expect(() => getTokenAddress('UNKNOWN', 42161))
           .toThrow('Token UNKNOWN not found');
       });
 
@@ -519,7 +519,7 @@ describe('Token Helpers', () => {
   describe('areTokensSupportedOnChain', () => {
     describe('Success Cases', () => {
       it('should return true when all tokens are supported', () => {
-        const result = areTokensSupportedOnChain(['USDC', 'ETH'], 1);
+        const result = areTokensSupportedOnChain(['USDC', 'ETH'], 42161);
         expect(result).toBe(true);
       });
 
@@ -529,12 +529,12 @@ describe('Token Helpers', () => {
       });
 
       it('should return true for native ETH token', () => {
-        const result = areTokensSupportedOnChain(['ETH'], 1);
+        const result = areTokensSupportedOnChain(['ETH'], 42161);
         expect(result).toBe(true);
       });
 
       it('should return false when some tokens are not supported', () => {
-        const result = areTokensSupportedOnChain(['USDC', 'UNKNOWN'], 1);
+        const result = areTokensSupportedOnChain(['USDC', 'UNKNOWN'], 42161);
         expect(result).toBe(false);
       });
 
@@ -549,25 +549,25 @@ describe('Token Helpers', () => {
       });
 
       it('should work with mixed token support', () => {
-        const supportedResult = areTokensSupportedOnChain(['USDC', 'ETH'], 1);
+        const supportedResult = areTokensSupportedOnChain(['USDC', 'ETH'], 42161);
         expect(supportedResult).toBe(true);
 
-        const unsupportedResult = areTokensSupportedOnChain(['USDC', 'NONEXISTENT'], 1);
+        const unsupportedResult = areTokensSupportedOnChain(['USDC', 'NONEXISTENT'], 42161);
         expect(unsupportedResult).toBe(false);
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for invalid symbols array', () => {
-        expect(() => areTokensSupportedOnChain(null, 1)).toThrow('Token symbols parameter is required');
-        expect(() => areTokensSupportedOnChain('USDC', 1)).toThrow('Token symbols must be an array');
-        expect(() => areTokensSupportedOnChain([], 1)).toThrow('Token symbols array cannot be empty');
+        expect(() => areTokensSupportedOnChain(null, 42161)).toThrow('Token symbols parameter is required');
+        expect(() => areTokensSupportedOnChain('USDC', 42161)).toThrow('Token symbols must be an array');
+        expect(() => areTokensSupportedOnChain([], 42161)).toThrow('Token symbols array cannot be empty');
       });
 
       it('should throw error for invalid symbols in array', () => {
-        expect(() => areTokensSupportedOnChain([null], 1)).toThrow('Token symbols[0]: Token symbol parameter is required');
-        expect(() => areTokensSupportedOnChain(['USDC', ''], 1)).toThrow('Token symbols[1]: Token symbol cannot be empty');
-        expect(() => areTokensSupportedOnChain(['USDC', 123], 1)).toThrow('Token symbols[1]: Token symbol must be a string');
+        expect(() => areTokensSupportedOnChain([null], 42161)).toThrow('Token symbols[0]: Token symbol parameter is required');
+        expect(() => areTokensSupportedOnChain(['USDC', ''], 42161)).toThrow('Token symbols[1]: Token symbol cannot be empty');
+        expect(() => areTokensSupportedOnChain(['USDC', 123], 42161)).toThrow('Token symbols[1]: Token symbol must be a string');
       });
 
       it('should throw error for invalid chainId', () => {
@@ -580,16 +580,16 @@ describe('Token Helpers', () => {
   describe('getTokenByAddress', () => {
     describe('Success Cases', () => {
       it('should return token for valid address and chain', () => {
-        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-        const result = getTokenByAddress(address, 1);
+        const address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+        const result = getTokenByAddress(address, 42161);
 
         expect(result).toBeDefined();
         expect(result.symbol).toBe('USDC');
       });
 
       it('should handle case-insensitive addresses', () => {
-        const address = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
-        const result = getTokenByAddress(address, 1);
+        const address = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+        const result = getTokenByAddress(address, 42161);
 
         expect(result).toBeDefined();
         expect(result.symbol).toBe('USDC');
@@ -605,9 +605,9 @@ describe('Token Helpers', () => {
         expect(result.name).toBe('Wrapped Ether');
       });
 
-      it('should resolve WETH address on Ethereum mainnet to WETH token', () => {
-        const address = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
-        const result = getTokenByAddress(address, 1);
+      it('should resolve WETH address on local fork to WETH token', () => {
+        const address = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const result = getTokenByAddress(address, 1337);
 
         expect(result).toBeDefined();
         expect(result.symbol).toBe('WETH');
@@ -619,36 +619,36 @@ describe('Token Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for invalid address format', () => {
-        expect(() => getTokenByAddress('invalid', 1)).toThrow('Address must be a valid Ethereum address');
-        expect(() => getTokenByAddress('0x123', 1)).toThrow('Address must be a valid Ethereum address');
-        expect(() => getTokenByAddress('0x123456789012345678901234567890123456789G', 1)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress('invalid', 42161)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress('0x123', 42161)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress('0x123456789012345678901234567890123456789G', 42161)).toThrow('Address must be a valid Ethereum address');
       });
 
       it('should throw error for missing address', () => {
-        expect(() => getTokenByAddress(null, 1)).toThrow('Address parameter is required');
-        expect(() => getTokenByAddress(undefined, 1)).toThrow('Address parameter is required');
-        expect(() => getTokenByAddress('', 1)).toThrow('Address must be a valid Ethereum address');
+        expect(() => getTokenByAddress(null, 42161)).toThrow('Address parameter is required');
+        expect(() => getTokenByAddress(undefined, 42161)).toThrow('Address parameter is required');
+        expect(() => getTokenByAddress('', 42161)).toThrow('Address must be a valid Ethereum address');
       });
 
       it('should throw error for non-string address', () => {
-        expect(() => getTokenByAddress(123, 1)).toThrow('Address must be a string');
-        expect(() => getTokenByAddress({}, 1)).toThrow('Address must be a string');
+        expect(() => getTokenByAddress(123, 42161)).toThrow('Address must be a string');
+        expect(() => getTokenByAddress({}, 42161)).toThrow('Address must be a string');
       });
 
       it('should throw error for invalid chainId', () => {
-        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        const address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
         expect(() => getTokenByAddress(address, null)).toThrow('Chain ID parameter is required');
         expect(() => getTokenByAddress(address, 'invalid')).toThrow('Chain ID must be a positive integer');
       });
 
       it('should throw error for unknown address', () => {
         const address = '0x1234567890123456789012345678901234567890';
-        expect(() => getTokenByAddress(address, 1))
-          .toThrow(`No token found at address ${address} on chain 1`);
+        expect(() => getTokenByAddress(address, 42161))
+          .toThrow(`No token found at address ${address} on chain 42161`);
       });
 
       it('should throw error for address not on chain', () => {
-        const address = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+        const address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
         expect(() => getTokenByAddress(address, 999999))
           .toThrow(`No token found at address ${address} on chain 999999`);
       });
@@ -657,23 +657,6 @@ describe('Token Helpers', () => {
 
   describe('getTokensByChain', () => {
     describe('Success Cases', () => {
-      it('should return tokens available on Ethereum', () => {
-        const result = getTokensByChain(1);
-
-        expect(Array.isArray(result)).toBe(true);
-        expect(result.length).toBeGreaterThan(0);
-
-        result.forEach(token => {
-          // Native tokens have null addresses but wethAddresses
-          if (token.isNative) {
-            expect(token.wethAddresses[1]).toBeDefined();
-          } else {
-            expect(token.addresses[1]).toBeDefined();
-            expect(typeof token.addresses[1]).toBe('string');
-          }
-        });
-      });
-
       it('should return tokens available on Arbitrum', () => {
         const result = getTokensByChain(42161);
 
@@ -681,10 +664,27 @@ describe('Token Helpers', () => {
         expect(result.length).toBeGreaterThan(0);
 
         result.forEach(token => {
+          // Native tokens have null addresses but wethAddresses
           if (token.isNative) {
             expect(token.wethAddresses[42161]).toBeDefined();
           } else {
             expect(token.addresses[42161]).toBeDefined();
+            expect(typeof token.addresses[42161]).toBe('string');
+          }
+        });
+      });
+
+      it('should return tokens available on Avalanche', () => {
+        const result = getTokensByChain(43114);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+
+        result.forEach(token => {
+          if (token.isNative) {
+            // ETH is not native on Avalanche, skip
+          } else {
+            expect(token.addresses[43114]).toBeDefined();
           }
         });
       });
@@ -701,8 +701,8 @@ describe('Token Helpers', () => {
         expect(result).toEqual([]);
       });
 
-      it('should include USDC and ETH on all supported chains', () => {
-        const supportedChains = [1, 42161, 1337];
+      it('should include USDC and ETH on Arbitrum chains', () => {
+        const supportedChains = [42161, 1337];
 
         supportedChains.forEach(chainId => {
           const tokens = getTokensByChain(chainId);
@@ -714,13 +714,13 @@ describe('Token Helpers', () => {
       });
 
       it('should include native ETH token with correct properties', () => {
-        const result = getTokensByChain(1);
+        const result = getTokensByChain(42161);
         const ethToken = result.find(t => t.symbol === 'ETH');
 
         expect(ethToken).toBeDefined();
         expect(ethToken.isNative).toBe(true);
-        expect(ethToken.addresses[1]).toBe('0x0000000000000000000000000000000000000000');
-        expect(ethToken.wethAddresses[1]).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
+        expect(ethToken.addresses[42161]).toBe('0x0000000000000000000000000000000000000000');
+        expect(ethToken.wethAddresses[42161]).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
       });
     });
 
@@ -884,45 +884,45 @@ describe('Token Helpers', () => {
   describe('getTokenAddresses', () => {
     describe('Success Cases', () => {
       it('should return addresses for multiple ERC20 tokens', () => {
-        const result = getTokenAddresses(['USDC', 'WBTC'], 1);
+        const result = getTokenAddresses(['USDC', 'WBTC'], 42161);
 
         expect(typeof result).toBe('object');
-        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
+        expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+        expect(result.WBTC).toBe('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f');
       });
 
       it('should return AddressZero for native ETH token', () => {
-        const result = getTokenAddresses(['USDC', 'ETH'], 1);
+        const result = getTokenAddresses(['USDC', 'ETH'], 42161);
 
-        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+        expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
         expect(result.ETH).toBe('0x0000000000000000000000000000000000000000');
       });
 
-      it('should return addresses for Arbitrum chain', () => {
-        const result = getTokenAddresses(['USDC', 'WBTC'], 42161);
+      it('should return addresses for local fork chain', () => {
+        const result = getTokenAddresses(['USDC', 'WBTC'], 1337);
 
         expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
         expect(result.WBTC).toBe('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f');
       });
 
       it('should return all addresses when all tokens are available', () => {
-        const result = getTokenAddresses(['USDC', 'WBTC'], 1);
+        const result = getTokenAddresses(['USDC', 'WBTC'], 42161);
 
         expect(Object.keys(result)).toHaveLength(2);
-        expect(result.USDC).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
-        expect(result.WBTC).toBe('0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599');
+        expect(result.USDC).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+        expect(result.WBTC).toBe('0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f');
       });
 
       it('should work with single token', () => {
-        const result = getTokenAddresses(['USDC'], 1);
+        const result = getTokenAddresses(['USDC'], 42161);
         expect(result.USDC).toBeDefined();
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for invalid symbols', () => {
-        expect(() => getTokenAddresses(null, 1)).toThrow('Token symbols parameter is required');
-        expect(() => getTokenAddresses([], 1)).toThrow('Token symbols array cannot be empty');
+        expect(() => getTokenAddresses(null, 42161)).toThrow('Token symbols parameter is required');
+        expect(() => getTokenAddresses([], 42161)).toThrow('Token symbols array cannot be empty');
       });
 
       it('should throw error for invalid chainId', () => {
@@ -931,7 +931,7 @@ describe('Token Helpers', () => {
       });
 
       it('should throw error when token not found', () => {
-        expect(() => getTokenAddresses(['UNKNOWN', 'USDC'], 1))
+        expect(() => getTokenAddresses(['UNKNOWN', 'USDC'], 42161))
           .toThrow('Token UNKNOWN not found');
       });
 
@@ -1087,11 +1087,6 @@ describe('Token Helpers', () => {
 
   describe('getWethAddress', () => {
     describe('Success Cases', () => {
-      it('should return WETH address for Ethereum mainnet', () => {
-        const result = getWethAddress(1);
-        expect(result).toBe('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2');
-      });
-
       it('should return WETH address for Arbitrum', () => {
         const result = getWethAddress(42161);
         expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
@@ -1103,7 +1098,7 @@ describe('Token Helpers', () => {
       });
 
       it('should return valid Ethereum addresses', () => {
-        const chainIds = [1, 42161, 1337];
+        const chainIds = [42161, 1337];
         chainIds.forEach(chainId => {
           const result = getWethAddress(chainId);
           expect(result).toMatch(/^0x[a-fA-F0-9]{40}$/);

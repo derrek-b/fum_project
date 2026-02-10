@@ -7,10 +7,10 @@
  * =============================================================================
  * PLATFORM ADAPTER INTERFACE TRACKING
  * =============================================================================
- * This tracks which methods are confirmed as required interface methods vs
- * platform-specific helpers. Update as we build out the automation service.
+ * This tracks which methods are confirmed as required interface methods
+ * Update as we build out the automation service.
  *
- * CONFIRMED INTERFACE METHODS (platform-agnostic, required for all adapters):
+ * CONFIRMED AUTOMATION SERVICE INTERFACE METHODS (platform-agnostic, required for all adapters):
  * ----------------------------------------------------------------------------------
  * | Method                       | Used By                             | Status    |
  * |------------------------------|-------------------------------------|-----------|
@@ -241,10 +241,10 @@ export default class PlatformAdapter {
    * @param {Object} poolData - Pool data
    * @param {Object} token0Data - Token0 data
    * @param {Object} token1Data - Token1 data
-   * @param {number} chainId - Chain ID from the wallet
-   * @returns {Promise<Object>} - Token amounts
+   * @param {Object} [provider] - Ethers provider (required for some adapters, e.g. TJ V2.1)
+   * @returns {Promise<[BigInt, BigInt]>} [amount0, amount1]
    */
-  async calculateTokenAmounts(position, poolData, token0Data, token1Data) {
+  async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
     throw new Error("calculateTokenAmounts must be implemented by subclasses");
   }
 

@@ -2654,8 +2654,8 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           adapter._fetchPoolData(validWethAddress, validUsdcAddress, 500, undefined)
         ).rejects.toThrow();
 
-        // Test wrong chain provider
-        const wrongChainAdapter = new UniswapV3Adapter(1); // Ethereum instead of 1337
+        // Test wrong chain provider (adapter for Arbitrum, but provider is local 1337)
+        const wrongChainAdapter = new UniswapV3Adapter(42161);
         await expect(
           wrongChainAdapter._fetchPoolData(validWethAddress, validUsdcAddress, 500, env.provider)
         ).rejects.toThrow();
@@ -13141,7 +13141,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let adapter;
 
     beforeEach(() => {
-      adapter = new UniswapV3Adapter(1);
+      adapter = new UniswapV3Adapter(42161);
     });
 
     describe('success cases', () => {
@@ -13302,7 +13302,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let adapter;
 
     beforeEach(() => {
-      adapter = new UniswapV3Adapter(1);
+      adapter = new UniswapV3Adapter(42161);
     });
 
     describe('success cases', () => {
@@ -13580,7 +13580,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     let adapter;
 
     beforeEach(() => {
-      adapter = new UniswapV3Adapter(1);
+      adapter = new UniswapV3Adapter(42161);
     });
 
     describe('success cases', () => {

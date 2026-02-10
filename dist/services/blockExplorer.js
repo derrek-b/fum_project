@@ -15,7 +15,7 @@ import { ethers } from 'ethers';
 // ============================================================================
 
 let _config = {
-  arbiscanApiKey: null,
+  blockExplorerApiKey: null,
   alchemyApiKey: null,  // For future use
 };
 
@@ -40,11 +40,11 @@ const ETHERSCAN_CHAIN_IDS = {
 /**
  * Configure the block explorer service
  * @param {Object} options
- * @param {string} [options.arbiscanApiKey] - Arbiscan API key
+ * @param {string} [options.blockExplorerApiKey] - Block explorer API key (Arbiscan, Snowtrace, etc.)
  * @param {string} [options.alchemyApiKey] - Alchemy API key (for future use)
  */
-export function configureBlockExplorer({ arbiscanApiKey, alchemyApiKey } = {}) {
-  if (arbiscanApiKey !== undefined) _config.arbiscanApiKey = arbiscanApiKey;
+export function configureBlockExplorer({ blockExplorerApiKey, alchemyApiKey } = {}) {
+  if (blockExplorerApiKey !== undefined) _config.blockExplorerApiKey = blockExplorerApiKey;
   if (alchemyApiKey !== undefined) _config.alchemyApiKey = alchemyApiKey;
 }
 
@@ -61,7 +61,7 @@ export function getBlockExplorerConfig() {
  */
 export function resetBlockExplorerConfig() {
   _config = {
-    arbiscanApiKey: null,
+    blockExplorerApiKey: null,
     alchemyApiKey: null,
   };
 }
@@ -147,8 +147,8 @@ function createArbiscanService(chainId) {
       url.searchParams.append('module', 'account');
       url.searchParams.append('action', 'txlistinternal');
       url.searchParams.append('txhash', txHash);
-      if (_config.arbiscanApiKey) {
-        url.searchParams.append('apikey', _config.arbiscanApiKey);
+      if (_config.blockExplorerApiKey) {
+        url.searchParams.append('apikey', _config.blockExplorerApiKey);
       }
 
       const response = await fetch(url.toString());

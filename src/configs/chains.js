@@ -35,12 +35,6 @@ const chains = {
         // V4 uses UniversalRouter for swaps (shared with V3)
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
       },
-      traderjoeV2_1: {
-        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
-        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
-        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
-        positionManagerAddress: "",  // Populated after deployment
-      },
     },
   },
 
@@ -73,45 +67,55 @@ const chains = {
         stateViewAddress: "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
         quoterAddress: "0x3972c00f7ed4885e145823eb7c655375d275a1c5",
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
-      },
+      }
+    },
+  },
+
+  // Avalanche C-Chain
+  43114: {
+    name: "Avalanche",
+    nativeCurrency: {
+      name: "Avalanche",
+      symbol: "AVAX",
+      decimals: 18
+    },
+    rpcUrls: ["https://avax-mainnet.g.alchemy.com/v2"],
+    blockExplorerUrls: ["https://snowtrace.io"],
+    executorAddress: "0x0",
+    minDeploymentForGas: 10,
+    minSwapValue: 0.10,
+    transactionDeadlineMinutes: 5,
+    platformAddresses: {
       traderjoeV2_1: {
-        // Same as Arbitrum since it's a fork
         lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
         lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
         lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
-        positionManagerAddress: "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",  // Populated per test run after TJPositionManager deployment
+        positionManagerAddress: "",  // Populated after deployment
       },
     },
   },
 
-  // Ethereum Mainnet
-  1: {
-    name: "Ethereum",
+  // Local Hardhat Fork - Avalanche
+  1338: {
+    name: "Forked Avalanche",
     nativeCurrency: {
-      name: "Ether",
-      symbol: "ETH",
+      name: "Avalanche",
+      symbol: "AVAX",
       decimals: 18
     },
-    rpcUrls: ["https://cloudflare-eth.com"],
-    blockExplorerUrls: ["https://etherscan.io"],
-    executorAddress: "0x0",
-    minDeploymentForGas: 100,
-    minSwapValue: 1.00,
-    transactionDeadlineMinutes: 20,
+    rpcUrls: ["http://localhost:8546"],
+    blockExplorerUrls: ["https://snowtrace.io"], // Use Avalanche explorer since it's a fork
+    executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A", // Same test account as 1337
+    minDeploymentForGas: 10,
+    minSwapValue: 0.10,
+    transactionDeadlineMinutes: 5,
     platformAddresses: {
-      uniswapV3: {
-        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
-        positionManagerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-        routerAddress: "0xE592427A0AEce92De3Edee1F18E0157C05861564",
-        universalRouterAddress: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", // V2.0 (V4 support)
-        quoterAddress: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-      },
-      uniswapV4: {
-        poolManagerAddress: "0x000000000004444c5dc75cB358380D2e3dE08A90",
-        positionManagerAddress: "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e",
-        stateViewAddress: "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
-        quoterAddress: "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203",
-        universalRouterAddress: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      traderjoeV2_1: {
+        // Same as Avalanche since it's a fork
+        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
+        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
+        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
+        positionManagerAddress: "",  // Populated per test run after TJPositionManager deployment
       },
     },
   },

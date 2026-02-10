@@ -363,7 +363,7 @@ describe('Platform Helpers', () => {
   describe('getAvailablePlatforms', () => {
     describe('Success Cases', () => {
       it('should return array of available platforms for supported chains', () => {
-        const platforms = getAvailablePlatforms(1);
+        const platforms = getAvailablePlatforms(42161);
         expect(Array.isArray(platforms)).toBe(true);
         expect(platforms.length).toBeGreaterThan(0);
 
@@ -378,7 +378,7 @@ describe('Platform Helpers', () => {
         expect(uniswapV3.color).toBe('#FF007A');
         expect(uniswapV3.description).toBe('Uniswap V3 concentrated liquidity positions');
 
-        // Test address values from chains config (Ethereum mainnet)
+        // Test address values from chains config (Arbitrum)
         expect(uniswapV3.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
         expect(uniswapV3.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
         expect(uniswapV3.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
@@ -586,7 +586,7 @@ describe('Platform Helpers', () => {
   describe('lookupPlatformById', () => {
     describe('Success Cases', () => {
       it('should return complete platform config for valid platform and chain', () => {
-        const platform = lookupPlatformById('uniswapV3', 1);
+        const platform = lookupPlatformById('uniswapV3', 42161);
         expect(platform).toBeDefined();
 
         // Test actual values from configs
@@ -596,7 +596,7 @@ describe('Platform Helpers', () => {
         expect(platform.color).toBe('#FF007A');
         expect(platform.description).toBe('Uniswap V3 concentrated liquidity positions');
 
-        // Test address values from chains config (Ethereum mainnet)
+        // Test address values from chains config (Arbitrum)
         expect(platform.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
         expect(platform.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
         expect(platform.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
@@ -626,13 +626,13 @@ describe('Platform Helpers', () => {
           }
         }));
 
-        // Mock chains config where the platform is not configured for chain 1
+        // Mock chains config where the platform is not configured for chain 42161
         vi.doMock('../../../src/configs/chains.js', () => ({
           default: {
-            1: {
-              name: 'Ethereum',
-              rpcUrls: ['https://cloudflare-eth.com'],
-              executorAddress: '0x0',
+            42161: {
+              name: 'Arbitrum One',
+              rpcUrls: ['https://arb-mainnet.g.alchemy.com/v2'],
+              executorAddress: '0x42d9df99e78ba0573b2990d6177d6eef7145c8e6',
               platformAddresses: {
                 // testPlatform is not configured for this chain
               }
@@ -644,7 +644,7 @@ describe('Platform Helpers', () => {
         vi.resetModules();
         const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
 
-        const platform = platformHelpers.lookupPlatformById('testPlatform', 1);
+        const platform = platformHelpers.lookupPlatformById('testPlatform', 42161);
         expect(platform).toBeNull();
 
         // Restore original config
@@ -948,9 +948,9 @@ describe('Platform Helpers', () => {
       });
 
       it('should validate both platformId and chainId parameters', () => {
-        expect(() => lookupPlatformById(null, 1)).toThrow('platformId parameter is required');
+        expect(() => lookupPlatformById(null, 42161)).toThrow('platformId parameter is required');
         expect(() => lookupPlatformById('uniswapV3', null)).toThrow('chainId parameter is required');
-        expect(() => lookupPlatformById('', 1)).toThrow('platformId cannot be empty');
+        expect(() => lookupPlatformById('', 42161)).toThrow('platformId cannot be empty');
         expect(() => lookupPlatformById('uniswapV3', -1)).toThrow('chainId must be greater than 0');
       });
     });

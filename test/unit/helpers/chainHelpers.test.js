@@ -90,17 +90,6 @@ describe('Chain Helpers', () => {
 
   describe('getChainConfig', () => {
     describe('Success Cases', () => {
-      it('should return correct config for Ethereum mainnet (chainId 1)', () => {
-        const config = getChainConfig(1);
-
-        expect(config).toBeDefined();
-        expect(typeof config).toBe('object');
-        expect(config.name).toBe('Ethereum');
-        expect(config.rpcUrls).toEqual(['https://cloudflare-eth.com']);
-        expect(config.executorAddress).toBe('0x0');
-        expect(config.platformAddresses).toHaveProperty('uniswapV3');
-      });
-
       it('should return correct config for Arbitrum One (chainId 42161)', () => {
         const config = getChainConfig(42161);
 
@@ -110,6 +99,17 @@ describe('Chain Helpers', () => {
         expect(config.rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2']);  // Base URL - API key appended by getChainRpcUrls()
         expect(config.executorAddress).toBe('0x42d9df99e78ba0573b2990d6177d6eef7145c8e6');
         expect(config.platformAddresses).toHaveProperty('uniswapV3');
+      });
+
+      it('should return correct config for Avalanche (chainId 43114)', () => {
+        const config = getChainConfig(43114);
+
+        expect(config).toBeDefined();
+        expect(typeof config).toBe('object');
+        expect(config.name).toBe('Avalanche');
+        expect(config.rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2']);
+        expect(config.executorAddress).toBe('0x0');
+        expect(config.platformAddresses).toHaveProperty('traderjoeV2_1');
       });
     });
 
@@ -128,14 +128,14 @@ describe('Chain Helpers', () => {
 
   describe('getChainName', () => {
     describe('Success Cases', () => {
-      it('should return "Ethereum" for chainId 1', () => {
-        const name = getChainName(1);
-        expect(name).toBe('Ethereum');
-      });
-
       it('should return "Arbitrum One" for chainId 42161', () => {
         const name = getChainName(42161);
         expect(name).toBe('Arbitrum One');
+      });
+
+      it('should return "Avalanche" for chainId 43114', () => {
+        const name = getChainName(43114);
+        expect(name).toBe('Avalanche');
       });
     });
 
@@ -183,13 +183,6 @@ describe('Chain Helpers', () => {
 
   describe('getChainRpcUrls', () => {
     describe('Success Cases', () => {
-      it('should return correct RPC URLs for Ethereum mainnet (chainId 1)', () => {
-        const rpcUrls = getChainRpcUrls(1);
-
-        expect(Array.isArray(rpcUrls)).toBe(true);
-        expect(rpcUrls).toEqual(['https://cloudflare-eth.com']);
-      });
-
       it('should return correct RPC URLs for Arbitrum One (chainId 42161) with API key appended', () => {
         // Configure API key for test using the new configure pattern
         configureChainHelpers({ alchemyApiKey: 'test-api-key-123' });
@@ -198,6 +191,16 @@ describe('Chain Helpers', () => {
 
         expect(Array.isArray(rpcUrls)).toBe(true);
         expect(rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2/test-api-key-123']);
+      });
+
+      it('should return correct RPC URLs for Avalanche (chainId 43114) with API key appended', () => {
+        // Configure API key for test using the new configure pattern
+        configureChainHelpers({ alchemyApiKey: 'test-api-key-123' });
+
+        const rpcUrls = getChainRpcUrls(43114);
+
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2/test-api-key-123']);
       });
 
       it('should return static RPC URLs for local fork (chainId 1337) without modification', () => {
@@ -296,8 +299,8 @@ describe('Chain Helpers', () => {
       });
 
       it('should throw error for chains with 0x0 executor address', () => {
-        // Ethereum mainnet still has 0x0 (no executor deployed yet)
-        expect(() => getExecutorAddress(1)).toThrow('No executor address configured for chain 1');
+        // Avalanche still has 0x0 (no executor deployed yet)
+        expect(() => getExecutorAddress(43114)).toThrow('No executor address configured for chain 43114');
         // Note: Arbitrum (42161) now has a real executor address, so it doesn't throw
       });
 
@@ -357,18 +360,19 @@ describe('Chain Helpers', () => {
 
   describe('isChainSupported', () => {
     describe('Success Cases', () => {
-      it('should return true for Ethereum mainnet (chainId 1)', () => {
-        expect(isChainSupported(1)).toBe(true);
-      });
-
       it('should return true for Arbitrum One (chainId 42161)', () => {
         expect(isChainSupported(42161)).toBe(true);
+      });
+
+      it('should return true for Avalanche (chainId 43114)', () => {
+        expect(isChainSupported(43114)).toBe(true);
       });
 
       it('should return false for unsupported chains', () => {
         expect(isChainSupported(999999)).toBe(false);
         expect(isChainSupported(888888)).toBe(false);
         expect(isChainSupported(137)).toBe(false); // Polygon - not configured
+        expect(isChainSupported(1)).toBe(false); // Ethereum - removed
       });
     });
 
@@ -387,8 +391,8 @@ describe('Chain Helpers', () => {
         const chainIds = lookupSupportedChainIds();
 
         expect(Array.isArray(chainIds)).toBe(true);
-        expect(chainIds).toContain(1);      // Ethereum
         expect(chainIds).toContain(42161);  // Arbitrum One
+        expect(chainIds).toContain(43114);  // Avalanche
         expect(chainIds).toContain(1337);   // Forked Arbitrum
 
         chainIds.forEach(id => {
@@ -408,17 +412,6 @@ describe('Chain Helpers', () => {
 
   describe('getPlatformAddresses', () => {
     describe('Success Cases', () => {
-      it('should return correct UniswapV3 addresses for Ethereum mainnet (chainId 1)', () => {
-        const addresses = getPlatformAddresses(1, 'uniswapV3');
-
-        expect(addresses).toBeDefined();
-        expect(typeof addresses).toBe('object');
-        expect(addresses.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
-        expect(addresses.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
-        expect(addresses.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
-        expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
-      });
-
       it('should return correct UniswapV3 addresses for Arbitrum One (chainId 42161)', () => {
         const addresses = getPlatformAddresses(42161, 'uniswapV3');
 
@@ -428,6 +421,16 @@ describe('Chain Helpers', () => {
         expect(addresses.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
         expect(addresses.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
         expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
+      });
+
+      it('should return correct Trader Joe V2.1 addresses for Avalanche (chainId 43114)', () => {
+        const addresses = getPlatformAddresses(43114, 'traderjoeV2_1');
+
+        expect(addresses).toBeDefined();
+        expect(typeof addresses).toBe('object');
+        expect(addresses.lbFactoryAddress).toBe('0x8e42f2F4101563bF679975178e880FD87d3eFd4e');
+        expect(addresses.lbRouterAddress).toBe('0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30');
+        expect(addresses.lbQuoterAddress).toBe('0xd76019A16606FDa4651f636D9751f500Ed776250');
       });
     });
 
@@ -461,7 +464,7 @@ describe('Chain Helpers', () => {
       });
 
       it('should throw error for unconfigured platform', () => {
-        expect(() => getPlatformAddresses(1, 'nonexistentPlatform')).toThrow('Platform nonexistentPlatform not configured for chain 1');
+        expect(() => getPlatformAddresses(42161, 'nonexistentPlatform')).toThrow('Platform nonexistentPlatform not configured for chain 42161');
         expect(() => getPlatformAddresses(42161, 'aaveV3')).toThrow('Platform aaveV3 not configured for chain 42161');
         expect(() => getPlatformAddresses(1337, 'compound')).toThrow('Platform compound not configured for chain 1337');
       });
@@ -473,28 +476,28 @@ describe('Chain Helpers', () => {
       });
 
       it('should validate platformId parameter', () => {
-        expect(() => getPlatformAddresses(1, null)).toThrow('platformId parameter is required');
-        expect(() => getPlatformAddresses(1, undefined)).toThrow('platformId parameter is required');
-        expect(() => getPlatformAddresses(1, 123)).toThrow('platformId must be a string');
-        expect(() => getPlatformAddresses(1, '')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformAddresses(42161, null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformAddresses(42161, undefined)).toThrow('platformId parameter is required');
+        expect(() => getPlatformAddresses(42161, 123)).toThrow('platformId must be a string');
+        expect(() => getPlatformAddresses(42161, '')).toThrow('platformId cannot be empty');
       });
     });
   });
 
   describe('lookupChainPlatformIds', () => {
     describe('Success Cases', () => {
-      it('should return array containing uniswapV3 for all supported chains', () => {
-        const chain1Platforms = lookupChainPlatformIds(1);
+      it('should return array containing expected platforms for supported chains', () => {
         const chain42161Platforms = lookupChainPlatformIds(42161);
         const chain1337Platforms = lookupChainPlatformIds(1337);
+        const chain43114Platforms = lookupChainPlatformIds(43114);
 
-        expect(Array.isArray(chain1Platforms)).toBe(true);
         expect(Array.isArray(chain42161Platforms)).toBe(true);
         expect(Array.isArray(chain1337Platforms)).toBe(true);
+        expect(Array.isArray(chain43114Platforms)).toBe(true);
 
-        expect(chain1Platforms).toContain('uniswapV3');
         expect(chain42161Platforms).toContain('uniswapV3');
         expect(chain1337Platforms).toContain('uniswapV3');
+        expect(chain43114Platforms).toContain('traderjoeV2_1');
       });
 
       it('should return all configured platforms', async () => {
@@ -577,8 +580,8 @@ describe('Chain Helpers', () => {
   describe('getMinDeploymentForGas', () => {
     describe('Success Cases', () => {
       it('should return a number for valid chains', () => {
-        expect(typeof getMinDeploymentForGas(1)).toBe('number');
         expect(typeof getMinDeploymentForGas(42161)).toBe('number');
+        expect(typeof getMinDeploymentForGas(43114)).toBe('number');
         expect(typeof getMinDeploymentForGas(1337)).toBe('number');
       });
     });
@@ -628,20 +631,20 @@ describe('Chain Helpers', () => {
   describe('getMinSwapValue', () => {
     describe('Success Cases', () => {
       it('should return a number for valid chains', () => {
-        expect(typeof getMinSwapValue(1)).toBe('number');
         expect(typeof getMinSwapValue(42161)).toBe('number');
+        expect(typeof getMinSwapValue(43114)).toBe('number');
         expect(typeof getMinSwapValue(1337)).toBe('number');
       });
 
       it('should return expected values for each chain', () => {
         expect(getMinSwapValue(42161)).toBe(0.10);  // Arbitrum
         expect(getMinSwapValue(1337)).toBe(0.10);   // Local
-        expect(getMinSwapValue(1)).toBe(1.00);      // Ethereum
+        expect(getMinSwapValue(43114)).toBe(0.10);  // Avalanche
       });
 
       it('should return values >= 0', () => {
-        expect(getMinSwapValue(1)).toBeGreaterThanOrEqual(0);
         expect(getMinSwapValue(42161)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(43114)).toBeGreaterThanOrEqual(0);
         expect(getMinSwapValue(1337)).toBeGreaterThanOrEqual(0);
       });
     });
@@ -684,20 +687,20 @@ describe('Chain Helpers', () => {
   describe('getTransactionDeadlineMinutes', () => {
     describe('Success Cases', () => {
       it('should return a number for valid chains', () => {
-        expect(typeof getTransactionDeadlineMinutes(1)).toBe('number');
         expect(typeof getTransactionDeadlineMinutes(42161)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(43114)).toBe('number');
         expect(typeof getTransactionDeadlineMinutes(1337)).toBe('number');
       });
 
       it('should return expected values for each chain', () => {
         expect(getTransactionDeadlineMinutes(42161)).toBe(5);   // Arbitrum - fast L2
         expect(getTransactionDeadlineMinutes(1337)).toBe(5);    // Local fork (Arbitrum)
-        expect(getTransactionDeadlineMinutes(1)).toBe(20);      // Ethereum mainnet
+        expect(getTransactionDeadlineMinutes(43114)).toBe(5);   // Avalanche
       });
 
       it('should return values > 0', () => {
-        expect(getTransactionDeadlineMinutes(1)).toBeGreaterThan(0);
         expect(getTransactionDeadlineMinutes(42161)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(43114)).toBeGreaterThan(0);
         expect(getTransactionDeadlineMinutes(1337)).toBeGreaterThan(0);
       });
     });
