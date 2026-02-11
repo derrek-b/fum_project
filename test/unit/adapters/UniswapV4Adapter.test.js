@@ -11,7 +11,7 @@ import { setupV4TestEnvironment } from '../../setup/v4-setup.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { configureBlockExplorer, resetBlockExplorerConfig } from '../../../src/services/blockExplorer.js';
-import { getTokenAddress, getWethAddress } from '../../../src/helpers/tokenHelpers.js';
+import { getTokenAddress, getWrappedNativeAddress } from '../../../src/helpers/tokenHelpers.js';
 
 describe('UniswapV4Adapter - Unit Tests', () => {
   let env;
@@ -6584,7 +6584,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         // WBTC may not be available on all chains
         await expect(adapter.selectBestPool(
           'WETH', 'USDC', env.provider, 999999
-        )).rejects.toThrow(/not available on chain/);
+        )).rejects.toThrow(/configured for chain/);
       });
     });
   });
@@ -6598,7 +6598,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           symbol: 'USDC'
         };
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -6619,7 +6619,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should calculate price for positive tick', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -6644,7 +6644,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should calculate price for negative tick', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -6669,7 +6669,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -6695,7 +6695,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -6717,7 +6717,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getWethAddress(1337),
+        address: getWrappedNativeAddress(1337),
         decimals: 18,
         symbol: 'ETH'
       };
@@ -6778,7 +6778,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       it('should throw error when base and quote tokens have the same address', () => {
         const validTick = 0;
         const sameToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -6791,12 +6791,12 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const validTick = 0;
 
         const invalidTokens = [
-          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
+          { address: getWrappedNativeAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {

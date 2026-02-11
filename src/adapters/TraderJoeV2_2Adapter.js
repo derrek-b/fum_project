@@ -1,8 +1,8 @@
-// fum_library/adapters/TraderJoeV2_1Adapter.js
+// fum_library/adapters/TraderJoeV2_2Adapter.js
 /**
- * Adapter for Trader Joe V2.1 Liquidity Book on Arbitrum
+ * Adapter for Trader Joe V2.2 Liquidity Book on Arbitrum
  *
- * Trader Joe V2.1 uses a bin-based concentrated liquidity system where:
+ * Trader Joe V2.2 uses a bin-based concentrated liquidity system where:
  * - tokenX = lower address (equivalent to Uniswap's token0)
  * - tokenY = higher address (equivalent to Uniswap's token1)
  * - Liquidity is distributed across discrete price bins instead of continuous ticks
@@ -11,11 +11,11 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformAddresses, getChainConfig } from "../helpers/chainHelpers.js";
-import { getTokenBySymbol, getTokenByAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { getTokenBySymbol, getTokenByAddress, getWrappedNativeAddress, getWrappedNativeSymbol, isNativeToken, isWrappedNativeToken } from "../helpers/tokenHelpers.js";
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 import contractData from "../artifacts/contracts.js";
 
-// Trader Joe V2.1 ABIs and addresses from official SDK
+// Trader Joe V2.2 ABIs and addresses from official SDK
 import {
   LBPairV21ABI,
   LBRouterV21ABI,
@@ -27,17 +27,17 @@ import {
 
 const ERC20ABI = ERC20ARTIFACT.abi;
 
-export default class TraderJoeV2_1Adapter extends PlatformAdapter {
+export default class TraderJoeV2_2Adapter extends PlatformAdapter {
   /**
-   * Constructor for the Trader Joe V2.1 adapter
+   * Constructor for the Trader Joe V2.2 adapter
    * @param {number} chainId - Chain ID for the adapter
    * @param {Object} provider - Ethers provider instance
    */
   constructor(chainId, provider) {
-    super(chainId, "traderjoeV2_1", "Trader Joe V2.1");
+    super(chainId, "traderjoeV2_2", "Trader Joe V2.2");
 
     // Cache platform addresses from chain config
-    this.addresses = { ...getPlatformAddresses(chainId, "traderjoeV2_1") };
+    this.addresses = { ...getPlatformAddresses(chainId, "traderjoeV2_2") };
     this.chainConfig = getChainConfig(chainId);
 
     // Store ABIs from official SDK
@@ -81,9 +81,9 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   // =============================================================================
 
   /**
-   * Get the event filter for monitoring swap events on Trader Joe V2.1
+   * Get the event filter for monitoring swap events on Trader Joe V2.2
    *
-   * For Trader Joe V2.1, the poolId IS the LBPair contract address.
+   * For Trader Joe V2.2, the poolId IS the LBPair contract address.
    * Swaps emit directly from the LBPair contract (same pattern as V3).
    *
    * LBPair Swap event signature:
@@ -111,13 +111,13 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   /**
-   * Parse a Trader Joe V2.1 swap event log
+   * Parse a Trader Joe V2.2 swap event log
    *
    * Decodes log data from an LBPair Swap event. Validates the event signature,
    * extracts indexed parameters (sender, to) from topics, and decodes non-indexed
    * data including packed bytes32 amounts.
    *
-   * V2.1 Swap event:
+   * V2.2 Swap event:
    *   Swap(address indexed sender, address indexed to, uint24 id, bytes32 amountsIn,
    *        bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
    *
@@ -137,7 +137,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
    * @returns {Object} result.totalFees - Decoded total fees { amountX: string, amountY: string }
    * @returns {Object} result.protocolFees - Decoded protocol fees { amountX: string, amountY: string }
    * @throws {Error} If log is null/undefined or missing required properties
-   * @throws {Error} If log cannot be parsed as a Trader Joe V2.1 Swap event
+   * @throws {Error} If log cannot be parsed as a Trader Joe V2.2 Swap event
    */
   parseSwapEvent(log) {
     if (!log) {
@@ -199,7 +199,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Evaluate price movement between a baseline and current swap state
    *
-   * Uses Trader Joe V2.1 bin-based pricing:
+   * Uses Trader Joe V2.2 bin-based pricing:
    *   price(id) = (1 + binStep/10000)^(id - 8388608)
    *
    * The percentage simplifies to:
@@ -397,7 +397,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
             token0Symbol: tokenXInfo.symbol,
             token1Symbol: tokenYInfo.symbol,
             binStep: Number(positionData.binStep),
-            platform: 'traderjoeV2_1'
+            platform: 'traderjoeV2_2'
           }
         }
       };
@@ -503,7 +503,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Evaluate a position's range status relative to current pool state
    *
-   * Determines if a Trader Joe V2.1 position is in range and calculates distance metrics.
+   * Determines if a Trader Joe V2.2 position is in range and calculates distance metrics.
    * Checks the current activeId against the position's lowerBinId/upperBinId.
    *
    * Two modes:
@@ -579,7 +579,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   /**
-   * Calculate the current token amounts for a Trader Joe V2.1 position.
+   * Calculate the current token amounts for a Trader Joe V2.2 position.
    *
    * Unlike V3/V4 (pure math from liquidity + price), TJ requires RPC calls
    * to fetch per-bin reserves and total supplies from the LBPair contract,
@@ -598,7 +598,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {
     // --- Provider validation (required for TJ) ---
     if (!provider) {
-      throw new Error('provider is required for Trader Joe V2.1 calculateTokenAmounts');
+      throw new Error('provider is required for Trader Joe V2.2 calculateTokenAmounts');
     }
 
     // --- Position validation ---
@@ -667,7 +667,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   /**
-   * Generate calldata for removing liquidity from a TJ V2.1 position
+   * Generate calldata for removing liquidity from a TJ V2.2 position
    *
    * The vault calls decreaseLiquidity() on VaultFactory, which validates via
    * TJPositionValidator, then executes the calldata against TJPositionManager.
@@ -1216,14 +1216,8 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
       const activeBinIndex = deltaIds.indexOf(0);
 
       // Fetch active bin reserves and total supply from LBPair
-      const lbPair = new ethers.Contract(poolData.address, this.lbPairABI, provider);
-      const [binData, totalSupply] = await Promise.all([
-        lbPair.getBin(activeId),
-        lbPair.totalSupply(activeId)
-      ]);
-
-      const reserveX = binData[0].toBigInt();
-      const reserveY = binData[1].toBigInt();
+      const { reserveX, reserveY, totalSupply: totalSupplyBigInt } =
+        await this._getActiveBinData(poolData.address, activeId, provider);
 
       // Get distribution weights at the active bin
       const distXAtActive = distributionX[activeBinIndex];
@@ -1279,7 +1273,6 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
 
       // Estimate liquidity from active bin contribution
       let estimatedLiquidity;
-      const totalSupplyBigInt = totalSupply.toBigInt();
       const totalReserve = reserveX + reserveY;
       if (totalReserve > 0n && totalSupplyBigInt > 0n) {
         // Estimate deposit amount going to the active bin
@@ -1533,6 +1526,27 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   /**
+   * Fetch active bin reserves and total supply from LBPair contract
+   * @private
+   * @param {string} poolAddress - LBPair contract address
+   * @param {number} activeId - Active bin ID
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<{reserveX: bigint, reserveY: bigint, totalSupply: bigint}>}
+   */
+  async _getActiveBinData(poolAddress, activeId, provider) {
+    const lbPair = new ethers.Contract(poolAddress, this.lbPairABI, provider);
+    const [binData, totalSupply] = await Promise.all([
+      lbPair.getBin(activeId),
+      lbPair.totalSupply(activeId)
+    ]);
+    return {
+      reserveX: binData[0].toBigInt(),
+      reserveY: binData[1].toBigInt(),
+      totalSupply: totalSupply.toBigInt()
+    };
+  }
+
+  /**
    * Create a deadline timestamp from minutes
    * @param {number} deadlineMinutes - Minutes from now
    * @returns {number} Unix timestamp
@@ -1545,7 +1559,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   }
 
   /**
-   * Get the Swap event signature for Trader Joe V2.1 LBPair
+   * Get the Swap event signature for Trader Joe V2.2 LBPair
    * @returns {string} Solidity event signature
    */
   _getSwapEventSignature() {
@@ -1555,7 +1569,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Convert a bin ID to a human-readable price
    *
-   * Trader Joe V2.1 Liquidity Book price formula:
+   * Trader Joe V2.2 Liquidity Book price formula:
    *   price(id) = (1 + binStep/10000)^(id - 8388608) * 10^(token0Decimals - token1Decimals)
    *
    * The reference bin (8388608 = 2^23) represents a raw price ratio of 1.0.
@@ -1578,7 +1592,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Decode a packed bytes32 value into tokenX and tokenY amounts
    *
-   * Trader Joe V2.1 packs two 128-bit amounts into a single bytes32:
+   * Trader Joe V2.2 packs two 128-bit amounts into a single bytes32:
    *   - Upper 128 bits = tokenX amount
    *   - Lower 128 bits = tokenY amount
    *
@@ -1596,7 +1610,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   async batchSwapTransactions(swapInstructions, options) {
     const { provider, chainId, recipient, slippageTolerance } = options;
 
-    // Validate options (no signer — TJ V2.1 doesn't use Permit2)
+    // Validate options (no signer — TJ V2.2 doesn't use Permit2)
     if (!provider) throw new Error("provider is required");
     if (!chainId) throw new Error("chainId is required");
     if (!recipient) throw new Error("recipient is required");
@@ -1648,10 +1662,10 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     const tokenInIsNative = !!tokenIn.isNative;
     const tokenOutIsNative = !!tokenOut.isNative;
 
-    // Resolve addresses: native → WETH for route/quote
-    const wethAddress = getWethAddress(chainId);
-    const tokenInAddress = tokenInIsNative ? wethAddress : tokenIn.address;
-    const tokenOutAddress = tokenOutIsNative ? wethAddress : tokenOut.address;
+    // Resolve addresses: native → wrapped native token for route/quote
+    const wrappedNativeAddress = getWrappedNativeAddress(chainId);
+    const tokenInAddress = tokenInIsNative ? wrappedNativeAddress : tokenIn.address;
+    const tokenOutAddress = tokenOutIsNative ? wrappedNativeAddress : tokenOut.address;
 
     // 1. Get quote from LBQuoter
     const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
@@ -1843,7 +1857,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
 
     const swapTopicHash = ethers.utils.id(this._getSwapEventSignature());
 
-    // Collect all TJ V2.1 swap events from receipt
+    // Collect all TJ V2.2 swap events from receipt
     const swapEvents = [];
     for (const log of receipt.logs) {
       try {
@@ -1852,7 +1866,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
           swapEvents.push(parsed);
         }
       } catch (e) {
-        // Not a valid TJ V2.1 Swap event, skip
+        // Not a valid TJ V2.2 Swap event, skip
       }
     }
 
@@ -2040,10 +2054,10 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
       throw new Error("isAmountIn parameter is required and must be a boolean");
     }
 
-    // Resolve native → WETH for quoter route
-    const wethAddress = getWethAddress(this.chainId);
-    const resolvedTokenIn = tokenInIsNative ? wethAddress : tokenInAddress;
-    const resolvedTokenOut = tokenOutIsNative ? wethAddress : tokenOutAddress;
+    // Resolve native → wrapped native token for quoter route
+    const wrappedNativeAddress = getWrappedNativeAddress(this.chainId);
+    const resolvedTokenIn = tokenInIsNative ? wrappedNativeAddress : tokenInAddress;
+    const resolvedTokenOut = tokenOutIsNative ? wrappedNativeAddress : tokenOutAddress;
 
     // Call LBQuoter — handles pool discovery across all bin steps internally
     const quoter = new ethers.Contract(this.addresses.lbQuoterAddress, this.lbQuoterABI, provider);
@@ -2201,25 +2215,27 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     }
 
     // Resolve token addresses
-    // Trader Joe V2.1 uses WETH (not native ETH), so convert ETH to WETH
+    // Trader Joe V2.2 uses wrapped native tokens (WAVAX/WETH), so convert native to wrapped
     const resolveTokenData = (symbol) => {
       if (isNativeToken(symbol)) {
-        // Convert native ETH to WETH for Trader Joe V2.1
-        const wethAddress = getWethAddress(chainId);
+        // Convert native token to wrapped native for Trader Joe V2.2
+        const wrappedAddress = getWrappedNativeAddress(chainId);
+        const wrappedSymbol = getWrappedNativeSymbol(chainId);
         return {
-          address: wethAddress,
-          symbol: 'WETH',
+          address: wrappedAddress,
+          symbol: wrappedSymbol,
           decimals: 18,
           isNative: false
         };
       }
-      // Handle WETH specially - it's not in the base tokens config
-      // but is derived from ETH's wethAddresses
-      if (symbol === 'WETH') {
-        const wethAddress = getWethAddress(chainId);
+      // Handle wrapped native tokens specially - they're not in the base tokens config
+      // but are derived from native token's wrappedAddresses
+      if (isWrappedNativeToken(symbol)) {
+        const wrappedAddress = getWrappedNativeAddress(chainId);
+        const wrappedSymbol = getWrappedNativeSymbol(chainId);
         return {
-          address: wethAddress,
-          symbol: 'WETH',
+          address: wrappedAddress,
+          symbol: wrappedSymbol,
           decimals: 18,
           isNative: false
         };
@@ -2249,7 +2265,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
     // Get factory address for this chain from our config (supports local fork chainId 1337)
     const factoryAddress = this.addresses.lbFactoryAddress;
     if (!factoryAddress || factoryAddress === ethers.constants.AddressZero) {
-      throw new Error(`Trader Joe V2.1 not available on chain ${chainId}`);
+      throw new Error(`Trader Joe V2.2 not available on chain ${chainId}`);
     }
 
     // Create factory contract instance
@@ -2357,7 +2373,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Calculate position bin range from percentage parameters
    *
-   * Converts percentage-based range into bin IDs for Trader Joe V2.1 Liquidity Book.
+   * Converts percentage-based range into bin IDs for Trader Joe V2.2 Liquidity Book.
    * Each bin represents a price step of (binStep / 10000) as a ratio.
    *
    * Math: bins = log(1 + percent/100) / log(1 + binStep/10000)
@@ -2442,7 +2458,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Extract position bounds from an existing position object
    *
-   * For Trader Joe V2.1, positions store bounds as lowerBinId and upperBinId.
+   * For Trader Joe V2.2, positions store bounds as lowerBinId and upperBinId.
    * Returns them in a platform-agnostic format for strategy event emission.
    *
    * @param {Object} position - Position object from vault cache
@@ -2473,7 +2489,7 @@ export default class TraderJoeV2_1Adapter extends PlatformAdapter {
   /**
    * Get current pool state value for baseline tracking
    *
-   * For Trader Joe V2.1, the current pool state includes both the active bin ID
+   * For Trader Joe V2.2, the current pool state includes both the active bin ID
    * and the bin step. The bin step is needed by evaluatePriceMovement to convert
    * bin IDs to prices (it's not available in swap event data).
    *

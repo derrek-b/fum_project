@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { ethers } from 'ethers';
-import TraderJoeV2_1Adapter from '../../../src/adapters/TraderJoeV2_1Adapter.js';
+import TraderJoeV2_2Adapter from '../../../src/adapters/TraderJoeV2_2Adapter.js';
 import PlatformAdapter from '../../../src/adapters/PlatformAdapter.js';
 import { setupTraderJoeTestEnvironment } from '../../setup/traderjoe-setup.js';
 import tokens from '../../../src/configs/tokens.js';
@@ -9,14 +9,14 @@ import ERC20_ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' 
 
 const ERC20_ABI = ERC20_ARTIFACT.abi;
 
-describe('TraderJoeV2_1Adapter', () => {
+describe('TraderJoeV2_2Adapter', () => {
   let adapter;
   let env;
 
   // Shared state for E2E tests
   let testVault;
-  let weth, usdc;
-  let wethAddress, usdcAddress;
+  let wavax, usdc;
+  let wavaxAddress, usdcAddress;
 
   beforeAll(async () => {
     // Setup Hardhat fork environment with contracts deployed
@@ -45,43 +45,49 @@ describe('TraderJoeV2_1Adapter', () => {
     const vaultAbi = contractData.PositionVault.abi;
     testVault = new ethers.Contract(vaultAddress, vaultAbi, owner);
 
-    // Get token addresses
-    wethAddress = tokens.ETH.wethAddresses[1337];
-    usdcAddress = tokens.USDC.addresses[1337];
+    // Get token addresses for Avalanche fork (chain 1338)
+    wavaxAddress = tokens.AVAX.wrappedAddresses[env.chainId];
+    usdcAddress = tokens.USDC.addresses[env.chainId];
 
-    // Wrap ETH to WETH
-    const WETH_ABI = ['function deposit() payable', ...ERC20_ABI];
-    weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
+    // Wrap AVAX to WAVAX
+    const WAVAX_ABI = ['function deposit() payable', ...ERC20_ABI];
+    wavax = new ethers.Contract(wavaxAddress, WAVAX_ABI, owner);
     usdc = new ethers.Contract(usdcAddress, ERC20_ABI, owner);
 
-    await (await weth.deposit({ value: ethers.utils.parseEther('5') })).wait();
+    await (await wavax.deposit({ value: ethers.utils.parseEther('5') })).wait();
 
-    // Swap some WETH for USDC via Uniswap V3 router (it's on the fork)
-    const uniV3Router = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
-    await (await weth.approve(uniV3Router, ethers.utils.parseEther('2'))).wait();
+    // Swap some WAVAX for USDC via Trader Joe LBRouter
+    const lbRouterAddress = adapter.addresses.lbRouterAddress;
+    await (await wavax.approve(lbRouterAddress, ethers.utils.parseEther('2'))).wait();
 
-    const swapRouterABI = [
-      'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)'
+    const lbRouterABI = [
+      'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, (uint256[] pairBinSteps, uint8[] versions, address[] tokenPath) path, address to, uint256 deadline) external returns (uint256 amountOut)'
     ];
-    const swapRouter = new ethers.Contract(uniV3Router, swapRouterABI, owner);
-    await (await swapRouter.exactInputSingle({
-      tokenIn: wethAddress,
-      tokenOut: usdcAddress,
-      fee: 500,
-      recipient: owner.address,
-      deadline: Math.floor(Date.now() / 1000) + 3600,
-      amountIn: ethers.utils.parseEther('2'),
-      amountOutMinimum: 0,
-      sqrtPriceLimitX96: 0,
-    })).wait();
+    const lbRouter = new ethers.Contract(lbRouterAddress, lbRouterABI, owner);
 
-    // Transfer WETH and USDC to vault
-    const wethBal = await weth.balanceOf(owner.address);
+    // WAVAX -> USDC path via Trader Joe
+    // binStep 10 (10bps) for WAVAX/USDC pair, version 3 = V2.2
+    const swapPath = {
+      pairBinSteps: [10],
+      versions: [3], // V2.2 (version enum: 0=V1, 1=V2, 2=V2.1, 3=V2.2)
+      tokenPath: [wavaxAddress, usdcAddress]
+    };
+
+    await (await lbRouter.swapExactTokensForTokens(
+      ethers.utils.parseEther('2'),
+      0, // amountOutMin
+      swapPath,
+      owner.address,
+      Math.floor(Date.now() / 1000) + 3600
+    )).wait();
+
+    // Transfer WAVAX and USDC to vault
+    const wavaxBal = await wavax.balanceOf(owner.address);
     const usdcBal = await usdc.balanceOf(owner.address);
-    await (await weth.transfer(vaultAddress, wethBal)).wait();
+    await (await wavax.transfer(vaultAddress, wavaxBal)).wait();
     await (await usdc.transfer(vaultAddress, usdcBal)).wait();
 
-    console.log(`  Vault funded: ${ethers.utils.formatEther(wethBal)} WETH, ${ethers.utils.formatUnits(usdcBal, 6)} USDC`);
+    console.log(`  Vault funded: ${ethers.utils.formatEther(wavaxBal)} WAVAX, ${ethers.utils.formatUnits(usdcBal, 6)} USDC`);
   }, 180000); // 3 minute timeout for setup + funding
 
   afterAll(async () => {
@@ -96,33 +102,33 @@ describe('TraderJoeV2_1Adapter', () => {
     });
 
     it('should set correct platformId', () => {
-      expect(adapter.platformId).toBe('traderjoeV2_1');
+      expect(adapter.platformId).toBe('traderjoeV2_2');
     });
 
     it('should set correct platformName', () => {
-      expect(adapter.platformName).toBe('Trader Joe V2.1');
+      expect(adapter.platformName).toBe('Trader Joe V2.2');
     });
 
     it('should set correct chainId', () => {
-      expect(adapter.chainId).toBe(env.chainId); // 1337 for Hardhat fork
+      expect(adapter.chainId).toBe(env.chainId); // 1338 for Avalanche fork
     });
 
     it('should load platform addresses', () => {
-      // Addresses are same for 1337 and 42161 (fork uses Arbitrum addresses)
+      // V2.2 addresses for 1338 (Avalanche fork)
       expect(adapter.addresses).toBeDefined();
-      expect(adapter.addresses.lbFactoryAddress).toBe('0x8e42f2F4101563bF679975178e880FD87d3eFd4e');
-      expect(adapter.addresses.lbRouterAddress).toBe('0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30');
-      expect(adapter.addresses.lbQuoterAddress).toBe('0xd76019A16606FDa4651f636D9751f500Ed776250');
+      expect(adapter.addresses.lbFactoryAddress).toBe('0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c');
+      expect(adapter.addresses.lbRouterAddress).toBe('0x18556DA13313f3532c54711497A8FedAC273220E');
+      expect(adapter.addresses.lbQuoterAddress).toBe('0x9A550a522BBaDFB69019b0432800Ed17855A51C3');
     });
 
     it('should load chain config', () => {
       expect(adapter.chainConfig).toBeDefined();
-      expect(adapter.chainConfig.name).toBe('Forked Arbitrum'); // 1337 config
+      expect(adapter.chainConfig.name).toBe('Forked Avalanche'); // 1338 config
     });
   });
 
   describe('sortTokens', () => {
-    // Real Arbitrum token addresses for realistic testing
+    // Token addresses for testing sort logic (doesn't require on-chain data)
     const USDC = {
       address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
       symbol: 'USDC',
@@ -231,12 +237,12 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('_getSwapEventSignature', () => {
-    it('should return the correct Trader Joe V2.1 swap event signature', () => {
+    it('should return the correct Trader Joe V2.2 swap event signature', () => {
       const signature = adapter._getSwapEventSignature();
       expect(signature).toBe('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)');
     });
 
-    it('should generate the correct topic hash for TJ V2.1 swap events', () => {
+    it('should generate the correct topic hash for TJ V2.2 swap events', () => {
       const signature = adapter._getSwapEventSignature();
       const topicHash = ethers.utils.id(signature);
       expect(topicHash).toBe(ethers.utils.id('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)'));
@@ -306,7 +312,7 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('parseSwapEvent', () => {
-    // Build a valid V2.1 Swap event log for testing
+    // Build a valid V2.2 Swap event log for testing
     const validSignature = 'Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)';
     const validTopic0 = ethers.utils.id(validSignature);
     const validSender = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
@@ -392,7 +398,7 @@ describe('TraderJoeV2_1Adapter', () => {
     });
 
     describe('Parsing', () => {
-      it('should parse valid V2.1 swap event correctly', () => {
+      it('should parse valid V2.2 swap event correctly', () => {
         const result = adapter.parseSwapEvent(validLog);
 
         expect(result.activeId).toBe(8388608);
@@ -478,7 +484,7 @@ describe('TraderJoeV2_1Adapter', () => {
     const toTopic = ethers.utils.hexZeroPad('0xABCDEF0123456789ABCDEF0123456789ABCDEF01', 32);
 
     /**
-     * Create a mock TJ V2.1 Swap log with packed bytes32 amounts.
+     * Create a mock TJ V2.2 Swap log with packed bytes32 amounts.
      * @param {object} amountsIn - { amountX: string, amountY: string }
      * @param {object} amountsOut - { amountX: string, amountY: string }
      */
@@ -1325,11 +1331,11 @@ describe('TraderJoeV2_1Adapter', () => {
         // First discover a real pool
         let poolAddress;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolAddress = poolResult.bestPool.address;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping blockchain test');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping blockchain test');
             return;
           }
           throw error;
@@ -1422,41 +1428,41 @@ describe('TraderJoeV2_1Adapter', () => {
       });
 
       it('should throw error for invalid tokenBSymbol values', async () => {
-        await expect(adapter.selectBestPool('WETH', null, mockProvider, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', null, mockProvider, env.chainId))
           .rejects.toThrow('tokenBSymbol parameter is required and must be a string');
 
-        await expect(adapter.selectBestPool('WETH', undefined, mockProvider, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', undefined, mockProvider, env.chainId))
           .rejects.toThrow('tokenBSymbol parameter is required and must be a string');
 
-        await expect(adapter.selectBestPool('WETH', '', mockProvider, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', '', mockProvider, env.chainId))
           .rejects.toThrow('tokenBSymbol parameter is required and must be a string');
 
-        await expect(adapter.selectBestPool('WETH', 123, mockProvider, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 123, mockProvider, env.chainId))
           .rejects.toThrow('tokenBSymbol parameter is required and must be a string');
       });
 
       it('should throw error for invalid provider values', async () => {
-        await expect(adapter.selectBestPool('WETH', 'USDC', null, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', null, env.chainId))
           .rejects.toThrow('provider parameter is required and must be an ethers provider instance');
 
-        await expect(adapter.selectBestPool('WETH', 'USDC', undefined, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', undefined, env.chainId))
           .rejects.toThrow('provider parameter is required and must be an ethers provider instance');
 
-        await expect(adapter.selectBestPool('WETH', 'USDC', {}, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', {}, env.chainId))
           .rejects.toThrow('provider parameter is required and must be an ethers provider instance');
 
-        await expect(adapter.selectBestPool('WETH', 'USDC', 'not-a-provider', env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', 'not-a-provider', env.chainId))
           .rejects.toThrow('provider parameter is required and must be an ethers provider instance');
       });
 
       it('should throw error for invalid chainId values', async () => {
-        await expect(adapter.selectBestPool('WETH', 'USDC', mockProvider, null))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', mockProvider, null))
           .rejects.toThrow('chainId parameter is required and must be a number');
 
-        await expect(adapter.selectBestPool('WETH', 'USDC', mockProvider, undefined))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', mockProvider, undefined))
           .rejects.toThrow('chainId parameter is required and must be a number');
 
-        await expect(adapter.selectBestPool('WETH', 'USDC', mockProvider, '42161'))
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', mockProvider, '42161'))
           .rejects.toThrow('chainId parameter is required and must be a number');
       });
 
@@ -1464,18 +1470,18 @@ describe('TraderJoeV2_1Adapter', () => {
         await expect(adapter.selectBestPool('UNKNOWN_TOKEN', 'USDC', mockProvider, env.chainId))
           .rejects.toThrow('Token UNKNOWN_TOKEN not found');
 
-        await expect(adapter.selectBestPool('WETH', 'UNKNOWN_TOKEN', mockProvider, env.chainId))
+        await expect(adapter.selectBestPool('WAVAX', 'UNKNOWN_TOKEN', mockProvider, env.chainId))
           .rejects.toThrow('Token UNKNOWN_TOKEN not found');
       });
     });
 
     describe('Success Cases', () => {
-      // Note: These tests use Hardhat fork of Arbitrum
-      // Trader Joe V2.1 has active pools on Arbitrum
+      // Note: These tests use Hardhat fork of Avalanche
+      // Trader Joe V2.2 has active pools on Avalanche
 
-      it('should search for WETH/USDC pools on Arbitrum', async () => {
+      it('should search for WAVAX/USDC pools on Avalanche', async () => {
         try {
-          const result = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const result = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
 
           // Verify structure
           expect(result).toHaveProperty('bestPool');
@@ -1502,23 +1508,23 @@ describe('TraderJoeV2_1Adapter', () => {
           expect(result.bestPool.tokenY).toHaveProperty('decimals');
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools exist on Arbitrum');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools exist on Avalanche');
             return;
           }
           throw error;
         }
       }, 30000);
 
-      it('should handle ETH as native token (converts to WETH)', async () => {
+      it('should handle AVAX as native token (converts to WAVAX)', async () => {
         try {
-          const result = await adapter.selectBestPool('ETH', 'USDC', env.provider, env.chainId);
+          const result = await adapter.selectBestPool('AVAX', 'USDC', env.provider, env.chainId);
 
           expect(result).toHaveProperty('bestPool');
           expect(result).toHaveProperty('poolsDiscovered');
           expect(result).toHaveProperty('poolsActive');
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 ETH/USDC pools exist on Arbitrum');
+            console.log('No Trader Joe V2.2 AVAX/USDC pools exist on Avalanche');
             return;
           }
           throw error;
@@ -1528,15 +1534,15 @@ describe('TraderJoeV2_1Adapter', () => {
       it('should sort tokens correctly regardless of input order', async () => {
         try {
           // Try both orderings - should get same result
-          const resultAB = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
-          const resultBA = await adapter.selectBestPool('USDC', 'WETH', env.provider, env.chainId);
+          const resultAB = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
+          const resultBA = await adapter.selectBestPool('USDC', 'WAVAX', env.provider, env.chainId);
 
           // Should find the same pools regardless of order
           expect(resultAB.poolsDiscovered).toBe(resultBA.poolsDiscovered);
           expect(resultAB.bestPool.address).toBe(resultBA.bestPool.address);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 pools exist for token pair');
+            console.log('No Trader Joe V2.2 pools exist for token pair');
             return;
           }
           throw error;
@@ -1546,14 +1552,14 @@ describe('TraderJoeV2_1Adapter', () => {
 
     describe('Error Cases', () => {
       it('should throw when token is not available on chain', async () => {
-        await expect(adapter.selectBestPool('WETH', 'USDC', mockProvider, 999999))
-          .rejects.toThrow(/not available on chain/);
+        await expect(adapter.selectBestPool('WAVAX', 'USDC', mockProvider, 999999))
+          .rejects.toThrow(/No wrapped native token configured for chain/);
       });
     });
   });
 
   describe('getPoolData', () => {
-    // Note: These tests use real API calls to Arbitrum
+    // Note: These tests use real API calls to Avalanche
     // They require a real LBPair address
 
     describe('Parameter Validation', () => {
@@ -1586,11 +1592,11 @@ describe('TraderJoeV2_1Adapter', () => {
         // First find a real pool via Hardhat fork
         let poolAddress;
         try {
-          const result = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const result = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolAddress = result.bestPool.address;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools exist - skipping getPoolData test');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools exist - skipping getPoolData test');
             return;
           }
           throw error;
@@ -1626,7 +1632,7 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('generateCreatePositionData', () => {
-    // Real Arbitrum token addresses
+    // Real Avalanche token addresses
     const WETH = {
       address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
       symbol: 'WETH',
@@ -1755,7 +1761,7 @@ describe('TraderJoeV2_1Adapter', () => {
       });
 
       it('should throw if positionManagerAddress is not configured', async () => {
-        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        const adapterNoPM = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateCreatePositionData(validParams()))
           .rejects.toThrow('No position manager address found');
@@ -1767,12 +1773,12 @@ describe('TraderJoeV2_1Adapter', () => {
         // Discover a real pool
         let poolResult, poolData, positionRange;
         try {
-          poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping');
             return;
           }
           throw error;
@@ -2025,12 +2031,12 @@ describe('TraderJoeV2_1Adapter', () => {
         // 1. Discover a real pool
         let poolData, positionRange;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping E2E test');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping E2E test');
             return;
           }
           throw error;
@@ -2040,17 +2046,17 @@ describe('TraderJoeV2_1Adapter', () => {
         const pmAddress = adapter.addresses.positionManagerAddress;
 
         // 2. Get vault token balances
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        console.log(`  Vault balances: ${ethers.utils.formatEther(vaultWethBal)} WETH, ${ethers.utils.formatUnits(vaultUsdcBal, 6)} USDC`);
+        console.log(`  Vault balances: ${ethers.utils.formatEther(vaultWavaxBal)} WAVAX, ${ethers.utils.formatUnits(vaultUsdcBal, 6)} USDC`);
 
         // Use 10% of vault balances
-        const wethAmount = vaultWethBal.div(10);
+        const wavaxAmount = vaultWavaxBal.div(10);
         const usdcAmount = vaultUsdcBal.div(10);
 
         // 3. Get required approvals and execute via vault.approve()
         const approvalTxs = await adapter.getRequiredApprovals(
-          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+          'liquidity', vaultAddress, [wavaxAddress, usdcAddress], env.provider
         );
         if (approvalTxs.length > 0) {
           const approveTargets = approvalTxs.map(t => t.to);
@@ -2062,12 +2068,12 @@ describe('TraderJoeV2_1Adapter', () => {
         // 4. Generate createPosition calldata
         const txData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -2162,7 +2168,7 @@ describe('TraderJoeV2_1Adapter', () => {
         }
       }, 60000);
 
-      it('should return positions with correct TJ V2.1 fields', async () => {
+      it('should return positions with correct TJ V2.2 fields', async () => {
         const result = await adapter.getPositionsForVDS(testVault.address, env.provider);
 
         const positionKeys = Object.keys(result.positions);
@@ -2209,7 +2215,7 @@ describe('TraderJoeV2_1Adapter', () => {
           expect(poolInfo).toHaveProperty('token1Symbol');
           expect(poolInfo).toHaveProperty('binStep');
           expect(poolInfo).toHaveProperty('platform');
-          expect(poolInfo.platform).toBe('traderjoeV2_1');
+          expect(poolInfo.platform).toBe('traderjoeV2_2');
           expect(typeof poolInfo.binStep).toBe('number');
         }
       }, 60000);
@@ -2268,12 +2274,12 @@ describe('TraderJoeV2_1Adapter', () => {
       // If no position exists, create one
       let poolData, positionRange;
       try {
-        const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+        const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
         poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
         positionRange = adapter.getPositionRange(poolData, 5, 5);
       } catch (error) {
         if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-          console.log('No Trader Joe V2.1 WETH/USDC pools - cannot create position for getPositionById tests');
+          console.log('No Trader Joe V2.2 WAVAX/USDC pools - cannot create position for getPositionById tests');
           return;
         }
         throw error;
@@ -2283,7 +2289,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       // Approve tokens
       const approvalTxs = await adapter.getRequiredApprovals(
-        'liquidity', testVault.address, [wethAddress, usdcAddress], env.provider
+        'liquidity', testVault.address, [wavaxAddress, usdcAddress], env.provider
       );
       if (approvalTxs.length > 0) {
         const targets = approvalTxs.map(t => t.to);
@@ -2292,19 +2298,19 @@ describe('TraderJoeV2_1Adapter', () => {
       }
 
       // Use 10% of vault balances
-      const vaultWethBal = await weth.balanceOf(testVault.address);
+      const vaultWavaxBal = await wavax.balanceOf(testVault.address);
       const vaultUsdcBal = await usdc.balanceOf(testVault.address);
-      const wethAmount = vaultWethBal.div(10);
+      const wavaxAmount = vaultWavaxBal.div(10);
       const usdcAmount = vaultUsdcBal.div(10);
 
       const txData = await adapter.generateCreatePositionData({
         position: positionRange,
-        token0Amount: wethAmount.toString(),
+        token0Amount: wavaxAmount.toString(),
         token1Amount: usdcAmount.toString(),
         provider: env.provider,
         walletAddress: testVault.address,
         poolData,
-        token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+        token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
         token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         slippageTolerance: 5,
         deadlineMinutes: 10,
@@ -2370,7 +2376,7 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(typeof pool.token0Symbol).toBe('string');
         expect(typeof pool.token1Symbol).toBe('string');
         expect(typeof pool.binStep).toBe('number');
-        expect(pool.platform).toBe('traderjoeV2_1');
+        expect(pool.platform).toBe('traderjoeV2_2');
       }, 30000);
 
       it('should return pool address matching expected LBPair', async () => {
@@ -2554,19 +2560,19 @@ describe('TraderJoeV2_1Adapter', () => {
         // If no position exists, create one
         let poolData, positionRange;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No TJ V2.1 WETH/USDC pools - cannot create position for getAccruedFeesUSD tests');
+            console.log('No TJ V2.2 WAVAX/USDC pools - cannot create position for getAccruedFeesUSD tests');
             return;
           }
           throw error;
         }
 
         const approvalTxs = await adapter.getRequiredApprovals(
-          'liquidity', testVault.address, [wethAddress, usdcAddress], env.provider
+          'liquidity', testVault.address, [wavaxAddress, usdcAddress], env.provider
         );
         if (approvalTxs.length > 0) {
           const targets = approvalTxs.map(t => t.to);
@@ -2574,19 +2580,19 @@ describe('TraderJoeV2_1Adapter', () => {
           await (await testVault.approve(targets, data)).wait();
         }
 
-        const vaultWethBal = await weth.balanceOf(testVault.address);
+        const vaultWavaxBal = await wavax.balanceOf(testVault.address);
         const vaultUsdcBal = await usdc.balanceOf(testVault.address);
-        const wethAmount = vaultWethBal.div(10);
+        const wavaxAmount = vaultWavaxBal.div(10);
         const usdcAmount = vaultUsdcBal.div(10);
 
         const txData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: testVault.address,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -2728,7 +2734,7 @@ describe('TraderJoeV2_1Adapter', () => {
       });
 
       it('should throw if no spender address found (empty positionManagerAddress)', async () => {
-        const testAdapter = new TraderJoeV2_1Adapter(1337, env.provider);
+        const testAdapter = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         testAdapter.addresses.positionManagerAddress = '';
         await expect(testAdapter.getRequiredApprovals('liquidity', '0x0000000000000000000000000000000000000001', ['0x0000000000000000000000000000000000000002'], env.provider))
           .rejects.toThrow('no spender address found');
@@ -2739,12 +2745,12 @@ describe('TraderJoeV2_1Adapter', () => {
       it('should return approval transactions for tokens with no allowance', async () => {
         const pmAddress = adapter.addresses.positionManagerAddress;
 
-        // Use real token addresses on Arbitrum fork - they will have zero allowance
+        // Use real token addresses on Avalanche fork - they will have zero allowance
         // for a random vault address
         const vaultAddress = '0x0000000000000000000000000000000000000001';
         const tokenAddresses = [
-          '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
-          '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // USDC
+          '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
+          '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', // USDC
         ];
 
         const txs = await adapter.getRequiredApprovals('liquidity', vaultAddress, tokenAddresses, env.provider);
@@ -2773,24 +2779,24 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(decoded.amount.eq(ethers.constants.MaxUint256)).toBe(true);
       }, 30000);
 
-      it('should skip native ETH (address zero)', async () => {
+      it('should skip native AVAX (address zero)', async () => {
         const vaultAddress = '0x0000000000000000000000000000000000000001';
         const tokenAddresses = [
-          ethers.constants.AddressZero, // Native ETH - should be skipped
-          '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
+          ethers.constants.AddressZero, // Native AVAX - should be skipped
+          '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
         ];
 
         const txs = await adapter.getRequiredApprovals('liquidity', vaultAddress, tokenAddresses, env.provider);
 
-        // Only 1 tx (WETH), native ETH skipped
+        // Only 1 tx (WAVAX), native AVAX skipped
         expect(txs.length).toBe(1);
-        expect(txs[0].to).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(txs[0].to).toBe('0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7');
       }, 30000);
 
       it('should use lbRouterAddress as spender for swap operations', async () => {
         const vaultAddress = '0x0000000000000000000000000000000000000001';
         const tokenAddresses = [
-          '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
+          '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
         ];
 
         const txs = await adapter.getRequiredApprovals('swap', vaultAddress, tokenAddresses, env.provider);
@@ -2971,7 +2977,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       // --- Position manager address ---
       it('should throw if positionManagerAddress is not configured', async () => {
-        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        const adapterNoPM = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateRemoveLiquidityData(validParams()))
           .rejects.toThrow('No position manager address found');
@@ -3220,13 +3226,13 @@ describe('TraderJoeV2_1Adapter', () => {
         // Discover a real pool and create a position
         let poolData, positionRange;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
           e2ePoolData = poolData;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping removal E2E tests');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping removal E2E tests');
             return;
           }
           throw error;
@@ -3237,7 +3243,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         // Approve tokens if needed
         const approvalTxs = await adapter.getRequiredApprovals(
-          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+          'liquidity', vaultAddress, [wavaxAddress, usdcAddress], env.provider
         );
         if (approvalTxs.length > 0) {
           const targets = approvalTxs.map(t => t.to);
@@ -3246,19 +3252,19 @@ describe('TraderJoeV2_1Adapter', () => {
         }
 
         // Use 5% of vault balances to leave room for multiple tests
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(20);
+        const wavaxAmount = vaultWavaxBal.div(20);
         const usdcAmount = vaultUsdcBal.div(20);
 
         const txData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -3285,7 +3291,7 @@ describe('TraderJoeV2_1Adapter', () => {
         const pmAddress = adapter.addresses.positionManagerAddress;
 
         // Record vault balances before removal
-        const wethBalBefore = await weth.balanceOf(vaultAddress);
+        const wavaxBalBefore = await wavax.balanceOf(vaultAddress);
         const usdcBalBefore = await usdc.balanceOf(vaultAddress);
 
         // Generate remove calldata
@@ -3311,15 +3317,15 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(pos.active).toBe(false);
 
         // Verify vault received tokens back
-        const wethBalAfter = await weth.balanceOf(vaultAddress);
+        const wavaxBalAfter = await wavax.balanceOf(vaultAddress);
         const usdcBalAfter = await usdc.balanceOf(vaultAddress);
-        const wethReceived = wethBalAfter.sub(wethBalBefore);
+        const wavaxReceived = wavaxBalAfter.sub(wavaxBalBefore);
         const usdcReceived = usdcBalAfter.sub(usdcBalBefore);
 
         // At least one token should have been returned
-        expect(wethReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
+        expect(wavaxReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
 
-        console.log(`  Full removal: received ${ethers.utils.formatEther(wethReceived)} WETH, ${ethers.utils.formatUnits(usdcReceived, 6)} USDC`);
+        console.log(`  Full removal: received ${ethers.utils.formatEther(wavaxReceived)} WAVAX, ${ethers.utils.formatUnits(usdcReceived, 6)} USDC`);
       }, 120000);
 
       it('should execute partial removal (50%): create -> remove 50% -> verify still active', async () => {
@@ -3332,19 +3338,19 @@ describe('TraderJoeV2_1Adapter', () => {
         const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
 
         // Use small amounts
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(20);
+        const wavaxAmount = vaultWavaxBal.div(20);
         const usdcAmount = vaultUsdcBal.div(20);
 
         const createData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData: e2ePoolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -3400,17 +3406,17 @@ describe('TraderJoeV2_1Adapter', () => {
 
         // Create position
         const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
 
         const createData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: vaultWethBal.div(20).toString(),
+          token0Amount: vaultWavaxBal.div(20).toString(),
           token1Amount: vaultUsdcBal.div(20).toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData: e2ePoolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -3449,7 +3455,7 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('getAddLiquidityAmounts', () => {
-    // Real Arbitrum token addresses
+    // Real Avalanche token addresses
     const WETH = {
       address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
       symbol: 'WETH',
@@ -3721,12 +3727,12 @@ describe('TraderJoeV2_1Adapter', () => {
 
       beforeAll(async () => {
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolAddress = poolResult.bestPool.address;
           poolData = await adapter.getPoolData(poolAddress, env.provider);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping in-range calculation tests');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping in-range calculation tests');
             return;
           }
           throw error;
@@ -3743,7 +3749,7 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3765,7 +3771,7 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3783,7 +3789,7 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3810,7 +3816,7 @@ describe('TraderJoeV2_1Adapter', () => {
           provider: env.provider,
           poolData,
           token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
-          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
         });
 
         // token0Amount should correspond to USDC (caller's token0)
@@ -3830,7 +3836,7 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3849,7 +3855,7 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3861,14 +3867,14 @@ describe('TraderJoeV2_1Adapter', () => {
 
         const positionRange = adapter.getPositionRange(poolData, 5, 5);
 
-        // Call with WETH as token0
+        // Call with WAVAX as token0
         const resultA = await adapter.getAddLiquidityAmounts({
           position: positionRange,
           token0Amount: ethers.utils.parseEther('1').toString(),
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3880,30 +3886,199 @@ describe('TraderJoeV2_1Adapter', () => {
           provider: env.provider,
           poolData,
           token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
-          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
         });
 
-        // The WETH amount from the second call should be close to 1 ETH (within rounding)
-        const wethFromB = BigInt(resultB.token1Amount);
-        const originalWeth = BigInt(ethers.utils.parseEther('1').toString());
+        // The WAVAX amount from the second call should be close to 1 (within rounding)
+        const wavaxFromB = BigInt(resultB.token1Amount);
+        const originalWavax = BigInt(ethers.utils.parseEther('1').toString());
 
         // Allow 1% tolerance for rounding through BigInt division
-        const tolerance = originalWeth / 100n;
-        expect(wethFromB).toBeGreaterThan(originalWeth - tolerance);
-        expect(wethFromB).toBeLessThan(originalWeth + tolerance);
+        const tolerance = originalWavax / 100n;
+        expect(wavaxFromB).toBeGreaterThan(originalWavax - tolerance);
+        expect(wavaxFromB).toBeLessThan(originalWavax + tolerance);
       }, 60000);
 
 });
+
+    describe('Deterministic In-Range Formula', () => {
+      // Known inputs for deterministic testing of the in-range ratio formula.
+      // Uses real getUniformDistributionFromBinRange from SDK with known activeId/range.
+      //
+      // For activeId=100, range [98, 102]:
+      //   nb_x = 5 (bins 101,102 get 2 each, bin 100 gets 1)
+      //   nb_y = 5 (bins 98,99 get 2 each, bin 100 gets 1)
+      //   distXAtActive = 1e18 / 5 = 200000000000000000n
+      //   distYAtActive = 1e18 / 5 = 200000000000000000n
+      //   Since distX == distY at active bin, formula simplifies to reserveY/reserveX ratio.
+      const ACTIVE_ID = 100;
+      const LOWER_BIN = 98;
+      const UPPER_BIN = 102;
+      const BIN_STEP = 20;
+      const POOL_ADDRESS = '0x0000000000000000000000000000000000000001';
+      // tokenX has lower address (canonical TJ sort order)
+      const TOKEN_X_ADDR = '0x000000000000000000000000000000000000000a';
+      const TOKEN_Y_ADDR = '0x000000000000000000000000000000000000000b';
+
+      const RESERVE_X = 1000000000000000000n;  // 1e18 (1 tokenX, 18 decimals)
+      const RESERVE_Y = 2000000000n;            // 2e9 (2000 tokenY, 6 decimals)
+      const TOTAL_SUPPLY = 5000000000000000000n; // 5e18
+
+      let mockAdapter;
+
+      beforeEach(() => {
+        mockAdapter = new TraderJoeV2_2Adapter(env.chainId, env.provider);
+        mockAdapter._getActiveBinData = vi.fn().mockResolvedValue({
+          reserveX: RESERVE_X,
+          reserveY: RESERVE_Y,
+          totalSupply: TOTAL_SUPPLY,
+        });
+      });
+
+      it('should compute Y from X using the active bin ratio formula', async () => {
+        // Formula: resultY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX)
+        // With distX == distY: resultY = inputX * reserveY / reserveX
+        // = 500000000000000000 * 2000000000 / 1000000000000000000 = 1000000000
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '500000000000000000', // 0.5 tokenX (18 decimals)
+          token1Amount: '0',
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('500000000000000000');
+        expect(result.token1Amount).toBe('1000000000');
+        expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+      });
+
+      it('should compute X from Y using the reverse formula', async () => {
+        // Formula: resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY)
+        // = 1000000000 * reserveX / reserveY = 1000000000 * 1e18 / 2e9 = 500000000000000000
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '0',
+          token1Amount: '1000000000', // 1000 tokenY (6 decimals)
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('500000000000000000');
+        expect(result.token1Amount).toBe('1000000000');
+      });
+
+      it('should cap to X when X is the limiting factor', async () => {
+        // Provide X=0.5e18, Y=2e9 (more than the implied 1e9)
+        // impliedY = 0.5e18 * resY / resX = 1e9, which is <= 2e9 → X is limiting
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '500000000000000000',
+          token1Amount: '2000000000', // More than implied 1000000000
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('500000000000000000'); // X unchanged
+        expect(result.token1Amount).toBe('1000000000');          // Y computed from X
+      });
+
+      it('should cap to Y when Y is the limiting factor', async () => {
+        // Provide X=1e18, Y=500000000 (less than the implied 2e9)
+        // impliedY = 1e18 * resY / resX = 2e9, which is > 5e8 → Y is limiting
+        // resultX = 5e8 * resX / resY = 5e8 * 1e18 / 2e9 = 250000000000000000
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '1000000000000000000',
+          token1Amount: '500000000',
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('250000000000000000'); // X computed from Y
+        expect(result.token1Amount).toBe('500000000');           // Y unchanged
+      });
+
+      it('should return inputs as-is when active bin is empty', async () => {
+        mockAdapter._getActiveBinData = vi.fn().mockResolvedValue({
+          reserveX: 0n,
+          reserveY: 0n,
+          totalSupply: 0n,
+        });
+
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '500000000000000000',
+          token1Amount: '1000000000',
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('500000000000000000');
+        expect(result.token1Amount).toBe('1000000000');
+      });
+
+      it('should return resultY=0 when reserveX is 0 and only X is provided', async () => {
+        // reserveX=0 means X can't go into active bin
+        mockAdapter._getActiveBinData = vi.fn().mockResolvedValue({
+          reserveX: 0n,
+          reserveY: 2000000000n,
+          totalSupply: TOTAL_SUPPLY,
+        });
+
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '500000000000000000',
+          token1Amount: '0',
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_X_ADDR, decimals: 18 },
+          token1Data: { address: TOKEN_Y_ADDR, decimals: 6 },
+        });
+
+        expect(result.token0Amount).toBe('500000000000000000');
+        expect(result.token1Amount).toBe('0');
+      });
+
+      it('should correctly map results when caller token order is swapped', async () => {
+        // Pass TOKEN_Y as token0, TOKEN_X as token1 (reversed from canonical)
+        // tokensSwapped=true: amountX=token1Amount, amountY=token0Amount
+        // Input: token0Amount='0' (Y in SDK), token1Amount='500000000000000000' (X in SDK)
+        // Compute: resultY = inputX * resY / resX = 5e17 * 2e9 / 1e18 = 1e9
+        // Unswap: token0Amount=resultY=1000000000, token1Amount=resultX=500000000000000000
+        const result = await mockAdapter.getAddLiquidityAmounts({
+          position: { lowerBinId: LOWER_BIN, upperBinId: UPPER_BIN },
+          token0Amount: '0',
+          token1Amount: '500000000000000000',
+          provider: env.provider,
+          poolData: { activeId: ACTIVE_ID, binStep: BIN_STEP, address: POOL_ADDRESS },
+          token0Data: { address: TOKEN_Y_ADDR, decimals: 6 },   // Y as caller's token0
+          token1Data: { address: TOKEN_X_ADDR, decimals: 18 },  // X as caller's token1
+        });
+
+        expect(result.token0Amount).toBe('1000000000');           // Y in caller order
+        expect(result.token1Amount).toBe('500000000000000000');   // X in caller order
+      });
+    });
 
     describe('E2E Tests', () => {
       it('should compute amounts and verify non-zero for a real pool', async () => {
         let poolData;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping E2E test');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping E2E test');
             return;
           }
           throw error;
@@ -3917,30 +4092,51 @@ describe('TraderJoeV2_1Adapter', () => {
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
+        // Structural assertions (price-independent, matching V3/V4 pattern)
         expect(BigInt(result.token0Amount)).toBeGreaterThan(0n);
         expect(BigInt(result.token1Amount)).toBeGreaterThan(0n);
         expect(BigInt(result.liquidity)).toBeGreaterThan(0n);
+        expect(typeof result.token0Amount).toBe('string');
+        expect(typeof result.token1Amount).toBe('string');
+        expect(typeof result.liquidity).toBe('string');
 
-        // The ratio should be reasonable: ~$200 USDC for 0.1 ETH at ~$2000 ETH price
-        const usdcAmount = Number(result.token1Amount) / 1e6;
-        expect(usdcAmount).toBeGreaterThan(10);   // At least $10 USDC
-        expect(usdcAmount).toBeLessThan(1000);     // At most $1000 USDC
+        // Token0 should be close to input (0.1 WAVAX), allowing small rounding
+        const inputToken0 = BigInt(ethers.utils.parseEther('0.1').toString());
+        const resultToken0 = BigInt(result.token0Amount);
+        const token0Diff = inputToken0 > resultToken0
+          ? inputToken0 - resultToken0
+          : resultToken0 - inputToken0;
+        expect(token0Diff).toBeLessThanOrEqual(inputToken0 / 100n); // 1% tolerance
 
-        console.log(`  getAddLiquidityAmounts E2E: 0.1 WETH → ${ethers.utils.formatEther(result.token0Amount)} WETH + ${ethers.utils.formatUnits(result.token1Amount, 6)} USDC`);
+        // Consistency: same inputs should produce same outputs
+        const result2 = await adapter.getAddLiquidityAmounts({
+          position: positionRange,
+          token0Amount: ethers.utils.parseEther('0.1').toString(),
+          token1Amount: '0',
+          provider: env.provider,
+          poolData,
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
+          token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
+        });
+        expect(result.token0Amount).toBe(result2.token0Amount);
+        expect(result.token1Amount).toBe(result2.token1Amount);
+        expect(result.liquidity).toBe(result2.liquidity);
+
+        console.log(`  getAddLiquidityAmounts E2E: 0.1 WAVAX → ${ethers.utils.formatEther(result.token0Amount)} WAVAX + ${ethers.utils.formatUnits(result.token1Amount, 6)} USDC`);
       }, 60000);
 
       it('should produce consistent amounts when called with swapped token order', async () => {
         let poolData;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping E2E test');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping E2E test');
             return;
           }
           throw error;
@@ -3948,14 +4144,14 @@ describe('TraderJoeV2_1Adapter', () => {
 
         const positionRange = adapter.getPositionRange(poolData, 5, 5);
 
-        // Call with WETH as token0
+        // Call with WAVAX as token0
         const resultA = await adapter.getAddLiquidityAmounts({
           position: positionRange,
           token0Amount: ethers.utils.parseEther('0.1').toString(),
           token1Amount: '0',
           provider: env.provider,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
         });
 
@@ -3967,7 +4163,7 @@ describe('TraderJoeV2_1Adapter', () => {
           provider: env.provider,
           poolData,
           token0Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
-          token1Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token1Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
         });
 
         // resultA.token0Amount (WETH) should match resultB.token1Amount (WETH)
@@ -3979,7 +4175,7 @@ describe('TraderJoeV2_1Adapter', () => {
   });
 
   describe('generateAddLiquidityData', () => {
-    // Real Arbitrum token addresses (same as createPosition tests)
+    // Real Avalanche token addresses (same as createPosition tests)
     const WETH = {
       address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
       symbol: 'WETH',
@@ -4146,7 +4342,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       // --- Position manager address ---
       it('should throw if positionManagerAddress is not configured', async () => {
-        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        const adapterNoPM = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateAddLiquidityData(validParams()))
           .rejects.toThrow('No position manager address found');
@@ -4158,12 +4354,12 @@ describe('TraderJoeV2_1Adapter', () => {
         // Discover a real pool
         let poolResult, poolData, positionRange;
         try {
-          poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping');
             return;
           }
           throw error;
@@ -4441,13 +4637,13 @@ describe('TraderJoeV2_1Adapter', () => {
         // Discover a real pool and create a position
         let poolData, positionRange;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
           e2ePoolData = poolData;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping addLiquidity E2E tests');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping addLiquidity E2E tests');
             return;
           }
           throw error;
@@ -4458,7 +4654,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         // Approve tokens if needed
         const approvalTxs = await adapter.getRequiredApprovals(
-          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+          'liquidity', vaultAddress, [wavaxAddress, usdcAddress], env.provider
         );
         if (approvalTxs.length > 0) {
           const targets = approvalTxs.map(t => t.to);
@@ -4467,19 +4663,19 @@ describe('TraderJoeV2_1Adapter', () => {
         }
 
         // Use 5% of vault balances
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(20);
+        const wavaxAmount = vaultWavaxBal.div(20);
         const usdcAmount = vaultUsdcBal.div(20);
 
         const txData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -4511,19 +4707,19 @@ describe('TraderJoeV2_1Adapter', () => {
         const liquidityBefore = posBefore.liquidityMinted.map(lm => lm.toBigInt());
 
         // Use small amounts for adding
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(40);
+        const wavaxAmount = vaultWavaxBal.div(40);
         const usdcAmount = vaultUsdcBal.div(40);
 
         const addData = await adapter.generateAddLiquidityData({
           position: { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId },
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData: e2ePoolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 50, // Wide slippage for fork stability
           deadlineMinutes: 10,
@@ -4562,19 +4758,19 @@ describe('TraderJoeV2_1Adapter', () => {
 
         // 1. Create a fresh position
         const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(40);
+        const wavaxAmount = vaultWavaxBal.div(40);
         const usdcAmount = vaultUsdcBal.div(40);
 
         const createData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData: e2ePoolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -4589,17 +4785,17 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(newPos.active).toBe(true);
 
         // 2. Add liquidity to the position
-        const addWethAmount = vaultWethBal.div(80);
+        const addWavaxAmount = vaultWavaxBal.div(80);
         const addUsdcAmount = vaultUsdcBal.div(80);
 
         const addData = await adapter.generateAddLiquidityData({
           position: { id: newPosId.toString(), lowerBinId: newPos.lowerBinId, upperBinId: newPos.upperBinId },
-          token0Amount: addWethAmount.toString(),
+          token0Amount: addWavaxAmount.toString(),
           token1Amount: addUsdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData: e2ePoolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 50,
           deadlineMinutes: 10,
@@ -4614,7 +4810,7 @@ describe('TraderJoeV2_1Adapter', () => {
         // 3. Remove 100% of the position
         const posForRemoval = await adapter.getPositionById(newPosId, env.provider);
 
-        const wethBalBefore = await weth.balanceOf(vaultAddress);
+        const wavaxBalBefore = await wavax.balanceOf(vaultAddress);
         const usdcBalBefore = await usdc.balanceOf(vaultAddress);
 
         const removeData = await adapter.generateRemoveLiquidityData({
@@ -4633,12 +4829,12 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(posAfterRemove.active).toBe(false);
 
         // Verify vault received tokens back
-        const wethBalAfter = await weth.balanceOf(vaultAddress);
+        const wavaxBalAfter = await wavax.balanceOf(vaultAddress);
         const usdcBalAfter = await usdc.balanceOf(vaultAddress);
-        const wethReceived = wethBalAfter.sub(wethBalBefore);
+        const wavaxReceived = wavaxBalAfter.sub(wavaxBalBefore);
         const usdcReceived = usdcBalAfter.sub(usdcBalBefore);
 
-        expect(wethReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
+        expect(wavaxReceived.gt(0) || usdcReceived.gt(0)).toBe(true);
 
         console.log(`  Full lifecycle: create → add → remove complete for position ${newPosId}`);
       }, 180000);
@@ -4649,7 +4845,7 @@ describe('TraderJoeV2_1Adapter', () => {
     describe('Validation Error Cases', () => {
       it('should throw error for missing provider', async () => {
         await expect(
-          adapter.batchSwapTransactions([], { chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+          adapter.batchSwapTransactions([], { chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 })
         ).rejects.toThrow('provider is required');
       });
 
@@ -4661,20 +4857,20 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for missing recipient', async () => {
         await expect(
-          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, slippageTolerance: 0.5 })
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: env.chainId, slippageTolerance: 0.5 })
         ).rejects.toThrow('recipient is required');
       });
 
       it('should throw error for missing slippageTolerance', async () => {
         await expect(
-          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: '0x1234' })
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: env.chainId, recipient: '0x1234' })
         ).rejects.toThrow('slippageTolerance is required');
       });
 
-      it('should not require signer (TJ V2.1 has no Permit2)', async () => {
+      it('should not require signer (TJ V2.2 has no Permit2)', async () => {
         // Without signer, should pass option validation and hit instruction validation
         await expect(
-          adapter.batchSwapTransactions([], { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+          adapter.batchSwapTransactions([], { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 })
         ).rejects.toThrow('swapInstructions cannot be empty');
       });
 
@@ -4682,40 +4878,40 @@ describe('TraderJoeV2_1Adapter', () => {
         const mockSigner = { _signTypedData: () => Promise.resolve('0x') };
         // Should pass option validation and hit instruction validation
         await expect(
-          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 })
+          adapter.batchSwapTransactions([], { signer: mockSigner, provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 })
         ).rejects.toThrow('swapInstructions cannot be empty');
       });
 
       it('should throw error for non-array swapInstructions', async () => {
-        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        const options = { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 };
         await expect(
           adapter.batchSwapTransactions('not an array', options)
         ).rejects.toThrow('swapInstructions must be an array');
       });
 
       it('should throw error for empty swapInstructions array', async () => {
-        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        const options = { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 };
         await expect(
           adapter.batchSwapTransactions([], options)
         ).rejects.toThrow('swapInstructions cannot be empty');
       });
 
       it('should throw error for missing tokenIn', async () => {
-        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        const options = { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 };
         await expect(
           adapter.batchSwapTransactions([{ tokenOut: { symbol: 'USDC' }, amount: '1000' }], options)
         ).rejects.toThrow('tokenIn with symbol is required');
       });
 
       it('should throw error for missing tokenOut', async () => {
-        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        const options = { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 };
         await expect(
           adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, amount: '1000' }], options)
         ).rejects.toThrow('tokenOut with symbol is required');
       });
 
       it('should throw error for missing amount', async () => {
-        const options = { provider: env.provider, chainId: 1337, recipient: '0x1234', slippageTolerance: 0.5 };
+        const options = { provider: env.provider, chainId: env.chainId, recipient: '0x1234', slippageTolerance: 0.5 };
         await expect(
           adapter.batchSwapTransactions([{ tokenIn: { symbol: 'ETH' }, tokenOut: { symbol: 'USDC' } }], options)
         ).rejects.toThrow('amount is required');
@@ -4729,12 +4925,12 @@ describe('TraderJoeV2_1Adapter', () => {
         const amount = ethers.utils.parseEther('0.1').toString();
         const result = await adapter.batchSwapTransactions(
           [{
-            tokenIn: { symbol: 'WETH', address: wethAddress },
+            tokenIn: { symbol: 'WAVAX', address: wavaxAddress },
             tokenOut: { symbol: 'USDC', address: usdcAddress },
             amount,
             isAmountIn: true,
           }],
-          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 0.5 }
         );
 
         expect(result.transactions).toHaveLength(1);
@@ -4746,9 +4942,9 @@ describe('TraderJoeV2_1Adapter', () => {
         expect(tx.value).toBe('0x00');
 
         const meta = result.metadata[0];
-        expect(meta.tokenInSymbol).toBe('WETH');
+        expect(meta.tokenInSymbol).toBe('WAVAX');
         expect(meta.tokenOutSymbol).toBe('USDC');
-        expect(meta.tokenInAddress).toBe(wethAddress);
+        expect(meta.tokenInAddress).toBe(wavaxAddress);
         expect(meta.tokenOutAddress).toBe(usdcAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
         expect(meta.isAmountIn).toBe(true);
@@ -4763,7 +4959,7 @@ describe('TraderJoeV2_1Adapter', () => {
             amount,
             isAmountIn: true,
           }],
-          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 0.5 }
         );
 
         expect(result.transactions).toHaveLength(1);
@@ -4774,7 +4970,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         const meta = result.metadata[0];
         // tokenInAddress should be WETH for parseSwapReceipt compatibility
-        expect(meta.tokenInAddress).toBe(wethAddress);
+        expect(meta.tokenInAddress).toBe(wavaxAddress);
         expect(meta.tokenOutAddress).toBe(usdcAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
       }, 60000);
@@ -4788,7 +4984,7 @@ describe('TraderJoeV2_1Adapter', () => {
             amount,
             isAmountIn: true,
           }],
-          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 0.5 }
         );
 
         expect(result.transactions).toHaveLength(1);
@@ -4799,7 +4995,7 @@ describe('TraderJoeV2_1Adapter', () => {
         const meta = result.metadata[0];
         expect(meta.tokenInAddress).toBe(usdcAddress);
         // tokenOutAddress should be WETH for parseSwapReceipt compatibility
-        expect(meta.tokenOutAddress).toBe(wethAddress);
+        expect(meta.tokenOutAddress).toBe(wavaxAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
       }, 60000);
 
@@ -4807,28 +5003,28 @@ describe('TraderJoeV2_1Adapter', () => {
         const result = await adapter.batchSwapTransactions(
           [
             {
-              tokenIn: { symbol: 'WETH', address: wethAddress },
+              tokenIn: { symbol: 'WAVAX', address: wavaxAddress },
               tokenOut: { symbol: 'USDC', address: usdcAddress },
               amount: ethers.utils.parseEther('0.1').toString(),
               isAmountIn: true,
             },
             {
               tokenIn: { symbol: 'USDC', address: usdcAddress },
-              tokenOut: { symbol: 'WETH', address: wethAddress },
+              tokenOut: { symbol: 'WAVAX', address: wavaxAddress },
               amount: ethers.utils.parseUnits('100', 6).toString(),
               isAmountIn: true,
             },
           ],
-          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 0.5 }
         );
 
         expect(result.transactions).toHaveLength(2);
         expect(result.metadata).toHaveLength(2);
 
-        expect(result.metadata[0].tokenInSymbol).toBe('WETH');
+        expect(result.metadata[0].tokenInSymbol).toBe('WAVAX');
         expect(result.metadata[0].tokenOutSymbol).toBe('USDC');
         expect(result.metadata[1].tokenInSymbol).toBe('USDC');
-        expect(result.metadata[1].tokenOutSymbol).toBe('WETH');
+        expect(result.metadata[1].tokenOutSymbol).toBe('WAVAX');
 
         // Both should target the router
         expect(result.transactions[0].to).toBe(adapter.addresses.lbRouterAddress);
@@ -4839,12 +5035,12 @@ describe('TraderJoeV2_1Adapter', () => {
         const exactUsdcOut = ethers.utils.parseUnits('100', 6).toString();
         const result = await adapter.batchSwapTransactions(
           [{
-            tokenIn: { symbol: 'WETH', address: wethAddress },
+            tokenIn: { symbol: 'WAVAX', address: wavaxAddress },
             tokenOut: { symbol: 'USDC', address: usdcAddress },
             amount: exactUsdcOut,
             isAmountIn: false,
           }],
-          { provider: env.provider, chainId: 1337, recipient: vaultAddress(), slippageTolerance: 0.5 }
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 0.5 }
         );
 
         expect(result.transactions).toHaveLength(1);
@@ -4862,7 +5058,7 @@ describe('TraderJoeV2_1Adapter', () => {
     describe('Validation Error Cases', () => {
       it('should throw error for missing provider', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: ethers.utils.parseEther('0.1').toString(),
           isAmountIn: true,
@@ -4910,7 +5106,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for null tokenOutAddress', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: null,
           amount: ethers.utils.parseEther('0.1').toString(),
           isAmountIn: true,
@@ -4920,7 +5116,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for non-string amount', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: 123,
           isAmountIn: true,
@@ -4930,7 +5126,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for non-numeric amount string', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: 'abc',
           isAmountIn: true,
@@ -4940,7 +5136,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for zero amount', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: '0',
           isAmountIn: true,
@@ -4950,7 +5146,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should throw error for missing isAmountIn', async () => {
         await expect(adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: ethers.utils.parseEther('0.1').toString(),
           isAmountIn: null,
@@ -4964,7 +5160,7 @@ describe('TraderJoeV2_1Adapter', () => {
         const amountIn = ethers.utils.parseEther('0.1').toString();
 
         const result = await adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: amountIn,
           isAmountIn: true,
@@ -4980,7 +5176,7 @@ describe('TraderJoeV2_1Adapter', () => {
         const amountOut = ethers.utils.parseUnits('100', 6).toString();
 
         const result = await adapter.getBestSwapQuote({
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: amountOut,
           isAmountIn: false,
@@ -5026,7 +5222,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
       it('should return deterministic quotes for same params', async () => {
         const params = {
-          tokenInAddress: wethAddress,
+          tokenInAddress: wavaxAddress,
           tokenOutAddress: usdcAddress,
           amount: ethers.utils.parseEther('0.1').toString(),
           isAmountIn: true,
@@ -5152,7 +5348,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         const result = await adapter.calculateTokenAmounts(
           e2ePosition, e2ePoolData,
-          { address: wethAddress, decimals: 18 },
+          { address: wavaxAddress, decimals: 18 },
           { address: usdcAddress, decimals: 6 },
           env.provider
         );
@@ -5170,7 +5366,7 @@ describe('TraderJoeV2_1Adapter', () => {
       it('should return deterministic results', async () => {
         if (!e2ePosition) return;
 
-        const tokenData0 = { address: wethAddress, decimals: 18 };
+        const tokenData0 = { address: wavaxAddress, decimals: 18 };
         const tokenData1 = { address: usdcAddress, decimals: 6 };
 
         const result1 = await adapter.calculateTokenAmounts(
@@ -5197,7 +5393,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         const result = await adapter.calculateTokenAmounts(
           e2ePosition, e2ePoolData,
-          { address: wethAddress, decimals: 18 },
+          { address: wavaxAddress, decimals: 18 },
           { address: usdcAddress, decimals: 6 },
           env.provider
         );
@@ -5371,12 +5567,12 @@ describe('TraderJoeV2_1Adapter', () => {
 
         let poolData, positionRange;
         try {
-          const poolResult = await adapter.selectBestPool('WETH', 'USDC', env.provider, env.chainId);
+          const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
           positionRange = adapter.getPositionRange(poolData, 5, 5);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.1 WETH/USDC pools - skipping parseIncreaseLiquidityReceipt E2E');
+            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping parseIncreaseLiquidityReceipt E2E');
             return;
           }
           throw error;
@@ -5387,7 +5583,7 @@ describe('TraderJoeV2_1Adapter', () => {
 
         // Ensure approvals
         const approvalTxs = await adapter.getRequiredApprovals(
-          'liquidity', vaultAddress, [wethAddress, usdcAddress], env.provider
+          'liquidity', vaultAddress, [wavaxAddress, usdcAddress], env.provider
         );
         if (approvalTxs.length > 0) {
           const targets = approvalTxs.map(t => t.to);
@@ -5396,19 +5592,19 @@ describe('TraderJoeV2_1Adapter', () => {
         }
 
         // Use small amounts
-        const vaultWethBal = await weth.balanceOf(vaultAddress);
+        const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
-        const wethAmount = vaultWethBal.div(40);
+        const wavaxAmount = vaultWavaxBal.div(40);
         const usdcAmount = vaultUsdcBal.div(40);
 
         const txData = await adapter.generateCreatePositionData({
           position: positionRange,
-          token0Amount: wethAmount.toString(),
+          token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
           walletAddress: vaultAddress,
           poolData,
-          token0Data: { address: wethAddress, symbol: 'WETH', decimals: 18 },
+          token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
           slippageTolerance: 5,
           deadlineMinutes: 10,
@@ -5464,7 +5660,7 @@ describe('TraderJoeV2_1Adapter', () => {
       });
 
       it('should throw if positionManagerAddress is not configured', async () => {
-        const adapterNoPM = new TraderJoeV2_1Adapter(1337, env.provider);
+        const adapterNoPM = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateClaimFeesData({ position: { id: '1' }, walletAddress: '0x0000000000000000000000000000000000000001' }))
           .rejects.toThrow('No position manager address configured');

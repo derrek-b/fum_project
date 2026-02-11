@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-02-04T16:04:13.711Z
+Generated on: 2026-02-10T23:53:03.036Z
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ Generated on: 2026-02-04T16:04:13.711Z
 
 **Imports:**
 - from `../helpers/chainHelpers.js`
-- from `./TraderJoeV2_1Adapter.js`
+- from `./TraderJoeV2_2Adapter.js`
 - from `./UniswapV3Adapter.js`
 - from `./UniswapV4Adapter.js`
 
@@ -52,7 +52,7 @@ Adapter system for DeFi platforms
 - `PlatformAdapter` (class) (from `./PlatformAdapter.js`)
 - `UniswapV3Adapter` (class) (from `./UniswapV3Adapter.js`)
 - `UniswapV4Adapter` (class) (from `./UniswapV4Adapter.js`)
-- `TraderJoeV2_1Adapter` (class) (from `./TraderJoeV2_1Adapter.js`)
+- `TraderJoeV2_2Adapter` (class) (from `./TraderJoeV2_2Adapter.js`)
 
 ---
 
@@ -67,11 +67,11 @@ Base class for DeFi platform adapters.
 
 ---
 
-### TraderJoeV2_1Adapter.js
+### TraderJoeV2_2Adapter.js
 
-Adapter for Trader Joe V2.1 Liquidity Book on Arbitrum
+Adapter for Trader Joe V2.2 Liquidity Book on Arbitrum
 
-**Path:** `src/adapters/TraderJoeV2_1Adapter.js`
+**Path:** `src/adapters/TraderJoeV2_2Adapter.js`
 
 **Imports:**
 - from `../artifacts/contracts.js`
@@ -83,7 +83,7 @@ Adapter for Trader Joe V2.1 Liquidity Book on Arbitrum
 - from `ethers`
 
 **Exports:**
-- default: `TraderJoeV2_1Adapter` (class)
+- default: `TraderJoeV2_2Adapter` (class)
 
 ---
 
@@ -406,6 +406,11 @@ Permit2 Helper Functions
 - from `../configs/tokens.js`
 
 **Exports:**
+- `isWrappedNativeToken` (function)
+- `getWrappedNativeAddress` (function)
+- `getWrappedNativeSymbol` (function)
+- `getNativeSymbol` (function)
+- `getNativeTokenForChain` (function)
 - `getAllTokenSymbols` (function)
 - `getAllTokens` (function)
 - `getStablecoins` (function)
@@ -422,7 +427,6 @@ Permit2 Helper Functions
 - `validateTokensExist` (function)
 - `getCoingeckoId` (function)
 - `isNativeToken` (function)
-- `getWethAddress` (function)
 
 ---
 

@@ -86,11 +86,11 @@ const chains = {
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
-      traderjoeV2_1: {
-        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
-        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
-        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
-        positionManagerAddress: "",  // Populated after deployment
+      traderjoeV2_2: {
+        lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
+        lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
+        lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
+        positionManagerAddress: "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",  // Populated after deployment
       },
     },
   },
@@ -110,12 +110,12 @@ const chains = {
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
-      traderjoeV2_1: {
-        // Same as Avalanche since it's a fork
-        lbFactoryAddress: "0x8e42f2F4101563bF679975178e880FD87d3eFd4e",
-        lbRouterAddress: "0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30",
-        lbQuoterAddress: "0xd76019A16606FDa4651f636D9751f500Ed776250",
-        positionManagerAddress: "",  // Populated per test run after TJPositionManager deployment
+      traderjoeV2_2: {
+        // V2.2 addresses (same as Avalanche mainnet since it's a fork)
+        lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
+        lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
+        lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
+        positionManagerAddress: "0xF3838662B070a401Dc78bF93C521DFCf60f9D9c2",  // Populated per test run after TJPositionManager deployment
       },
     },
   },

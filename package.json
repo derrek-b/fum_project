@@ -35,7 +35,9 @@
     "dist",
     "test/setup",
     "test/test-env.js",
-    "bytecode"
+    "bytecode",
+    "hardhat.config.cjs",
+    "hardhat.avalanche.config.cjs"
   ],
   "scripts": {
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",

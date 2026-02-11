@@ -176,7 +176,7 @@ const PLATFORM_REQUIREMENTS = {
     requiresFeeTiers: false, // V4 has flexible fees
   },
   // Bin-based liquidity platforms (Trader Joe style)
-  traderjoeV2_1: {
+  traderjoeV2_2: {
     numberProperties: [], // Uses bins, not ticks
     objectProperties: ['features'], // Uses on-chain queries, not subgraphs
     requiresFeeTiers: false, // Bin step is per-pool

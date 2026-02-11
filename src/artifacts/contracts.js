@@ -710,7 +710,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xF22F82759Bf999fFDBBcea0FE457C83353311f65",
+      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -2830,7 +2830,9 @@
         "type": "function"
       }
     ],
-    "addresses": {}
+    "addresses": {
+      "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e"
+    }
   },
   "UniversalRouterValidator": {
     "abi": [
@@ -3138,7 +3140,9 @@
         "type": "function"
       }
     ],
-    "addresses": {}
+    "addresses": {
+      "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17"
+    }
   }
 };
 

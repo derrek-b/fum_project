@@ -109,7 +109,7 @@ describe('Chain Helpers', () => {
         expect(config.name).toBe('Avalanche');
         expect(config.rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2']);
         expect(config.executorAddress).toBe('0x0');
-        expect(config.platformAddresses).toHaveProperty('traderjoeV2_1');
+        expect(config.platformAddresses).toHaveProperty('traderjoeV2_2');
       });
     });
 
@@ -423,14 +423,15 @@ describe('Chain Helpers', () => {
         expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
       });
 
-      it('should return correct Trader Joe V2.1 addresses for Avalanche (chainId 43114)', () => {
-        const addresses = getPlatformAddresses(43114, 'traderjoeV2_1');
+      it('should return correct Trader Joe V2.2 addresses for Avalanche (chainId 43114)', () => {
+        const addresses = getPlatformAddresses(43114, 'traderjoeV2_2');
 
         expect(addresses).toBeDefined();
         expect(typeof addresses).toBe('object');
-        expect(addresses.lbFactoryAddress).toBe('0x8e42f2F4101563bF679975178e880FD87d3eFd4e');
-        expect(addresses.lbRouterAddress).toBe('0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30');
-        expect(addresses.lbQuoterAddress).toBe('0xd76019A16606FDa4651f636D9751f500Ed776250');
+        expect(addresses.lbFactoryAddress).toBe('0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c');
+        expect(addresses.lbRouterAddress).toBe('0x18556DA13313f3532c54711497A8FedAC273220E');
+        expect(addresses.lbQuoterAddress).toBe('0x9A550a522BBaDFB69019b0432800Ed17855A51C3');
+        expect(addresses.positionManagerAddress).toBe('0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C');
       });
     });
 
@@ -497,7 +498,7 @@ describe('Chain Helpers', () => {
 
         expect(chain42161Platforms).toContain('uniswapV3');
         expect(chain1337Platforms).toContain('uniswapV3');
-        expect(chain43114Platforms).toContain('traderjoeV2_1');
+        expect(chain43114Platforms).toContain('traderjoeV2_2');
       });
 
       it('should return all configured platforms', async () => {

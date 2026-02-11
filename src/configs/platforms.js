@@ -72,12 +72,12 @@ const platforms = {
       }    // Local fork (uses Arbitrum subgraph)
     },
   },
-  traderjoeV2_1: {
-    id: "traderjoeV2_1",
-    name: "Trader Joe V2.1",
+  traderjoeV2_2: {
+    id: "traderjoeV2_2",
+    name: "Trader Joe V2.2",
     logo: "/Platform_Logos/traderjoe.svg",
     color: "#E53E3E",
-    description: "Trader Joe V2.1 Liquidity Book positions",
+    description: "Trader Joe V2.2 Liquidity Book positions",
     features: {
       concentratedLiquidity: true,
       binBasedLiquidity: true,

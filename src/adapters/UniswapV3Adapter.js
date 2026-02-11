@@ -14,7 +14,7 @@ import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getPlatformFeeTiers, getPlatformTickSpacing, getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
-import { getTokenByAddress, getTokenBySymbol, getTokenAddress, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { getTokenByAddress, getTokenBySymbol, getTokenAddress, getWrappedNativeAddress, getWrappedNativeSymbol, isNativeToken, isWrappedNativeToken } from "../helpers/tokenHelpers.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
@@ -2690,14 +2690,15 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Chain ID parameter is required");
     }
 
-    // V3 only uses WETH for ETH pairs - resolve addresses accordingly
+    // V3 only uses wrapped native tokens (WETH/WAVAX) for native pairs - resolve addresses accordingly
     const resolveTokenData = (symbol) => {
-      if (isNativeToken(symbol) || symbol === 'WETH') {
-        // For native ETH or WETH, use WETH address - V3 only uses WETH
-        const wethAddress = getWethAddress(chainId);
+      if (isNativeToken(symbol) || isWrappedNativeToken(symbol)) {
+        // For native tokens or wrapped native tokens, use the wrapped address - V3 only uses wrapped tokens
+        const wrappedAddress = getWrappedNativeAddress(chainId);
+        const wrappedSymbol = getWrappedNativeSymbol(chainId);
         return {
-          address: wethAddress,
-          symbol: 'WETH',  // Pool actually uses WETH
+          address: wrappedAddress,
+          symbol: wrappedSymbol,  // Pool actually uses wrapped token (WETH/WAVAX)
           inputWasNative: isNativeToken(symbol)
         };
       }

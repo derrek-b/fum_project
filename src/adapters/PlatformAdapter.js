@@ -241,7 +241,7 @@ export default class PlatformAdapter {
    * @param {Object} poolData - Pool data
    * @param {Object} token0Data - Token0 data
    * @param {Object} token1Data - Token1 data
-   * @param {Object} [provider] - Ethers provider (required for some adapters, e.g. TJ V2.1)
+   * @param {Object} [provider] - Ethers provider (required for some adapters, e.g. TJ V2.2)
    * @returns {Promise<[BigInt, BigInt]>} [amount0, amount1]
    */
   async calculateTokenAmounts(position, poolData, token0Data, token1Data, provider) {

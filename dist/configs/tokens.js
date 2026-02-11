@@ -46,6 +46,7 @@ const tokens = {
   "ETH": {
     name: "Ether",
     symbol: "ETH",
+    wrappedSymbol: "WETH",
     displaySymbol: "ETH",
     decimals: 18,
     coingeckoId: "ethereum",
@@ -54,12 +55,12 @@ const tokens = {
       42161: ADDRESS_ZERO,
       1337: ADDRESS_ZERO
     },
-    wethAddresses: {
+    wrappedAddresses: {
       42161: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",  // Arbitrum
       1337: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"    // Local Arbitrum fork
     },
     logoURI: "/Token_Logos/ETH.svg",
-    wethLogoURI: "/Token_Logos/WETH.svg",
+    wrappedLogoURI: "/Token_Logos/WETH.svg",
     isStablecoin: false
   },
 
@@ -67,6 +68,7 @@ const tokens = {
   "AVAX": {
     name: "Avalanche",
     symbol: "AVAX",
+    wrappedSymbol: "WAVAX",
     displaySymbol: "AVAX",
     decimals: 18,
     coingeckoId: "avalanche-2",
@@ -75,12 +77,12 @@ const tokens = {
       43114: ADDRESS_ZERO,
       1338: ADDRESS_ZERO
     },
-    wethAddresses: {
+    wrappedAddresses: {
       43114: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",  // WAVAX on Avalanche
       1338: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7"    // Local Avalanche fork (same as Avalanche)
     },
     logoURI: "/Token_Logos/AVAX.svg",
-    wethLogoURI: "/Token_Logos/WAVAX.svg",
+    wrappedLogoURI: "/Token_Logos/WAVAX.svg",
     isStablecoin: false
   },
 

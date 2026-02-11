@@ -26,7 +26,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getBlockExplorerService } from "../services/blockExplorer.js";
 import { getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
-import { getTokenByAddress, getTokenBySymbol, getWethAddress, isNativeToken } from "../helpers/tokenHelpers.js";
+import { getTokenByAddress, getTokenBySymbol, getWrappedNativeAddress, getWrappedNativeSymbol, isNativeToken, isWrappedNativeToken } from "../helpers/tokenHelpers.js";
 import { discoverV4Pools, getV4PositionsByOwner } from "../services/theGraph.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Token, Percent, CurrencyAmount, TradeType, Ether } from '@uniswap/sdk-core';
@@ -3369,13 +3369,13 @@ export default class UniswapV4Adapter extends PlatformAdapter {
           isNative: true
         };
       }
-      // Handle WETH specially - it's not in the base tokens config
-      // but is derived from ETH's wethAddresses
-      if (symbol === 'WETH') {
-        const wethAddress = getWethAddress(chainId);
+      // Handle wrapped native tokens specially - they're not in the base tokens config
+      // but are derived from native token's wrappedAddresses
+      if (isWrappedNativeToken(symbol)) {
+        const wrappedAddress = getWrappedNativeAddress(chainId);
         return {
-          address: wethAddress,
-          symbol: 'WETH',
+          address: wrappedAddress,
+          symbol: getWrappedNativeSymbol(chainId),
           decimals: 18,
           isNative: false
         };

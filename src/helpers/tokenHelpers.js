@@ -93,13 +93,163 @@ function validateTokenSymbols(symbols) {
 }
 
 /**
+ * Check if a token symbol is a wrapped native token (WETH, WAVAX, etc.)
+ * @memberof module:helpers/tokenHelpers
+ * @param {string} symbol - Token symbol (case-sensitive)
+ * @returns {boolean} True if the symbol is a wrapped native token
+ * @example
+ * // Check if WETH is a wrapped native token
+ * const isWrapped = isWrappedNativeToken('WETH');
+ * // Returns: true
+ *
+ * @example
+ * // Check if WAVAX is a wrapped native token
+ * const isWrapped = isWrappedNativeToken('WAVAX');
+ * // Returns: true
+ *
+ * @example
+ * // Check if USDC is a wrapped native token
+ * const isWrapped = isWrappedNativeToken('USDC');
+ * // Returns: false
+ * @since 1.1.0
+ */
+export function isWrappedNativeToken(symbol) {
+  validateTokenSymbol(symbol);
+
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedSymbol === symbol) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Get wrapped native token address for a specific chain (WETH on Arbitrum, WAVAX on Avalanche, etc.)
+ * @memberof module:helpers/tokenHelpers
+ * @param {number} chainId - Chain ID where the wrapped native address is needed
+ * @returns {string} Wrapped native token contract address (0x-prefixed)
+ * @throws {Error} If chainId is invalid or no wrapped native token configured for chain
+ * @example
+ * // Get WETH address on Arbitrum
+ * const wrappedAddress = getWrappedNativeAddress(42161);
+ * // Returns: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+ *
+ * @example
+ * // Get WAVAX address on Avalanche
+ * const wrappedAddress = getWrappedNativeAddress(43114);
+ * // Returns: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7"
+ * @since 1.1.0
+ */
+export function getWrappedNativeAddress(chainId) {
+  validateChainId(chainId);
+
+  // Find native token configured for this chain
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedAddresses?.[chainId]) {
+      return token.wrappedAddresses[chainId];
+    }
+  }
+
+  throw new Error(`No wrapped native token configured for chain ${chainId}`);
+}
+
+/**
+ * Get wrapped native token symbol for a specific chain (WETH, WAVAX, etc.)
+ * @memberof module:helpers/tokenHelpers
+ * @param {number} chainId - Chain ID to get wrapped symbol for
+ * @returns {string} Wrapped native token symbol (e.g., 'WETH', 'WAVAX')
+ * @throws {Error} If chainId is invalid or no wrapped native token configured for chain
+ * @example
+ * // Get wrapped symbol on Arbitrum
+ * const symbol = getWrappedNativeSymbol(42161);
+ * // Returns: "WETH"
+ *
+ * @example
+ * // Get wrapped symbol on Avalanche
+ * const symbol = getWrappedNativeSymbol(43114);
+ * // Returns: "WAVAX"
+ * @since 1.1.0
+ */
+export function getWrappedNativeSymbol(chainId) {
+  validateChainId(chainId);
+
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedAddresses?.[chainId]) {
+      return token.wrappedSymbol;
+    }
+  }
+
+  throw new Error(`No wrapped native token configured for chain ${chainId}`);
+}
+
+/**
+ * Get native token symbol for a specific chain (ETH, AVAX, etc.)
+ * @memberof module:helpers/tokenHelpers
+ * @param {number} chainId - Chain ID to get native symbol for
+ * @returns {string} Native token symbol (e.g., 'ETH', 'AVAX')
+ * @throws {Error} If chainId is invalid or no native token configured for chain
+ * @example
+ * // Get native symbol on Arbitrum
+ * const symbol = getNativeSymbol(42161);
+ * // Returns: "ETH"
+ *
+ * @example
+ * // Get native symbol on Avalanche
+ * const symbol = getNativeSymbol(43114);
+ * // Returns: "AVAX"
+ * @since 1.1.0
+ */
+export function getNativeSymbol(chainId) {
+  validateChainId(chainId);
+
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedAddresses?.[chainId]) {
+      return token.symbol;
+    }
+  }
+
+  throw new Error(`No native token configured for chain ${chainId}`);
+}
+
+/**
+ * Get native token configuration for a specific chain
+ * @memberof module:helpers/tokenHelpers
+ * @param {number} chainId - Chain ID to get native token for
+ * @returns {Object} Native token configuration object
+ * @throws {Error} If chainId is invalid or no native token configured for chain
+ * @example
+ * // Get native token on Arbitrum
+ * const nativeToken = getNativeTokenForChain(42161);
+ * // Returns: { symbol: "ETH", wrappedSymbol: "WETH", ... }
+ *
+ * @example
+ * // Get native token on Avalanche
+ * const nativeToken = getNativeTokenForChain(43114);
+ * // Returns: { symbol: "AVAX", wrappedSymbol: "WAVAX", ... }
+ * @since 1.1.0
+ */
+export function getNativeTokenForChain(chainId) {
+  validateChainId(chainId);
+
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedAddresses?.[chainId]) {
+      return token;
+    }
+  }
+
+  throw new Error(`No native token configured for chain ${chainId}`);
+}
+
+/**
  * Get all token symbols
  * @memberof module:helpers/tokenHelpers
  * @returns {Array<string>} Array of all configured token symbols
  * @example
  * // Get all token symbols
  * const symbols = getAllTokenSymbols();
- * // Returns: ['ETH', 'USDC', 'USDT', 'DAI', 'WBTC', ...]
+ * // Returns: ['ETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'WETH', 'WAVAX', ...]
  *
  * @example
  * // Check if a symbol exists
@@ -110,10 +260,15 @@ function validateTokenSymbols(symbols) {
  * @since 1.0.0
  */
 export function getAllTokenSymbols() {
-  // Include WETH in addition to the base token symbols
-  // WETH is derived from ETH's wethAddresses but is needed for position tracking
-  // (Uniswap V3 positions use WETH, not native ETH)
-  return [...Object.keys(tokens), 'WETH'];
+  // Include wrapped native token symbols in addition to the base token symbols
+  // Wrapped native tokens are derived from native token's wrappedAddresses but are needed for position tracking
+  // (DEX positions use wrapped tokens like WETH/WAVAX, not native ETH/AVAX)
+  const baseSymbols = Object.keys(tokens);
+  const wrappedSymbols = Object.values(tokens)
+    .filter(token => token.isNative && token.wrappedSymbol)
+    .map(token => token.wrappedSymbol);
+
+  return [...baseSymbols, ...wrappedSymbols];
 }
 
 /**
@@ -137,24 +292,26 @@ export function getAllTokenSymbols() {
  * @since 1.0.0
  */
 export function getAllTokens() {
-  const ethToken = tokens['ETH'];
+  // Dynamically create wrapped token entries for all native tokens
+  // This makes getAllTokens() consistent with getAllTokenSymbols() which includes all wrapped symbols
+  const wrappedTokenEntries = {};
 
-  // If ETH has wethAddresses, create a WETH entry
-  // This makes getAllTokens() consistent with getAllTokenSymbols() which includes WETH
-  if (ethToken?.wethAddresses) {
-    return {
-      ...tokens,
-      WETH: {
-        ...ethToken,
-        symbol: 'WETH',
-        name: 'Wrapped Ether',
+  for (const token of Object.values(tokens)) {
+    if (token.isNative && token.wrappedSymbol && token.wrappedAddresses) {
+      wrappedTokenEntries[token.wrappedSymbol] = {
+        ...token,
+        symbol: token.wrappedSymbol,
+        name: `Wrapped ${token.name}`,
         isNative: false,
-        addresses: ethToken.wethAddresses
-      }
-    };
+        addresses: token.wrappedAddresses
+      };
+    }
   }
 
-  return tokens;
+  return {
+    ...tokens,
+    ...wrappedTokenEntries
+  };
 }
 
 /**
@@ -217,9 +374,9 @@ export function getTokensByChain(chainId) {
       throw new Error(`Token ${token.symbol || 'unknown'} is missing addresses property`);
     }
 
-    // For native tokens, check wethAddresses instead
+    // For native tokens, check wrappedAddresses instead
     if (token.isNative) {
-      return token.wethAddresses && token.wethAddresses[chainId];
+      return token.wrappedAddresses && token.wrappedAddresses[chainId];
     }
 
     return token.addresses[chainId];
@@ -429,19 +586,19 @@ export function getTokenByAddress(address, chainId) {
       return token;
     }
 
-    // Also check wethAddresses for native tokens
-    // When looking up a WETH contract address, return a modified token with 'WETH' symbol
-    // This allows position tracking to distinguish between native ETH and wrapped ETH
-    if (token.wethAddresses &&
-        token.wethAddresses[chainId] &&
-        token.wethAddresses[chainId].toLowerCase() === normalizedAddress) {
-      // Return a modified copy with WETH symbol and the WETH address
+    // Also check wrappedAddresses for native tokens
+    // When looking up a wrapped native token address (e.g., WETH, WAVAX), return a modified token
+    // This allows position tracking to distinguish between native tokens and their wrapped versions
+    if (token.wrappedAddresses &&
+        token.wrappedAddresses[chainId] &&
+        token.wrappedAddresses[chainId].toLowerCase() === normalizedAddress) {
+      // Return a modified copy with wrapped symbol and the wrapped address
       return {
         ...token,
-        symbol: 'WETH',
-        name: 'Wrapped Ether',
+        symbol: token.wrappedSymbol,
+        name: `Wrapped ${token.name}`,
         isNative: false,
-        addresses: { [chainId]: token.wethAddresses[chainId] }
+        addresses: { [chainId]: token.wrappedAddresses[chainId] }
       };
     }
   }
@@ -494,13 +651,13 @@ export function getTokensByType(isStablecoin) {
  * @example
  * // Get ETH address (returns null for native token)
  * const ethAddress = getTokenAddress('ETH', 1);
- * // Returns: null (use getWethAddress() for WETH contract address)
+ * // Returns: AddressZero (use getWrappedNativeAddress() for wrapped token contract address)
  *
  * @example
  * // Handle native vs ERC20 tokens
  * const address = getTokenAddress(symbol, chainId);
  * if (address === null) {
- *   // Native token - use provider.getBalance() or getWethAddress()
+ *   // Native token - use provider.getBalance() or getWrappedNativeAddress()
  * } else {
  *   const contract = new ethers.Contract(address, ERC20ABI, provider);
  * }
@@ -515,9 +672,9 @@ export function getTokenAddress(symbol, chainId) {
     throw new Error(`Token ${symbol} not found`);
   }
 
-  // For native tokens, verify chain support via wethAddresses
+  // For native tokens, verify chain support via wrappedAddresses
   if (token.isNative) {
-    if (!token.wethAddresses || !token.wethAddresses[chainId]) {
+    if (!token.wrappedAddresses || !token.wrappedAddresses[chainId]) {
       throw new Error(`Token ${symbol} not available on chain ${chainId}`);
     }
     // Native ETH returns AddressZero (set in config)
@@ -595,9 +752,9 @@ export function areTokensSupportedOnChain(symbols, chainId) {
     const token = tokens[symbol];
     if (!token) return false;
 
-    // For native tokens, check wethAddresses
+    // For native tokens, check wrappedAddresses
     if (token.isNative) {
-      return token.wethAddresses && token.wethAddresses[chainId];
+      return token.wrappedAddresses && token.wrappedAddresses[chainId];
     }
 
     return token.addresses[chainId];
@@ -649,9 +806,14 @@ export function validateTokensExist(symbols) {
 export function getCoingeckoId(symbol) {
   validateTokenSymbol(symbol);
 
-  // WETH uses the same price as ETH (coingecko id: 'ethereum')
-  if (symbol === 'WETH') {
-    return tokens['ETH'].coingeckoId;
+  // Wrapped native tokens (WETH, WAVAX, etc.) use the same price as their native counterpart
+  if (isWrappedNativeToken(symbol)) {
+    // Find the native token that has this wrapped symbol
+    for (const token of Object.values(tokens)) {
+      if (token.isNative && token.wrappedSymbol === symbol) {
+        return token.coingeckoId;
+      }
+    }
   }
 
   const token = tokens[symbol];
@@ -694,9 +856,8 @@ export function getCoingeckoId(symbol) {
 export function isNativeToken(symbol) {
   validateTokenSymbol(symbol);
 
-  // WETH is not in the token config (ETH is, with wethAddresses)
-  // WETH is explicitly not a native token - it's a wrapped version
-  if (symbol === 'WETH') {
+  // Wrapped native tokens (WETH, WAVAX, etc.) are not native - they're ERC20 wrapped versions
+  if (isWrappedNativeToken(symbol)) {
     return false;
   }
 
@@ -708,39 +869,3 @@ export function isNativeToken(symbol) {
   return token.isNative === true;
 }
 
-/**
- * Get WETH contract address for a specific chain
- * @memberof module:helpers/tokenHelpers
- * @param {number} chainId - Chain ID where the WETH address is needed
- * @returns {string} WETH contract address (0x-prefixed)
- * @throws {Error} If chainId is invalid or WETH not available on chain
- * @example
- * // Get WETH address on Ethereum mainnet
- * const wethAddress = getWethAddress(1);
- * // Returns: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
- *
- * @example
- * // Use for wrapping ETH in V3 operations
- * const wethContract = new ethers.Contract(getWethAddress(chainId), WETH_ABI, signer);
- * await wethContract.deposit({ value: amount });
- * @since 1.0.0
- */
-export function getWethAddress(chainId) {
-  validateChainId(chainId);
-
-  const ethToken = tokens['ETH'];
-  if (!ethToken) {
-    throw new Error('ETH token not found in configuration');
-  }
-
-  if (!ethToken.wethAddresses) {
-    throw new Error('ETH token does not have wethAddresses configured');
-  }
-
-  const address = ethToken.wethAddresses[chainId];
-  if (!address) {
-    throw new Error(`WETH not available on chain ${chainId}`);
-  }
-
-  return address;
-}

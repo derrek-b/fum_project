@@ -9,6 +9,7 @@ import { ethers } from 'ethers';
 import AdapterFactory from '../../../src/adapters/AdapterFactory.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
+import TraderJoeV2_2Adapter from '../../../src/adapters/TraderJoeV2_2Adapter.js';
 
 // Create a mock provider for testing
 const mockProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
@@ -56,11 +57,36 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(v4Adapter.chainId).toBe(42161);
       });
 
+      it('should return adapters for Avalanche (43114)', () => {
+        const result = AdapterFactory.getAdaptersForChain(43114, mockProvider);
+
+        expect(result).toBeDefined();
+        expect(result).toHaveProperty('adapters');
+        expect(result).toHaveProperty('failures');
+        expect(Array.isArray(result.adapters)).toBe(true);
+        expect(Array.isArray(result.failures)).toBe(true);
+        expect(result.adapters.length).toBe(1); // Trader Joe V2.2 only
+        expect(result.failures.length).toBe(0);
+
+        // Check for Trader Joe adapter
+        const tjAdapter = result.adapters.find(a => a instanceof TraderJoeV2_2Adapter);
+        expect(tjAdapter).toBeDefined();
+        expect(tjAdapter.chainId).toBe(43114);
+        expect(tjAdapter.platformId).toBe('traderjoeV2_2');
+        expect(tjAdapter.platformName).toBe('Trader Joe V2.2');
+
+        // Uniswap adapters should NOT be present on Avalanche
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeUndefined();
+        expect(v4Adapter).toBeUndefined();
+      });
+
       it('should return adapters for local test chain (1337)', () => {
         const result = AdapterFactory.getAdaptersForChain(1337, mockProvider);
 
         expect(result).toBeDefined();
-        expect(result.adapters.length).toBe(3); // V3, V4, and Trader Joe V2.1 (Arbitrum fork)
+        expect(result.adapters.length).toBe(2); // V3, V4 (Arbitrum fork)
         expect(result.failures.length).toBe(0);
 
         // Check for V3 and V4 adapters
@@ -70,6 +96,26 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(v4Adapter).toBeDefined();
         expect(v3Adapter.chainId).toBe(1337);
         expect(v4Adapter.chainId).toBe(1337);
+      });
+
+      it('should return adapters for local Avalanche test chain (1338)', () => {
+        const result = AdapterFactory.getAdaptersForChain(1338, mockProvider);
+
+        expect(result).toBeDefined();
+        expect(result.adapters.length).toBe(1); // Trader Joe V2.2 only (Avalanche fork)
+        expect(result.failures.length).toBe(0);
+
+        // Check for Trader Joe adapter
+        const tjAdapter = result.adapters.find(a => a instanceof TraderJoeV2_2Adapter);
+        expect(tjAdapter).toBeDefined();
+        expect(tjAdapter.chainId).toBe(1338);
+        expect(tjAdapter.platformId).toBe('traderjoeV2_2');
+
+        // Uniswap adapters should NOT be present on Avalanche fork
+        const v3Adapter = result.adapters.find(a => a instanceof UniswapV3Adapter);
+        const v4Adapter = result.adapters.find(a => a instanceof UniswapV4Adapter);
+        expect(v3Adapter).toBeUndefined();
+        expect(v4Adapter).toBeUndefined();
       });
 
       it('should throw error for unsupported chain', () => {
@@ -243,6 +289,25 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(adapter.chainId).toBe(1337);
       });
 
+      it('should return TraderJoeV2_2Adapter for Avalanche (43114)', () => {
+        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 43114, mockProvider);
+
+        expect(adapter).toBeDefined();
+        expect(adapter).toBeInstanceOf(TraderJoeV2_2Adapter);
+        expect(adapter.chainId).toBe(43114);
+        expect(adapter.platformId).toBe('traderjoeV2_2');
+        expect(adapter.platformName).toBe('Trader Joe V2.2');
+      });
+
+      it('should return TraderJoeV2_2Adapter for local Avalanche test chain (1338)', () => {
+        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 1338, mockProvider);
+
+        expect(adapter).toBeDefined();
+        expect(adapter).toBeInstanceOf(TraderJoeV2_2Adapter);
+        expect(adapter.chainId).toBe(1338);
+        expect(adapter.platformId).toBe('traderjoeV2_2');
+      });
+
       it('should return registered custom adapter', () => {
         // Register a custom adapter
         AdapterFactory.registerAdapterForTestingOnly('mock', MockAdapter);
@@ -405,6 +470,48 @@ describe('AdapterFactory - Unit Tests', () => {
         }).toThrow('Failed to create uniswapV3 adapter for chain -1: chainId must be greater than 0');
       });
 
+      it('should throw error for Uniswap V3 on Avalanche chain (43114)', () => {
+        // Uniswap V3 is not deployed on Avalanche
+        expect(() => {
+          AdapterFactory.getAdapter('uniswapV3', 43114, mockProvider);
+        }).toThrow('Failed to create uniswapV3 adapter for chain 43114: Platform uniswapV3 not configured for chain 43114');
+      });
+
+      it('should throw error for Uniswap V3 on Avalanche fork (1338)', () => {
+        // Uniswap V3 is not deployed on Avalanche fork
+        expect(() => {
+          AdapterFactory.getAdapter('uniswapV3', 1338, mockProvider);
+        }).toThrow('Failed to create uniswapV3 adapter for chain 1338: Platform uniswapV3 not configured for chain 1338');
+      });
+
+      it('should throw error for Uniswap V4 on Avalanche chain (43114)', () => {
+        // Uniswap V4 is not deployed on Avalanche
+        expect(() => {
+          AdapterFactory.getAdapter('uniswapV4', 43114, mockProvider);
+        }).toThrow('Failed to create uniswapV4 adapter for chain 43114: Platform uniswapV4 not configured for chain 43114');
+      });
+
+      it('should throw error for Uniswap V4 on Avalanche fork (1338)', () => {
+        // Uniswap V4 is not deployed on Avalanche fork
+        expect(() => {
+          AdapterFactory.getAdapter('uniswapV4', 1338, mockProvider);
+        }).toThrow('Failed to create uniswapV4 adapter for chain 1338: Platform uniswapV4 not configured for chain 1338');
+      });
+
+      it('should throw error for Trader Joe on Arbitrum chain (42161)', () => {
+        // Trader Joe is not deployed on Arbitrum
+        expect(() => {
+          AdapterFactory.getAdapter('traderjoeV2_2', 42161, mockProvider);
+        }).toThrow('Failed to create traderjoeV2_2 adapter for chain 42161: Platform traderjoeV2_2 not configured for chain 42161');
+      });
+
+      it('should throw error for Trader Joe on Arbitrum fork (1337)', () => {
+        // Trader Joe is not deployed on Arbitrum fork
+        expect(() => {
+          AdapterFactory.getAdapter('traderjoeV2_2', 1337, mockProvider);
+        }).toThrow('Failed to create traderjoeV2_2 adapter for chain 1337: Platform traderjoeV2_2 not configured for chain 1337');
+      });
+
       it('should throw error with custom adapter validation failure', () => {
         // Create an adapter that validates chainId more strictly
         class StrictAdapter {
@@ -433,7 +540,9 @@ describe('AdapterFactory - Unit Tests', () => {
       expect(platforms).toBeDefined();
       expect(Array.isArray(platforms)).toBe(true);
       expect(platforms).toContain('uniswapV3');
-      expect(platforms.length).toBeGreaterThan(0);
+      expect(platforms).toContain('uniswapV4');
+      expect(platforms).toContain('traderjoeV2_2');
+      expect(platforms.length).toBeGreaterThanOrEqual(3);
     });
 
     it('should include newly registered platforms', () => {
@@ -451,6 +560,14 @@ describe('AdapterFactory - Unit Tests', () => {
   describe('hasAdapter', () => {
     it('should return true for existing uniswapV3 adapter', () => {
       expect(AdapterFactory.hasAdapter('uniswapV3')).toBe(true);
+    });
+
+    it('should return true for existing uniswapV4 adapter', () => {
+      expect(AdapterFactory.hasAdapter('uniswapV4')).toBe(true);
+    });
+
+    it('should return true for existing traderjoeV2_2 adapter', () => {
+      expect(AdapterFactory.hasAdapter('traderjoeV2_2')).toBe(true);
     });
 
     it('should return false for non-existent adapter and silly inputs', () => {

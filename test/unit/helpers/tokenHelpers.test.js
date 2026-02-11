@@ -22,7 +22,11 @@ import {
   isStablecoin,
   detectStablePair,
   isNativeToken,
-  getWethAddress
+  getWrappedNativeAddress,
+  getWrappedNativeSymbol,
+  getNativeSymbol,
+  isWrappedNativeToken,
+  getNativeTokenForChain
 } from '../../../src/helpers/tokenHelpers.js';
 import tokens from '../../../src/configs/tokens.js';
 
@@ -61,7 +65,9 @@ describe('Token Helpers', () => {
         const eth = result.ETH;
         expect(eth).toHaveProperty('isNative');
         expect(eth.isNative).toBe(true);
-        expect(eth).toHaveProperty('wethAddresses');
+        expect(eth).toHaveProperty('wrappedAddresses');
+        expect(eth).toHaveProperty('wrappedSymbol');
+        expect(eth.wrappedSymbol).toBe('WETH');
       });
 
       it('should include all expected token properties', () => {
@@ -74,7 +80,7 @@ describe('Token Helpers', () => {
         });
       });
 
-      it('should include WETH derived from ETH wethAddresses', () => {
+      it('should include WETH derived from ETH wrappedAddresses', () => {
         const result = getAllTokens();
         const weth = result.WETH;
 
@@ -83,8 +89,21 @@ describe('Token Helpers', () => {
         expect(weth.name).toBe('Wrapped Ether');
         expect(weth.isNative).toBe(false);
         expect(weth.addresses).toBeDefined();
-        // WETH addresses should come from ETH's wethAddresses
+        // WETH addresses should come from ETH's wrappedAddresses
         expect(weth.addresses[42161]).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should include WAVAX derived from AVAX wrappedAddresses', () => {
+        const result = getAllTokens();
+        const wavax = result.WAVAX;
+
+        expect(wavax).toBeDefined();
+        expect(wavax.symbol).toBe('WAVAX');
+        expect(wavax.name).toBe('Wrapped Avalanche');
+        expect(wavax.isNative).toBe(false);
+        expect(wavax.addresses).toBeDefined();
+        // WAVAX addresses should come from AVAX's wrappedAddresses
+        expect(wavax.addresses[43114]).toBe('0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7');
       });
     });
   });
@@ -110,7 +129,8 @@ describe('Token Helpers', () => {
         expect(result.decimals).toBe(18);
         expect(result.isStablecoin).toBe(false);
         expect(result.isNative).toBe(true);
-        expect(result.wethAddresses).toBeDefined();
+        expect(result.wrappedAddresses).toBeDefined();
+        expect(result.wrappedSymbol).toBe('WETH');
       });
 
       it('should handle unicode keys correctly', () => {
@@ -345,7 +365,7 @@ describe('Token Helpers', () => {
       });
 
       it('should return false for ETH-USDC mixed pair (using WETH address)', () => {
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result = detectStablePair(wethAddress, usdcAddress, 1337);
@@ -355,7 +375,7 @@ describe('Token Helpers', () => {
       });
 
       it('should return false for USDC-ETH mixed pair (reversed, using WETH address)', () => {
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result = detectStablePair(usdcAddress, wethAddress, 1337);
@@ -364,7 +384,7 @@ describe('Token Helpers', () => {
       });
 
       it('should return false for ETH-WBTC non-stable pair (using WETH address)', () => {
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const wbtcAddress = getTokenAddress('WBTC', 1337);
 
         const result = detectStablePair(wethAddress, wbtcAddress, 1337);
@@ -373,7 +393,7 @@ describe('Token Helpers', () => {
       });
 
       it('should work with all combinations of known tokens', () => {
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
         const usdtAddress = getTokenAddress('USD₮0', 1337);
         const wbtcAddress = getTokenAddress('WBTC', 1337);
@@ -504,7 +524,7 @@ describe('Token Helpers', () => {
       });
 
       it('should be deterministic for non-stable pairs', () => {
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         const result1 = detectStablePair(wethAddress, usdcAddress, 1337);
@@ -664,9 +684,9 @@ describe('Token Helpers', () => {
         expect(result.length).toBeGreaterThan(0);
 
         result.forEach(token => {
-          // Native tokens have null addresses but wethAddresses
+          // Native tokens have AddressZero for addresses but wrappedAddresses
           if (token.isNative) {
-            expect(token.wethAddresses[42161]).toBeDefined();
+            expect(token.wrappedAddresses[42161]).toBeDefined();
           } else {
             expect(token.addresses[42161]).toBeDefined();
             expect(typeof token.addresses[42161]).toBe('string');
@@ -720,7 +740,8 @@ describe('Token Helpers', () => {
         expect(ethToken).toBeDefined();
         expect(ethToken.isNative).toBe(true);
         expect(ethToken.addresses[42161]).toBe('0x0000000000000000000000000000000000000000');
-        expect(ethToken.wethAddresses[42161]).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(ethToken.wrappedAddresses[42161]).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(ethToken.wrappedSymbol).toBe('WETH');
       });
     });
 
@@ -1085,22 +1106,52 @@ describe('Token Helpers', () => {
     });
   });
 
-  describe('getWethAddress', () => {
+  describe('isWrappedNativeToken', () => {
     describe('Success Cases', () => {
-      it('should return WETH address for Arbitrum', () => {
-        const result = getWethAddress(42161);
-        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      it('should return true for WETH', () => {
+        expect(isWrappedNativeToken('WETH')).toBe(true);
       });
 
-      it('should return WETH address for local chain', () => {
-        const result = getWethAddress(1337);
-        expect(result).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      it('should return true for WAVAX', () => {
+        expect(isWrappedNativeToken('WAVAX')).toBe(true);
+      });
+
+      it('should return false for native tokens', () => {
+        expect(isWrappedNativeToken('ETH')).toBe(false);
+        expect(isWrappedNativeToken('AVAX')).toBe(false);
+      });
+
+      it('should return false for regular tokens', () => {
+        expect(isWrappedNativeToken('USDC')).toBe(false);
+        expect(isWrappedNativeToken('WBTC')).toBe(false);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid symbol', () => {
+        expect(() => isWrappedNativeToken(null)).toThrow('Token symbol parameter is required');
+        expect(() => isWrappedNativeToken('')).toThrow('Token symbol cannot be empty');
+        expect(() => isWrappedNativeToken(123)).toThrow('Token symbol must be a string');
+      });
+    });
+  });
+
+  describe('getWrappedNativeAddress', () => {
+    describe('Success Cases', () => {
+      it('should return WETH address for Arbitrum chains', () => {
+        expect(getWrappedNativeAddress(42161)).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+        expect(getWrappedNativeAddress(1337)).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1');
+      });
+
+      it('should return WAVAX address for Avalanche chains', () => {
+        expect(getWrappedNativeAddress(43114)).toBe('0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7');
+        expect(getWrappedNativeAddress(1338)).toBe('0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7');
       });
 
       it('should return valid Ethereum addresses', () => {
-        const chainIds = [42161, 1337];
+        const chainIds = [42161, 1337, 43114, 1338];
         chainIds.forEach(chainId => {
-          const result = getWethAddress(chainId);
+          const result = getWrappedNativeAddress(chainId);
           expect(result).toMatch(/^0x[a-fA-F0-9]{40}$/);
         });
       });
@@ -1108,18 +1159,155 @@ describe('Token Helpers', () => {
 
     describe('Error Cases', () => {
       it('should throw error for null chainId', () => {
-        expect(() => getWethAddress(null)).toThrow('Chain ID parameter is required');
+        expect(() => getWrappedNativeAddress(null)).toThrow('Chain ID parameter is required');
       });
 
       it('should throw error for invalid chainId', () => {
-        expect(() => getWethAddress('invalid')).toThrow('Chain ID must be a positive integer');
-        expect(() => getWethAddress(-1)).toThrow('Chain ID must be a positive integer');
-        expect(() => getWethAddress(0)).toThrow('Chain ID must be a positive integer');
+        expect(() => getWrappedNativeAddress('invalid')).toThrow('Chain ID must be a positive integer');
+        expect(() => getWrappedNativeAddress(-1)).toThrow('Chain ID must be a positive integer');
+        expect(() => getWrappedNativeAddress(0)).toThrow('Chain ID must be a positive integer');
       });
 
       it('should throw error for unsupported chain', () => {
-        expect(() => getWethAddress(999999)).toThrow('WETH not available on chain 999999');
+        expect(() => getWrappedNativeAddress(999999)).toThrow('No wrapped native token configured for chain 999999');
       });
+    });
+  });
+
+  describe('getWrappedNativeSymbol', () => {
+    describe('Success Cases', () => {
+      it('should return WETH for Arbitrum chains', () => {
+        expect(getWrappedNativeSymbol(42161)).toBe('WETH');
+        expect(getWrappedNativeSymbol(1337)).toBe('WETH');
+      });
+
+      it('should return WAVAX for Avalanche chains', () => {
+        expect(getWrappedNativeSymbol(43114)).toBe('WAVAX');
+        expect(getWrappedNativeSymbol(1338)).toBe('WAVAX');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid chainId', () => {
+        expect(() => getWrappedNativeSymbol(null)).toThrow('Chain ID parameter is required');
+        expect(() => getWrappedNativeSymbol('invalid')).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for unsupported chain', () => {
+        expect(() => getWrappedNativeSymbol(999999)).toThrow('No wrapped native token configured for chain 999999');
+      });
+    });
+  });
+
+  describe('getNativeSymbol', () => {
+    describe('Success Cases', () => {
+      it('should return ETH for Arbitrum chains', () => {
+        expect(getNativeSymbol(42161)).toBe('ETH');
+        expect(getNativeSymbol(1337)).toBe('ETH');
+      });
+
+      it('should return AVAX for Avalanche chains', () => {
+        expect(getNativeSymbol(43114)).toBe('AVAX');
+        expect(getNativeSymbol(1338)).toBe('AVAX');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid chainId', () => {
+        expect(() => getNativeSymbol(null)).toThrow('Chain ID parameter is required');
+        expect(() => getNativeSymbol('invalid')).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for unsupported chain', () => {
+        expect(() => getNativeSymbol(999999)).toThrow('No native token configured for chain 999999');
+      });
+    });
+  });
+
+  describe('getNativeTokenForChain', () => {
+    describe('Success Cases', () => {
+      it('should return ETH config for Arbitrum chains', () => {
+        const result = getNativeTokenForChain(42161);
+        expect(result.symbol).toBe('ETH');
+        expect(result.wrappedSymbol).toBe('WETH');
+        expect(result.isNative).toBe(true);
+      });
+
+      it('should return AVAX config for Avalanche chains', () => {
+        const result = getNativeTokenForChain(43114);
+        expect(result.symbol).toBe('AVAX');
+        expect(result.wrappedSymbol).toBe('WAVAX');
+        expect(result.isNative).toBe(true);
+      });
+
+      it('should return local fork configs', () => {
+        const result1337 = getNativeTokenForChain(1337);
+        expect(result1337.symbol).toBe('ETH');
+
+        const result1338 = getNativeTokenForChain(1338);
+        expect(result1338.symbol).toBe('AVAX');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid chainId', () => {
+        expect(() => getNativeTokenForChain(null)).toThrow('Chain ID parameter is required');
+        expect(() => getNativeTokenForChain('invalid')).toThrow('Chain ID must be a positive integer');
+      });
+
+      it('should throw error for unsupported chain', () => {
+        expect(() => getNativeTokenForChain(999999)).toThrow('No native token configured for chain 999999');
+      });
+    });
+  });
+
+  describe('getAllTokenSymbols with wrapped tokens', () => {
+    it('should include both WETH and WAVAX', () => {
+      const symbols = getAllTokenSymbols();
+      expect(symbols).toContain('WETH');
+      expect(symbols).toContain('WAVAX');
+    });
+
+    it('should include base native tokens', () => {
+      const symbols = getAllTokenSymbols();
+      expect(symbols).toContain('ETH');
+      expect(symbols).toContain('AVAX');
+    });
+  });
+
+  describe('getCoingeckoId with wrapped tokens', () => {
+    it('should return ethereum coingecko ID for WETH', () => {
+      expect(getCoingeckoId('WETH')).toBe('ethereum');
+    });
+
+    it('should return avalanche-2 coingecko ID for WAVAX', () => {
+      expect(getCoingeckoId('WAVAX')).toBe('avalanche-2');
+    });
+  });
+
+  describe('isNativeToken with wrapped tokens', () => {
+    it('should return false for WETH', () => {
+      expect(isNativeToken('WETH')).toBe(false);
+    });
+
+    it('should return false for WAVAX', () => {
+      expect(isNativeToken('WAVAX')).toBe(false);
+    });
+
+    it('should return true for AVAX', () => {
+      expect(isNativeToken('AVAX')).toBe(true);
+    });
+  });
+
+  describe('getTokenByAddress with WAVAX', () => {
+    it('should resolve WAVAX address to WAVAX token', () => {
+      const address = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7';
+      const result = getTokenByAddress(address, 43114);
+
+      expect(result).toBeDefined();
+      expect(result.symbol).toBe('WAVAX');
+      expect(result.isNative).toBe(false);
+      expect(result.name).toBe('Wrapped Avalanche');
     });
   });
 });

@@ -10,7 +10,7 @@ import JSBI from 'jsbi';
 import { setupTestEnvironment } from '../../test-env.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import chains from '../../../src/configs/chains.js';
-import { getTokenBySymbol, getTokenAddress, getWethAddress } from '../../../src/helpers/tokenHelpers.js';
+import { getTokenBySymbol, getTokenAddress, getWrappedNativeAddress } from '../../../src/helpers/tokenHelpers.js';
 import { getPermit2Nonce, generatePermit2Signature } from '../../../src/helpers/Permit2Helper.js';
 
 describe('UniswapV3Adapter - Unit Tests', () => {
@@ -874,7 +874,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       // Get token data using helpers
       const usdcToken = getTokenBySymbol('USDC');
-      const wethAddress = getWethAddress(1337);
+      const wethAddress = getWrappedNativeAddress(1337);
 
       // Create real contract instances using addresses from adapter config
       const poolAddress = await adapter._getPoolAddress(
@@ -2749,7 +2749,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     beforeAll(async () => {
       // Get valid pool data to use for testing
-      const wethAddress = getWethAddress(1337);
+      const wethAddress = getWrappedNativeAddress(1337);
       const usdcToken = getTokenBySymbol('USDC');
       const usdcAddress = usdcToken.addresses[1337];
 
@@ -3105,7 +3105,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       positionData = await positionManager.positions(testTokenId);
 
       // Get pool data for the position's tokens
-      const wethAddress = getWethAddress(1337);
+      const wethAddress = getWrappedNativeAddress(1337);
       const usdcToken = getTokenBySymbol('USDC');
       const usdcAddress = usdcToken.addresses[1337];
 
@@ -3725,7 +3725,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should calculate price for ETH/USDC pair', () => {
         const ethToken = {
-          address: getWethAddress(1337), // Hardhat fork WETH
+          address: getWrappedNativeAddress(1337), // Hardhat fork WETH
           decimals: 18,
           symbol: 'ETH'
         };
@@ -3774,7 +3774,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -3801,7 +3801,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -3823,7 +3823,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getWethAddress(1337),
+        address: getWrappedNativeAddress(1337),
         decimals: 18,
         symbol: 'ETH'
       };
@@ -3896,12 +3896,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validSqrtPrice = '79228162514264337593543950336';
 
         const invalidTokens = [
-          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
+          { address: getWrappedNativeAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -3939,7 +3939,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           symbol: 'USDC'
         };
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -3960,7 +3960,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should calculate price for positive tick', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -3985,7 +3985,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should calculate price for negative tick', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4010,7 +4010,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4036,7 +4036,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -4058,7 +4058,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getWethAddress(1337),
+        address: getWrappedNativeAddress(1337),
         decimals: 18,
         symbol: 'ETH'
       };
@@ -4119,7 +4119,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error when base and quote tokens have the same address', () => {
         const validTick = 0;
         const sameToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4132,12 +4132,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validTick = 0;
 
         const invalidTokens = [
-          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
+          { address: getWrappedNativeAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -4168,7 +4168,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should handle extreme tick values near limits', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4196,7 +4196,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle zero tick consistently', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4219,7 +4219,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Success Cases', () => {
       it('should convert price to tick and back consistently', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4242,7 +4242,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle small prices correctly', () => {
         const ethToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4265,7 +4265,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle inverted token pairs consistently', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4298,7 +4298,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should work with minimal token metadata', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18
           // No symbol or name
         };
@@ -4317,7 +4317,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
     describe('Error Cases', () => {
       const validTokenA = {
-        address: getWethAddress(1337),
+        address: getWrappedNativeAddress(1337),
         decimals: 18,
         symbol: 'ETH'
       };
@@ -4382,7 +4382,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
       it('should throw error when base and quote tokens have the same address', () => {
         const validPrice = 1000;
         const sameToken = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4395,12 +4395,12 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const validPrice = 1000;
 
         const invalidTokens = [
-          { address: getWethAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: NaN, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -Infinity, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: -1, symbol: 'TEST' },
-          { address: getWethAddress(1337), decimals: 256, symbol: 'TEST' }
+          { address: getWrappedNativeAddress(1337), decimals: 'not-a-number', symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: NaN, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -Infinity, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: -1, symbol: 'TEST' },
+          { address: getWrappedNativeAddress(1337), decimals: 256, symbol: 'TEST' }
         ];
 
         invalidTokens.forEach(invalidToken => {
@@ -4431,7 +4431,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     describe('Special Cases', () => {
       it('should handle very small prices', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4451,7 +4451,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should handle very large prices', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4470,7 +4470,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
 
       it('should be deterministic', () => {
         const tokenA = {
-          address: getWethAddress(1337),
+          address: getWrappedNativeAddress(1337),
           decimals: 18,
           symbol: 'ETH'
         };
@@ -4807,7 +4807,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         const swapperWallet = new ethers.Wallet(env.accounts[2].privateKey, env.provider);
 
         // Get WETH and USDC addresses from our environment
-        const wethAddress = getWethAddress(1337);
+        const wethAddress = getWrappedNativeAddress(1337);
         const usdcAddress = getTokenAddress('USDC', 1337);
 
         // Simple WETH ABI with deposit function
@@ -6919,7 +6919,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         // Use valid token symbols but invalid chainId - token resolution will fail
         await expect(
           adapter.selectBestPool('ETH', 'USDC', env.provider, 999999)
-        ).rejects.toThrow(/not available on chain/);
+        ).rejects.toThrow(/configured for chain/);
       });
     });
   });

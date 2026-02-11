@@ -46,6 +46,7 @@ const tokens = {
   "ETH": {
     name: "Ether",
     symbol: "ETH",
+    wrappedSymbol: "WETH",
     displaySymbol: "ETH",
     decimals: 18,
     coingeckoId: "ethereum",
@@ -67,6 +68,7 @@ const tokens = {
   "AVAX": {
     name: "Avalanche",
     symbol: "AVAX",
+    wrappedSymbol: "WAVAX",
     displaySymbol: "AVAX",
     decimals: 18,
     coingeckoId: "avalanche-2",

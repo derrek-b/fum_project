@@ -82,16 +82,20 @@ function validateTokenAddresses(tokenKey, token, validChainIds) {
     }
   });
 
-  // Native tokens must have wethAddresses
+  // Native tokens must have wrappedAddresses and wrappedSymbol
   if (isNativeToken) {
-    if (!token.wethAddresses || typeof token.wethAddresses !== 'object') {
-      throw new Error(`Native token ${tokenKey} must have wethAddresses object`);
+    if (!token.wrappedAddresses || typeof token.wrappedAddresses !== 'object') {
+      throw new Error(`Native token ${tokenKey} must have wrappedAddresses object`);
     }
 
-    // Validate wethAddresses for native tokens
-    Object.entries(token.wethAddresses).forEach(([chainId, address]) => {
+    if (!token.wrappedSymbol || typeof token.wrappedSymbol !== 'string') {
+      throw new Error(`Native token ${tokenKey} must have wrappedSymbol string`);
+    }
+
+    // Validate wrappedAddresses for native tokens
+    Object.entries(token.wrappedAddresses).forEach(([chainId, address]) => {
       if (!validateEthereumAddress(address)) {
-        throw new Error(`Native token ${tokenKey} wethAddress for chain ${chainId} must be a valid Ethereum address, got: ${address}`);
+        throw new Error(`Native token ${tokenKey} wrappedAddress for chain ${chainId} must be a valid Ethereum address, got: ${address}`);
       }
     });
   }

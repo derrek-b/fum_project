@@ -27,6 +27,7 @@ export const TEST_CONFIG = {
   // Network settings - dynamic based on fork chain
   chainId: isAvalanche ? 1338 : 1337,
   port: isAvalanche ? 8546 : 8545,
+  forkChain,
 
   // Fork settings - Arbitrum or Avalanche mainnet
   forkUrl: process.env.ALCHEMY_API_KEY
@@ -95,7 +96,7 @@ export const ARBITRUM_ADDRESSES = {
 
 // Avalanche mainnet contract addresses
 export const AVALANCHE_ADDRESSES = {
-  // Trader Joe V2.1 contracts
+  // Trader Joe V2.2 contracts
   LB_FACTORY: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
   LB_ROUTER: '0xb4315e873dBcf96Ffd0acd8EA43f689D8c20fB30',
   LB_QUOTER: '0xd76019A16606FDa4651f636D9751f500Ed776250',
@@ -151,9 +152,31 @@ async function waitForNode(url, maxAttempts = 30) {
 export async function startHardhat(options = {}) {
   const config = { ...TEST_CONFIG, ...options };
 
+  // Determine fork chain at runtime (not from cached TEST_CONFIG)
+  // This ensures FORK_CHAIN env var set by npm scripts is used
+  const runtimeForkChain = process.env.FORK_CHAIN || 'arbitrum';
+  console.log(`[startHardhat] Runtime FORK_CHAIN: ${runtimeForkChain}, port: ${config.port}`);
+
   // Spawn Hardhat node as subprocess
-  const hardhatProcess = spawn('npx', ['hardhat', 'node', '--port', config.port.toString()], {
-    cwd: LIBRARY_ROOT,
+  // Use chain-specific config file with absolute path
+  // Run from LIBRARY_ROOT where hardhat and contracts are located
+  const configFile = runtimeForkChain === 'avalanche'
+    ? path.join(LIBRARY_ROOT, 'hardhat.avalanche.config.cjs')
+    : path.join(LIBRARY_ROOT, 'hardhat.config.cjs');
+
+  // When running as installed package, Hardhat is in the consuming project's node_modules
+  // So we need to find the nearest hardhat installation
+  const projectRoot = process.cwd();
+
+  console.log(`Using Hardhat config: ${configFile}`);
+  console.log(`Running from: ${projectRoot}`);
+
+  const hardhatProcess = spawn('npx', [
+    'hardhat', 'node',
+    '--port', config.port.toString(),
+    '--config', configFile
+  ], {
+    cwd: projectRoot,  // Run from project root where Hardhat is installed
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env }
   });

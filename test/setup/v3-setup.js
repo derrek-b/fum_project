@@ -70,7 +70,7 @@ async function setupV3Environment(coreEnv) {
     ...ERC20_ABI
   ];
 
-  const wethAddress = tokens.ETH.wethAddresses[1337];
+  const wethAddress = tokens.ETH.wrappedAddresses[1337];
   const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
 
   const wrapTx = await weth.deposit({ value: ethers.utils.parseEther('10') });

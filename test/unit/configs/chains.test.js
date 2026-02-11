@@ -87,8 +87,8 @@ function validateNativeCurrency(chainId, nativeCurrency) {
 const REQUIRED_PLATFORM_ADDRESSES = {
   uniswapV3: ['factoryAddress', 'positionManagerAddress', 'routerAddress', 'universalRouterAddress', 'quoterAddress'],
   uniswapV4: ['poolManagerAddress', 'positionManagerAddress', 'stateViewAddress', 'quoterAddress', 'universalRouterAddress'],
-  traderjoeV2_1: ['lbFactoryAddress', 'lbRouterAddress', 'lbQuoterAddress'],
-  // Note: traderjoeV2_1.positionManagerAddress is optional - populated after TJPositionManager deployment
+  traderjoeV2_2: ['lbFactoryAddress', 'lbRouterAddress', 'lbQuoterAddress'],
+  // Note: traderjoeV2_2.positionManagerAddress is optional - populated after TJPositionManager deployment
 };
 
 /**

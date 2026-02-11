@@ -78,23 +78,27 @@ async function deployContract(deployer, contractName, args = []) {
  * Fails fast if addresses don't match to avoid long test runs with wrong addresses
  * If addresses don't match, saves the new addresses before exiting so next run uses them
  * @param {Object} actualAddresses - The actual deployed contract addresses
+ * @param {number} chainId - The chain ID to validate against
  */
-async function validateDeterministicAddresses(actualAddresses) {
+async function validateDeterministicAddresses(actualAddresses, chainId) {
 
-  // Get expected addresses from the contracts file
+  // Get expected addresses from the contracts file for this chain
+  const chainIdStr = String(chainId);
   const expectedAddresses = {
-    VaultFactory: contractsData.VaultFactory?.addresses?.['1337'],
-    BabyStepsStrategy: contractsData.bob?.addresses?.['1337'],
+    VaultFactory: contractsData.VaultFactory?.addresses?.[chainIdStr],
+    BabyStepsStrategy: contractsData.bob?.addresses?.[chainIdStr],
   };
 
   let allMatch = true;
   const mismatches = [];
+  let hasMissingAddresses = false;
 
   for (const [contractName, expectedAddress] of Object.entries(expectedAddresses)) {
     const actualAddress = actualAddresses[contractName];
 
     if (!expectedAddress) {
       console.log(`⚠️  ${contractName}: No stored address found (first deployment)`);
+      hasMissingAddresses = true;
       continue;
     }
 
@@ -109,6 +113,13 @@ async function validateDeterministicAddresses(actualAddresses) {
         expected: expectedAddress
       });
     }
+  }
+
+  // Save addresses if any were missing (first deployment for this chain)
+  if (hasMissingAddresses && allMatch) {
+    console.log('Saving new addresses for first deployment...');
+    await updateContractsFile(actualAddresses, chainId);
+    console.log('✅ Addresses saved for future runs.\n');
   }
 
   if (!allMatch) {
@@ -126,7 +137,7 @@ async function validateDeterministicAddresses(actualAddresses) {
     console.error('\nSaving new addresses before exit so next run uses them...');
 
     // Save the new addresses before exiting so next run will use them
-    await updateContractsFile(actualAddresses);
+    await updateContractsFile(actualAddresses, chainId);
     console.error('✅ New addresses saved. Run the test again to use the updated addresses.');
     console.error('\nFailing fast to avoid wasting time on a broken test run.');
 
@@ -140,7 +151,7 @@ async function validateDeterministicAddresses(actualAddresses) {
 /**
  * Update chains.js config with a deployed address
  * @param {number} chainId - Chain ID to update
- * @param {string} platformId - Platform key (e.g. 'traderjoeV2_1')
+ * @param {string} platformId - Platform key (e.g. 'traderjoeV2_2')
  * @param {string} key - Address key to update (e.g. 'positionManagerAddress')
  * @param {string} value - The address value to set
  */
@@ -185,17 +196,10 @@ export async function deployFUMContracts(deployer, config = {}) {
     const network = await deployer.provider.getNetwork();
     const chainId = network.chainId;
 
-    // Get platform-specific addresses from chain config (handles Arbitrum fork correctly)
-    const uniswapAddresses = getPlatformAddresses(chainId, 'uniswapV3');
-    const universalRouterAddress = uniswapAddresses.universalRouterAddress;
-    const nonfungiblePositionManagerAddress = uniswapAddresses.positionManagerAddress;
-
     // Permit2 is canonical across all chains
     const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 
     console.log(`Deploying for chainId ${chainId}:`);
-    console.log(`  Universal Router: ${universalRouterAddress}`);
-    console.log(`  Position Manager: ${nonfungiblePositionManagerAddress}`);
 
     // Deploy VaultFactory with owner and permit2 (v2.0.0)
     // Validators are registered separately after deployment
@@ -204,41 +208,54 @@ export async function deployFUMContracts(deployer, config = {}) {
       permit2Address
     ]);
 
-    // Deploy validators (no constructor args)
-    contracts.universalRouterValidator = await deployContract(deployer, 'UniversalRouterValidator');
-    contracts.v3PositionValidator = await deployContract(deployer, 'UniswapV3PositionValidator');
-    contracts.v4PositionValidator = await deployContract(deployer, 'UniswapV4PositionValidator');
+    // Chain-specific deployments:
+    // - 1337 (Arbitrum fork): Deploy Uniswap V3/V4 contracts
+    // - 1338 (Avalanche fork): Deploy Trader Joe contracts
+    const isAvalanche = chainId === 1338;
 
-    // Register validators with factory
-    console.log('Registering validators with factory...');
-    await contracts.vaultFactory.setSwapValidator(
-      universalRouterAddress,
-      contracts.universalRouterValidator.address
-    );
-    console.log(`  ✅ UniversalRouterValidator registered for ${universalRouterAddress}`);
+    if (!isAvalanche) {
+      // Arbitrum fork - deploy Uniswap contracts
+      const uniswapAddresses = getPlatformAddresses(chainId, 'uniswapV3');
+      const universalRouterAddress = uniswapAddresses.universalRouterAddress;
+      const nonfungiblePositionManagerAddress = uniswapAddresses.positionManagerAddress;
 
-    await contracts.vaultFactory.setLiquidityValidator(
-      nonfungiblePositionManagerAddress,
-      contracts.v3PositionValidator.address
-    );
-    console.log(`  ✅ UniswapV3PositionValidator registered for ${nonfungiblePositionManagerAddress}`);
+      console.log(`  Universal Router: ${universalRouterAddress}`);
+      console.log(`  Position Manager: ${nonfungiblePositionManagerAddress}`);
 
-    // Get V4 position manager address and register V4 validator
-    try {
-      const uniswapV4Addresses = getPlatformAddresses(chainId, 'uniswapV4');
-      const v4PositionManagerAddress = uniswapV4Addresses.positionManagerAddress;
-      await contracts.vaultFactory.setLiquidityValidator(
-        v4PositionManagerAddress,
-        contracts.v4PositionValidator.address
+      // Deploy validators (no constructor args)
+      contracts.universalRouterValidator = await deployContract(deployer, 'UniversalRouterValidator');
+      contracts.v3PositionValidator = await deployContract(deployer, 'UniswapV3PositionValidator');
+      contracts.v4PositionValidator = await deployContract(deployer, 'UniswapV4PositionValidator');
+
+      // Register validators with factory
+      console.log('Registering validators with factory...');
+      await contracts.vaultFactory.setSwapValidator(
+        universalRouterAddress,
+        contracts.universalRouterValidator.address
       );
-      console.log(`  ✅ UniswapV4PositionValidator registered for ${v4PositionManagerAddress}`);
-    } catch (e) {
-      console.log(`  ⚠️ V4 not configured for chainId ${chainId}, skipping V4 validator registration`);
-    }
+      console.log(`  ✅ UniversalRouterValidator registered for ${universalRouterAddress}`);
 
-    // Deploy TJ position manager and validator
-    try {
-      const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_1');
+      await contracts.vaultFactory.setLiquidityValidator(
+        nonfungiblePositionManagerAddress,
+        contracts.v3PositionValidator.address
+      );
+      console.log(`  ✅ UniswapV3PositionValidator registered for ${nonfungiblePositionManagerAddress}`);
+
+      // Get V4 position manager address and register V4 validator
+      try {
+        const uniswapV4Addresses = getPlatformAddresses(chainId, 'uniswapV4');
+        const v4PositionManagerAddress = uniswapV4Addresses.positionManagerAddress;
+        await contracts.vaultFactory.setLiquidityValidator(
+          v4PositionManagerAddress,
+          contracts.v4PositionValidator.address
+        );
+        console.log(`  ✅ UniswapV4PositionValidator registered for ${v4PositionManagerAddress}`);
+      } catch (e) {
+        console.log(`  ⚠️ V4 not configured for chainId ${chainId}, skipping V4 validator registration`);
+      }
+    } else {
+      // Avalanche fork - deploy Trader Joe contracts
+      const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_2');
       contracts.tjPositionManager = await deployContract(deployer, 'TJPositionManager', [
         tjAddresses.lbRouterAddress
       ]);
@@ -252,10 +269,8 @@ export async function deployFUMContracts(deployer, config = {}) {
       console.log(`  ✅ TJPositionValidator registered for ${contracts.tjPositionManager.address}`);
 
       // Save TJPositionManager address to chains config so adapter can find it
-      await updateChainsConfig(chainId, 'traderjoeV2_1', 'positionManagerAddress',
+      await updateChainsConfig(chainId, 'traderjoeV2_2', 'positionManagerAddress',
         contracts.tjPositionManager.address);
-    } catch (e) {
-      console.log(`  ⚠️ Trader Joe V2.1 not configured for chainId ${chainId}, skipping TJ deployment`);
     }
 
     // Deploy strategies (no constructor args)
@@ -276,7 +291,7 @@ export async function deployFUMContracts(deployer, config = {}) {
     }
 
     // Validate deterministic addresses - fail fast if they don't match expected values
-    await validateDeterministicAddresses(addresses);
+    await validateDeterministicAddresses(addresses, chainId);
 
     return {
       contracts,
@@ -291,50 +306,53 @@ export async function deployFUMContracts(deployer, config = {}) {
 /**
  * Update the fum_library contracts files with deployed addresses
  * @param {Object} addresses - Deployed contract addresses
+ * @param {number} chainId - The chain ID to update
  */
-async function updateContractsFile(addresses) {
+async function updateContractsFile(addresses, chainId) {
   // Update both src and dist versions using the same logic
-  await updateArtifactsContracts(addresses, ARTIFACTS_CONTRACTS_FILE);
-  await updateArtifactsContracts(addresses, DIST_ARTIFACTS_CONTRACTS_FILE);
+  await updateArtifactsContracts(addresses, ARTIFACTS_CONTRACTS_FILE, chainId);
+  await updateArtifactsContracts(addresses, DIST_ARTIFACTS_CONTRACTS_FILE, chainId);
 }
 
 /**
  * Update a contracts.js file with deployed addresses
  * @param {Object} addresses - Deployed contract addresses
  * @param {string} filePath - Path to the contracts file to update
+ * @param {number} chainId - The chain ID to update
  */
-async function updateArtifactsContracts(addresses, filePath) {
+async function updateArtifactsContracts(addresses, filePath, chainId) {
   console.log(`Attempting to update contracts file at: ${filePath}`);
-  
+
   if (!fs.existsSync(filePath)) {
     console.warn(`Contracts file not found at ${filePath}`);
     return;
   }
 
+  const chainIdStr = String(chainId);
   let content = fs.readFileSync(filePath, 'utf8');
 
-  // Update each contract's 1337 address
+  // Update each contract's address for this chain
   Object.entries(addresses).forEach(([contractName, address]) => {
     // Map contract names to the names used in artifacts
     const artifactName = mapContractName(contractName);
 
-    // Look for the contract's addresses section and update 1337
+    // Look for the contract's addresses section and update the chainId
     const addressPattern = new RegExp(
-      `("${artifactName}":[\\s\\S]*?"addresses":\\s*{[^}]*"1337":\\s*)"[^"]*"`,
+      `("${artifactName}":[\\s\\S]*?"addresses":\\s*{[^}]*"${chainIdStr}":\\s*)"[^"]*"`,
       'g'
     );
 
     content = content.replace(addressPattern, `$1"${address}"`);
 
-    // If 1337 doesn't exist, add it
+    // If chainId doesn't exist, add it
     const addPattern = new RegExp(
       `("${artifactName}":[\\s\\S]*?"addresses":\\s*{)([^}]*)(})`,
       'g'
     );
 
     content = content.replace(addPattern, (match, before, middle, after) => {
-      if (!middle.includes('"1337"')) {
-        const newMiddle = middle.trim() ? middle + ',\n      "1337": "' + address + '"' : '\n      "1337": "' + address + '"\n    ';
+      if (!middle.includes(`"${chainIdStr}"`)) {
+        const newMiddle = middle.trim() ? middle + `,\n      "${chainIdStr}": "` + address + '"' : `\n      "${chainIdStr}": "` + address + '"\n    ';
         return before + newMiddle + after;
       }
       return match;
