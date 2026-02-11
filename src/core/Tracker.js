@@ -10,6 +10,7 @@ import path from 'path';
 import { ethers } from 'ethers';
 import readline from 'readline';
 import { fetchTokenPrices, CACHE_DURATIONS, getTokenBySymbol, AdapterFactory } from 'fum_library';
+import { getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 
 /**
  * Tracker class for vault performance monitoring
@@ -21,6 +22,7 @@ export default class Tracker {
    * @param {Object} config - Configuration object
    * @param {string} config.dataDir - Base directory for vault data
    * @param {Object} config.eventManager - EventManager instance
+   * @param {number} config.chainId - Chain ID for the network
    * @param {boolean} [config.debug=false] - Enable debug logging
    * @param {string} [config.trackingFailuresFilePath='./data/trackingFailures.json'] - Path to tracking failures file
    */
@@ -31,9 +33,13 @@ export default class Tracker {
     if (!config.eventManager) {
       throw new Error('eventManager is required in Tracker configuration');
     }
+    if (!config.chainId) {
+      throw new Error('chainId is required in Tracker configuration');
+    }
 
     this.dataDir = path.resolve(config.dataDir);
     this.eventManager = config.eventManager;
+    this.chainId = config.chainId;
     this.debug = config.debug || false;
     this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
 
@@ -646,20 +652,21 @@ export default class Tracker {
 
     try {
       const { amount, amountFormatted, gasUsed, gasEstimated, effectiveGasPrice, success } = data;
-      const operation = type === 'wrap' ? 'ETH→WETH' : 'WETH→ETH';
+      const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+      const operation = type === 'wrap' ? `Native→${wrappedNativeSymbol}` : `${wrappedNativeSymbol}→Native`;
       this.log(`${operation} for vault ${vaultAddress}: ${amountFormatted}`);
 
       // Calculate gas costs
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
-      // Calculate amount in USD (use ETH/WETH price since 1:1 conversion)
-      const prices = await fetchTokenPrices(['WETH'], CACHE_DURATIONS['2-MINUTES']);
-      const ethPrice = prices['WETH'];
-      const amountUSD = parseFloat(amountFormatted) * ethPrice;
+      // Calculate amount in USD (use wrapped native price since 1:1 conversion)
+      const prices = await fetchTokenPrices([wrappedNativeSymbol], CACHE_DURATIONS['2-MINUTES']);
+      const nativePrice = prices[wrappedNativeSymbol];
+      const amountUSD = parseFloat(amountFormatted) * nativePrice;
 
       // Append transaction
       await this.appendTransaction(vaultAddress, {
@@ -1215,17 +1222,18 @@ export default class Tracker {
    * Calculate gas cost in USD
    * @private
    */
-  async calculateGasUSD(gasETH) {
+  async calculateGasUSD(gasNative) {
     try {
-      const prices = await fetchTokenPrices(['WETH'], CACHE_DURATIONS['2-MINUTES']);
-      const wethPriceUSD = prices.WETH || 0;
+      const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+      const prices = await fetchTokenPrices([wrappedNativeSymbol], CACHE_DURATIONS['2-MINUTES']);
+      const nativePriceUSD = prices[wrappedNativeSymbol] || 0;
 
-      if (wethPriceUSD === 0) {
-        this.log('WETH price unavailable, gas cost will be 0');
+      if (nativePriceUSD === 0) {
+        this.log(`${wrappedNativeSymbol} price unavailable, gas cost will be 0`);
         return 0;
       }
 
-      return gasETH * wethPriceUSD;
+      return gasNative * nativePriceUSD;
     } catch (error) {
       console.error('Failed to calculate gas cost in USD:', error.message);
       return 0;

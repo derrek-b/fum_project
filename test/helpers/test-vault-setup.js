@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
-import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getWrappedNativeAddress, getWrappedNativeSymbol, isWrappedNativeToken } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain';
 
 const ERC20_ABI = [
@@ -27,26 +27,26 @@ const STRATEGY_CONTRACT_MAP = {
 };
 
 /**
- * Get token address, handling WETH specially since it's not in the token config
+ * Get token address, handling wrapped native tokens specially since they're not in the token config
  * @param {string} symbol - Token symbol
  * @param {number} chainId - Chain ID
  * @returns {string} Token address
  */
 function getTokenAddressForTest(symbol, chainId) {
-  if (symbol === 'WETH') {
-    return getWethAddress(chainId);
+  if (isWrappedNativeToken(symbol)) {
+    return getWrappedNativeAddress(chainId);
   }
   return getTokenAddress(symbol, chainId);
 }
 
 /**
- * Get token data by symbol, handling WETH specially since it's not in the token config
+ * Get token data by symbol, handling wrapped native tokens specially since they're not in the token config
  * @param {string} symbol - Token symbol
  * @returns {Object} Token data with decimals and symbol
  */
 function getTokenBySymbolForTest(symbol) {
-  if (symbol === 'WETH') {
-    return { symbol: 'WETH', decimals: 18 };
+  if (isWrappedNativeToken(symbol)) {
+    return { symbol, decimals: 18 };
   }
   return getTokenBySymbol(symbol);
 }
@@ -162,12 +162,12 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
     ...ERC20_ABI
   ];
 
-  const wethAddress = getWethAddress(1337);
-  const weth = new ethers.Contract(wethAddress, WETH_ABI, owner);
+  const wrappedNativeAddress = getWrappedNativeAddress(1337);
+  const wrappedNative = new ethers.Contract(wrappedNativeAddress, WETH_ABI, owner);
 
-  const wrapTx = await weth.deposit({ value: ethers.utils.parseEther(settings.wrapEthAmount) });
+  const wrapTx = await wrappedNative.deposit({ value: ethers.utils.parseEther(settings.wrapEthAmount) });
   await wrapTx.wait();
-  console.log('  - WETH wrapped successfully');
+  console.log('  - Native token wrapped successfully');
 
   // Step 2: Perform token swaps
   const tokenContracts = {};

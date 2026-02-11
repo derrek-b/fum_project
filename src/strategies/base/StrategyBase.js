@@ -21,9 +21,9 @@
  * | Method                       | Notes                               |
  * |------------------------------|-------------------------------------|
  * | executeBatchTransactions     | Execute tx batch through vault      |
- * | executeWrap                  | Wrap native ETH to WETH             |
- * | executeUnwrap                | Unwrap WETH to native ETH           |
- * | isWrapUnwrapPair             | Check if swap is ETH<->WETH         |
+ * | executeWrap                  | Wrap native to wrapped native       |
+ * | executeUnwrap                | Unwrap wrapped native to native     |
+ * | isWrapUnwrapPair             | Check if swap is native<->wrapped   |
  * | buildSwapDetails             | Combine metadata with actual swaps  |
  * | log                          | Debug logging with strategy prefix  |
  * =============================================================================
@@ -31,6 +31,7 @@
 
 import { ethers } from 'ethers';
 import { getVaultContract } from 'fum_library';
+import { getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { retryRpcCall, retryWithBackoff } from '../../utils/RetryHelper.js';
 import { UnrecoverableError } from '../../utils/errors.js';
 
@@ -289,40 +290,44 @@ export default class StrategyBase {
   }
 
   // ===========================================================================
-  // ETH/WETH Wrap/Unwrap Helpers
+  // Native/Wrapped Native Wrap/Unwrap Helpers
   // ===========================================================================
 
   /**
-   * Check if token pair is ETH <-> WETH (wrap/unwrap, not swap)
+   * Check if token pair is native <-> wrapped native (wrap/unwrap, not swap)
+   * Works for ETH<->WETH on Arbitrum, AVAX<->WAVAX on Avalanche, etc.
    * @param {Object} tokenIn - Input token data with isNative and symbol
    * @param {Object} tokenOut - Output token data with isNative and symbol
    * @returns {{ isWrap: boolean, isUnwrap: boolean, isWrapOrUnwrap: boolean }}
    */
   isWrapUnwrapPair(tokenIn, tokenOut) {
-    const isWrap = tokenIn.isNative === true && tokenOut.symbol === 'WETH';
-    const isUnwrap = tokenIn.symbol === 'WETH' && tokenOut.isNative === true;
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+    const isWrap = tokenIn.isNative === true && tokenOut.symbol === wrappedNativeSymbol;
+    const isUnwrap = tokenIn.symbol === wrappedNativeSymbol && tokenOut.isNative === true;
     return { isWrap, isUnwrap, isWrapOrUnwrap: isWrap || isUnwrap };
   }
 
   /**
-   * Execute ETH → WETH wrap via vault
+   * Execute native → wrapped native wrap via vault
+   * Works for ETH→WETH on Arbitrum, AVAX→WAVAX on Avalanche, etc.
    * @param {Object} vault - Vault data with address
    * @param {string} amount - Amount in wei (as string)
    * @returns {Promise<Object>} Transaction receipt
    */
   async executeWrap(vault, amount) {
-    const wethAddress = this.tokens['WETH'].address;
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+    const wrappedNativeAddress = this.tokens[wrappedNativeSymbol].address;
     const vaultContract = getVaultContract(vault.address, this.provider);
     const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
     const vaultWithSigner = vaultContract.connect(signer);
 
-    this.log(`Wrapping ${ethers.utils.formatEther(amount)} ETH to WETH`);
+    this.log(`Wrapping ${ethers.utils.formatEther(amount)} native to ${wrappedNativeSymbol}`);
 
     // Estimate gas before execution
     let gasEstimated = '0';
     try {
       const estimate = await retryRpcCall(
-        () => vaultWithSigner.estimateGas.wrapETH(wethAddress, amount),
+        () => vaultWithSigner.estimateGas.wrapETH(wrappedNativeAddress, amount),
         'estimateGas.wrapETH'
       );
       gasEstimated = estimate.toString();
@@ -332,7 +337,7 @@ export default class StrategyBase {
 
     const receipt = await retryRpcCall(
       async () => {
-        const tx = await vaultWithSigner.wrapETH(wethAddress, amount);
+        const tx = await vaultWithSigner.wrapETH(wrappedNativeAddress, amount);
         return tx.wait();
       },
       'wrapETH',
@@ -341,8 +346,9 @@ export default class StrategyBase {
 
     this.log(`Wrap complete: ${receipt.transactionHash}`);
 
-    this.eventManager.emit('ETHWrapped', {
+    this.eventManager.emit('NativeWrapped', {
       vaultAddress: vault.address,
+      wrappedNativeSymbol,
       amount: amount.toString(),
       amountFormatted: ethers.utils.formatEther(amount),
       transactionHash: receipt.transactionHash,
@@ -351,31 +357,33 @@ export default class StrategyBase {
       effectiveGasPrice: receipt.effectiveGasPrice.toString(),
       success: receipt.status === 1,
       timestamp: Date.now(),
-      log: { level: 'info', message: `Wrapped ${ethers.utils.formatEther(amount)} ETH to WETH` }
+      log: { level: 'info', message: `Wrapped ${ethers.utils.formatEther(amount)} native to ${wrappedNativeSymbol}` }
     });
 
     return receipt;
   }
 
   /**
-   * Execute WETH → ETH unwrap via vault
+   * Execute wrapped native → native unwrap via vault
+   * Works for WETH→ETH on Arbitrum, WAVAX→AVAX on Avalanche, etc.
    * @param {Object} vault - Vault data with address
    * @param {string} amount - Amount in wei (as string)
    * @returns {Promise<Object>} Transaction receipt
    */
   async executeUnwrap(vault, amount) {
-    const wethAddress = this.tokens['WETH'].address;
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+    const wrappedNativeAddress = this.tokens[wrappedNativeSymbol].address;
     const vaultContract = getVaultContract(vault.address, this.provider);
     const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
     const vaultWithSigner = vaultContract.connect(signer);
 
-    this.log(`Unwrapping ${ethers.utils.formatEther(amount)} WETH to ETH`);
+    this.log(`Unwrapping ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to native`);
 
     // Estimate gas before execution
     let gasEstimated = '0';
     try {
       const estimate = await retryRpcCall(
-        () => vaultWithSigner.estimateGas.unwrapETH(wethAddress, amount),
+        () => vaultWithSigner.estimateGas.unwrapETH(wrappedNativeAddress, amount),
         'estimateGas.unwrapETH'
       );
       gasEstimated = estimate.toString();
@@ -385,7 +393,7 @@ export default class StrategyBase {
 
     const receipt = await retryRpcCall(
       async () => {
-        const tx = await vaultWithSigner.unwrapETH(wethAddress, amount);
+        const tx = await vaultWithSigner.unwrapETH(wrappedNativeAddress, amount);
         return tx.wait();
       },
       'unwrapETH',
@@ -394,8 +402,9 @@ export default class StrategyBase {
 
     this.log(`Unwrap complete: ${receipt.transactionHash}`);
 
-    this.eventManager.emit('ETHUnwrapped', {
+    this.eventManager.emit('NativeUnwrapped', {
       vaultAddress: vault.address,
+      wrappedNativeSymbol,
       amount: amount.toString(),
       amountFormatted: ethers.utils.formatEther(amount),
       transactionHash: receipt.transactionHash,
@@ -404,7 +413,7 @@ export default class StrategyBase {
       effectiveGasPrice: receipt.effectiveGasPrice.toString(),
       success: receipt.status === 1,
       timestamp: Date.now(),
-      log: { level: 'info', message: `Unwrapped ${ethers.utils.formatEther(amount)} WETH to ETH` }
+      log: { level: 'info', message: `Unwrapped ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to native` }
     });
 
     return receipt;

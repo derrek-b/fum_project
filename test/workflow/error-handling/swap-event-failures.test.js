@@ -197,7 +197,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
    * Helper to execute a swap and wait for event processing
    */
   const executeSwapAndWait = async (direction = 'wethToUsdc', waitMs = 2000) => {
-    const wethAddress = swapWallet.wethAddress;
+    const wethAddress = swapWallet.wrappedNativeAddress;
     const usdcAddress = swapWallet.usdcAddress;
     const swapAmount = direction === 'wethToUsdc'
       ? ethers.utils.parseUnits('1', 18)  // 1 WETH
@@ -556,7 +556,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
    * @returns {Promise<{swapCount: number, rebalanceTriggered: boolean}>}
    */
   const executeSwapsUntilRebalance = async (events, vault, maxSwaps = 20) => {
-    const wethAddress = swapWallet.wethAddress;
+    const wethAddress = swapWallet.wrappedNativeAddress;
     const usdcAddress = swapWallet.usdcAddress;
     const swapAmount = ethers.utils.parseUnits('15', 18); // 15 WETH per swap
 

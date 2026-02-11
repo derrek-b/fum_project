@@ -10,7 +10,7 @@ import { ethers } from 'ethers';
 import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import { Percent, Token, CurrencyAmount, TradeType, Ether } from '@uniswap/sdk-core';
-import { getTokenAddress, getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getTokenAddress, getWrappedNativeAddress, isWrappedNativeToken } from 'fum_library/helpers/tokenHelpers';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../helpers/hardhat-setup.js';
 
 describe('Native ETH Swap Proof of Concept', () => {
@@ -83,8 +83,8 @@ describe('Native ETH Swap Proof of Concept', () => {
 
     // Get address for the local chain (which maps to Arbitrum addresses)
     let address;
-    if (symbol === 'WETH') {
-      address = getWethAddress(LOCAL_CHAIN_ID);
+    if (isWrappedNativeToken(symbol)) {
+      address = getWrappedNativeAddress(LOCAL_CHAIN_ID);
     } else {
       address = getTokenAddress(symbol, LOCAL_CHAIN_ID);
     }

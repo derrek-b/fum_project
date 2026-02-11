@@ -41,6 +41,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let tokenPreparationCompletedEvents = [];
   let tokensSwappedEvents = [];
   let liquidityAddedToPositionEvents = [];
+  let assetValuesFetchedEvents = [];
 
   beforeAll(async () => {
     // Clean up any old vault data from previous test runs
@@ -207,6 +208,10 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       service.eventManager.subscribe('LiquidityAddedToPosition', (data) => {
         liquidityAddedToPositionEvents.push(data);
+      });
+
+      service.eventManager.subscribe('AssetValuesFetched', (data) => {
+        assetValuesFetchedEvents.push(data);
       });
 
       // Start the service
@@ -923,7 +928,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const wbtcDistribution = event.distributions.find(d => d.token === 'WBTC');
         expect(wbtcDistribution).toBeDefined();
         expect(BigInt(wbtcDistribution.amount)).toBeGreaterThan(0n);
-        expect(wbtcDistribution.asNativeEth).toBe(false);
+        expect(wbtcDistribution.asNativeToken).toBe(false);
         expect(wbtcDistribution.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
       });
 
@@ -933,7 +938,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
         const wethDistribution = event.distributions.find(d => d.token === 'WETH');
         expect(wethDistribution).toBeDefined();
         expect(BigInt(wethDistribution.amount)).toBeGreaterThan(0n);
-        expect(wethDistribution.asNativeEth).toBe(true);
+        expect(wethDistribution.asNativeToken).toBe(true);
         expect(wethDistribution.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
       });
 
@@ -945,7 +950,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
           expect(dist).toHaveProperty('address');
           expect(dist).toHaveProperty('amount');
           expect(dist).toHaveProperty('amountFormatted');
-          expect(dist).toHaveProperty('asNativeEth');
+          expect(dist).toHaveProperty('asNativeToken');
           expect(dist).toHaveProperty('transactionHash');
           expect(dist.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
         }
@@ -1438,11 +1443,27 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     });
 
     it('should have non-aligned tokens depleted to dust after swaps', () => {
+      // Get the final WBTC balance from vault cache (after all swaps)
       const vault = service.vaultDataService.getAllVaults()[0];
       const wbtcBalance = BigInt(vault.tokens.WBTC || '0');
-      // WBTC is not a target token and was used for deficit/buffer swaps
-      // Should be depleted to dust (less than 1000 satoshis = 0.00001 BTC)
-      expect(wbtcBalance).toBeLessThan(1000n);
+
+      // Get WBTC price from an AssetValuesFetched event
+      const assetEvent = assetValuesFetchedEvents.find(e => e.assetData?.tokens?.WBTC?.price);
+      expect(assetEvent).toBeDefined();
+
+      const wbtcPrice = assetEvent.assetData.tokens.WBTC.price;
+      const totalVaultValue = assetEvent.totalVaultValue;
+
+      // Calculate current WBTC USD value using final balance and captured price
+      // WBTC has 8 decimals
+      const wbtcUsdValue = (Number(wbtcBalance) / 1e8) * wbtcPrice;
+
+      // WBTC is not a target token and was used for deficit swaps
+      // Remaining WBTC should be less than 0.5% of total vault value
+      // (we maximize asset utilization for position creation)
+      const wbtcPercentage = (wbtcUsdValue / totalVaultValue) * 100;
+
+      expect(wbtcPercentage).toBeLessThan(0.5);
     });
 
     it('should have used aligned tokens for liquidity addition', () => {

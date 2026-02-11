@@ -83,6 +83,7 @@ class AutomationService {
     this.tracker = new Tracker({
       dataDir: this.trackingDataDir,
       eventManager: this.eventManager,
+      chainId: this.chainId,
       debug: this.debug
     });
 

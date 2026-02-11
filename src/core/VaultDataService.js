@@ -14,10 +14,9 @@ import {
   getContract,
   getContractInfoByAddress,
   mapStrategyParameters,
-  getTokenAddress,
-  getAllTokenSymbols
+  getTokenAddress
 } from 'fum_library';
-import { isNativeToken, getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { isNativeToken, getWrappedNativeAddress, getWrappedNativeSymbol, isWrappedNativeToken } from 'fum_library/helpers/tokenHelpers';
 import ERC20ARTIFACT from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
 const ERC20ABI = ERC20ARTIFACT.abi;
 
@@ -174,8 +173,15 @@ class VaultDataService {
         throw new Error(`Failed to load strategy data for vault ${normalizedAddress} (strategy: ${strategyAddress}): ${error.message}`);
       }
 
+      // Use chain-filtered tokens from this.tokens (set via setTokens from AutomationService)
+      // instead of getAllTokenSymbols() which returns tokens for ALL chains
+      const tokenSymbols = this.tokens ? Object.keys(this.tokens) : [];
+      if (tokenSymbols.length === 0) {
+        throw new Error(`No tokens configured for chain ${this.chainId}. Ensure setTokens() is called before loading vaults.`);
+      }
+
       const [tokenBalances, positions] = await Promise.all([
-        this.fetchTokenBalances(normalizedAddress, getAllTokenSymbols()),
+        this.fetchTokenBalances(normalizedAddress, tokenSymbols),
         this.fetchPositions(vaultContract.address)
       ]);
 
@@ -234,8 +240,9 @@ class VaultDataService {
           }
 
           let tokenAddress;
-          if (symbol === 'WETH') {
-            tokenAddress = getWethAddress(this.chainId);
+          const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+          if (symbol === wrappedNativeSymbol) {
+            tokenAddress = getWrappedNativeAddress(this.chainId);
           } else {
             tokenAddress = getTokenAddress(symbol, this.chainId);
           }
@@ -414,8 +421,13 @@ class VaultDataService {
         throw new Error(`Vault ${normalizedAddress} not found in cache`);
       }
 
+      // Use chain-filtered tokens instead of getAllTokenSymbols()
+      const tokenSymbols = Object.keys(this.tokens || {});
+      if (tokenSymbols.length === 0) {
+        throw new Error(`No tokens configured for chain ${this.chainId}. Cannot refresh positions.`);
+      }
       const [allTokenBalances, currentPositions] = await Promise.all([
-        this.fetchTokenBalances(normalizedAddress, getAllTokenSymbols()),
+        this.fetchTokenBalances(normalizedAddress, tokenSymbols),
         this.fetchPositions(normalizedAddress)
       ]);
 
@@ -453,9 +465,14 @@ class VaultDataService {
         throw new Error(`Vault ${normalizedAddress} not found in cache`);
       }
 
+      // Use chain-filtered tokens instead of getAllTokenSymbols()
+      const tokenSymbols = Object.keys(this.tokens || {});
+      if (tokenSymbols.length === 0) {
+        throw new Error(`No tokens configured for chain ${this.chainId}. Cannot refresh tokens.`);
+      }
       const allTokenBalances = await this.fetchTokenBalances(
         normalizedAddress,
-        getAllTokenSymbols()
+        tokenSymbols
       );
 
       vault.tokens = allTokenBalances;

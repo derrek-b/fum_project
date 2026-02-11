@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 import { TraderJoeV2_1Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokenAddress, getTokenBySymbol } from 'fum_library';
-import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getWrappedNativeAddress, isWrappedNativeToken, isNativeToken } from 'fum_library/helpers/tokenHelpers';
 
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
@@ -25,27 +25,24 @@ const LB_ROUTER_ABI = [
 ];
 
 /**
- * Get token address for TJ, handling native tokens
+ * Get token address for TJ, handling native and wrapped native tokens
  */
 export function getTokenAddressForTJ(symbol, chainId) {
-  if (symbol === 'WAVAX') {
-    return getWethAddress(chainId);
+  if (isWrappedNativeToken(symbol)) {
+    return getWrappedNativeAddress(chainId);
   }
-  if (symbol === 'AVAX') {
+  if (isNativeToken(symbol)) {
     return ethers.constants.AddressZero;
   }
   return getTokenAddress(symbol, chainId);
 }
 
 /**
- * Get token data by symbol, handling WAVAX
+ * Get token data by symbol, handling native and wrapped native tokens
  */
 export function getTokenDataForTJ(symbol) {
-  if (symbol === 'WAVAX') {
-    return { symbol: 'WAVAX', decimals: 18 };
-  }
-  if (symbol === 'AVAX') {
-    return { symbol: 'AVAX', decimals: 18 };
+  if (isWrappedNativeToken(symbol) || isNativeToken(symbol)) {
+    return { symbol, decimals: 18 };
   }
   return getTokenBySymbol(symbol);
 }
@@ -70,7 +67,7 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
   const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
 
   const swapWallet = testEnv.hardhatServer.signers[1];
-  const wavaxAddress = getWethAddress(chainId);
+  const wrappedNativeAddress = getWrappedNativeAddress(chainId);
   const usdcAddress = getTokenAddress('USDC', chainId);
 
   // Fund swap wallet with AVAX
@@ -81,11 +78,11 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
   await fundTx.wait();
   console.log(`  Funded swap wallet with ${avaxAmount} AVAX`);
 
-  // Wrap AVAX to WAVAX
-  const wavaxContract = new ethers.Contract(wavaxAddress, WAVAX_ABI, swapWallet);
-  const wrapTx = await wavaxContract.deposit({ value: ethers.utils.parseEther(wavaxAmount) });
+  // Wrap native to wrapped native
+  const wrappedNativeContract = new ethers.Contract(wrappedNativeAddress, WAVAX_ABI, swapWallet);
+  const wrapTx = await wrappedNativeContract.deposit({ value: ethers.utils.parseEther(wavaxAmount) });
   await wrapTx.wait();
-  console.log(`  Wrapped ${wavaxAmount} AVAX to WAVAX`);
+  console.log(`  Wrapped ${wavaxAmount} native to wrapped native`);
 
   // Build USDC reserves if requested
   let usdcBalance = ethers.BigNumber.from(0);
@@ -94,19 +91,19 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
 
     // Approve router
     const swapAmountWei = ethers.utils.parseEther(usdcAmount);
-    const approveTx = await wavaxContract.approve(traderjoeV2_1.lbRouterAddress, swapAmountWei);
+    const approveTx = await wrappedNativeContract.approve(traderjoeV2_1.lbRouterAddress, swapAmountWei);
     await approveTx.wait();
 
     // Build path for swap
     const path = {
       pairBinSteps: [20], // binStep 20 (0.20%)
       versions: [2],      // Version 2.1
-      tokenPath: [wavaxAddress, usdcAddress]
+      tokenPath: [wrappedNativeAddress, usdcAddress]
     };
 
     const deadline = Math.floor(Date.now() / 1000) + 300;
 
-    // Swap WAVAX for USDC
+    // Swap wrapped native for USDC
     const swapTx = await lbRouter.swapExactTokensForTokens(
       swapAmountWei,
       0, // amountOutMin
@@ -123,9 +120,9 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
 
   return {
     wallet: swapWallet,
-    wavaxAddress,
+    wrappedNativeAddress,
     usdcAddress,
-    wavaxContract,
+    wrappedNativeContract,
     usdcBalance
   };
 }

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Basic initialization tests for Trader Joe V2.1 adapter and vault setup
+ * @fileoverview Basic initialization tests for Trader Joe V2.2 adapter and vault setup
  *
  * These tests verify:
  * 1. TJ adapter loads correctly on Avalanche fork
@@ -11,13 +11,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ethers } from 'ethers';
-import { TraderJoeV2_1Adapter } from 'fum_library/adapters';
+import { TraderJoeV2_2Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokenAddress } from 'fum_library';
-import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getWrappedNativeAddress } from 'fum_library/helpers/tokenHelpers';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { loadSharedState } from '../../shared-state.js';
 
-describe('AutomationService - Trader Joe V2.1 Initialization', () => {
+describe('AutomationService - Trader Joe V2.2 Initialization', () => {
   let testEnv;
   let chainId;
   let isAvalancheFork;
@@ -41,17 +41,17 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
   });
 
   describe('Adapter Loading', () => {
-    it('should create TraderJoeV2_1Adapter instance', () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+    it('should create TraderJoeV2_2Adapter instance', () => {
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       expect(adapter).toBeDefined();
-      expect(adapter.platformId).toBe('traderjoeV2_1');
+      expect(adapter.platformId).toBe('traderjoeV2_2');
       expect(adapter.chainId).toBe(chainId);
     });
 
     it('should have correct platform addresses configured', () => {
       const chainConfig = getChainConfig(chainId);
-      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_1;
+      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_2;
 
       expect(tjAddresses).toBeDefined();
       expect(tjAddresses.lbFactoryAddress).toBeDefined();
@@ -70,8 +70,8 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
       expect(usdcAddress).toBeDefined();
       expect(ethers.utils.isAddress(usdcAddress)).toBe(true);
 
-      // WETH/WAVAX should be available via getWethAddress
-      const wrappedNativeAddress = getWethAddress(chainId);
+      // WETH/WAVAX should be available via getWrappedNativeAddress
+      const wrappedNativeAddress = getWrappedNativeAddress(chainId);
       expect(wrappedNativeAddress).toBeDefined();
       expect(ethers.utils.isAddress(wrappedNativeAddress)).toBe(true);
 
@@ -88,14 +88,18 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
     });
   });
 
+  // Known WAVAX/USDC pool on Trader Joe V2.2 (10bps)
+  // https://snowscan.xyz/address/0x864d4e5ee7318e97483db7eb0912e09f161516ea
+  const KNOWN_WAVAX_USDC_POOL = '0x864d4e5ee7318e97483db7eb0912e09f161516ea';
+
   describe('Pool Data Fetching', () => {
     it('should fetch pool data from LBFactory', async () => {
       const chainConfig = getChainConfig(chainId);
-      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_1;
+      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_2;
 
-      // Create factory contract
+      // Create factory contract with getAllLBPairs to find available pools
       const LB_FACTORY_ABI = [
-        'function getLBPairInformation(address tokenX, address tokenY, uint256 binStep) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting))'
+        'function getAllLBPairs(address tokenX, address tokenY) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting)[])'
       ];
       const lbFactory = new ethers.Contract(
         tjAddresses.lbFactoryAddress,
@@ -104,7 +108,7 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
       );
 
       // Get WAVAX/USDC pair info
-      const wavaxAddress = getWethAddress(chainId);
+      const wavaxAddress = getWrappedNativeAddress(chainId);
       const usdcAddress = getTokenAddress('USDC', chainId);
 
       // Sort tokens (lower address first)
@@ -112,42 +116,25 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
         ? [wavaxAddress, usdcAddress]
         : [usdcAddress, wavaxAddress];
 
-      // Query factory for the 0.20% (binStep=20) pool
-      const pairInfo = await lbFactory.getLBPairInformation(tokenX, tokenY, 20);
+      // Query factory for all WAVAX/USDC pools
+      const allPairs = await lbFactory.getAllLBPairs(tokenX, tokenY);
 
-      console.log(`    LBPair address: ${pairInfo.LBPair}`);
-      console.log(`    binStep: ${pairInfo.binStep}`);
+      console.log(`    Found ${allPairs.length} WAVAX/USDC pools`);
+      allPairs.forEach((pair, i) => {
+        console.log(`    Pool ${i}: ${pair.LBPair} (binStep: ${pair.binStep})`);
+      });
 
-      expect(pairInfo.LBPair).not.toBe(ethers.constants.AddressZero);
-      expect(pairInfo.binStep).toBe(20);
+      // Find the 10bps pool
+      const pool10bps = allPairs.find(p => p.binStep === 10);
+      expect(pool10bps).toBeDefined();
+      expect(pool10bps.LBPair.toLowerCase()).toBe(KNOWN_WAVAX_USDC_POOL.toLowerCase());
     });
 
     it('should fetch pool state via adapter.getPoolData()', async () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
-      const chainConfig = getChainConfig(chainId);
-      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_1;
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
-      // Find the WAVAX/USDC pool
-      const LB_FACTORY_ABI = [
-        'function getLBPairInformation(address tokenX, address tokenY, uint256 binStep) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting))'
-      ];
-      const lbFactory = new ethers.Contract(
-        tjAddresses.lbFactoryAddress,
-        LB_FACTORY_ABI,
-        testEnv.hardhatServer.provider
-      );
-
-      const wavaxAddress = getWethAddress(chainId);
-      const usdcAddress = getTokenAddress('USDC', chainId);
-      const [tokenX, tokenY] = wavaxAddress.toLowerCase() < usdcAddress.toLowerCase()
-        ? [wavaxAddress, usdcAddress]
-        : [usdcAddress, wavaxAddress];
-
-      const pairInfo = await lbFactory.getLBPairInformation(tokenX, tokenY, 20);
-      const lbPairAddress = pairInfo.LBPair;
-
-      // Fetch pool data via adapter
-      const poolData = await adapter.getPoolData(lbPairAddress, testEnv.hardhatServer.provider);
+      // Use known WAVAX/USDC pool address directly
+      const poolData = await adapter.getPoolData(KNOWN_WAVAX_USDC_POOL, testEnv.hardhatServer.provider);
 
       console.log(`    Pool address: ${poolData.address}`);
       console.log(`    Active bin ID: ${poolData.activeId}`);
@@ -156,18 +143,18 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
       console.log(`    Reserve Y: ${poolData.reserveY}`);
 
       expect(poolData).toBeDefined();
-      expect(poolData.address.toLowerCase()).toBe(lbPairAddress.toLowerCase());
+      expect(poolData.address.toLowerCase()).toBe(KNOWN_WAVAX_USDC_POOL.toLowerCase());
       expect(typeof poolData.activeId).toBe('number');
       expect(poolData.activeId).toBeGreaterThan(0);
-      expect(poolData.binStep).toBe(20);
+      expect(poolData.binStep).toBe(10);
       expect(poolData.tokenX).toBeDefined();
       expect(poolData.tokenY).toBeDefined();
     });
 
     it('should correctly sort tokens via adapter.sortTokens()', () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
-      const wavaxAddress = getWethAddress(chainId);
+      const wavaxAddress = getWrappedNativeAddress(chainId);
       const usdcAddress = getTokenAddress('USDC', chainId);
 
       const tokenA = { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 };
@@ -190,7 +177,7 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
 
   describe('Swap Event Handling', () => {
     it('should generate correct swap event filter', () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       // Use a test LBPair address
       const testPoolAddress = '0x1234567890123456789012345678901234567890';
@@ -209,7 +196,7 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
     });
 
     it('should validate getSwapEventFilter input', () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       // Should throw for invalid input
       expect(() => adapter.getSwapEventFilter(null)).toThrow('poolId parameter is required');
@@ -220,16 +207,16 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
 
   describe('Position Range Evaluation', () => {
     it('should calculate bin range from percentage', () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       // Test calculateBinRange (if available) or manual calculation
       const poolData = {
         activeId: 8388608, // Reference bin ID (price = 1.0)
-        binStep: 20        // 0.20%
+        binStep: 10        // 0.10%
       };
 
-      // For a 5% range with binStep 20:
-      // bins = log(1.05) / log(1.002) = ~24 bins
+      // For a 5% range with binStep 10:
+      // bins = log(1.05) / log(1.001) = ~49 bins
       const upperPercent = 5;
       const lowerPercent = 5;
 
@@ -245,7 +232,7 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
     });
 
     it('should evaluate position range correctly', async () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       // Create a mock position with known bin range
       const position = {
@@ -273,7 +260,7 @@ describe('AutomationService - Trader Joe V2.1 Initialization', () => {
     });
 
     it('should detect out-of-range positions', async () => {
-      const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
       const position = {
         lowerBinId: 8388608,

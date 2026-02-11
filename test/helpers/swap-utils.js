@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
 import { getTokenAddress, getTokenBySymbol } from 'fum_library';
-import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getWrappedNativeAddress, isWrappedNativeToken } from 'fum_library/helpers/tokenHelpers';
 
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
@@ -20,21 +20,21 @@ const WETH_ABI = [
 ];
 
 /**
- * Get token address, handling WETH specially
+ * Get token address, handling wrapped native tokens specially
  */
 export function getTokenAddressForTest(symbol, chainId = 1337) {
-  if (symbol === 'WETH') {
-    return getWethAddress(chainId);
+  if (isWrappedNativeToken(symbol)) {
+    return getWrappedNativeAddress(chainId);
   }
   return getTokenAddress(symbol, chainId);
 }
 
 /**
- * Get token data by symbol, handling WETH specially
+ * Get token data by symbol, handling wrapped native tokens specially
  */
 export function getTokenDataForTest(symbol) {
-  if (symbol === 'WETH') {
-    return { symbol: 'WETH', decimals: 18 };
+  if (isWrappedNativeToken(symbol)) {
+    return { symbol, decimals: 18 };
   }
   return getTokenBySymbol(symbol);
 }
@@ -53,7 +53,7 @@ export async function setupSwapWallet(testEnv, options = {}) {
   } = options;
 
   const swapWallet = testEnv.hardhatServer.signers[1];
-  const wethAddress = getWethAddress(1337);
+  const wrappedNativeAddress = getWrappedNativeAddress(1337);
   const usdcAddress = getTokenAddress('USDC', 1337);
 
   // Fund swap wallet with ETH
@@ -64,11 +64,11 @@ export async function setupSwapWallet(testEnv, options = {}) {
   await fundTx.wait();
   console.log(`  Funded swap wallet with ${ethAmount} ETH`);
 
-  // Wrap ETH to WETH
-  const wethContract = new ethers.Contract(wethAddress, WETH_ABI, swapWallet);
-  const wrapTx = await wethContract.deposit({ value: ethers.utils.parseEther(wethAmount) });
+  // Wrap native to wrapped native
+  const wrappedNativeContract = new ethers.Contract(wrappedNativeAddress, WETH_ABI, swapWallet);
+  const wrapTx = await wrappedNativeContract.deposit({ value: ethers.utils.parseEther(wethAmount) });
   await wrapTx.wait();
-  console.log(`  Wrapped ${wethAmount} ETH to WETH`);
+  console.log(`  Wrapped ${wethAmount} native to wrapped native`);
 
   // Build USDC reserves if requested
   let usdcBalance = ethers.BigNumber.from(0);
@@ -78,12 +78,12 @@ export async function setupSwapWallet(testEnv, options = {}) {
 
     // Approve router
     const swapAmountWei = ethers.utils.parseEther(usdcAmount);
-    const approveTx = await wethContract.approve(routerAddress, swapAmountWei);
+    const approveTx = await wrappedNativeContract.approve(routerAddress, swapAmountWei);
     await approveTx.wait();
 
-    // Swap WETH for USDC
+    // Swap wrapped native for USDC
     const swapParams = {
-      tokenIn: wethAddress,
+      tokenIn: wrappedNativeAddress,
       tokenOut: usdcAddress,
       fee: 500,
       recipient: swapWallet.address,
@@ -109,9 +109,9 @@ export async function setupSwapWallet(testEnv, options = {}) {
 
   return {
     wallet: swapWallet,
-    wethAddress,
+    wrappedNativeAddress,
     usdcAddress,
-    wethContract,
+    wrappedNativeContract,
     usdcBalance
   };
 }

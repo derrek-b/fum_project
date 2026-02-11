@@ -5,7 +5,8 @@
 
 import { ethers } from 'ethers';
 import { StrategyBase } from '../base/index.js';
-import { getStrategyDetails, getTransactionDeadlineMinutes, getWethAddress, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas, getMinSwapValue } from 'fum_library';
+import { getStrategyDetails, getTransactionDeadlineMinutes, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas, getMinSwapValue } from 'fum_library';
+import { getWrappedNativeAddress, getWrappedNativeSymbol, getNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
 import { UnrecoverableError } from '../../utils/errors.js';
 
@@ -728,7 +729,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         throw new UnrecoverableError(`No adapter for platform ${vault.targetPlatforms[0]}`);
       }
 
-      // selectBestPool handles ETH -> WETH resolution internally
+      // selectBestPool handles native -> wrapped native resolution internally
       const { bestPool } = await retryRpcCall(
         () => adapter.selectBestPool(vault.targetTokens[0], vault.targetTokens[1], this.provider, this.chainId),
         'selectBestPool (rebalance)',
@@ -910,8 +911,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       return { alignedPositions, nonAlignedPositions };
     }
 
-    // Use targetPool's actual tokens for alignment (adapter-resolved, e.g., WETH for V3)
-    // This allows vault.targetTokens to contain 'ETH' while we check against 'WETH'
+    // Use targetPool's actual tokens for alignment (adapter-resolved, e.g., WETH/WAVAX for V3)
+    // This allows vault.targetTokens to contain 'ETH'/'AVAX' while we check against wrapped versions
     const targetTokenSymbols = [targetPool.token0.symbol, targetPool.token1.symbol];
 
     for (const [positionId, position] of Object.entries(positions)) {
@@ -1436,7 +1437,7 @@ export default class BabyStepsStrategy extends StrategyBase {
    *
    * Takes aggregated fees (keyed by token address), calculates the owner's
    * portion based on reinvestmentRatio, and transfers to owner.
-   * WETH is unwrapped to native ETH before transfer.
+   * Wrapped native tokens (WETH/WAVAX) are unwrapped to native before transfer.
    *
    * Individual token withdrawals are wrapped in try/catch - failures for one
    * token won't prevent distribution of other tokens.
@@ -1478,7 +1479,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Execute withdrawals
-    const wethAddress = getWethAddress(this.chainId);
+    const wrappedNativeAddress = getWrappedNativeAddress(this.chainId);
     const vaultContract = getVaultContract(vault.address, this.provider);
     const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
     const vaultWithSigner = vaultContract.connect(signer);
@@ -1487,17 +1488,17 @@ export default class BabyStepsStrategy extends StrategyBase {
     const failures = [];
 
     for (const [addr, tokenData] of Object.entries(ownerAmounts)) {
-      const isWeth = addr.toLowerCase() === wethAddress.toLowerCase();
-      const isNativeEth = tokenData.address === ethers.constants.AddressZero;
+      const isWrappedNative = addr.toLowerCase() === wrappedNativeAddress.toLowerCase();
+      const isNativeToken = tokenData.address === ethers.constants.AddressZero;
 
       try {
         const receipt = await retryRpcCall(async () => {
           let tx;
-          if (isWeth) {
-            // V3: WETH needs unwrapping
-            tx = await vaultWithSigner.unwrapAndWithdrawETH(wethAddress, tokenData.amount);
-          } else if (isNativeEth) {
-            // V4: Native ETH is already unwrapped, use withdrawETH
+          if (isWrappedNative) {
+            // V3: Wrapped native (WETH/WAVAX) needs unwrapping
+            tx = await vaultWithSigner.unwrapAndWithdrawETH(wrappedNativeAddress, tokenData.amount);
+          } else if (isNativeToken) {
+            // V4: Native token is already unwrapped, use withdrawETH
             tx = await vaultWithSigner.withdrawETH(tokenData.amount);
           } else {
             // ERC20 tokens
@@ -1511,7 +1512,7 @@ export default class BabyStepsStrategy extends StrategyBase {
           address: tokenData.address,
           amount: tokenData.amount.toString(),
           amountFormatted: ethers.utils.formatUnits(tokenData.amount, tokenData.decimals),
-          asNativeEth: isWeth,
+          asNativeToken: isWrappedNative,
           transactionHash: receipt.transactionHash
         });
 
@@ -1732,18 +1733,20 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
+    const nativeSymbol = getNativeSymbol(this.chainId);
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
     if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
-      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
+      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
       await retryRpcCall(
         () => this.executeWrap(vault, wrapUnwrap.wrapAmount),
-        `wrapETH for vault ${vault.address}`
+        `wrap native for vault ${vault.address}`
       );
     }
     if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
-      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
+      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
       await retryRpcCall(
         () => this.executeUnwrap(vault, wrapUnwrap.unwrapAmount),
-        `unwrapWETH for vault ${vault.address}`
+        `unwrap native for vault ${vault.address}`
       );
     }
 
@@ -1801,17 +1804,17 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Note: wrap/unwrap already executed, so freshResult.wrapUnwrap should be 0
         // But check just in case balances changed unexpectedly
         if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
-          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
+          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
           await retryRpcCall(
             () => this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount),
-            `wrapETH (additional) for vault ${vault.address}`
+            `wrap native (additional) for vault ${vault.address}`
           );
         }
         if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
-          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
+          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
           await retryRpcCall(
             () => this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount),
-            `unwrapWETH (additional) for vault ${vault.address}`
+            `unwrap native (additional) for vault ${vault.address}`
           );
         }
 
@@ -2055,18 +2058,20 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // Execute wrap/unwrap FIRST (swaps may depend on wrapped tokens)
+    const nativeSymbol = getNativeSymbol(this.chainId);
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
     if (BigInt(wrapUnwrap.wrapAmount) > 0n) {
-      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ETH to WETH`);
+      this.log(`Wrapping ${ethers.utils.formatEther(wrapUnwrap.wrapAmount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
       await retryRpcCall(
         () => this.executeWrap(vault, wrapUnwrap.wrapAmount),
-        `wrapETH for vault ${vault.address}`
+        `wrap native for vault ${vault.address}`
       );
     }
     if (BigInt(wrapUnwrap.unwrapAmount) > 0n) {
-      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} WETH to ETH`);
+      this.log(`Unwrapping ${ethers.utils.formatEther(wrapUnwrap.unwrapAmount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
       await retryRpcCall(
         () => this.executeUnwrap(vault, wrapUnwrap.unwrapAmount),
-        `unwrapWETH for vault ${vault.address}`
+        `unwrap native for vault ${vault.address}`
       );
     }
 
@@ -2124,17 +2129,17 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Note: wrap/unwrap already executed, so freshResult.wrapUnwrap should be 0
         // But check just in case balances changed unexpectedly
         if (BigInt(freshResult.wrapUnwrap.wrapAmount) > 0n) {
-          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ETH to WETH`);
+          this.log(`Wrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.wrapAmount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
           await retryRpcCall(
             () => this.executeWrap(vault, freshResult.wrapUnwrap.wrapAmount),
-            `wrapETH (additional) for vault ${vault.address}`
+            `wrap native (additional) for vault ${vault.address}`
           );
         }
         if (BigInt(freshResult.wrapUnwrap.unwrapAmount) > 0n) {
-          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} WETH to ETH`);
+          this.log(`Unwrapping additional ${ethers.utils.formatEther(freshResult.wrapUnwrap.unwrapAmount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
           await retryRpcCall(
             () => this.executeUnwrap(vault, freshResult.wrapUnwrap.unwrapAmount),
-            `unwrapWETH (additional) for vault ${vault.address}`
+            `unwrap native (additional) for vault ${vault.address}`
           );
         }
 
@@ -2374,61 +2379,61 @@ export default class BabyStepsStrategy extends StrategyBase {
     let remainingToken0Deficit = token0Deficit;
     let remainingToken1Deficit = token1Deficit;
 
-    // Track wrap/unwrap amounts (ETH <-> WETH is 1:1, no router needed)
-    let wrapAmount = 0n;    // ETH → WETH
-    let unwrapAmount = 0n;  // WETH → ETH
+    // Track wrap/unwrap amounts (native <-> wrapped native is 1:1, no router needed)
+    let wrapAmount = 0n;    // native → wrapped native (e.g., ETH → WETH, AVAX → WAVAX)
+    let unwrapAmount = 0n;  // wrapped native → native (e.g., WETH → ETH, WAVAX → AVAX)
 
-    // Pre-Phase: Handle ETH <-> WETH conversions before normal swap routing
-    const ethSymbol = 'ETH';
-    const wethSymbol = 'WETH';
-    const token0IsWeth = token0Data.symbol === wethSymbol;
-    const token1IsWeth = token1Data.symbol === wethSymbol;
-    const token0IsNativeEth = token0Data.isNative === true;
-    const token1IsNativeEth = token1Data.isNative === true;
+    // Pre-Phase: Handle native <-> wrapped native conversions before normal swap routing
+    const nativeSymbol = getNativeSymbol(this.chainId);
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+    const token0IsWrappedNative = token0Data.symbol === wrappedNativeSymbol;
+    const token1IsWrappedNative = token1Data.symbol === wrappedNativeSymbol;
+    const token0IsNative = token0Data.isNative === true;
+    const token1IsNative = token1Data.isNative === true;
 
-    // Case 1: Non-aligned ETH, target token is WETH → wrap
-    if (nonAlignedTokens.includes(ethSymbol) && (token0IsWeth || token1IsWeth)) {
-      const ethBalance = remainingBalances[ethSymbol] || 0n;
-      const wethDeficit = token0IsWeth ? remainingToken0Deficit : remainingToken1Deficit;
+    // Case 1: Non-aligned native, target token is wrapped native → wrap
+    if (nonAlignedTokens.includes(nativeSymbol) && (token0IsWrappedNative || token1IsWrappedNative)) {
+      const nativeBalance = remainingBalances[nativeSymbol] || 0n;
+      const wrappedNativeDeficit = token0IsWrappedNative ? remainingToken0Deficit : remainingToken1Deficit;
 
-      if (ethBalance > 0n && wethDeficit > 0n) {
-        const amount = ethBalance < wethDeficit ? ethBalance : wethDeficit;
+      if (nativeBalance > 0n && wrappedNativeDeficit > 0n) {
+        const amount = nativeBalance < wrappedNativeDeficit ? nativeBalance : wrappedNativeDeficit;
         wrapAmount += amount;
 
-        remainingBalances[ethSymbol] -= amount;
-        if (token0IsWeth) remainingToken0Deficit -= amount;
+        remainingBalances[nativeSymbol] -= amount;
+        if (token0IsWrappedNative) remainingToken0Deficit -= amount;
         else remainingToken1Deficit -= amount;
 
-        if (remainingBalances[ethSymbol] === 0n) {
-          delete remainingBalances[ethSymbol];
-          const idx = nonAlignedTokens.indexOf(ethSymbol);
+        if (remainingBalances[nativeSymbol] === 0n) {
+          delete remainingBalances[nativeSymbol];
+          const idx = nonAlignedTokens.indexOf(nativeSymbol);
           if (idx > -1) nonAlignedTokens.splice(idx, 1);
         }
         phasesUsed.wrapUnwrap = true;
-        this.log(`Pre-phase: Wrapping ${ethers.utils.formatEther(amount)} ETH to WETH`);
+        this.log(`Pre-phase: Wrapping ${ethers.utils.formatEther(amount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
       }
     }
 
-    // Case 2: Non-aligned WETH, target token is native ETH → unwrap
-    if (nonAlignedTokens.includes(wethSymbol) && (token0IsNativeEth || token1IsNativeEth)) {
-      const wethBalance = remainingBalances[wethSymbol] || 0n;
-      const ethDeficit = token0IsNativeEth ? remainingToken0Deficit : remainingToken1Deficit;
+    // Case 2: Non-aligned wrapped native, target token is native → unwrap
+    if (nonAlignedTokens.includes(wrappedNativeSymbol) && (token0IsNative || token1IsNative)) {
+      const wrappedNativeBalance = remainingBalances[wrappedNativeSymbol] || 0n;
+      const nativeDeficit = token0IsNative ? remainingToken0Deficit : remainingToken1Deficit;
 
-      if (wethBalance > 0n && ethDeficit > 0n) {
-        const amount = wethBalance < ethDeficit ? wethBalance : ethDeficit;
+      if (wrappedNativeBalance > 0n && nativeDeficit > 0n) {
+        const amount = wrappedNativeBalance < nativeDeficit ? wrappedNativeBalance : nativeDeficit;
         unwrapAmount += amount;
 
-        remainingBalances[wethSymbol] -= amount;
-        if (token0IsNativeEth) remainingToken0Deficit -= amount;
+        remainingBalances[wrappedNativeSymbol] -= amount;
+        if (token0IsNative) remainingToken0Deficit -= amount;
         else remainingToken1Deficit -= amount;
 
-        if (remainingBalances[wethSymbol] === 0n) {
-          delete remainingBalances[wethSymbol];
-          const idx = nonAlignedTokens.indexOf(wethSymbol);
+        if (remainingBalances[wrappedNativeSymbol] === 0n) {
+          delete remainingBalances[wrappedNativeSymbol];
+          const idx = nonAlignedTokens.indexOf(wrappedNativeSymbol);
           if (idx > -1) nonAlignedTokens.splice(idx, 1);
         }
         phasesUsed.wrapUnwrap = true;
-        this.log(`Pre-phase: Unwrapping ${ethers.utils.formatEther(amount)} WETH to ETH`);
+        this.log(`Pre-phase: Unwrapping ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
       }
     }
 
@@ -2458,7 +2463,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Cover token0 deficit
       if (remainingToken0Deficit > 0n && remainingBalances[tokenSymbol] > 0n) {
-        // Skip ETH <-> WETH pairs (handled in pre-phase as wrap/unwrap)
+        // Skip native <-> wrapped native pairs (handled in pre-phase as wrap/unwrap)
         if (this.isWrapUnwrapPair(tokenData, token0Data).isWrapOrUnwrap) continue;
 
         const swapResult = await this.getDeficitSwapQuote(
@@ -2478,7 +2483,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Cover token1 deficit
       if (remainingToken1Deficit > 0n && remainingBalances[tokenSymbol] > 0n) {
-        // Skip ETH <-> WETH pairs (handled in pre-phase as wrap/unwrap)
+        // Skip native <-> wrapped native pairs (handled in pre-phase as wrap/unwrap)
         if (this.isWrapUnwrapPair(tokenData, token1Data).isWrapOrUnwrap) continue;
 
         const swapResult = await this.getDeficitSwapQuote(
@@ -2661,7 +2666,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Log summary
     const wrapUnwrapSummary = hasWrapUnwrap
-      ? `, wrap: ${ethers.utils.formatEther(wrapAmount)} ETH, unwrap: ${ethers.utils.formatEther(unwrapAmount)} WETH`
+      ? `, wrap: ${ethers.utils.formatEther(wrapAmount)} ${nativeSymbol}, unwrap: ${ethers.utils.formatEther(unwrapAmount)} ${wrappedNativeSymbol}`
       : '';
     this.log(`Generated ${deficitSwaps.length} deficit swap transactions${wrapUnwrapSummary}`);
 

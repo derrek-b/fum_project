@@ -11,7 +11,7 @@
 import { ethers } from 'ethers';
 import { TraderJoeV2_1Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
-import { getWethAddress } from 'fum_library/helpers/tokenHelpers';
+import { getWrappedNativeAddress, isWrappedNativeToken, isNativeToken } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain';
 
 const ERC20_ABI = [
@@ -36,34 +36,31 @@ const STRATEGY_CONTRACT_MAP = {
 };
 
 /**
- * Get token address for testing, handling native tokens (AVAX) and wrapped versions (WAVAX)
+ * Get token address for testing, handling native tokens and wrapped versions
  * @param {string} symbol - Token symbol
  * @param {number} chainId - Chain ID
  * @returns {string} Token address
  */
 function getTokenAddressForTJ(symbol, chainId) {
-  // Handle WAVAX specially - it's the wrapped version of AVAX
-  if (symbol === 'WAVAX') {
-    return getWethAddress(chainId);
+  // Handle wrapped native tokens (WAVAX, WETH)
+  if (isWrappedNativeToken(symbol)) {
+    return getWrappedNativeAddress(chainId);
   }
-  // AVAX returns AddressZero (native token)
-  if (symbol === 'AVAX') {
+  // Native tokens (AVAX, ETH) return AddressZero
+  if (isNativeToken(symbol)) {
     return ethers.constants.AddressZero;
   }
   return getTokenAddress(symbol, chainId);
 }
 
 /**
- * Get token data by symbol, handling WAVAX specially
+ * Get token data by symbol, handling native and wrapped native tokens specially
  * @param {string} symbol - Token symbol
  * @returns {Object} Token data with decimals and symbol
  */
 function getTokenDataForTJ(symbol) {
-  if (symbol === 'WAVAX') {
-    return { symbol: 'WAVAX', decimals: 18 };
-  }
-  if (symbol === 'AVAX') {
-    return { symbol: 'AVAX', decimals: 18 };
+  if (isWrappedNativeToken(symbol) || isNativeToken(symbol)) {
+    return { symbol, decimals: 18 };
   }
   return getTokenBySymbol(symbol);
 }
@@ -170,17 +167,17 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
   const tokenContracts = {};
   const tokenBalances = {};
 
-  // Step 1: Wrap native token to WAVAX
-  console.log(`  - Wrapping ${settings.nativeAmount} AVAX to WAVAX...`);
-  const wavaxAddress = getWethAddress(chainId);
-  const wavaxContract = new ethers.Contract(wavaxAddress, WAVAX_ABI, owner);
+  // Step 1: Wrap native token to wrapped native (WAVAX on Avalanche)
+  console.log(`  - Wrapping ${settings.nativeAmount} native to wrapped native...`);
+  const wrappedNativeAddress = getWrappedNativeAddress(chainId);
+  const wrappedNativeContract = new ethers.Contract(wrappedNativeAddress, WAVAX_ABI, owner);
 
-  const wrapTx = await wavaxContract.deposit({ value: ethers.utils.parseEther(settings.nativeAmount) });
+  const wrapTx = await wrappedNativeContract.deposit({ value: ethers.utils.parseEther(settings.nativeAmount) });
   await wrapTx.wait();
 
-  tokenContracts['WAVAX'] = wavaxContract;
-  tokenBalances['WAVAX'] = await wavaxContract.balanceOf(owner.address);
-  console.log(`    WAVAX balance: ${ethers.utils.formatEther(tokenBalances['WAVAX'])}`);
+  tokenContracts['WAVAX'] = wrappedNativeContract;
+  tokenBalances['WAVAX'] = await wrappedNativeContract.balanceOf(owner.address);
+  console.log(`    Wrapped native balance: ${ethers.utils.formatEther(tokenBalances['WAVAX'])}`);
 
   // Step 2: Perform token swaps via LBRouter
   for (const swap of settings.swapTokens) {
