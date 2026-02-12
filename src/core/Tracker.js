@@ -456,14 +456,14 @@ export default class Tracker {
     if (!this.vaultMetadata.has(vaultAddress)) return;
 
     try {
-      const { oldPositionId, currentTick, reason } = data;
+      const { oldPositionId, current, reason } = data;
       this.log(`Position rebalanced for vault ${vaultAddress}: ${reason}`);
 
       await this.appendTransaction(vaultAddress, {
         type: 'PositionRebalanced',
         vaultAddress,
         oldPositionId,
-        currentTick,
+        current,
         reason,
         timestamp
       });
@@ -956,10 +956,8 @@ export default class Tracker {
         totalActualUSD,
         differenceUSD,
         differencePercent,
-        tickLower: data.tickLower,
-        tickUpper: data.tickUpper,
-        currentTick: data.currentTick,
-        liquidity: data.liquidity,
+        ...data.position,
+        current: data.current,
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,
@@ -1050,7 +1048,7 @@ export default class Tracker {
         differenceUSD,
         differencePercent,
         ...data.position,
-        currentTick: data.currentTick,
+        current: data.current,
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,

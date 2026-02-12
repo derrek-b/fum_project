@@ -1,284 +1,518 @@
 /**
- * @fileoverview Basic initialization tests for Trader Joe V2.2 adapter and vault setup
+ * @fileoverview Integration test for AutomationService initialization on Avalanche fork (Trader Joe)
+ * Tests the complete service lifecycle: constructor -> start -> running state -> stop
  *
- * These tests verify:
- * 1. TJ adapter loads correctly on Avalanche fork
- * 2. Can fetch pool data from TJ LBPairs
- * 3. Can create vaults with TJ positions (when TJPositionManager is deployed)
+ * Mirrors test/workflow/service-init/basic-init.test.js but targets Avalanche chain (1338)
+ * with Trader Joe V2.2 adapter instead of Uniswap V3/V4.
  *
  * Run with: FORK_CHAIN=avalanche npm test -- test/workflow/traderjoe/basic-init.test.js
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ethers } from 'ethers';
-import { TraderJoeV2_2Adapter } from 'fum_library/adapters';
-import { getChainConfig, getTokenAddress } from 'fum_library';
-import { getWrappedNativeAddress } from 'fum_library/helpers/tokenHelpers';
+import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
-import { loadSharedState } from '../../shared-state.js';
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
 
-describe('AutomationService - Trader Joe V2.2 Initialization', () => {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaults)', () => {
   let testEnv;
-  let chainId;
-  let isAvalancheFork;
+  let testConfig;
+  let service;
+  const testBlacklistPath = path.join(__dirname, '../../../data/.test-tj-0vaults-blacklist.json');
+
+  // Event capture
+  let serviceStartedEvent = null;
+  let initializedEvent = null;
+  let poolDataFetchedEvent = null;
 
   beforeAll(async () => {
-    // Load shared state to determine chain
-    const state = loadSharedState();
-    chainId = state.chainId;
-    isAvalancheFork = chainId === 1338;
-
-    console.log(`\n🔷 Running TJ tests on chain ${chainId} (${isAvalancheFork ? 'Avalanche' : 'Arbitrum'} fork)`);
-
-    // Set up test environment
     testEnv = await setupTestBlockchain();
-  }, 120000);
-
-  afterAll(async () => {
-    if (testEnv) {
-      await cleanupTestBlockchain(testEnv);
+    testConfig = {
+      ...testEnv.testConfig,
+      blacklistFilePath: testBlacklistPath
+    };
+    // Clean up test blacklist file
+    try {
+      await fs.unlink(testBlacklistPath);
+    } catch (e) {
+      // File doesn't exist, that's fine
     }
   });
 
-  describe('Adapter Loading', () => {
-    it('should create TraderJoeV2_2Adapter instance', () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
-
-      expect(adapter).toBeDefined();
-      expect(adapter.platformId).toBe('traderjoeV2_2');
-      expect(adapter.chainId).toBe(chainId);
-    });
-
-    it('should have correct platform addresses configured', () => {
-      const chainConfig = getChainConfig(chainId);
-      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_2;
-
-      expect(tjAddresses).toBeDefined();
-      expect(tjAddresses.lbFactoryAddress).toBeDefined();
-      expect(tjAddresses.lbRouterAddress).toBeDefined();
-      expect(tjAddresses.lbQuoterAddress).toBeDefined();
-
-      // Verify addresses are valid Ethereum addresses
-      expect(ethers.utils.isAddress(tjAddresses.lbFactoryAddress)).toBe(true);
-      expect(ethers.utils.isAddress(tjAddresses.lbRouterAddress)).toBe(true);
-      expect(ethers.utils.isAddress(tjAddresses.lbQuoterAddress)).toBe(true);
-    });
-
-    it('should have token addresses configured for chain', () => {
-      // USDC should be available on both chains
-      const usdcAddress = getTokenAddress('USDC', chainId);
-      expect(usdcAddress).toBeDefined();
-      expect(ethers.utils.isAddress(usdcAddress)).toBe(true);
-
-      // WETH/WAVAX should be available via getWrappedNativeAddress
-      const wrappedNativeAddress = getWrappedNativeAddress(chainId);
-      expect(wrappedNativeAddress).toBeDefined();
-      expect(ethers.utils.isAddress(wrappedNativeAddress)).toBe(true);
-
-      // Verify correct addresses for each chain
-      if (isAvalancheFork) {
-        // Avalanche addresses
-        expect(usdcAddress.toLowerCase()).toBe('0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'.toLowerCase());
-        expect(wrappedNativeAddress.toLowerCase()).toBe('0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7'.toLowerCase());
-      } else {
-        // Arbitrum addresses
-        expect(usdcAddress.toLowerCase()).toBe('0xaf88d065e77c8cC2239327C5EDb3A432268e5831'.toLowerCase());
-        expect(wrappedNativeAddress.toLowerCase()).toBe('0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'.toLowerCase());
-      }
-    });
+  afterAll(async () => {
+    if (service && service.isRunning) {
+      await service.stop();
+    }
+    await cleanupTestBlockchain(testEnv);
+    // Clean up test blacklist file
+    try {
+      await fs.unlink(testBlacklistPath);
+    } catch (e) {
+      // File doesn't exist, that's fine
+    }
   });
 
-  // Known WAVAX/USDC pool on Trader Joe V2.2 (10bps)
-  // https://snowscan.xyz/address/0x864d4e5ee7318e97483db7eb0912e09f161516ea
-  const KNOWN_WAVAX_USDC_POOL = '0x864d4e5ee7318e97483db7eb0912e09f161516ea';
+  describe('Constructor Validation', () => {
+    it('should throw error for missing automationServiceAddress', () => {
+      expect(() => new AutomationService({
+        chainId: 1338,
+        wsUrl: 'ws://localhost:8546'
+      })).toThrow('automationServiceAddress is required');
+    });
 
-  describe('Pool Data Fetching', () => {
-    it('should fetch pool data from LBFactory', async () => {
-      const chainConfig = getChainConfig(chainId);
-      const tjAddresses = chainConfig.platformAddresses.traderjoeV2_2;
+    it('should throw error for invalid automationServiceAddress', () => {
+      expect(() => new AutomationService({
+        automationServiceAddress: 'not-an-address',
+        chainId: 1338,
+        wsUrl: 'ws://localhost:8546'
+      })).toThrow('automationServiceAddress must be a valid Ethereum address');
+    });
 
-      // Create factory contract with getAllLBPairs to find available pools
-      const LB_FACTORY_ABI = [
-        'function getAllLBPairs(address tokenX, address tokenY) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting)[])'
-      ];
-      const lbFactory = new ethers.Contract(
-        tjAddresses.lbFactoryAddress,
-        LB_FACTORY_ABI,
-        testEnv.hardhatServer.provider
-      );
+    it('should throw error for missing chainId', () => {
+      expect(() => new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        wsUrl: 'ws://localhost:8546'
+      })).toThrow('chainId is required');
+    });
 
-      // Get WAVAX/USDC pair info
-      const wavaxAddress = getWrappedNativeAddress(chainId);
-      const usdcAddress = getTokenAddress('USDC', chainId);
+    it('should throw error for invalid chainId', () => {
+      expect(() => new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        chainId: -1,
+        wsUrl: 'ws://localhost:8546'
+      })).toThrow('chainId must be a positive number');
+    });
 
-      // Sort tokens (lower address first)
-      const [tokenX, tokenY] = wavaxAddress.toLowerCase() < usdcAddress.toLowerCase()
-        ? [wavaxAddress, usdcAddress]
-        : [usdcAddress, wavaxAddress];
+    it('should throw error for missing wsUrl', () => {
+      expect(() => new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        chainId: 1338
+      })).toThrow('wsUrl is required');
+    });
 
-      // Query factory for all WAVAX/USDC pools
-      const allPairs = await lbFactory.getAllLBPairs(tokenX, tokenY);
+    it('should throw error for invalid wsUrl', () => {
+      expect(() => new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        chainId: 1338,
+        wsUrl: 'http://localhost:8546'
+      })).toThrow('wsUrl must be a valid WebSocket URL');
+    });
 
-      console.log(`    Found ${allPairs.length} WAVAX/USDC pools`);
-      allPairs.forEach((pair, i) => {
-        console.log(`    Pool ${i}: ${pair.LBPair} (binStep: ${pair.binStep})`);
+    it('should use default values for optional config', () => {
+      const svc = new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        chainId: 1338,
+        wsUrl: 'ws://localhost:8546'
       });
 
-      // Find the 10bps pool
-      const pool10bps = allPairs.find(p => p.binStep === 10);
-      expect(pool10bps).toBeDefined();
-      expect(pool10bps.LBPair.toLowerCase()).toBe(KNOWN_WAVAX_USDC_POOL.toLowerCase());
+      expect(svc.debug).toBe(false);
+      expect(svc.ssePort).toBe(3001);
+      expect(svc.retryIntervalMs).toBe(300000);
+      expect(svc.maxFailureDurationMs).toBe(3600000);
     });
 
-    it('should fetch pool state via adapter.getPoolData()', async () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
+    it('should update poolData when PoolDataFetched event is emitted', () => {
+      const svc = new AutomationService({
+        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
+        chainId: 1338,
+        wsUrl: 'ws://localhost:8546'
+      });
 
-      // Use known WAVAX/USDC pool address directly
-      const poolData = await adapter.getPoolData(KNOWN_WAVAX_USDC_POOL, testEnv.hardhatServer.provider);
+      const testPoolData = {
+        '0x864d4e5ee7318e97483db7eb0912e09f161516ea': {
+          tokenXSymbol: 'WAVAX',
+          tokenYSymbol: 'USDC',
+          binStep: 10
+        }
+      };
 
-      console.log(`    Pool address: ${poolData.address}`);
-      console.log(`    Active bin ID: ${poolData.activeId}`);
-      console.log(`    Bin step: ${poolData.binStep}`);
-      console.log(`    Reserve X: ${poolData.reserveX}`);
-      console.log(`    Reserve Y: ${poolData.reserveY}`);
+      svc.eventManager.emit('PoolDataFetched', { poolData: testPoolData });
 
-      expect(poolData).toBeDefined();
-      expect(poolData.address.toLowerCase()).toBe(KNOWN_WAVAX_USDC_POOL.toLowerCase());
-      expect(typeof poolData.activeId).toBe('number');
-      expect(poolData.activeId).toBeGreaterThan(0);
-      expect(poolData.binStep).toBe(10);
-      expect(poolData.tokenX).toBeDefined();
-      expect(poolData.tokenY).toBeDefined();
-    });
-
-    it('should correctly sort tokens via adapter.sortTokens()', () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
-
-      const wavaxAddress = getWrappedNativeAddress(chainId);
-      const usdcAddress = getTokenAddress('USDC', chainId);
-
-      const tokenA = { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 };
-      const tokenB = { address: usdcAddress, symbol: 'USDC', decimals: 6 };
-
-      const { sortedToken0, sortedToken1, tokensSwapped } = adapter.sortTokens(tokenA, tokenB);
-
-      // Lower address should be tokenX (sortedToken0)
-      const expectedTokenX = wavaxAddress.toLowerCase() < usdcAddress.toLowerCase() ? tokenA : tokenB;
-      const expectedTokenY = wavaxAddress.toLowerCase() < usdcAddress.toLowerCase() ? tokenB : tokenA;
-
-      expect(sortedToken0.address.toLowerCase()).toBe(expectedTokenX.address.toLowerCase());
-      expect(sortedToken1.address.toLowerCase()).toBe(expectedTokenY.address.toLowerCase());
-
-      console.log(`    TokenX (sorted): ${sortedToken0.symbol} (${sortedToken0.address})`);
-      console.log(`    TokenY (sorted): ${sortedToken1.symbol} (${sortedToken1.address})`);
-      console.log(`    Tokens swapped: ${tokensSwapped}`);
+      expect(svc.poolData['0x864d4e5ee7318e97483db7eb0912e09f161516ea']).toBeDefined();
+      expect(svc.poolData['0x864d4e5ee7318e97483db7eb0912e09f161516ea'].tokenXSymbol).toBe('WAVAX');
     });
   });
 
-  describe('Swap Event Handling', () => {
-    it('should generate correct swap event filter', () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
+  describe('Phase 1: Pre-Start State', () => {
+    it('should create service with correct configuration', () => {
+      service = new AutomationService(testConfig);
 
-      // Use a test LBPair address
-      const testPoolAddress = '0x1234567890123456789012345678901234567890';
-
-      const filter = adapter.getSwapEventFilter(testPoolAddress);
-
-      expect(filter).toBeDefined();
-      expect(filter.address).toBe(testPoolAddress);
-      expect(filter.topics).toBeDefined();
-      expect(filter.topics.length).toBe(1);
-
-      // Verify it's the correct Swap event topic
-      // Swap(address indexed sender, address indexed to, uint24 id, bytes32 amountsIn, bytes32 amountsOut, uint24 volatilityAccumulator, bytes32 totalFees, bytes32 protocolFees)
-      const expectedTopic = ethers.utils.id('Swap(address,address,uint24,bytes32,bytes32,uint24,bytes32,bytes32)');
-      expect(filter.topics[0]).toBe(expectedTopic);
+      expect(service.automationServiceAddress).toBe(testConfig.automationServiceAddress);
+      expect(service.chainId).toBe(testConfig.chainId);
+      expect(service.wsUrl).toBe(testConfig.wsUrl);
+      expect(service.debug).toBe(testConfig.debug);
     });
 
-    it('should validate getSwapEventFilter input', () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
+    it('should have correct initial service state', () => {
+      expect(service.isRunning).toBe(false);
+      expect(service.provider).toBe(null);
+      expect(service.contracts).toEqual({});
+    });
 
-      // Should throw for invalid input
-      expect(() => adapter.getSwapEventFilter(null)).toThrow('poolId parameter is required');
-      expect(() => adapter.getSwapEventFilter('')).toThrow('poolId parameter is required');
-      expect(() => adapter.getSwapEventFilter('invalid')).toThrow('Invalid poolId address');
+    it('should initialize data structures correctly', () => {
+      expect(service.vaultLocks).toEqual({});
+      expect(service.adapters).toBeInstanceOf(Map);
+      expect(service.adapters.size).toBe(0);
+      expect(service.tokens).toEqual({});
+      expect(service.poolData).toEqual({});
+    });
+
+    it('should initialize EventManager correctly', () => {
+      expect(service.eventManager).toBeDefined();
+      expect(typeof service.eventManager.setDebug).toBe('function');
+      expect(typeof service.eventManager.registerContractListener).toBe('function');
+      expect(service.eventManager.listeners).toEqual({});
+      expect(service.eventManager.debug).toBe(testConfig.debug);
+      expect(service.eventManager.enabled).toBe(true);
+    });
+
+    it('should initialize VaultDataService correctly', () => {
+      expect(service.vaultDataService).toBeDefined();
+      // vaults is private (#vaults), verify via public methods
+      expect(service.vaultDataService._getCacheSizeForTesting()).toBe(0);
+      expect(service.vaultDataService.getAllVaults()).toEqual([]);
+      expect(service.vaultDataService.eventManager).toBe(service.eventManager);
+      expect(service.vaultDataService.provider).toBe(null);
+      expect(service.vaultDataService.chainId).toBe(null);
+    });
+
+    it('should initialize Tracker correctly', () => {
+      expect(service.tracker).toBeDefined();
+      expect(service.tracker.vaultMetadata).toBeInstanceOf(Map);
+      expect(service.tracker.vaultMetadata.size).toBe(0);
+      expect(service.tracker.eventManager).toBe(service.eventManager);
+      expect(service.tracker.dataDir).toContain('vaults');
+      expect(service.tracker.debug).toBe(testConfig.debug);
+    });
+
+    it('should initialize SSEBroadcaster correctly', () => {
+      expect(service.sseBroadcaster).toBeDefined();
+      expect(service.sseBroadcaster.eventManager).toBe(service.eventManager);
+      expect(service.sseBroadcaster.port).toBe(testConfig.ssePort);
+      expect(service.sseBroadcaster.debug).toBe(testConfig.debug);
+      expect(service.sseBroadcaster.isRunning).toBe(false);
+      expect(service.sseBroadcaster.clients).toBeInstanceOf(Set);
+      expect(service.sseBroadcaster.clients.size).toBe(0);
+      expect(service.sseBroadcaster.server).toBe(null);
+      expect(Array.isArray(service.sseBroadcaster.broadcastEvents)).toBe(true);
+      expect(service.sseBroadcaster.broadcastEvents.length).toBeGreaterThan(10);
+    });
+
+    it('should initialize strategies with correct dependencies', () => {
+      expect(service.strategies).toBeInstanceOf(Map);
+      expect(service.strategies.size).toBe(1);
+      expect(service.strategies.has('bob')).toBe(true);
+
+      const bobStrategy = service.strategies.get('bob');
+      expect(bobStrategy.type).toBe('bob');
+      expect(bobStrategy.name).toBe('Baby Steps Strategy');
+
+      // Dependency injection (before start)
+      expect(bobStrategy.vaultDataService).toBe(service.vaultDataService);
+      expect(bobStrategy.eventManager).toBe(service.eventManager);
+      expect(bobStrategy.provider).toBe(null);
+      expect(bobStrategy.adapters).toBe(null);
+      expect(bobStrategy.tokens).toBe(null);
+      expect(bobStrategy.chainId).toBe(testConfig.chainId);
+      expect(bobStrategy.debug).toBe(testConfig.debug);
+      expect(bobStrategy.vaultLocks).toBe(service.vaultLocks);
+      expect(bobStrategy.poolData).toBe(service.poolData);
+
+      // Strategy config loaded
+      expect(bobStrategy.config).toBeDefined();
+      expect(bobStrategy.config.id).toBe('bob');
+
+      // Strategy-specific caches initialized
+      expect(bobStrategy.registeredListenerKeys).toEqual({});
     });
   });
 
-  describe('Position Range Evaluation', () => {
-    it('should calculate bin range from percentage', () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
+  describe('Phase 2: Service Start', () => {
+    it('should start service successfully', async () => {
+      // Set up event listeners before start
+      service.eventManager.subscribe('ServiceStarted', (data) => {
+        serviceStartedEvent = data;
+      });
+      service.eventManager.subscribe('initialized', (data) => {
+        initializedEvent = data;
+      });
+      service.eventManager.subscribe('PoolDataFetched', (data) => {
+        poolDataFetchedEvent = data;
+      });
 
-      // Test calculateBinRange (if available) or manual calculation
-      const poolData = {
-        activeId: 8388608, // Reference bin ID (price = 1.0)
-        binStep: 10        // 0.10%
-      };
+      await service.start();
 
-      // For a 5% range with binStep 10:
-      // bins = log(1.05) / log(1.001) = ~49 bins
-      const upperPercent = 5;
-      const lowerPercent = 5;
-
-      // Calculate expected bins using TJ formula
-      const binsPerPercent = Math.log(1 + upperPercent / 100) / Math.log(1 + poolData.binStep / 10000);
-      const expectedBins = Math.floor(binsPerPercent);
-
-      console.log(`    Active ID: ${poolData.activeId}`);
-      console.log(`    For ±${upperPercent}% range: ~${expectedBins} bins each direction`);
-      console.log(`    Expected range: ${poolData.activeId - expectedBins} to ${poolData.activeId + expectedBins}`);
-
-      expect(expectedBins).toBeGreaterThan(0);
+      expect(service.isRunning).toBe(true);
+      expect(serviceStartedEvent).toBeDefined();
+      expect(serviceStartedEvent.chainId).toBe(testConfig.chainId);
+      expect(serviceStartedEvent.automationServiceAddress).toBe(testConfig.automationServiceAddress);
+      expect(serviceStartedEvent.adaptersLoaded).toBeGreaterThan(0);
+      expect(serviceStartedEvent.tokensLoaded).toBeGreaterThan(0);
+      expect(serviceStartedEvent.timestamp).toBeGreaterThan(0);
     });
 
-    it('should evaluate position range correctly', async () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
-
-      // Create a mock position with known bin range
-      const position = {
-        lowerBinId: 8388598, // 10 bins below center
-        upperBinId: 8388618, // 10 bins above center
-        pool: '0x1234567890123456789012345678901234567890' // Mock pool address
-      };
-
-      // Test with swapData (no RPC call)
-      const swapData = { activeId: 8388608 }; // Exactly centered
-
-      const result = await adapter.evaluatePositionRange(position, null, { swapData });
-
-      console.log(`    Position range: ${position.lowerBinId} to ${position.upperBinId}`);
-      console.log(`    Current activeId: ${swapData.activeId}`);
-      console.log(`    In range: ${result.inRange}`);
-      console.log(`    Centeredness: ${result.centeredness.toFixed(3)}`);
-      console.log(`    Distance to upper: ${result.distanceToUpper.toFixed(3)}`);
-      console.log(`    Distance to lower: ${result.distanceToLower.toFixed(3)}`);
-
-      expect(result.inRange).toBe(true);
-      expect(result.centeredness).toBeCloseTo(0.5, 1); // Should be centered
-      expect(result.distanceToUpper).toBeCloseTo(0.5, 1);
-      expect(result.distanceToLower).toBeCloseTo(0.5, 1);
+    it('should initialize provider correctly', () => {
+      expect(service.provider).toBeDefined();
+      expect(service.provider.constructor.name).toBe('WebSocketProvider');
     });
 
-    it('should detect out-of-range positions', async () => {
-      const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
+    it('should emit VaultDataService initialized event', () => {
+      expect(initializedEvent).toBeDefined();
+      expect(initializedEvent.chainId).toBe(testConfig.chainId);
+      expect(service.vaultDataService.provider).toBe(service.provider);
+      expect(service.vaultDataService.chainId).toBe(testConfig.chainId);
+    });
 
-      const position = {
-        lowerBinId: 8388608,
-        upperBinId: 8388628,
-        pool: '0x1234567890123456789012345678901234567890'
-      };
+    it('should initialize Trader Joe V2.2 adapter', () => {
+      expect(service.adapters).toBeInstanceOf(Map);
+      expect(service.adapters.size).toBe(1); // Only TJ on Avalanche
+      expect(service.adapters.has('traderjoeV2_2')).toBe(true);
 
-      // activeId below position range
-      const swapDataBelow = { activeId: 8388600 };
-      const resultBelow = await adapter.evaluatePositionRange(position, null, { swapData: swapDataBelow });
+      const tjAdapter = service.adapters.get('traderjoeV2_2');
+      expect(tjAdapter).toBeDefined();
+      expect(tjAdapter.platformId).toBe('traderjoeV2_2');
+      expect(typeof tjAdapter.getPositionsForVDS).toBe('function');
+    });
 
-      expect(resultBelow.inRange).toBe(false);
+    it('should share adapters with VaultDataService', () => {
+      expect(service.vaultDataService.adapters).toBe(service.adapters);
+      expect(service.vaultDataService.adapters.has('traderjoeV2_2')).toBe(true);
+    });
 
-      // activeId above position range
-      const swapDataAbove = { activeId: 8388640 };
-      const resultAbove = await adapter.evaluatePositionRange(position, null, { swapData: swapDataAbove });
+    it('should initialize token configuration', () => {
+      expect(Object.keys(service.tokens).length).toBeGreaterThan(0);
+      expect(service.tokens.USDC).toBeDefined();
+      expect(service.tokens.USDC.symbol).toBe('USDC');
+      expect(service.tokens.USDC.decimals).toBe(6);
+      expect(service.tokens.AVAX).toBeDefined();
+      expect(service.tokens.AVAX.decimals).toBe(18);
+    });
 
-      expect(resultAbove.inRange).toBe(false);
+    it('should share tokens with VaultDataService', () => {
+      expect(service.vaultDataService.tokens).toBe(service.tokens);
+    });
+
+    it('should share poolData with VaultDataService', () => {
+      expect(service.vaultDataService.poolData).toBe(service.poolData);
+    });
+
+    it('should inject dependencies into EventManager after start', () => {
+      // Verify EventManager dependency injection
+      expect(service.eventManager.poolData).toBeDefined();
+      expect(typeof service.eventManager.poolData).toBe('object');
+      expect(service.eventManager.poolData).toBe(service.poolData); // Same reference
+
+      expect(service.eventManager.adapters).toBeDefined();
+      expect(service.eventManager.adapters).toBeInstanceOf(Map);
+      expect(service.eventManager.adapters).toBe(service.adapters); // Same reference
+      expect(service.eventManager.adapters.size).toBe(1); // Only TJ
+      expect(service.eventManager.adapters.has('traderjoeV2_2')).toBe(true);
+
+      expect(service.eventManager.vaultDataService).toBeDefined();
+      expect(service.eventManager.vaultDataService).toBe(service.vaultDataService); // Same reference
+    });
+
+    it('should initialize strategy contracts', () => {
+      expect(service.contracts.bobStrategy).toBeDefined();
+      expect(typeof service.contracts.bobStrategy.getVersion).toBe('function');
+      expect(typeof service.contracts.bobStrategy.getAllParameters).toBe('function');
+    });
+
+    it('should update strategy dependencies after start', () => {
+      const bobStrategy = service.strategies.get('bob');
+      expect(bobStrategy.provider).toBe(service.provider);
+      expect(bobStrategy.adapters).toBe(service.adapters);
+      expect(bobStrategy.tokens).toBe(service.tokens);
+      expect(bobStrategy.serviceConfig).toBeDefined();
+      expect(bobStrategy.serviceConfig.chainId).toBe(service.chainId);
+      expect(bobStrategy.serviceConfig.automationServiceAddress).toBe(service.automationServiceAddress);
+    });
+
+    it('should register Tracker event handlers', () => {
+      const trackerEvents = ['VaultBaselineCaptured', 'FeesCollected', 'PositionRebalanced'];
+      trackerEvents.forEach(eventName => {
+        expect(service.eventManager.eventHandlers[eventName]).toBeDefined();
+        expect(service.eventManager.eventHandlers[eventName].length).toBeGreaterThan(0);
+      });
+    });
+
+    it('should start SSEBroadcaster', () => {
+      expect(service.sseBroadcaster.isRunning).toBe(true);
+      expect(service.sseBroadcaster.server).not.toBe(null);
+      service.sseBroadcaster.broadcastEvents.forEach(eventName => {
+        expect(service.eventManager.eventHandlers[eventName]).toBeDefined();
+      });
+    });
+
+    it('should register authorization event listener', () => {
+      const authListeners = Object.keys(service.eventManager.listeners).filter(key =>
+        key.includes('authorization')
+      );
+      expect(authListeners.length).toBeGreaterThan(0);
+
+      const authListener = service.eventManager.listeners[authListeners[0]];
+      expect(authListener.type).toBe('filter');
+      expect(authListener.address).toBe('global');
+    });
+
+    it('should register strategy parameter event listener', () => {
+      const paramListeners = Object.keys(service.eventManager.listeners).filter(key =>
+        key.includes('parameter-update')
+      );
+      expect(paramListeners.length).toBeGreaterThan(0);
+    });
+
+    it('should start failed vault retry timer', () => {
+      expect(service.failedVaultRetryTimer).toBeDefined();
+    });
+
+    it('should be idempotent (start twice is safe)', async () => {
+      await service.start();
+      expect(service.isRunning).toBe(true);
+    });
+  });
+
+  describe('Phase 3: 0-Vault State Verification', () => {
+    it('should have no vaults in VaultDataService', () => {
+      const allVaults = service.vaultDataService.getAllVaults();
+      expect(Array.isArray(allVaults)).toBe(true);
+      expect(allVaults.length).toBe(0);
+    });
+
+    it('should have empty poolData (no vaults = no pools)', () => {
+      expect(Object.keys(service.poolData).length).toBe(0);
+    });
+
+    it('should not emit PoolDataFetched with 0 vaults', () => {
+      expect(poolDataFetchedEvent).toBe(null);
+    });
+
+    it('should only have system listeners registered', () => {
+      const listeners = service.eventManager.listeners;
+      const listenerKeys = Object.keys(listeners);
+
+      const authListenerKeys = listenerKeys.filter(k => k.includes('authorization'));
+      const paramListenerKeys = listenerKeys.filter(k => k.includes('parameter-update'));
+
+      expect(authListenerKeys.length).toBe(1);
+      expect(paramListenerKeys.length).toBeGreaterThanOrEqual(1);
+
+      // No vault-specific listeners
+      const vaultListeners = listenerKeys.filter(k =>
+        !k.includes('authorization') &&
+        !k.includes('parameter-update') &&
+        !k.includes('template-selected') &&
+        !k.includes('global')
+      );
+      expect(vaultListeners.length).toBe(0);
+    });
+
+    it('should report correct status for 0-vault state', () => {
+      const status = service.getStatus();
+      expect(status.isRunning).toBe(true);
+      expect(status.adaptersLoaded).toBeGreaterThan(0);
+      expect(status.tokensLoaded).toBeGreaterThan(0);
+      expect(status.poolsCached).toBe(0);
+      expect(status.vaultsCached).toBe(0);
+      expect(status.failedVaults).toBe(0);
+      expect(status.blacklistedVaults).toBe(0);
+      expect(status.sse.isRunning).toBe(true);
+    });
+  });
+
+  describe('Phase 4: Blacklist and Failed Vault Management', () => {
+    it('should track failed vault and emit event', async () => {
+      const failedVaultAddress = '0x1234567890123456789012345678901234567890';
+      let failedEvent = null;
+      service.eventManager.subscribe('VaultFailed', (data) => {
+        failedEvent = data;
+      });
+
+      await service.trackFailedVault(failedVaultAddress, 'Test error message');
+
+      expect(service.failedVaults.has(failedVaultAddress)).toBe(true);
+      const failedData = service.failedVaults.get(failedVaultAddress);
+      expect(failedData.vaultAddress).toBe(failedVaultAddress);
+      expect(failedData.lastError).toBe('Test error message');
+      expect(failedData.attempts).toBe(1);
+      expect(failedEvent.vaultAddress).toBe(failedVaultAddress);
+    });
+
+    it('should increment attempts on subsequent failures', async () => {
+      const failedVaultAddress = '0x1234567890123456789012345678901234567890';
+      await service.trackFailedVault(failedVaultAddress, 'Error 2');
+      await service.trackFailedVault(failedVaultAddress, 'Error 3');
+      expect(service.failedVaults.get(failedVaultAddress).attempts).toBe(3);
+    });
+
+    it('should blacklist vault and emit event', async () => {
+      const blacklistAddress = '0x2222222222222222222222222222222222222222';
+      let blacklistEvent = null;
+      service.eventManager.subscribe('VaultBlacklisted', (data) => {
+        blacklistEvent = data;
+      });
+
+      await service.blacklistVault(blacklistAddress, 'Test blacklist reason');
+
+      expect(service.isVaultBlacklisted(blacklistAddress)).toBe(true);
+      expect(blacklistEvent).toBeDefined();
+      expect(blacklistEvent.reason).toBe('Test blacklist reason');
+    });
+
+    it('should unblacklist vault and emit event', async () => {
+      const blacklistAddress = '0x2222222222222222222222222222222222222222';
+      let unblacklistEvent = null;
+      service.eventManager.subscribe('VaultUnblacklisted', (data) => {
+        unblacklistEvent = data;
+      });
+
+      await service.unblacklistVault(blacklistAddress);
+
+      expect(service.isVaultBlacklisted(blacklistAddress)).toBe(false);
+      expect(unblacklistEvent).toBeDefined();
+    });
+
+    it('should return blacklist data', async () => {
+      await service.blacklistVault('0x3333333333333333333333333333333333333333', 'Reason 1');
+      await service.blacklistVault('0x4444444444444444444444444444444444444444', 'Reason 2');
+      const blacklistData = service.getBlacklistData();
+      expect(Object.keys(blacklistData).length).toBe(2);
+    });
+
+    it('should persist blacklist to disk', async () => {
+      const fileContents = await fs.readFile(testBlacklistPath, 'utf-8');
+      const savedBlacklist = JSON.parse(fileContents);
+      expect(Object.keys(savedBlacklist).length).toBe(2);
+    });
+  });
+
+  describe('Phase 5: Service Stop', () => {
+    it('should stop service cleanly', async () => {
+      await service.stop();
+
+      expect(service.isRunning).toBe(false);
+      expect(service.provider).toBe(null);
+    });
+
+    it('should stop SSEBroadcaster', () => {
+      expect(service.sseBroadcaster.isRunning).toBe(false);
+    });
+
+    it('should clear failed vault retry timer', () => {
+      expect(service.failedVaultRetryTimer).toBe(null);
+    });
+
+    it('should disable EventManager', () => {
+      expect(service.eventManager.enabled).toBe(false);
+    });
+
+    it('should be idempotent (stop twice is safe)', async () => {
+      await service.stop();
+      expect(service.isRunning).toBe(false);
     });
   });
 });

@@ -75,18 +75,13 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now(),
       log: {
         level: 'info',
-        message: `Selected ${bestPool.token0.symbol}/${bestPool.token1.symbol} pool: ${bestPool.address} (fee: ${bestPool.fee}bp)`
+        message: `Selected ${adapter.describePool(bestPool)}`
       }
     });
 
-    // Enrich token metadata with full token data from this.tokens
-    const targetPool = {
-      ...bestPool,
-      token0: { ...this.tokens[bestPool.token0.symbol], ...bestPool.token0 },
-      token1: { ...this.tokens[bestPool.token1.symbol], ...bestPool.token1 }
-    };
+    const targetPool = bestPool;
 
-    this.log(`🎯 Target pool selected: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
+    this.log(`🎯 Target pool selected: ${adapter.describePool(targetPool)}`);
 
     // Step 1.5: Check emergency exit baseline if exists (retry/recovery scenario)
     // If vault was in retry queue and price moved beyond emergency threshold, blacklist immediately
@@ -210,9 +205,9 @@ export default class BabyStepsStrategy extends StrategyBase {
         // Step 6a: Set emergency exit baseline (only if not already set)
         // If baseline exists, we're in a retry scenario and should preserve the original baseline
         if (this.emergencyExitBaseline[vault.address] === undefined) {
-          const currentTick = adapter.getPoolCurrent(targetPool);
-          this.emergencyExitBaseline[vault.address] = currentTick;
-          this.log(`Set emergency exit baseline ${currentTick} for vault ${vault.address}`);
+          const currentPool = adapter.getPoolCurrent(targetPool);
+          this.emergencyExitBaseline[vault.address] = currentPool;
+          this.log(`Set emergency exit baseline ${JSON.stringify(currentPool)} for vault ${vault.address}`);
         } else {
           this.log(`Preserved existing emergency exit baseline ${this.emergencyExitBaseline[vault.address]} for vault ${vault.address} (retry scenario)`);
         }
@@ -230,9 +225,9 @@ export default class BabyStepsStrategy extends StrategyBase {
 
         // Still need to set emergency exit baseline if we have aligned positions
         if (Object.keys(evaluation.alignedPositions).length > 0 && this.emergencyExitBaseline[vault.address] === undefined) {
-          const currentTick = adapter.getPoolCurrent(targetPool);
-          this.emergencyExitBaseline[vault.address] = currentTick;
-          this.log(`Set emergency exit baseline ${currentTick} for vault ${vault.address} (no deployable capital)`);
+          const currentPool = adapter.getPoolCurrent(targetPool);
+          this.emergencyExitBaseline[vault.address] = currentPool;
+          this.log(`Set emergency exit baseline ${JSON.stringify(currentPool)} for vault ${vault.address} (no deployable capital)`);
         }
       }
     }
@@ -342,7 +337,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       { swapData }
     );
 
-    this.log(`Position range status: centeredness=${(rangeStatus.centeredness * 100).toFixed(2)}%, inRange=${rangeStatus.inRange}, tick=${rangeStatus.currentTick}`);
+    this.log(`Position range status: centeredness=${(rangeStatus.centeredness * 100).toFixed(2)}%, inRange=${rangeStatus.inRange}, current=${rangeStatus.current}`);
 
     if (!rangeStatus.inRange) {
       this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position is out of range`);
@@ -736,17 +731,12 @@ export default class BabyStepsStrategy extends StrategyBase {
         { log: (msg) => this.log(msg) }
       );
 
-      // Enrich with token data
-      const targetPool = {
-        ...bestPool,
-        token0: { ...this.tokens[bestPool.token0.symbol], ...bestPool.token0 },
-        token1: { ...this.tokens[bestPool.token1.symbol], ...bestPool.token1 }
-      };
+      const targetPool = bestPool;
 
-      this.log(`Target pool for new position: ${targetPool.token0.symbol}/${targetPool.token1.symbol} at ${targetPool.address}`);
+      this.log(`Target pool for new position: ${adapter.describePool(targetPool)}`);
 
       // Step 2: Close the out-of-range position
-      this.log(`🔍 [rebalancePosition] BEFORE CLOSE - Position ${position.id}: tickLower=${position.tickLower}, tickUpper=${position.tickUpper}`);
+      const rebalanceBounds = adapter.extractPositionBounds(position);
       const { receipt, feesByPosition } = await this.closePositions(vault, { [position.id]: position });
 
       // Step 3: Process fees (if any)
@@ -968,7 +958,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       const EDGE_THRESHOLD = 0.05; // 5% from either edge
 
       if (!rangeStatus.inRange) {
-        this.log(`Position ${positionId} out of range: currentTick=${rangeStatus.currentTick}, range=${position.tickLower}-${position.tickUpper}`);
+        const positionBounds = adapter.extractPositionBounds(position);
+        this.log(`Position ${positionId} out of range: current=${rangeStatus.current}, range=${positionBounds.lower}-${positionBounds.upper}`);
         nonAlignedPositions[positionId] = position;
       } else if (rangeStatus.centeredness < EDGE_THRESHOLD || rangeStatus.centeredness > (1 - EDGE_THRESHOLD)) {
         this.log(`Position ${positionId} too close to edge: centeredness=${rangeStatus.centeredness.toFixed(4)}, threshold=${EDGE_THRESHOLD}`);
@@ -1106,15 +1097,14 @@ export default class BabyStepsStrategy extends StrategyBase {
       this.log(`Adding position ${positionId} to close batch: ${poolMetadata.token0Symbol}/${poolMetadata.token1Symbol} on ${poolMetadata.platform}`);
 
       // Fetch fresh pool state (cached poolMetadata only has static metadata)
-      // Both V3 and V4 need current tick, sqrtPriceX96, and liquidity for liquidity removal
       const freshPoolState = await retryRpcCall(
         () => adapter.getPoolData(position.pool, this.provider),
         'getPoolData',
         { log: (msg) => this.log(msg) }
       );
       const poolData = {
-        ...poolMetadata,     // Static metadata (fee, token symbols, platform)
-        ...freshPoolState    // Current state (tick, sqrtPriceX96, liquidity)
+        ...poolMetadata,
+        ...freshPoolState
       };
 
       // Store metadata for event parsing (use fresh poolData, not cached poolMetadata)
@@ -1837,15 +1827,14 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // Step 8: Re-fetch pool data at current price (swaps may have moved it)
-    // getPoolData returns fresh tick/sqrtPriceX96/liquidity but not poolKey
     // Merge fresh state with original targetPool to preserve poolKey
     const freshPoolState = await retryRpcCall(
       () => adapter.getPoolData(targetPool.address, this.provider),
       'getPoolData (post-swap refresh)'
     );
     const freshPoolData = {
-      ...targetPool,        // Preserve poolKey and other metadata
-      ...freshPoolState     // Override with fresh tick, sqrtPriceX96, liquidity
+      ...targetPool,
+      ...freshPoolState
     };
 
     // Step 9: Get final token balances to pass to adapter
@@ -1973,17 +1962,11 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Get position range object (platform-specific properties, e.g., tickLower/tickUpper for V3)
-    this.log(`🔍 [createNewPosition] Calculating new position range from pool tick: ${targetPool.tick}`);
-    this.log(`   Range params: +${vault.strategy.parameters.targetRangeUpper}bp / -${vault.strategy.parameters.targetRangeLower}bp`);
     let position = adapter.getPositionRange(
       targetPool,
       vault.strategy.parameters.targetRangeUpper,
       vault.strategy.parameters.targetRangeLower
     );
-
-    // Generic logging via Object.values destructuring
-    const [lower, upper, current] = Object.values(position);
-    this.log(`🔍 [createNewPosition] NEW POSITION RANGE CALCULATED: tickLower=${lower}, tickUpper=${upper} (current tick: ${current})`);
 
     // Step 4: Get token prices and determine optimal ratio via test quote
     // Always fetch prices for target tokens (cache handles efficiency)
@@ -1998,43 +1981,28 @@ export default class BabyStepsStrategy extends StrategyBase {
       throw new Error(`Unable to fetch prices for ${token0Data.symbol} and/or ${token1Data.symbol}`);
     }
 
-    // Get test quote to determine pool's required ratio at this tick range
-    // Use $100 worth of token0 to ensure precision across extreme price disparities (e.g., PEPE/WBTC)
-    const testValueUSD = 100;
-    const testInputDecimal = testValueUSD / token0Price;
-    const testAmount = ethers.utils.parseUnits(
-      testInputDecimal.toFixed(token0Data.decimals),
-      token0Data.decimals
-    );
-    const testQuote = await retryRpcCall(
-      () => adapter.getAddLiquidityAmounts({
+    // Get optimal token value ratio from the adapter (platform-specific calculation)
+    const { token0Share, token1Share } = await retryRpcCall(
+      () => adapter.getOptimalTokenRatio({
         position,
-        token0Amount: testAmount.toString(),
-        token1Amount: '0',
-        provider: this.provider,
         poolData: targetPool,
         token0Data,
-        token1Data
+        token1Data,
+        token0Price,
+        token1Price,
+        provider: this.provider
       }),
-      'getAddLiquidityAmounts (test quote)'
+      'getOptimalTokenRatio'
     );
 
-    // Calculate optimal VALUE ratio from test quote
-    const testToken0Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token0Amount, token0Data.decimals));
-    const testToken1Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token1Amount, token1Data.decimals));
-    const testToken0ValueUSD = testToken0Decimal * token0Price;
-    const testToken1ValueUSD = testToken1Decimal * token1Price;
-    const optimalRatio = testToken0ValueUSD / testToken1ValueUSD;
-
     this.log(`Token prices: ${token0Data.symbol}=$${token0Price.toFixed(2)}, ${token1Data.symbol}=$${token1Price.toFixed(2)}`);
-    this.log(`Test quote ratio: ${testToken0Decimal.toFixed(6)} ${token0Data.symbol} : ${testToken1Decimal.toFixed(6)} ${token1Data.symbol}`);
-    this.log(`Optimal value ratio: ${optimalRatio.toFixed(4)} (${(optimalRatio / (1 + optimalRatio) * 100).toFixed(1)}% ${token0Data.symbol} : ${(1 / (1 + optimalRatio) * 100).toFixed(1)}% ${token1Data.symbol})`);
+    this.log(`Optimal value ratio: ${(token0Share * 100).toFixed(1)}% ${token0Data.symbol} : ${(token1Share * 100).toFixed(1)}% ${token1Data.symbol}`);
 
     // Step 5: Calculate target amounts based on ratio and total vault value
     // Use totalVaultValue (includes non-aligned tokens that will be swapped)
     const totalValue = assetValues.totalVaultValue;
-    const targetToken0ValueUSD = totalValue * (optimalRatio / (1 + optimalRatio));
-    const targetToken1ValueUSD = totalValue - targetToken0ValueUSD;
+    const targetToken0ValueUSD = totalValue * token0Share;
+    const targetToken1ValueUSD = totalValue * token1Share;
 
     // Convert to token amounts
     const targetToken0Amount = ethers.utils.parseUnits(
@@ -2162,18 +2130,15 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     // Step 9: Re-fetch pool data at current price (swaps may have moved it)
-    // getPoolData returns fresh tick/sqrtPriceX96/liquidity but not poolKey
     // Merge fresh state with original targetPool to preserve poolKey
     const freshPoolState = await retryRpcCall(
       () => adapter.getPoolData(targetPool.address, this.provider),
       'getPoolData (post-swap refresh)'
     );
     const freshPoolData = {
-      ...targetPool,        // Preserve poolKey and other metadata
-      ...freshPoolState     // Override with fresh tick, sqrtPriceX96, liquidity
+      ...targetPool,
+      ...freshPoolState
     };
-    this.log(`🔍 [createNewPosition] AFTER DEFICIT SWAPS - Current pool tick: ${freshPoolData.tick}`);
-
     // Step 9a: Recalculate position range centered on current tick
     // Deficit swaps may have moved the price, so we need to recenter the range
     // on the actual current tick to ensure position is properly centered
@@ -2182,15 +2147,13 @@ export default class BabyStepsStrategy extends StrategyBase {
       vault.strategy.parameters.targetRangeUpper,
       vault.strategy.parameters.targetRangeLower
     );
-    const [finalLower, finalUpper, finalCurrent] = Object.values(position);
-    this.log(`🔍 [createNewPosition] FINAL POSITION RANGE: tickLower=${finalLower}, tickUpper=${finalUpper} (current tick: ${finalCurrent})`);
 
     // Step 10: Get final token balances to pass to adapter
     const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
     const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
     const maxSlippage = vault.strategy.parameters.maxSlippage;
 
-    this.log(`🔄 Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
+    this.log(`Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
     // Step 11: Execute mint transaction
     // 11a. Generate CREATE position data with fresh pool data
@@ -2211,14 +2174,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       'generateCreatePositionData'
     );
 
-    this.log(`Position data generated with fresh pool state (tick: ${freshPoolData.tick})`);
-    this.log(`🔍 [createNewPosition] createPositionData result:`);
-    this.log(`   to: ${createPositionData.to}`);
-    this.log(`   value: ${createPositionData.value}`);
-    this.log(`   value in ETH: ${ethers.utils.formatEther(createPositionData.value || '0')}`);
-    this.log(`   quote.liquidity: ${createPositionData.quote?.liquidity}`);
-    this.log(`   quote.mintAmount0: ${createPositionData.quote?.mintAmount0}`);
-    this.log(`   quote.mintAmount1: ${createPositionData.quote?.mintAmount1}`);
+    this.log(`Position data generated, target: ${createPositionData.to}, value: ${createPositionData.value}`);
+    this.log(`Position quote: ${JSON.stringify(createPositionData.quote)}`);
 
     // 11b. Execute MINT transaction (different from 'addliq')
     this.log(`Executing mint for new ${token0Data.symbol}/${token1Data.symbol} position`);
@@ -2275,14 +2232,12 @@ export default class BabyStepsStrategy extends StrategyBase {
       () => adapter.getPositionById(receiptData.tokenId, this.provider),
       'getPositionById'
     );
-    this.log(`🔍 [createNewPosition] FINAL ON-CHAIN POSITION - ID ${newPosition.id}: tickLower=${newPosition.tickLower}, tickUpper=${newPosition.tickUpper}`);
-
     // Step 14: Set emergency exit baseline from fresh pool data (after swaps)
     // This overwrites any previous baseline (e.g., from aligned position at init, or previous position before rebalance)
     // Note: Use freshPoolData (has tick), not newPoolData (only has metadata from getPositionById)
     const currentPool = adapter.getPoolCurrent(freshPoolData);
     this.emergencyExitBaseline[vault.address] = currentPool;
-    this.log(`Set emergency exit baseline ${currentPool} for vault ${vault.address} (new position)`);
+    this.log(`Set emergency exit baseline ${JSON.stringify(currentPool)} for vault ${vault.address} (new position)`);
     await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
     await this.vaultDataService.refreshTokens(vault.address);
   }

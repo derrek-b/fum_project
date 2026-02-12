@@ -273,7 +273,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       const uniswapAdapter = service.adapters.get('uniswapV3');
       expect(uniswapAdapter).toBeDefined();
       expect(uniswapAdapter.platformId).toBe('uniswapV3');
-      expect(typeof uniswapAdapter.getPositions).toBe('function');
+      expect(typeof uniswapAdapter.getPositionsForVDS).toBe('function');
     });
 
     it('should share adapters with VaultDataService', () => {

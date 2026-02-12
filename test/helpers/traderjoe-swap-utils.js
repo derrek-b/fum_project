@@ -1,10 +1,10 @@
 /**
- * @fileoverview Shared utilities for Trader Joe V2.1 swap testing
+ * @fileoverview Shared utilities for Trader Joe V2.2 swap testing
  * Provides helpers for executing swaps via LBRouter and querying pool state
  */
 
 import { ethers } from 'ethers';
-import { TraderJoeV2_1Adapter } from 'fum_library/adapters';
+import { TraderJoeV2_2Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokenAddress, getTokenBySymbol } from 'fum_library';
 import { getWrappedNativeAddress, isWrappedNativeToken, isNativeToken } from 'fum_library/helpers/tokenHelpers';
 
@@ -64,7 +64,7 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
   const chainId = network.chainId;
 
   const chainConfig = getChainConfig(chainId);
-  const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
+  const traderjoeV2_2 = chainConfig.platformAddresses.traderjoeV2_2;
 
   const swapWallet = testEnv.hardhatServer.signers[1];
   const wrappedNativeAddress = getWrappedNativeAddress(chainId);
@@ -87,11 +87,11 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
   // Build USDC reserves if requested
   let usdcBalance = ethers.BigNumber.from(0);
   if (parseFloat(usdcAmount) > 0) {
-    const lbRouter = new ethers.Contract(traderjoeV2_1.lbRouterAddress, LB_ROUTER_ABI, swapWallet);
+    const lbRouter = new ethers.Contract(traderjoeV2_2.lbRouterAddress, LB_ROUTER_ABI, swapWallet);
 
     // Approve router
     const swapAmountWei = ethers.utils.parseEther(usdcAmount);
-    const approveTx = await wrappedNativeContract.approve(traderjoeV2_1.lbRouterAddress, swapAmountWei);
+    const approveTx = await wrappedNativeContract.approve(traderjoeV2_2.lbRouterAddress, swapAmountWei);
     await approveTx.wait();
 
     // Build path for swap
@@ -128,7 +128,7 @@ export async function setupTJSwapWallet(testEnv, options = {}) {
 }
 
 /**
- * Execute a swap on Trader Joe V2.1
+ * Execute a swap on Trader Joe V2.2
  * @param {Object} testEnv - Test environment
  * @param {Object} params - Swap parameters
  * @returns {Promise<Object>} Transaction receipt
@@ -148,13 +148,13 @@ export async function executeTraderJoeSwap(testEnv, params) {
   const chainId = network.chainId;
 
   const chainConfig = getChainConfig(chainId);
-  const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
+  const traderjoeV2_2 = chainConfig.platformAddresses.traderjoeV2_2;
 
-  const lbRouter = new ethers.Contract(traderjoeV2_1.lbRouterAddress, LB_ROUTER_ABI, wallet);
+  const lbRouter = new ethers.Contract(traderjoeV2_2.lbRouterAddress, LB_ROUTER_ABI, wallet);
 
   // Approve router if needed
   const tokenInContract = new ethers.Contract(tokenIn, ERC20_ABI, wallet);
-  const approveTx = await tokenInContract.approve(traderjoeV2_1.lbRouterAddress, amountIn);
+  const approveTx = await tokenInContract.approve(traderjoeV2_2.lbRouterAddress, amountIn);
   await approveTx.wait();
 
   // Build path
@@ -172,7 +172,7 @@ export async function executeTraderJoeSwap(testEnv, params) {
 
   // Execute swap
   const txParams = {
-    to: traderjoeV2_1.lbRouterAddress,
+    to: traderjoeV2_2.lbRouterAddress,
     data: lbRouter.interface.encodeFunctionData('swapExactTokensForTokens', [
       amountIn,
       amountOutMin,
@@ -211,17 +211,17 @@ export async function executeTraderJoeSwapsUntilCondition(testEnv, params) {
   const network = await testEnv.hardhatServer.provider.getNetwork();
   const chainId = network.chainId;
 
-  const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+  const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
 
   // Find the LBPair address
   const chainConfig = getChainConfig(chainId);
-  const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
+  const traderjoeV2_2 = chainConfig.platformAddresses.traderjoeV2_2;
 
   const LB_FACTORY_ABI = [
     'function getLBPairInformation(address tokenX, address tokenY, uint256 binStep) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting))'
   ];
   const lbFactory = new ethers.Contract(
-    traderjoeV2_1.lbFactoryAddress,
+    traderjoeV2_2.lbFactoryAddress,
     LB_FACTORY_ABI,
     testEnv.hardhatServer.provider
   );
@@ -279,7 +279,7 @@ export async function getPoolActiveId(testEnv, lbPairAddress) {
   const network = await testEnv.hardhatServer.provider.getNetwork();
   const chainId = network.chainId;
 
-  const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+  const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
   const poolData = await adapter.getPoolData(lbPairAddress, testEnv.hardhatServer.provider);
   return poolData.activeId;
 }
@@ -294,7 +294,7 @@ export async function getTraderJoePoolData(testEnv, lbPairAddress) {
   const network = await testEnv.hardhatServer.provider.getNetwork();
   const chainId = network.chainId;
 
-  const adapter = new TraderJoeV2_1Adapter(chainId, testEnv.hardhatServer.provider);
+  const adapter = new TraderJoeV2_2Adapter(chainId, testEnv.hardhatServer.provider);
   return adapter.getPoolData(lbPairAddress, testEnv.hardhatServer.provider);
 }
 
@@ -311,13 +311,13 @@ export async function findLBPairAddress(testEnv, tokenA, tokenB, binStep = 20) {
   const chainId = network.chainId;
 
   const chainConfig = getChainConfig(chainId);
-  const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
+  const traderjoeV2_2 = chainConfig.platformAddresses.traderjoeV2_2;
 
   const LB_FACTORY_ABI = [
     'function getLBPairInformation(address tokenX, address tokenY, uint256 binStep) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting))'
   ];
   const lbFactory = new ethers.Contract(
-    traderjoeV2_1.lbFactoryAddress,
+    traderjoeV2_2.lbFactoryAddress,
     LB_FACTORY_ABI,
     testEnv.hardhatServer.provider
   );

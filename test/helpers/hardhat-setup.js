@@ -77,6 +77,7 @@ async function connectToSharedHardhat() {
     deployer: signers[0],
     deployedContracts: state.deployedContracts,
     port: state.port,
+    chainId: state.chainId,
 
     /**
      * Take a snapshot (for test-specific isolation within a file)

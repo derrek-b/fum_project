@@ -121,19 +121,6 @@ export default class StrategyBase {
     // Calculate total value for payable calls (only swap uses this)
     const totalValue = values.reduce((sum, v) => sum.add(ethers.BigNumber.from(v)), ethers.BigNumber.from(0));
 
-    // 🔍 DEBUG: Log transaction values and vault ETH balance
-    const vaultEthBalance = await this.provider.getBalance(vault.address);
-    this.log(`🔍 [executeBatchTransactions] Debug for ${operationType} (type: ${type}):`);
-    this.log(`   Transaction count: ${transactions.length}`);
-    this.log(`   Individual values: ${values.map(v => ethers.utils.formatEther(v)).join(', ')} ETH`);
-    this.log(`   Total value (msg.value): ${ethers.utils.formatEther(totalValue)} ETH`);
-    this.log(`   Vault ETH balance: ${ethers.utils.formatEther(vaultEthBalance)} ETH`);
-    this.log(`   Balance sufficient: ${vaultEthBalance.gte(totalValue)}`);
-    if (!vaultEthBalance.gte(totalValue)) {
-      this.log(`   ⚠️ INSUFFICIENT ETH: need ${ethers.utils.formatEther(totalValue)}, have ${ethers.utils.formatEther(vaultEthBalance)}`);
-      this.log(`   Shortfall: ${ethers.utils.formatEther(totalValue.sub(vaultEthBalance))} ETH`);
-    }
-
     // Get vault contract for execution
     const vaultContract = getVaultContract(vault.address, this.provider);
 

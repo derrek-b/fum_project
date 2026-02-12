@@ -1,7 +1,7 @@
 /**
- * @fileoverview Configurable Trader Joe V2.1 test vault setup for automation service tests
+ * @fileoverview Configurable Trader Joe V2.2 test vault setup for automation service tests
  *
- * Creates TJ V2.1 vaults with bin-based positions, handling TJ-specific operations:
+ * Creates TJ V2.2 vaults with bin-based positions, handling TJ-specific operations:
  * - Bin-based liquidity (lowerBinId, upperBinId instead of ticks)
  * - Token ordering via sortTokens() (tokenX = lower address)
  * - LBRouter for swaps
@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import { TraderJoeV2_1Adapter } from 'fum_library/adapters';
+import { TraderJoeV2_2Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
 import { getWrappedNativeAddress, isWrappedNativeToken, isNativeToken } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain';
@@ -66,7 +66,7 @@ function getTokenDataForTJ(symbol) {
 }
 
 /**
- * Set up a Trader Joe V2.1 test vault with configurable positions, tokens, and balances
+ * Set up a Trader Joe V2.2 test vault with configurable positions, tokens, and balances
  *
  * @param {Object} hardhat - Hardhat instance with provider and signers
  * @param {Object} contracts - Deployed FUM contract instances
@@ -104,7 +104,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
 
     // Vault target configuration
     targetTokens: null,          // If null, auto-derived from positions
-    targetPlatforms: ['traderjoeV2_1'],
+    targetPlatforms: ['traderjoeV2_2'],
 
     // Strategy configuration
     strategy: 'bob',
@@ -119,7 +119,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
   const network = await hardhat.provider.getNetwork();
   const chainId = network.chainId;
 
-  console.log('🔷 Setting up Trader Joe V2.1 test vault...');
+  console.log('🔷 Setting up Trader Joe V2.2 test vault...');
   console.log(`  - Chain: ${chainId}`);
   console.log(`  - Vault: ${settings.vaultName}`);
   console.log(`  - Positions: ${settings.positions.length}`);
@@ -153,14 +153,14 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
 
   // Get chain config
   const chainConfig = getChainConfig(chainId);
-  const traderjoeV2_1 = chainConfig.platformAddresses.traderjoeV2_1;
+  const traderjoeV2_2 = chainConfig.platformAddresses.traderjoeV2_2;
 
-  if (!traderjoeV2_1) {
-    throw new Error(`Trader Joe V2.1 not configured for chain ${chainId}`);
+  if (!traderjoeV2_2) {
+    throw new Error(`Trader Joe V2.2 not configured for chain ${chainId}`);
   }
 
   // Create TJ adapter
-  const adapter = new TraderJoeV2_1Adapter(chainId, hardhat.provider);
+  const adapter = new TraderJoeV2_2Adapter(chainId, hardhat.provider);
   const owner = hardhat.signers[0];
 
   // Track token contracts and balances
@@ -197,14 +197,14 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     const swapAmountIn = ethers.utils.parseUnits(swap.amount, tokenInData.decimals);
 
     // Approve LBRouter to spend input token
-    const approveTx = await tokenContracts[sourceToken].approve(traderjoeV2_1.lbRouterAddress, swapAmountIn);
+    const approveTx = await tokenContracts[sourceToken].approve(traderjoeV2_2.lbRouterAddress, swapAmountIn);
     await approveTx.wait();
 
     // Use LBRouter swapExactTokensForTokens
     const LB_ROUTER_ABI = [
       'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, tuple(uint256[] pairBinSteps, uint8[] versions, address[] tokenPath) path, address to, uint256 deadline) external returns (uint256 amountOut)'
     ];
-    const lbRouter = new ethers.Contract(traderjoeV2_1.lbRouterAddress, LB_ROUTER_ABI, owner);
+    const lbRouter = new ethers.Contract(traderjoeV2_2.lbRouterAddress, LB_ROUTER_ABI, owner);
 
     // Build path for the swap
     const path = {
@@ -256,7 +256,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     const LB_FACTORY_ABI = [
       'function getLBPairInformation(address tokenX, address tokenY, uint256 binStep) view returns (tuple(uint16 binStep, address LBPair, bool createdByOwner, bool ignoredForRouting))'
     ];
-    const lbFactory = new ethers.Contract(traderjoeV2_1.lbFactoryAddress, LB_FACTORY_ABI, hardhat.provider);
+    const lbFactory = new ethers.Contract(traderjoeV2_2.lbFactoryAddress, LB_FACTORY_ABI, hardhat.provider);
 
     const pairInfo = await lbFactory.getLBPairInformation(
       sortedToken0.address,
@@ -318,7 +318,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     const token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
 
     // Approve TJPositionManager for both tokens
-    const positionManagerAddress = traderjoeV2_1.positionManagerAddress;
+    const positionManagerAddress = traderjoeV2_2.positionManagerAddress;
     if (!positionManagerAddress) {
       throw new Error('TJPositionManager address not configured. Deploy TJPositionManager first.');
     }
@@ -461,7 +461,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
   }
   console.log(`    Vault ${vaultAddress} is now authorized for automation service`);
 
-  console.log('  ✅ Trader Joe V2.1 test vault setup complete!');
+  console.log('  ✅ Trader Joe V2.2 test vault setup complete!');
 
   return {
     vault: testVault,
