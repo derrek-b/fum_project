@@ -26,7 +26,8 @@ const VALIDATORS_TO_EXTRACT = [
   'UniversalRouterValidator',
   'UniswapV3PositionValidator',
   'UniswapV4PositionValidator',
-  'TJPositionValidator'
+  'TJPositionValidator',
+  'TJSwapValidator'
 ];
 
 // Debug logging
