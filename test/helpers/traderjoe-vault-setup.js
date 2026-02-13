@@ -79,7 +79,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     // Token configuration
     nativeAmount: '10',           // AVAX to start with (for wrapping + swaps)
     swapTokens: [                 // Token swaps from AVAX/WAVAX
-      { from: 'AVAX', to: 'USDC', amount: '2' }
+      { from: 'AVAX', to: 'USDC', amount: '2', binStep: 10, version: 3 }
     ],
 
     // Position configuration (TJ uses bins instead of ticks)
@@ -206,10 +206,13 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     ];
     const lbRouter = new ethers.Contract(traderjoeV2_2.lbRouterAddress, LB_ROUTER_ABI, owner);
 
-    // Build path for the swap
+    // Build path for the swap — each swap specifies its own binStep and version
+    if (!swap.binStep || !swap.version) {
+      throw new Error(`Swap ${sourceToken} → ${swap.to} must specify binStep and version`);
+    }
     const path = {
-      pairBinSteps: [20], // Use binStep 20 (0.20% fee) for WAVAX/USDC
-      versions: [2],      // Version 2.1
+      pairBinSteps: [swap.binStep],
+      versions: [swap.version],
       tokenPath: [tokenInAddress, tokenOutAddress]
     };
 
@@ -358,7 +361,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     const mintReceipt = await mintTx.wait();
 
     // Parse receipt to get tokenId from PositionCreated event
-    const POSITION_CREATED_TOPIC = ethers.utils.id('PositionCreated(uint256,address,address)');
+    const POSITION_CREATED_TOPIC = ethers.utils.id('PositionCreated(uint256,address,address,uint256[],uint256[],uint256,uint256)');
     const positionCreatedLog = mintReceipt.logs.find(log => log.topics[0] === POSITION_CREATED_TOPIC);
 
     if (!positionCreatedLog) {
@@ -393,6 +396,68 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     }
     if (tokenBalances[sortedSymbol1]) {
       tokenBalances[sortedSymbol1] = tokenBalances[sortedSymbol1].sub(token1Amount);
+    }
+  }
+
+  // Step 4.5: Execute fee-generating swaps if configured
+  if (settings.feeGeneratingSwaps && settings.feeGeneratingSwaps.length > 0) {
+    console.log('  - Executing fee-generating swaps to create position fees...');
+
+    const LB_ROUTER_ABI_FEE = [
+      'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, tuple(uint256[] pairBinSteps, uint8[] versions, address[] tokenPath) path, address to, uint256 deadline) external returns (uint256 amountOut)'
+    ];
+    const lbRouterFee = new ethers.Contract(traderjoeV2_2.lbRouterAddress, LB_ROUTER_ABI_FEE, owner);
+
+    for (const feeSwap of settings.feeGeneratingSwaps) {
+      const { pool, swaps } = feeSwap;
+      console.log(`    Generating fees on pool ${pool.tokenX}/${pool.tokenY} (binStep: ${pool.binStep})...`);
+
+      for (let i = 0; i < swaps.length; i++) {
+        const swap = swaps[i];
+        const sourceToken = swap.from === 'AVAX' ? 'WAVAX' : swap.from;
+        const tokenInAddress = getTokenAddressForTJ(sourceToken, chainId);
+        const tokenOutAddress = getTokenAddressForTJ(swap.to, chainId);
+        const tokenInData = getTokenDataForTJ(sourceToken);
+        const swapAmountIn = ethers.utils.parseUnits(swap.amount, tokenInData.decimals);
+
+        // Ensure we have a contract for the source token
+        if (!tokenContracts[sourceToken]) {
+          tokenContracts[sourceToken] = new ethers.Contract(tokenInAddress, ERC20_ABI, owner);
+        }
+        if (!tokenContracts[swap.to]) {
+          tokenContracts[swap.to] = new ethers.Contract(tokenOutAddress, ERC20_ABI, owner);
+        }
+
+        // Approve LBRouter to spend input token
+        const approveTx = await tokenContracts[sourceToken].approve(traderjoeV2_2.lbRouterAddress, swapAmountIn);
+        await approveTx.wait();
+
+        const feePath = {
+          pairBinSteps: [pool.binStep],
+          versions: [pool.version],
+          tokenPath: [tokenInAddress, tokenOutAddress]
+        };
+
+        const deadline = Math.floor(Date.now() / 1000) + 300;
+        const swapTx = await lbRouterFee.swapExactTokensForTokens(
+          swapAmountIn,
+          0,
+          feePath,
+          owner.address,
+          deadline
+        );
+        await swapTx.wait();
+
+        console.log(`      Swap ${i + 1}/${swaps.length}: ${swap.amount} ${swap.from} → ${swap.to}`);
+      }
+
+      console.log(`    ✓ Fee-generating swaps completed for ${pool.tokenX}/${pool.tokenY}`);
+    }
+
+    // Refresh token balances after fee-generating swaps
+    for (const [tokenSymbol, contract] of Object.entries(tokenContracts)) {
+      const balance = await contract.balanceOf(owner.address);
+      tokenBalances[tokenSymbol] = balance;
     }
   }
 
