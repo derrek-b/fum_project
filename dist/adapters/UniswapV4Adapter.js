@@ -780,7 +780,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       centeredness: Math.max(0, Math.min(1, centeredness)),
       distanceToUpper: Math.max(0, Math.min(1, distanceToUpper)),
       distanceToLower: Math.max(0, Math.min(1, distanceToLower)),
-      currentTick
+      current: currentTick
     };
   }
 
@@ -1524,7 +1524,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @param {Object} params.provider - Ethers provider
    * @returns {Promise<{token0Amount: string, token1Amount: string, liquidity: string}>} All as wei strings
    */
-  async getAddLiquidityAmounts(params) {
+  async _getAddLiquidityAmounts(params) {
     const {
       position,
       token0Amount,
@@ -1722,6 +1722,95 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       }
       throw new Error(`Failed to calculate add liquidity amounts: ${error.message}`);
     }
+  }
+
+  /**
+   * Calculate the optimal token value ratio for a V4 position range
+   *
+   * Uses a test quote via _getAddLiquidityAmounts: feeds $100 of token0 with 0 token1,
+   * then converts the SDK's output amounts to USD values to determine the value split.
+   *
+   * @param {Object} params - See PlatformAdapter.getOptimalTokenRatio for full JSDoc
+   * @returns {Promise<{token0Share: number, token1Share: number}>}
+   */
+  async getOptimalTokenRatio(params) {
+    const {
+      position,
+      poolData,
+      token0Data,
+      token1Data,
+      token0Price,
+      token1Price,
+      provider
+    } = params;
+
+    // --- Validation ---
+    if (!position || typeof position !== 'object') {
+      throw new Error('position is required and must be an object');
+    }
+    if (!Number.isFinite(position.tickLower) || !Number.isFinite(position.tickUpper)) {
+      throw new Error('position.tickLower and position.tickUpper must be finite numbers');
+    }
+    if (position.tickLower >= position.tickUpper) {
+      throw new Error('position.tickLower must be less than position.tickUpper');
+    }
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData is required and must be an object');
+    }
+    if (!token0Data || typeof token0Data !== 'object') {
+      throw new Error('token0Data is required and must be an object');
+    }
+    if (!token1Data || typeof token1Data !== 'object') {
+      throw new Error('token1Data is required and must be an object');
+    }
+    if (typeof token0Price !== 'number' || !Number.isFinite(token0Price) || token0Price <= 0) {
+      throw new Error('token0Price must be a positive finite number');
+    }
+    if (typeof token1Price !== 'number' || !Number.isFinite(token1Price) || token1Price <= 0) {
+      throw new Error('token1Price must be a positive finite number');
+    }
+    if (!provider) {
+      throw new Error('provider is required');
+    }
+
+    // Compute test inputs: $100 worth of each token
+    // Providing both tokens hits the fromAmounts() path in the SDK, which correctly
+    // handles in-range, above-tick, and below-tick positions in a single call.
+    const testValueUSD = 100;
+    const testAmount0 = ethers.utils.parseUnits(
+      (testValueUSD / token0Price).toFixed(token0Data.decimals),
+      token0Data.decimals
+    );
+    const testAmount1 = ethers.utils.parseUnits(
+      (testValueUSD / token1Price).toFixed(token1Data.decimals),
+      token1Data.decimals
+    );
+
+    const testQuote = await this._getAddLiquidityAmounts({
+      position,
+      token0Amount: testAmount0.toString(),
+      token1Amount: testAmount1.toString(),
+      provider,
+      poolData,
+      token0Data,
+      token1Data
+    });
+
+    // Convert returned amounts to USD values
+    const token0Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token0Amount, token0Data.decimals));
+    const token1Decimal = parseFloat(ethers.utils.formatUnits(testQuote.token1Amount, token1Data.decimals));
+    const token0ValueUSD = token0Decimal * token0Price;
+    const token1ValueUSD = token1Decimal * token1Price;
+    const totalValueUSD = token0ValueUSD + token1ValueUSD;
+
+    if (totalValueUSD === 0) {
+      throw new Error('Test quote returned zero amounts for both tokens');
+    }
+
+    return {
+      token0Share: token0ValueUSD / totalValueUSD,
+      token1Share: token1ValueUSD / totalValueUSD
+    };
   }
 
   /**
@@ -3437,12 +3526,14 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         token0: {
           symbol: pool.token0.symbol,
           address: token0Address,
-          decimals: parseInt(pool.token0.decimals, 10)
+          decimals: parseInt(pool.token0.decimals, 10),
+          isNative: token0Address === ethers.constants.AddressZero
         },
         token1: {
           symbol: pool.token1.symbol,
           address: token1Address,
-          decimals: parseInt(pool.token1.decimals, 10)
+          decimals: parseInt(pool.token1.decimals, 10),
+          isNative: token1Address === ethers.constants.AddressZero
         },
         // V4-specific: Include poolKey for contract interactions
         poolKey: {
@@ -3646,6 +3737,17 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     );
 
     return { tickLower, tickUpper, currentTick: poolData.tick };
+  }
+
+  /**
+   * Format a human-readable summary of a pool for logging.
+   * @param {Object} pool - Pool object from selectBestPool
+   * @returns {string} Formatted pool description
+   */
+  describePool(pool) {
+    const t0 = pool.token0?.symbol ?? '?';
+    const t1 = pool.token1?.symbol ?? '?';
+    return `${t0}/${t1} at ${pool.address} (fee: ${pool.fee}bp, tick: ${pool.tick})`;
   }
 
   /**

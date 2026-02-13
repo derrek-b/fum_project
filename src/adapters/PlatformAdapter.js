@@ -25,21 +25,21 @@
  * | parseCollectReceipt          | Strategy.collectFees                | CONFIRMED |
  * | generateRemoveLiquidityData  | Strategy.closePositions             | CONFIRMED |
  * | generateClaimFeesData        | Strategy.collectFees                | CONFIRMED |
- * | getAddLiquidityAmounts       | Strategy.addToPosition              | CONFIRMED |
  * | generateAddLiquidityData     | Strategy.addToPosition              | CONFIRMED |
  * | generateCreatePositionData   | Strategy.createNewPosition          | CONFIRMED |
- * | parseSwapReceipt             | Strategy.prepareTokens              | CONFIRMED |x??
+ * | parseSwapReceipt             | Strategy.prepareTokens              | CONFIRMED |
  * | parseIncreaseLiquidityReceipt| Strategy.addToPosition              | CONFIRMED |
  * | getBestSwapQuote             | Strategy.prepareTokens              | CONFIRMED |
  * | extractPositionBounds        | Strategy event emission             | CONFIRMED |
  * | getPositionRange             | Strategy.createNewPosition          | CONFIRMED |
  * | evaluatePositionRange        | Strategy.evaluatePositions          | CONFIRMED |
  * | batchSwapTransactions        | Strategy.prepareTokens              | CONFIRMED |
- * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |x
- * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |x
+ * | getSwapEventFilter           | EventManager.subscribeToSwapEvents  | CONFIRMED |
+ * | parseSwapEvent               | Strategy.handleSwapEvent            | CONFIRMED |
  * | evaluatePriceMovement        | Strategy.handleSwapEvent            | CONFIRMED |
  * | getAccruedFeesUSD            | Strategy.handleSwapEvent            | CONFIRMED |
  * | sortTokens                   | Strategy pool token ordering        | CONFIRMED |
+ * | getOptimalTokenRatio         | Strategy.createNewPosition          | CONFIRMED |
  * =============================================================================
  */
 export default class PlatformAdapter {
@@ -271,39 +271,42 @@ export default class PlatformAdapter {
   }
 
   /**
-   * Get the token amounts required to add liquidity to a position
+   * Calculate the optimal token value ratio for a position range
    *
-   * Returns amounts in the CALLER's token order (not SDK-sorted order).
-   * Each platform implements this using their native calculation method.
+   * Given a position's range and current pool state, determines what fraction
+   * of total value should be allocated to each token. This is platform-specific:
+   * - V3/V4: Uses a test quote via _getAddLiquidityAmounts (tick-range math)
+   * - TJ V2.2: Uses bin count ratios
    *
-   * @param {Object} params - Parameters for calculating amounts
+   * Returns shares that represent the fraction of total VALUE (not amount)
+   * each token should receive. Shares always sum to 1.0.
+   *
+   * @param {Object} params - Parameters for calculating optimal ratio
    * @param {Object} params.position - Position range definition
-   * @param {number} params.position.tickLower - Lower tick of position range
-   * @param {number} params.position.tickUpper - Upper tick of position range
-   * @param {string} params.token0Amount - Desired amount of caller's token0 (wei string, can be "0")
-   * @param {string} params.token1Amount - Desired amount of caller's token1 (wei string, can be "0")
-   * @param {Object} params.poolData - Pool state data
-   * @param {number} params.poolData.fee - Pool fee tier
-   * @param {string} params.poolData.sqrtPriceX96 - Current pool sqrt price
-   * @param {string} params.poolData.liquidity - Current pool liquidity
-   * @param {number} params.poolData.tick - Current pool tick
+   * @param {number} [params.position.tickLower] - Lower tick (tick-based AMMs)
+   * @param {number} [params.position.tickUpper] - Upper tick (tick-based AMMs)
+   * @param {number} [params.position.lowerBinId] - Lower bin (bin-based AMMs)
+   * @param {number} [params.position.upperBinId] - Upper bin (bin-based AMMs)
+   * @param {Object} params.poolData - Pool state data (sqrtPriceX96, tick, fee, etc.)
    * @param {Object} params.token0Data - Caller's token0 data
    * @param {string} params.token0Data.address - Token contract address
    * @param {number} params.token0Data.decimals - Token decimals
+   * @param {string} params.token0Data.symbol - Token symbol
    * @param {Object} params.token1Data - Caller's token1 data
    * @param {string} params.token1Data.address - Token contract address
    * @param {number} params.token1Data.decimals - Token decimals
+   * @param {string} params.token1Data.symbol - Token symbol
+   * @param {number} params.token0Price - USD price of token0
+   * @param {number} params.token1Price - USD price of token1
    * @param {Object} params.provider - Ethers provider instance
-   * @returns {Promise<Object>} Calculated amounts in caller's token order
-   * @returns {string} result.token0Amount - Amount of caller's token0 required (wei string)
-   * @returns {string} result.token1Amount - Amount of caller's token1 required (wei string)
-   * @returns {string} result.liquidity - Resulting position liquidity (wei string)
+   * @returns {Promise<Object>} Optimal value ratio
+   * @returns {number} result.token0Share - Fraction of value for token0 (0.0-1.0)
+   * @returns {number} result.token1Share - Fraction of value for token1 (0.0-1.0)
    * @throws {Error} If parameters are invalid or calculation fails
    */
-  async getAddLiquidityAmounts(params) {
-    throw new Error("getAddLiquidityAmounts must be implemented by subclasses");
+  async getOptimalTokenRatio(params) {
+    throw new Error("getOptimalTokenRatio must be implemented by subclasses");
   }
-
 
   /**
    * Generate transaction data for creating a new position
@@ -524,10 +527,21 @@ export default class PlatformAdapter {
   }
 
   /**
+   * Format a human-readable summary of a pool for logging.
+   * Each platform uses its native terminology (e.g., fee/tick for Uniswap, binStep/activeId for TJ).
+   *
+   * @param {Object} pool - Pool object from selectBestPool
+   * @returns {string} Formatted pool description
+   */
+  describePool(pool) {
+    throw new Error("describePool must be implemented by subclasses");
+  }
+
+  /**
    * Calculate position range bounds from percentage parameters
    *
    * Returns a position object with platform-specific range properties that can be
-   * passed directly to other adapter methods (getAddLiquidityAmounts, generateCreatePositionData).
+   * passed directly to other adapter methods (generateCreatePositionData, getOptimalTokenRatio).
    *
    * @param {Object} poolData - Pool data object containing current state
    * @param {number} upperPercent - Upper range in percentage (e.g., 5 for +5%)

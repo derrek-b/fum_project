@@ -711,6 +711,7 @@
     ],
     "addresses": {
       "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
+      "1338": "0x636279C6135f2F50eFDFF6650A38Defb3437AC42",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -2108,6 +2109,7 @@
     ],
     "addresses": {
       "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
+      "1338": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
   },
@@ -2831,7 +2833,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e"
+      "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e",
+      "1338": "0xe80a4962191410D6D07be8655c36F57D05d7034e"
     }
   },
   "UniversalRouterValidator": {
@@ -3141,7 +3144,33 @@
       }
     ],
     "addresses": {
-      "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17"
+      "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17",
+      "1338": "0xCBd482597a26c0255a5F38B3360bE2015D628187"
+    }
+  },
+  "TJSwapValidator": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "validateSwap",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      }
+    ],
+    "addresses": {
+      "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
     }
   }
 };

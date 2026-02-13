@@ -522,7 +522,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
    *   - centeredness: number (0-1) - 0 = at lower, 0.5 = centered, 1 = at upper
    *   - distanceToUpper: number (0-1) - Distance to upper bound as fraction
    *   - distanceToLower: number (0-1) - Distance to lower bound as fraction
-   *   - currentTick: number - Current active bin ID (named for interface compatibility)
+   *   - current: number - Current active bin ID
    */
   async evaluatePositionRange(position, provider, options = {}) {
     // Validate position object
@@ -574,7 +574,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       centeredness: Math.max(0, Math.min(1, centeredness)),
       distanceToUpper: Math.max(0, Math.min(1, distanceToUpper)),
       distanceToLower: Math.max(0, Math.min(1, distanceToLower)),
-      currentTick: currentBinId // Named for interface compatibility with strategy code
+      current: currentBinId
     };
   }
 
@@ -1078,225 +1078,156 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     };
   }
 
-  async getAddLiquidityAmounts(params) {
-    const { position, token0Amount, token1Amount, poolData, token0Data, token1Data, provider } = params;
+  /**
+   * Calculate the optimal token value ratio for a Trader Joe V2.2 bin-based position
+   *
+   * Uses bin count approach: counts bins above/below the active bin, then reads the
+   * active bin's reserves to compute its actual value split. This is more accurate
+   * than a test-quote approach for TJ because TJ's test quote only reflects the
+   * active bin's composition — for a multi-bin position, a skewed active bin produces
+   * wildly wrong ratios.
+   *
+   * @param {Object} params - See PlatformAdapter.getOptimalTokenRatio for full JSDoc
+   * @returns {Promise<{token0Share: number, token1Share: number}>}
+   */
+  async getOptimalTokenRatio(params) {
+    const {
+      position,
+      poolData,
+      token0Data,
+      token1Data,
+      token0Price,
+      token1Price,
+      provider
+    } = params;
 
-    // --- Input validation (same pattern as generateCreatePositionData) ---
-    if (position === null || position === undefined) {
-      throw new Error("Position parameter is required");
-    }
-    if (typeof position !== 'object' || Array.isArray(position)) {
-      throw new Error("Position must be an object");
+    // --- Validation ---
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error('position is required and must be an object');
     }
     if (position.lowerBinId === null || position.lowerBinId === undefined) {
-      throw new Error("Position lowerBinId is required");
+      throw new Error('position.lowerBinId is required');
     }
     if (!Number.isFinite(position.lowerBinId)) {
-      throw new Error("Position lowerBinId must be a finite number");
+      throw new Error('position.lowerBinId must be a finite number');
     }
     if (position.upperBinId === null || position.upperBinId === undefined) {
-      throw new Error("Position upperBinId is required");
+      throw new Error('position.upperBinId is required');
     }
     if (!Number.isFinite(position.upperBinId)) {
-      throw new Error("Position upperBinId must be a finite number");
+      throw new Error('position.upperBinId must be a finite number');
     }
     if (position.lowerBinId >= position.upperBinId) {
-      throw new Error("Position lowerBinId must be less than upperBinId");
+      throw new Error('position.lowerBinId must be less than position.upperBinId');
     }
-
-    if (token0Amount === null || token0Amount === undefined) {
-      throw new Error("Token0 amount is required");
-    }
-    if (typeof token0Amount !== 'string') {
-      throw new Error("Token0 amount must be a string");
-    }
-    if (!/^\d+$/.test(token0Amount)) {
-      throw new Error("Token0 amount must be a positive numeric string");
-    }
-    if (token1Amount === null || token1Amount === undefined) {
-      throw new Error("Token1 amount is required");
-    }
-    if (typeof token1Amount !== 'string') {
-      throw new Error("Token1 amount must be a string");
-    }
-    if (!/^\d+$/.test(token1Amount)) {
-      throw new Error("Token1 amount must be a positive numeric string");
-    }
-    if (token0Amount === '0' && token1Amount === '0') {
-      throw new Error("At least one token amount must be greater than 0");
-    }
-
-    if (!provider) {
-      throw new Error("Provider is required");
-    }
-
-    if (poolData === null || poolData === undefined) {
-      throw new Error("Pool data parameter is required");
-    }
-    if (typeof poolData !== 'object' || Array.isArray(poolData)) {
-      throw new Error("Pool data must be an object");
+    if (!poolData || typeof poolData !== 'object') {
+      throw new Error('poolData is required and must be an object');
     }
     if (poolData.activeId === null || poolData.activeId === undefined) {
-      throw new Error("Pool data activeId is required");
+      throw new Error('poolData.activeId is required');
     }
     if (!Number.isFinite(poolData.activeId)) {
-      throw new Error("Pool data activeId must be a finite number");
+      throw new Error('poolData.activeId must be a finite number');
     }
     if (poolData.binStep === null || poolData.binStep === undefined) {
-      throw new Error("Pool data binStep is required");
+      throw new Error('poolData.binStep is required');
     }
     if (!Number.isFinite(poolData.binStep) || poolData.binStep <= 0) {
-      throw new Error("Pool data binStep must be a positive finite number");
+      throw new Error('poolData.binStep must be a positive finite number');
     }
     if (!poolData.address) {
-      throw new Error("Pool data address is required");
+      throw new Error('poolData.address is required');
     }
-
-    if (token0Data === null || token0Data === undefined) {
-      throw new Error("Token0 data parameter is required");
+    if (!token0Data || typeof token0Data !== 'object') {
+      throw new Error('token0Data is required and must be an object');
     }
     if (!token0Data.address) {
-      throw new Error("Token0 address is required");
+      throw new Error('token0Data.address is required');
     }
     if (token0Data.decimals === null || token0Data.decimals === undefined) {
-      throw new Error("Token0 decimals is required");
+      throw new Error('token0Data.decimals is required');
     }
-    if (token1Data === null || token1Data === undefined) {
-      throw new Error("Token1 data parameter is required");
+    if (!token1Data || typeof token1Data !== 'object') {
+      throw new Error('token1Data is required and must be an object');
     }
     if (!token1Data.address) {
-      throw new Error("Token1 address is required");
+      throw new Error('token1Data.address is required');
     }
     if (token1Data.decimals === null || token1Data.decimals === undefined) {
-      throw new Error("Token1 decimals is required");
+      throw new Error('token1Data.decimals is required');
     }
-    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
-      throw new Error("Token0 and token1 addresses cannot be the same");
+    if (typeof token0Price !== 'number' || !Number.isFinite(token0Price) || token0Price <= 0) {
+      throw new Error('token0Price must be a positive finite number');
     }
-
-    // --- Sort tokens to TJ canonical order (tokenX = lower address) ---
-    const { sortedToken0: tokenX, sortedToken1: tokenY, tokensSwapped } =
-      this.sortTokens(token0Data, token1Data);
-    const amountX = tokensSwapped ? token1Amount : token0Amount;
-    const amountY = tokensSwapped ? token0Amount : token1Amount;
-
-    // --- Determine position's range relative to activeId ---
-    const activeId = poolData.activeId;
-    const lowerBin = position.lowerBinId;
-    const upperBin = position.upperBinId;
-    const entirelyAbove = lowerBin > activeId;   // X-only range
-    const entirelyBelow = upperBin < activeId;   // Y-only range
-
-    // --- Handle out-of-range positions (no RPC needed) ---
-    if (entirelyAbove) {
-      // Only tokenX is depositable
-      const resultX = BigInt(amountX) > 0n ? amountX : '0';
-      return {
-        token0Amount: tokensSwapped ? '0' : resultX,
-        token1Amount: tokensSwapped ? resultX : '0',
-        liquidity: resultX
-      };
+    if (typeof token1Price !== 'number' || !Number.isFinite(token1Price) || token1Price <= 0) {
+      throw new Error('token1Price must be a positive finite number');
     }
-    if (entirelyBelow) {
-      // Only tokenY is depositable
-      const resultY = BigInt(amountY) > 0n ? amountY : '0';
-      return {
-        token0Amount: tokensSwapped ? resultY : '0',
-        token1Amount: tokensSwapped ? '0' : resultY,
-        liquidity: resultY
-      };
+    if (!provider) {
+      throw new Error('provider is required');
     }
 
-    // --- In-range: compute amounts using distribution and reserves ---
-    try {
-      const { deltaIds, distributionX, distributionY } =
-        getUniformDistributionFromBinRange(activeId, [lowerBin, upperBin]);
+    const { lowerBinId, upperBinId } = position;
+    const { activeId } = poolData;
 
-      // Find the active bin index (deltaId === 0)
-      const activeBinIndex = deltaIds.indexOf(0);
+    // --- Token sorting (TJ canonical: tokenX = lower address) ---
+    const { tokensSwapped } = this.sortTokens(token0Data, token1Data);
 
-      // Fetch active bin reserves and total supply from LBPair
-      const { reserveX, reserveY, totalSupply: totalSupplyBigInt } =
-        await this._getActiveBinData(poolData.address, activeId, provider);
-
-      // Get distribution weights at the active bin
-      const distXAtActive = distributionX[activeBinIndex];
-      const distYAtActive = distributionY[activeBinIndex];
-
-      let resultX, resultY;
-      const inputX = BigInt(amountX);
-      const inputY = BigInt(amountY);
-
-      if (reserveX === 0n && reserveY === 0n) {
-        // Empty active bin — no ratio constraint, return inputs as-is
-        resultX = inputX;
-        resultY = inputY;
-      } else if (inputX > 0n && inputY === 0n) {
-        // Case 1a: Only X provided → compute Y
-        resultX = inputX;
-        if (reserveX === 0n || distXAtActive === 0n) {
-          // X can't go into active bin — deposit X in above-active bins only
-          resultY = 0n;
-        } else {
-          // amountY = amountX * distXAtActive * reserveY / (distYAtActive * reserveX)
-          resultY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
-        }
-      } else if (inputY > 0n && inputX === 0n) {
-        // Case 1b: Only Y provided → compute X
-        resultY = inputY;
-        if (reserveY === 0n || distYAtActive === 0n) {
-          resultX = 0n;
-        } else {
-          resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
-        }
-      } else {
-        // Case 2: Both provided → determine limiting factor
-        if (reserveX === 0n || distXAtActive === 0n) {
-          resultX = 0n;
-          resultY = inputY;
-        } else if (reserveY === 0n || distYAtActive === 0n) {
-          resultX = inputX;
-          resultY = 0n;
-        } else {
-          const impliedY = inputX * distXAtActive * reserveY / (distYAtActive * reserveX);
-          if (impliedY <= inputY) {
-            // X is the limiting factor
-            resultX = inputX;
-            resultY = impliedY;
-          } else {
-            // Y is the limiting factor
-            resultY = inputY;
-            resultX = inputY * distYAtActive * reserveX / (distXAtActive * reserveY);
-          }
-        }
-      }
-
-      // Estimate liquidity from active bin contribution
-      let estimatedLiquidity;
-      const totalReserve = reserveX + reserveY;
-      if (totalReserve > 0n && totalSupplyBigInt > 0n) {
-        // Estimate deposit amount going to the active bin
-        // Use the proportion of the total amount
-        const depositAtActive = resultX + resultY;
-        estimatedLiquidity = (depositAtActive * totalSupplyBigInt / totalReserve).toString();
-      } else {
-        estimatedLiquidity = (resultX + resultY).toString();
-      }
-
-      // Map results back to caller's token order
-      return {
-        token0Amount: tokensSwapped ? resultY.toString() : resultX.toString(),
-        token1Amount: tokensSwapped ? resultX.toString() : resultY.toString(),
-        liquidity: estimatedLiquidity
-      };
-    } catch (error) {
-      if (error.message.includes('is required') ||
-          error.message.includes('must be') ||
-          error.message.includes('cannot be the same')) {
-        throw error;
-      }
-      throw new Error(`Failed to calculate add liquidity amounts: ${error.message}`);
+    // --- Out-of-range: entirely above active (all tokenX) ---
+    if (lowerBinId > activeId) {
+      return tokensSwapped
+        ? { token0Share: 0, token1Share: 1 }
+        : { token0Share: 1, token1Share: 0 };
     }
+
+    // --- Out-of-range: entirely below active (all tokenY) ---
+    if (upperBinId < activeId) {
+      return tokensSwapped
+        ? { token0Share: 1, token1Share: 0 }
+        : { token0Share: 0, token1Share: 1 };
+    }
+
+    // --- In-range: active bin is within position ---
+    const binsAbove = upperBinId - activeId;  // X-only bins
+    const binsBelow = activeId - lowerBinId;  // Y-only bins
+    const totalBins = upperBinId - lowerBinId + 1;
+
+    // Fetch active bin reserves (1 RPC call via existing helper)
+    const activeBinData = await this._getActiveBinData(poolData.address, activeId, provider);
+
+    // Resolve token data in canonical order
+    const tokenXData = tokensSwapped ? token1Data : token0Data;
+    const tokenYData = tokensSwapped ? token0Data : token1Data;
+    const tokenXPrice = tokensSwapped ? token1Price : token0Price;
+    const tokenYPrice = tokensSwapped ? token0Price : token1Price;
+
+    // Active bin USD value split
+    const reserveXFormatted = parseFloat(ethers.utils.formatUnits(activeBinData.reserveX.toString(), tokenXData.decimals));
+    const reserveYFormatted = parseFloat(ethers.utils.formatUnits(activeBinData.reserveY.toString(), tokenYData.decimals));
+    const xUSD = reserveXFormatted * tokenXPrice;
+    const yUSD = reserveYFormatted * tokenYPrice;
+    const activeTotalUSD = xUSD + yUSD;
+
+    let activeXShare, activeYShare;
+    if (activeTotalUSD === 0) {
+      activeXShare = 0.5;
+      activeYShare = 0.5;
+    } else {
+      activeXShare = xUSD / activeTotalUSD;
+      activeYShare = yUSD / activeTotalUSD;
+    }
+
+    // Weighted bin counts (X = above + active's X portion, Y = below + active's Y portion)
+    const xWeight = binsAbove + activeXShare;
+    const yWeight = binsBelow + activeYShare;
+
+    // Map back to caller's token order
+    const token0Weight = tokensSwapped ? yWeight : xWeight;
+    const token1Weight = tokensSwapped ? xWeight : yWeight;
+
+    return {
+      token0Share: token0Weight / totalBins,
+      token1Share: token1Weight / totalBins
+    };
   }
 
   /**
@@ -1602,8 +1533,8 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
   _decodePackedAmounts(packedBytes32) {
     const bn = ethers.BigNumber.from(packedBytes32);
     const mask128 = ethers.BigNumber.from('0x' + 'f'.repeat(32));
-    const amountY = bn.and(mask128);
-    const amountX = bn.shr(128);
+    const amountX = bn.and(mask128);
+    const amountY = bn.shr(128);
     return { amountX: amountX.toString(), amountY: amountY.toString() };
   }
 
@@ -2345,20 +2276,28 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     const best = activePools[0];
 
     // Build normalized pool data structure
+    const tokenXData = {
+      address: tokenX.address,
+      symbol: tokenX.symbol,
+      decimals: tokenX.decimals,
+      isNative: false  // TJ always uses wrapped native, never raw native
+    };
+    const tokenYData = {
+      address: tokenY.address,
+      symbol: tokenY.symbol,
+      decimals: tokenY.decimals,
+      isNative: false
+    };
+
     const bestPool = {
       address: best.address,
       binStep: best.binStep,
       activeId: best.activeId,
-      tokenX: {
-        id: tokenX.address.toLowerCase(),
-        symbol: tokenX.symbol,
-        decimals: tokenX.decimals
-      },
-      tokenY: {
-        id: tokenY.address.toLowerCase(),
-        symbol: tokenY.symbol,
-        decimals: tokenY.decimals
-      },
+      tokenX: tokenXData,
+      tokenY: tokenYData,
+      // Normalized aliases for cross-platform strategy compatibility (token0/token1 is the standard)
+      token0: tokenXData,
+      token1: tokenYData,
       reserveX: best.reserveX,
       reserveY: best.reserveY
     };
@@ -2453,6 +2392,17 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       upperBinId,
       activeBinId: poolData.activeId
     };
+  }
+
+  /**
+   * Format a human-readable summary of a pool for logging.
+   * @param {Object} pool - Pool object from selectBestPool
+   * @returns {string} Formatted pool description
+   */
+  describePool(pool) {
+    const t0 = pool.tokenX?.symbol ?? pool.token0?.symbol ?? '?';
+    const t1 = pool.tokenY?.symbol ?? pool.token1?.symbol ?? '?';
+    return `${t0}/${t1} at ${pool.address} (binStep: ${pool.binStep}, activeId: ${pool.activeId})`;
   }
 
   /**

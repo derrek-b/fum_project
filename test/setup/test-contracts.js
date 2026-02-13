@@ -260,13 +260,20 @@ export async function deployFUMContracts(deployer, config = {}) {
         tjAddresses.lbRouterAddress
       ]);
       contracts.tjPositionValidator = await deployContract(deployer, 'TJPositionValidator');
+      contracts.tjSwapValidator = await deployContract(deployer, 'TJSwapValidator');
 
-      // Register TJ validator with factory
+      // Register TJ validators with factory
       await contracts.vaultFactory.setLiquidityValidator(
         contracts.tjPositionManager.address,
         contracts.tjPositionValidator.address
       );
       console.log(`  ✅ TJPositionValidator registered for ${contracts.tjPositionManager.address}`);
+
+      await contracts.vaultFactory.setSwapValidator(
+        tjAddresses.lbRouterAddress,
+        contracts.tjSwapValidator.address
+      );
+      console.log(`  ✅ TJSwapValidator registered for ${tjAddresses.lbRouterAddress}`);
 
       // Save TJPositionManager address to chains config so adapter can find it
       await updateChainsConfig(chainId, 'traderjoeV2_2', 'positionManagerAddress',
@@ -288,6 +295,9 @@ export async function deployFUMContracts(deployer, config = {}) {
     }
     if (contracts.tjPositionValidator) {
       addresses.TJPositionValidator = contracts.tjPositionValidator.address;
+    }
+    if (contracts.tjSwapValidator) {
+      addresses.TJSwapValidator = contracts.tjSwapValidator.address;
     }
 
     // Validate deterministic addresses - fail fast if they don't match expected values
@@ -380,7 +390,8 @@ function mapContractName(contractName) {
     'UniswapV3PositionValidator': 'UniswapV3PositionValidator',
     'UniswapV4PositionValidator': 'UniswapV4PositionValidator',
     'TJPositionManager': 'TJPositionManager',
-    'TJPositionValidator': 'TJPositionValidator'
+    'TJPositionValidator': 'TJPositionValidator',
+    'TJSwapValidator': 'TJSwapValidator'
   };
 
   return nameMap[contractName] || contractName;
