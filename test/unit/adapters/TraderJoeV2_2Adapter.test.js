@@ -488,7 +488,9 @@ describe('TraderJoeV2_2Adapter', () => {
      * @param {object} amountsIn - { amountX: string, amountY: string }
      * @param {object} amountsOut - { amountX: string, amountY: string }
      */
-    function createMockTJSwapLog(amountsIn, amountsOut) {
+    const PAIR_ADDRESS_2 = '0x1234567890ABCDEF1234567890ABCDEF12345678';
+
+    function createMockTJSwapLog(amountsIn, amountsOut, { pairAddress = PAIR_ADDRESS, logIndex } = {}) {
       const abiCoder = new ethers.utils.AbiCoder();
 
       // TJ PackedUint128Math: X = lower 128 bits, Y = upper 128 bits
@@ -508,9 +510,10 @@ describe('TraderJoeV2_2Adapter', () => {
       );
 
       return {
-        address: PAIR_ADDRESS,
+        address: pairAddress,
         topics: [swapTopicHash, senderTopic, toTopic],
-        data
+        data,
+        ...(logIndex !== undefined && { logIndex })
       };
     }
 
@@ -560,10 +563,30 @@ describe('TraderJoeV2_2Adapter', () => {
       });
     });
 
+    /** Helper to create V2.2 single-hop route metadata */
+    function v22Route(tokenIn, tokenOut) {
+      return {
+        tokenInAddress: tokenIn,
+        tokenOutAddress: tokenOut,
+        routes: [{
+          tokenPath: [tokenIn.toLowerCase(), tokenOut.toLowerCase()],
+          poolCount: 1,
+          versions: [3]
+        }]
+      };
+    }
+
     describe('Simple swaps', () => {
       it('should return empty array for empty metadata', () => {
         const result = adapter.parseSwapReceipt({ logs: [] }, []);
         expect(result).toEqual([]);
+      });
+
+      it('should throw error for metadata missing routes', () => {
+        expect(() => adapter.parseSwapReceipt(
+          { logs: [] },
+          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+        )).toThrow('Swap metadata must have routes');
       });
 
       it('should parse swap where tokenIn is tokenX (lower address)', () => {
@@ -576,7 +599,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const result = adapter.parseSwapReceipt(
           { logs: [log] },
-          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+          [v22Route(TOKEN_A, TOKEN_B)]
         );
 
         expect(result).toHaveLength(1);
@@ -594,7 +617,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const result = adapter.parseSwapReceipt(
           { logs: [log] },
-          [{ tokenInAddress: TOKEN_B, tokenOutAddress: TOKEN_A }]
+          [v22Route(TOKEN_B, TOKEN_A)]
         );
 
         expect(result).toHaveLength(1);
@@ -603,20 +626,23 @@ describe('TraderJoeV2_2Adapter', () => {
       });
 
       it('should parse multiple sequential swaps independently', () => {
+        // Each swap goes through a different pool (different addresses)
         const log1 = createMockTJSwapLog(
           { amountX: '1000000000000000000', amountY: '0' },
-          { amountX: '0', amountY: '2000000000' }
+          { amountX: '0', amountY: '2000000000' },
+          { pairAddress: PAIR_ADDRESS, logIndex: 0 }
         );
         const log2 = createMockTJSwapLog(
           { amountX: '0', amountY: '500000000' },
-          { amountX: '250000000000000000', amountY: '0' }
+          { amountX: '250000000000000000', amountY: '0' },
+          { pairAddress: PAIR_ADDRESS_2, logIndex: 1 }
         );
 
         const result = adapter.parseSwapReceipt(
           { logs: [log1, log2] },
           [
-            { tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B },
-            { tokenInAddress: TOKEN_B, tokenOutAddress: TOKEN_A }
+            v22Route(TOKEN_A, TOKEN_B),
+            v22Route(TOKEN_B, TOKEN_A)
           ]
         );
 
@@ -630,7 +656,7 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should return zeros when no matching swap events found', () => {
         const result = adapter.parseSwapReceipt(
           { logs: [] },
-          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
+          [v22Route(TOKEN_A, TOKEN_B)]
         );
 
         expect(result).toHaveLength(1);
@@ -655,27 +681,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const result = adapter.parseSwapReceipt(
           { logs: [transferLog, swapLog] },
-          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B }]
-        );
-
-        expect(result).toHaveLength(1);
-        expect(result[0].actualAmountIn).toBe('1000000000000000000');
-        expect(result[0].actualAmountOut).toBe('2000000000');
-      });
-
-      it('should accumulate amounts across expectedSwapEvents', () => {
-        const log1 = createMockTJSwapLog(
-          { amountX: '500000000000000000', amountY: '0' },
-          { amountX: '0', amountY: '1000000000' }
-        );
-        const log2 = createMockTJSwapLog(
-          { amountX: '500000000000000000', amountY: '0' },
-          { amountX: '0', amountY: '1000000000' }
-        );
-
-        const result = adapter.parseSwapReceipt(
-          { logs: [log1, log2] },
-          [{ tokenInAddress: TOKEN_A, tokenOutAddress: TOKEN_B, expectedSwapEvents: 2 }]
+          [v22Route(TOKEN_A, TOKEN_B)]
         );
 
         expect(result).toHaveLength(1);
@@ -684,17 +690,20 @@ describe('TraderJoeV2_2Adapter', () => {
       });
     });
 
-    describe('Multi-hop swaps', () => {
+    describe('Multi-hop swaps (V2.2 only)', () => {
       it('should parse 2-hop swap A→MID→B', () => {
         // Hop 1: A→MID (A < MID, so A=tokenX): amountsIn.X = input, amountsOut not needed from hop1
         // Hop 2: MID→B (MID < B, so MID=tokenX): amountsOut.Y = output
+        // Each hop uses a different pool address
         const hop1Log = createMockTJSwapLog(
           { amountX: '1000000000000000000', amountY: '0' },
-          { amountX: '0', amountY: '5000000000' }
+          { amountX: '0', amountY: '5000000000' },
+          { pairAddress: PAIR_ADDRESS, logIndex: 0 }
         );
         const hop2Log = createMockTJSwapLog(
           { amountX: '5000000000', amountY: '0' },
-          { amountX: '0', amountY: '2000000000' }
+          { amountX: '0', amountY: '2000000000' },
+          { pairAddress: PAIR_ADDRESS_2, logIndex: 1 }
         );
 
         const result = adapter.parseSwapReceipt(
@@ -704,7 +713,8 @@ describe('TraderJoeV2_2Adapter', () => {
             tokenOutAddress: TOKEN_B,
             routes: [{
               tokenPath: [TOKEN_A, TOKEN_MID, TOKEN_B],
-              poolCount: 2
+              poolCount: 2,
+              versions: [3, 3]
             }]
           }]
         );
@@ -719,11 +729,13 @@ describe('TraderJoeV2_2Adapter', () => {
         // Hop 2: MID→A (MID > A, so MID=tokenY): amountsOut.X = output (A=tokenX, A < MID)
         const hop1Log = createMockTJSwapLog(
           { amountX: '0', amountY: '2000000000' },
-          { amountX: '5000000000', amountY: '0' }
+          { amountX: '5000000000', amountY: '0' },
+          { pairAddress: PAIR_ADDRESS, logIndex: 0 }
         );
         const hop2Log = createMockTJSwapLog(
           { amountX: '0', amountY: '5000000000' },
-          { amountX: '1000000000000000000', amountY: '0' }
+          { amountX: '1000000000000000000', amountY: '0' },
+          { pairAddress: PAIR_ADDRESS_2, logIndex: 1 }
         );
 
         const result = adapter.parseSwapReceipt(
@@ -733,7 +745,8 @@ describe('TraderJoeV2_2Adapter', () => {
             tokenOutAddress: TOKEN_A,
             routes: [{
               tokenPath: [TOKEN_B, TOKEN_MID, TOKEN_A],
-              poolCount: 2
+              poolCount: 2,
+              versions: [3, 3]
             }]
           }]
         );
@@ -741,6 +754,299 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result).toHaveLength(1);
         expect(result[0].actualAmountIn).toBe('2000000000');
         expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+
+      it('should handle multi-bin crossing (multiple events from same pool)', () => {
+        // Single-hop swap that crosses 2 bins → 2 Swap events from same pool
+        // amountIn is in the first event, amountOut is in the last event
+        const bin1Log = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '1500000000' },
+          { pairAddress: PAIR_ADDRESS, logIndex: 0 }
+        );
+        const bin2Log = createMockTJSwapLog(
+          { amountX: '500000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '500000000' },
+          { pairAddress: PAIR_ADDRESS, logIndex: 1 }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [bin1Log, bin2Log] },
+          [v22Route(TOKEN_A, TOKEN_B)]
+        );
+
+        expect(result).toHaveLength(1);
+        // amountIn from first event, amountOut from last event
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('500000000');
+      });
+    });
+
+    describe('V1 (JoePair) swap events', () => {
+      const v1SwapTopicHash = ethers.utils.id('Swap(address,uint256,uint256,uint256,uint256,address)');
+
+      /**
+       * Create a mock V1 JoePair Swap log.
+       * Topics: [hash, sender(indexed), to(indexed)]
+       * Data: [amount0In, amount1In, amount0Out, amount1Out]
+       */
+      function createMockV1SwapLog(amount0In, amount1In, amount0Out, amount1Out) {
+        const abiCoder = new ethers.utils.AbiCoder();
+        const data = abiCoder.encode(
+          ['uint256', 'uint256', 'uint256', 'uint256'],
+          [amount0In, amount1In, amount0Out, amount1Out]
+        );
+        return {
+          address: '0x1111111111111111111111111111111111111111',
+          topics: [v1SwapTopicHash, senderTopic, toTopic],
+          data,
+          logIndex: 0
+        };
+      }
+
+      it('should parse V1 swap where tokenIn is token0 (lower address)', () => {
+        // A < B → A=token0, B=token1. Swapping A→B: amount0In has input, amount1Out has output
+        const log = createMockV1SwapLog('1000000000000000000', '0', '0', '2000000000');
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A.toLowerCase(), TOKEN_B.toLowerCase()],
+              poolCount: 1,
+              versions: [0]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse V1 swap where tokenIn is token1 (higher address)', () => {
+        // B > A → B=token1. Swapping B→A: amount1In has input, amount0Out has output
+        const log = createMockV1SwapLog('0', '2000000000', '1000000000000000000', '0');
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_B,
+            tokenOutAddress: TOKEN_A,
+            routes: [{
+              tokenPath: [TOKEN_B.toLowerCase(), TOKEN_A.toLowerCase()],
+              poolCount: 1,
+              versions: [0]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('2000000000');
+        expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+    });
+
+    describe('V2.0 (Legacy LBPair) swap events', () => {
+      const v2SwapTopicHash = ethers.utils.id('Swap(address,address,uint256,bool,uint256,uint256,uint256,uint256)');
+
+      /**
+       * Create a mock V2.0 Legacy LBPair Swap log.
+       * Topics: [hash, sender(indexed), recipient(indexed), id(indexed)]
+       * Data: [swapForY, amountIn, amountOut, volatilityAccumulated, fees]
+       */
+      function createMockV2LegacySwapLog(swapForY, amountIn, amountOut) {
+        const abiCoder = new ethers.utils.AbiCoder();
+        const data = abiCoder.encode(
+          ['bool', 'uint256', 'uint256', 'uint256', 'uint256'],
+          [swapForY, amountIn, amountOut, 0, 0]
+        );
+        const idTopic = ethers.utils.hexZeroPad('0x800000', 32); // active bin ID
+        return {
+          address: '0x2222222222222222222222222222222222222222',
+          topics: [v2SwapTopicHash, senderTopic, toTopic, idTopic],
+          data,
+          logIndex: 0
+        };
+      }
+
+      it('should parse V2.0 swap with swapForY=true (tokenX→tokenY)', () => {
+        // swapForY=true means tokenX (lower address) is input
+        // A < B → A=tokenX, B=tokenY
+        const log = createMockV2LegacySwapLog(true, '1000000000000000000', '2000000000');
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A.toLowerCase(), TOKEN_B.toLowerCase()],
+              poolCount: 1,
+              versions: [1]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse V2.0 swap with swapForY=false (tokenY→tokenX)', () => {
+        // swapForY=false means tokenY (higher address) is input
+        // B > A → B=tokenY
+        const log = createMockV2LegacySwapLog(false, '2000000000', '1000000000000000000');
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_B,
+            tokenOutAddress: TOKEN_A,
+            routes: [{
+              tokenPath: [TOKEN_B.toLowerCase(), TOKEN_A.toLowerCase()],
+              poolCount: 1,
+              versions: [1]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('2000000000');
+        expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+    });
+
+    describe('V2.1 swap events (shares V2.2 packed bytes32 format)', () => {
+      it('should parse V2.1 swap using V2.2-format event (lower→higher)', () => {
+        // V2.1 LBPairs emit the same Swap event as V2.2 (packed bytes32)
+        // A < B → A=tokenX. Swapping A→B: amountsIn.X = input, amountsOut.Y = output
+        const log = createMockTJSwapLog(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A.toLowerCase(), TOKEN_B.toLowerCase()],
+              poolCount: 1,
+              versions: [2]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse V2.1 swap using V2.2-format event (higher→lower)', () => {
+        // B > A → B=tokenY. Swapping B→A: amountsIn.Y = input, amountsOut.X = output
+        const log = createMockTJSwapLog(
+          { amountX: '0', amountY: '2000000000' },
+          { amountX: '1000000000000000000', amountY: '0' }
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [log] },
+          [{
+            tokenInAddress: TOKEN_B,
+            tokenOutAddress: TOKEN_A,
+            routes: [{
+              tokenPath: [TOKEN_B.toLowerCase(), TOKEN_A.toLowerCase()],
+              poolCount: 1,
+              versions: [2]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('2000000000');
+        expect(result[0].actualAmountOut).toBe('1000000000000000000');
+      });
+    });
+
+    describe('Cross-version multi-hop swaps', () => {
+      const v1SwapTopicHash = ethers.utils.id('Swap(address,uint256,uint256,uint256,uint256,address)');
+
+      function createMockV1SwapLog(amount0In, amount1In, amount0Out, amount1Out, logIndex) {
+        const abiCoder = new ethers.utils.AbiCoder();
+        const data = abiCoder.encode(
+          ['uint256', 'uint256', 'uint256', 'uint256'],
+          [amount0In, amount1In, amount0Out, amount1Out]
+        );
+        return {
+          address: '0x1111111111111111111111111111111111111111',
+          topics: [v1SwapTopicHash, senderTopic, toTopic],
+          data,
+          logIndex
+        };
+      }
+
+      function createMockTJSwapLogWithIndex(amountsIn, amountsOut, logIndex, pairAddress = PAIR_ADDRESS) {
+        return createMockTJSwapLog(amountsIn, amountsOut, { pairAddress, logIndex });
+      }
+
+      it('should parse V1→V2.2 two-hop swap', () => {
+        // Hop 1 (V1): A→MID. A < MID → A=token0. amount0In=input
+        // Hop 2 (V2.2): MID→B. MID < B → MID=tokenX. amountsOut.Y=output
+        const hop1Log = createMockV1SwapLog('1000000000000000000', '0', '0', '5000000000', 0);
+        const hop2Log = createMockTJSwapLogWithIndex(
+          { amountX: '5000000000', amountY: '0' },
+          { amountX: '0', amountY: '2000000000' },
+          1
+        );
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [hop1Log, hop2Log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A.toLowerCase(), TOKEN_MID.toLowerCase(), TOKEN_B.toLowerCase()],
+              poolCount: 2,
+              versions: [0, 3]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
+      });
+
+      it('should parse V2.2→V1 two-hop swap', () => {
+        // Hop 1 (V2.2): A→MID. A < MID → A=tokenX. amountsIn.X=input
+        // Hop 2 (V1): MID→B. MID < B → MID=token0. amount1Out=output
+        const hop1Log = createMockTJSwapLogWithIndex(
+          { amountX: '1000000000000000000', amountY: '0' },
+          { amountX: '0', amountY: '5000000000' },
+          0
+        );
+        const hop2Log = createMockV1SwapLog('5000000000', '0', '0', '2000000000', 1);
+
+        const result = adapter.parseSwapReceipt(
+          { logs: [hop1Log, hop2Log] },
+          [{
+            tokenInAddress: TOKEN_A,
+            tokenOutAddress: TOKEN_B,
+            routes: [{
+              tokenPath: [TOKEN_A.toLowerCase(), TOKEN_MID.toLowerCase(), TOKEN_B.toLowerCase()],
+              poolCount: 2,
+              versions: [3, 0]
+            }]
+          }]
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000000000000000');
+        expect(result[0].actualAmountOut).toBe('2000000000');
       });
     });
   });
@@ -4687,6 +4993,12 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(meta.tokenOutAddress).toBe(usdcAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
         expect(meta.isAmountIn).toBe(true);
+        // Single-hop swap should have routes with valid version
+        expect(meta.routes).toBeDefined();
+        expect(meta.routes).toHaveLength(1);
+        expect(meta.routes[0].poolCount).toBe(1);
+        expect(meta.routes[0].versions[0]).toBeGreaterThanOrEqual(0);
+        expect(meta.routes[0].versions[0]).toBeLessThanOrEqual(3);
       }, 60000);
 
       it('should generate Native→ERC20 swap (ETH→USDC exact input)', async () => {
@@ -4712,6 +5024,10 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(meta.tokenInAddress).toBe(wavaxAddress);
         expect(meta.tokenOutAddress).toBe(usdcAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+        // Single-hop swap should have routes with valid version
+        expect(meta.routes).toBeDefined();
+        expect(meta.routes[0].versions[0]).toBeGreaterThanOrEqual(0);
+        expect(meta.routes[0].versions[0]).toBeLessThanOrEqual(3);
       }, 60000);
 
       it('should generate ERC20→Native swap (USDC→ETH exact input)', async () => {
@@ -4736,6 +5052,10 @@ describe('TraderJoeV2_2Adapter', () => {
         // tokenOutAddress should be WETH for parseSwapReceipt compatibility
         expect(meta.tokenOutAddress).toBe(wavaxAddress);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+        // Single-hop swap should have routes with valid version
+        expect(meta.routes).toBeDefined();
+        expect(meta.routes[0].versions[0]).toBeGreaterThanOrEqual(0);
+        expect(meta.routes[0].versions[0]).toBeLessThanOrEqual(3);
       }, 60000);
 
       it('should generate multiple batch swap transactions', async () => {
@@ -4768,6 +5088,10 @@ describe('TraderJoeV2_2Adapter', () => {
         // Both should target the router
         expect(result.transactions[0].to).toBe(adapter.addresses.lbRouterAddress);
         expect(result.transactions[1].to).toBe(adapter.addresses.lbRouterAddress);
+
+        // Both are single-hop, should have routes with valid version
+        expect(result.metadata[0].routes[0].versions[0]).toBeGreaterThanOrEqual(0);
+        expect(result.metadata[1].routes[0].versions[0]).toBeGreaterThanOrEqual(0);
       }, 60000);
 
       it('should generate exact output swap (WETH→exact USDC)', async () => {
@@ -4789,6 +5113,48 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(meta.isAmountIn).toBe(false);
         expect(BigInt(meta.quotedAmountIn)).toBeGreaterThan(0n);
         expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+      }, 60000);
+
+      it('should include routes with version info for USDT→WAVAX swap', async () => {
+        // USDT→WAVAX may route through V1 JoePair (1 hop) or V2.2 via USDC (2 hops)
+        // depending on fork block state. Either way, routes must have versions.
+        const usdtAddress = tokens['USD₮0'].addresses[env.chainId];
+        const amount = ethers.utils.parseUnits('10', 6).toString(); // 10 USDT
+
+        const result = await adapter.batchSwapTransactions(
+          [{
+            tokenIn: { symbol: 'USD₮0', address: usdtAddress },
+            tokenOut: { symbol: 'WAVAX', address: wavaxAddress },
+            amount,
+            isAmountIn: true,
+          }],
+          { provider: env.provider, chainId: env.chainId, recipient: vaultAddress(), slippageTolerance: 1 }
+        );
+
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        const meta = result.metadata[0];
+        expect(meta.tokenInSymbol).toBe('USD₮0');
+        expect(meta.tokenOutSymbol).toBe('WAVAX');
+        expect(BigInt(meta.quotedAmountOut)).toBeGreaterThan(0n);
+
+        // Routes must always be present with version info
+        expect(meta.routes).toBeDefined();
+        expect(meta.routes).toHaveLength(1);
+        const route = meta.routes[0];
+        expect(route.poolCount).toBeGreaterThanOrEqual(1);
+        expect(route.tokenPath).toHaveLength(route.poolCount + 1);
+        // Path should start with USDT and end with WAVAX
+        expect(route.tokenPath[0].toLowerCase()).toBe(usdtAddress.toLowerCase());
+        expect(route.tokenPath[route.tokenPath.length - 1].toLowerCase()).toBe(wavaxAddress.toLowerCase());
+        // Versions array should match hop count
+        expect(route.versions).toHaveLength(route.poolCount);
+        // Each version should be a valid TJ version enum (0-3)
+        for (const v of route.versions) {
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThanOrEqual(3);
+        }
       }, 60000);
     });
   });

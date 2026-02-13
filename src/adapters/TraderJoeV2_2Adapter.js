@@ -1498,6 +1498,68 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get the swap event topic hash for a given TJ version.
+   *
+   * V2.1 and V2.2 LBPairs share the same Swap event signature (packed bytes32).
+   * Only V2.0 uses the legacy signature with bool/uint256.
+   *
+   * @param {number} version - ILBRouter.Version enum: 0=V1, 1=V2, 2=V2_1, 3=V2_2
+   * @returns {string} keccak256 topic hash
+   */
+  _getSwapTopicForVersion(version) {
+    switch (version) {
+      case 0: // V1 (JoePair / UniswapV2-style)
+        return ethers.utils.id('Swap(address,uint256,uint256,uint256,uint256,address)');
+      case 1: // V2.0 (Legacy LBPair — bool swapForY + uint256 amounts)
+        return ethers.utils.id('Swap(address,address,uint256,bool,uint256,uint256,uint256,uint256)');
+      case 2: // V2.1 (shares V2.2 packed bytes32 event signature)
+      case 3: // V2.2 (Current LBPair)
+        return ethers.utils.id(this._getSwapEventSignature());
+      default:
+        throw new Error(`Unknown TJ version: ${version}`);
+    }
+  }
+
+  /**
+   * Parse a V1 JoePair (UniswapV2-style) Swap event log.
+   * Topics: [hash, sender(indexed), to(indexed)]
+   * Data: [amount0In, amount1In, amount0Out, amount1Out]
+   * @param {Object} log - Raw event log
+   * @returns {{ amount0In: string, amount1In: string, amount0Out: string, amount1Out: string }}
+   */
+  _parseV1SwapEvent(log) {
+    const decoded = ethers.utils.defaultAbiCoder.decode(
+      ['uint256', 'uint256', 'uint256', 'uint256'],
+      log.data
+    );
+    return {
+      amount0In: decoded[0].toString(),
+      amount1In: decoded[1].toString(),
+      amount0Out: decoded[2].toString(),
+      amount1Out: decoded[3].toString(),
+    };
+  }
+
+  /**
+   * Parse a V2/V2.1 Legacy LBPair Swap event log.
+   * Topics: [hash, sender(indexed), recipient(indexed), id(indexed)]
+   * Data: [swapForY, amountIn, amountOut, volatilityAccumulated, fees]
+   * @param {Object} log - Raw event log
+   * @returns {{ swapForY: boolean, amountIn: string, amountOut: string }}
+   */
+  _parseV2LegacySwapEvent(log) {
+    const decoded = ethers.utils.defaultAbiCoder.decode(
+      ['bool', 'uint256', 'uint256', 'uint256', 'uint256'],
+      log.data
+    );
+    return {
+      swapForY: decoded[0],
+      amountIn: decoded[1].toString(),
+      amountOut: decoded[2].toString(),
+    };
+  }
+
+  /**
    * Convert a bin ID to a human-readable price
    *
    * Trader Joe V2.2 Liquidity Book price formula:
@@ -1577,6 +1639,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         quotedAmountIn: result.quotedAmountIn,
         quotedAmountOut: result.quotedAmountOut,
         isAmountIn: result.isAmountIn,
+        routes: result.routes,
       });
     }
 
@@ -1662,6 +1725,12 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       }
     }
 
+    // Build routes for parseSwapReceipt (always include for version info)
+    const tokenPath = quote.route.map(addr => addr.toLowerCase());
+    const poolCount = quote.binSteps.length;
+    const versions = quote.versions.map(v => Number(v));
+    const routes = [{ tokenPath, poolCount, versions }];
+
     return {
       transaction: { to: this.addresses.lbRouterAddress, data, value },
       tokenInAddress,    // WETH address if native (for parseSwapReceipt compatibility)
@@ -1669,6 +1738,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       quotedAmountIn,
       quotedAmountOut,
       isAmountIn,
+      routes,
     };
   }
 
@@ -1786,22 +1856,38 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       return [];
     }
 
-    const swapTopicHash = ethers.utils.id(this._getSwapEventSignature());
+    // Compute topic hashes for all known TJ swap versions
+    const topicV1 = this._getSwapTopicForVersion(0);
+    const topicV2Legacy = this._getSwapTopicForVersion(1); // V2.0 only
+    const topicV22 = this._getSwapTopicForVersion(3);      // V2.1 and V2.2 share this
 
-    // Collect all TJ V2.2 swap events from receipt
-    const swapEvents = [];
+    // Step 1: Scan all receipt logs, collecting swap events from ALL versions
+    // Version tags: 0=V1, 1=V2.0 legacy, 3=V2.1/V2.2 (same format)
+    const allSwapEvents = [];
     for (const log of receipt.logs) {
+      if (!log.topics || !log.topics[0]) continue;
+      const topic0 = log.topics[0];
       try {
-        if (log.topics && log.topics[0] === swapTopicHash) {
-          const parsed = this.parseSwapEvent(log);
-          swapEvents.push(parsed);
+        if (topic0 === topicV22) {
+          allSwapEvents.push({ version: 3, parsed: this.parseSwapEvent(log), logIndex: log.logIndex, address: log.address.toLowerCase() });
+        } else if (topic0 === topicV2Legacy) {
+          allSwapEvents.push({ version: 1, parsed: this._parseV2LegacySwapEvent(log), logIndex: log.logIndex, address: log.address.toLowerCase() });
+        } else if (topic0 === topicV1) {
+          allSwapEvents.push({ version: 0, parsed: this._parseV1SwapEvent(log), logIndex: log.logIndex, address: log.address.toLowerCase() });
         }
       } catch (e) {
-        // Not a valid TJ V2.2 Swap event, skip
+        // Not a valid swap event, skip
       }
     }
 
-    // Match events to metadata sequentially
+    // Sort by logIndex to maintain emission order
+    allSwapEvents.sort((a, b) => (a.logIndex ?? 0) - (b.logIndex ?? 0));
+
+    // Step 2: Match events to metadata sequentially
+    // Each hop may produce multiple Swap events (multi-bin crossing in LB pools).
+    // We group contiguous events from the same pool address as belonging to one hop.
+    // For amountIn: use the first event of the hop's group.
+    // For amountOut: use the last event of the hop's group.
     let eventIndex = 0;
     const actualSwaps = [];
 
@@ -1812,54 +1898,38 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       if (!metadata.tokenOutAddress) {
         throw new Error("Swap metadata must have tokenOutAddress");
       }
+      if (!metadata.routes || metadata.routes.length === 0) {
+        throw new Error("Swap metadata must have routes");
+      }
 
-      const tokenInAddress = metadata.tokenInAddress.toLowerCase();
-      const tokenOutAddress = metadata.tokenOutAddress.toLowerCase();
       let totalAmountIn = BigInt(0);
       let totalAmountOut = BigInt(0);
 
-      if (metadata.routes && metadata.routes.length > 0) {
-        // MULTI-HOP: use tokenPath for first/last hop extraction
-        for (const route of metadata.routes) {
-          const { tokenPath, poolCount } = route;
-          for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
-            if (eventIndex >= swapEvents.length) break;
-            const event = swapEvents[eventIndex];
+      for (const { tokenPath, poolCount } of metadata.routes) {
+        for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
+          if (eventIndex >= allSwapEvents.length) break;
 
-            if (hopIdx === 0) {
-              const first = tokenPath[0].toLowerCase();
-              const second = tokenPath[1].toLowerCase();
-              const isTokenX = first < second;
-              totalAmountIn += BigInt(isTokenX
-                ? event.amountsIn.amountX : event.amountsIn.amountY);
-            }
+          // Consume all contiguous events from the same pool address (multi-bin crossing)
+          const hopPoolAddress = allSwapEvents[eventIndex].address;
+          const firstEvent = allSwapEvents[eventIndex];
+          let lastEvent = firstEvent;
+          eventIndex++;
 
-            if (hopIdx === poolCount - 1) {
-              const prevToken = tokenPath[poolCount - 1].toLowerCase();
-              const lastToken = tokenPath[poolCount].toLowerCase();
-              const isTokenX = lastToken < prevToken;
-              totalAmountOut += BigInt(isTokenX
-                ? event.amountsOut.amountX : event.amountsOut.amountY);
-            }
-
+          while (eventIndex < allSwapEvents.length && allSwapEvents[eventIndex].address === hopPoolAddress) {
+            lastEvent = allSwapEvents[eventIndex];
             eventIndex++;
           }
-        }
-      } else {
-        // SIMPLE: single-hop, use token address ordering
-        const isTokenInTokenX = tokenInAddress < tokenOutAddress;
-        const numEvents = metadata.expectedSwapEvents || 1;
 
-        for (let i = 0; i < numEvents; i++) {
-          if (eventIndex >= swapEvents.length) break;
-          const event = swapEvents[eventIndex];
+          const hopTokenIn = tokenPath[hopIdx].toLowerCase();
+          const hopTokenOut = tokenPath[hopIdx + 1].toLowerCase();
 
-          totalAmountIn += BigInt(isTokenInTokenX
-            ? event.amountsIn.amountX : event.amountsIn.amountY);
-          totalAmountOut += BigInt(isTokenInTokenX
-            ? event.amountsOut.amountY : event.amountsOut.amountX);
+          if (hopIdx === 0) {
+            totalAmountIn += this._extractAmountIn(firstEvent.version, firstEvent.parsed, hopTokenIn, hopTokenOut);
+          }
 
-          eventIndex++;
+          if (hopIdx === poolCount - 1) {
+            totalAmountOut += this._extractAmountOut(lastEvent.version, lastEvent.parsed, hopTokenIn, hopTokenOut);
+          }
         }
       }
 
@@ -1870,6 +1940,50 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     }
 
     return actualSwaps;
+  }
+
+  /**
+   * Extract amountIn from a parsed swap event based on TJ version and token ordering.
+   * @param {number} version - TJ version (0=V1, 1/2=V2/V2.1, 3=V2.2)
+   * @param {Object} parsed - Parsed event data
+   * @param {string} hopTokenIn - Lowercase address of hop input token
+   * @param {string} hopTokenOut - Lowercase address of hop output token
+   * @returns {bigint} Amount in
+   */
+  _extractAmountIn(version, parsed, hopTokenIn, hopTokenOut) {
+    if (version === 0) {
+      // V1: token0 = lower address (enforced by UniswapV2 factory)
+      return BigInt(hopTokenIn < hopTokenOut ? parsed.amount0In : parsed.amount1In);
+    } else if (version === 1) {
+      // V2.0 Legacy: amountIn is given directly
+      return BigInt(parsed.amountIn);
+    } else {
+      // V2.1/V2.2: packed bytes32. Sum both components — only the input side is non-zero.
+      // Can't assume tokenX = lower address; V2.1/V2.2 factories don't enforce ordering.
+      return BigInt(parsed.amountsIn.amountX) + BigInt(parsed.amountsIn.amountY);
+    }
+  }
+
+  /**
+   * Extract amountOut from a parsed swap event based on TJ version and token ordering.
+   * @param {number} version - TJ version (0=V1, 1/2=V2/V2.1, 3=V2.2)
+   * @param {Object} parsed - Parsed event data
+   * @param {string} hopTokenIn - Lowercase address of hop input token
+   * @param {string} hopTokenOut - Lowercase address of hop output token
+   * @returns {bigint} Amount out
+   */
+  _extractAmountOut(version, parsed, hopTokenIn, hopTokenOut) {
+    if (version === 0) {
+      // V1: token0 = lower address (enforced by UniswapV2 factory)
+      return BigInt(hopTokenOut < hopTokenIn ? parsed.amount0Out : parsed.amount1Out);
+    } else if (version === 1) {
+      // V2.0 Legacy: amountOut is given directly
+      return BigInt(parsed.amountOut);
+    } else {
+      // V2.1/V2.2: packed bytes32. Sum both components — only the output side is non-zero.
+      // Can't assume tokenX = lower address; V2.1/V2.2 factories don't enforce ordering.
+      return BigInt(parsed.amountsOut.amountX) + BigInt(parsed.amountsOut.amountY);
+    }
   }
 
   parseIncreaseLiquidityReceipt(receipt, { position, poolData } = {}) {

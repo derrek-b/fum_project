@@ -101,6 +101,21 @@ const tokens = {
     isStablecoin: false
   },
 
+  // AUSD (Agora USD - stablecoin on Avalanche)
+  "AUSD": {
+    name: "Agora USD",
+    symbol: "AUSD",
+    displaySymbol: "AUSD",
+    decimals: 6,
+    coingeckoId: "agora-dollar",
+    addresses: {
+      43114: "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", // Avalanche
+      1338: "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a"   // Local Avalanche fork
+    },
+    logoURI: "/Token_Logos/AUSD.svg",
+    isStablecoin: true
+  },
+
   // LINK
   "LINK": {
     name: "Chainlink",
