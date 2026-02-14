@@ -499,6 +499,34 @@ describe('V4 AutomationService Initialization - createNewPosition Workflow', () 
         expect(USDCOutputSwap.tokenInSymbol).toBe('ETH');
       }
     });
+
+    it('should have actual amounts in swap details', () => {
+      if (tokensSwappedEvents.length > 0) {
+        const event = tokensSwappedEvents[0];
+
+        for (const swap of event.swaps) {
+          expect(swap.tokenInSymbol).toBeDefined();
+          expect(swap.tokenOutSymbol).toBeDefined();
+          expect(swap.quotedAmountIn).toBeDefined();
+          expect(swap.quotedAmountOut).toBeDefined();
+          expect(swap.actualAmountIn).toBeDefined();
+          expect(swap.actualAmountOut).toBeDefined();
+          expect(typeof swap.isAmountIn).toBe('boolean');
+
+          expect(BigInt(swap.actualAmountOut)).toBeGreaterThan(0n);
+        }
+      }
+    });
+
+    it('should have actualAmountIn > 0 (validates receipt parsing)', () => {
+      if (tokensSwappedEvents.length > 0) {
+        for (const event of tokensSwappedEvents) {
+          for (const swap of event.swaps) {
+            expect(BigInt(swap.actualAmountIn)).toBeGreaterThan(0n);
+          }
+        }
+      }
+    });
   });
 
   describe('createNewPosition Step 8: Token Balance Refresh', () => {

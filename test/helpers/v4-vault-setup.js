@@ -12,6 +12,7 @@ import { ethers } from 'ethers';
 import { UniswapV4Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
 import { getVaultContract } from 'fum_library/blockchain';
+import { getWrappedNativeAddress } from 'fum_library/helpers/tokenHelpers';
 
 const ERC20_ABI = [
   'function balanceOf(address account) view returns (uint256)',
@@ -401,6 +402,21 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
     const ethToSend = ethers.utils.parseEther(settings.nativeEthToVault);
     await (await owner.sendTransaction({ to: vaultAddress, value: ethToSend })).wait();
     console.log(`    Transferred ${settings.nativeEthToVault} ETH to vault`);
+  }
+
+  // Wrap ETH to WETH and send to vault if configured
+  if (settings.wrapEthToVault) {
+    const wrapAmount = ethers.utils.parseEther(settings.wrapEthToVault);
+    const WETH_ABI = [
+      'function deposit() payable',
+      'function balanceOf(address) view returns (uint256)',
+      'function transfer(address to, uint256 amount) returns (bool)'
+    ];
+    const wethAddress = getWrappedNativeAddress(1337);
+    const wethContract = new ethers.Contract(wethAddress, WETH_ABI, owner);
+    await (await wethContract.deposit({ value: wrapAmount })).wait();
+    await (await wethContract.transfer(vaultAddress, wrapAmount)).wait();
+    console.log(`    Wrapped and transferred ${settings.wrapEthToVault} WETH to vault`);
   }
 
   // Step 6: Configure vault for AutomationService discovery
