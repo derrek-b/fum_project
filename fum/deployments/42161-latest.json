@@ -1,0 +1,12 @@
+{
+  "version": "0.2.1",
+  "timestamp": "2025-12-10T19-27-16",
+  "network": {
+    "name": "Arbitrum One",
+    "chainId": 42161
+  },
+  "contracts": {
+    "BabyStepsStrategy": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
+  },
+  "deployer": "0x42d9df99E78BA0573b2990d6177d6EEf7145c8e6"
+}

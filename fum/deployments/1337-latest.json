@@ -1,0 +1,13 @@
+{
+  "version": "0.2.1",
+  "timestamp": "2025-12-18T00-08-54",
+  "network": {
+    "name": "arbitrum",
+    "chainId": 1337
+  },
+  "contracts": {
+    "VaultFactory": "0x32Cf7c29bAa92AB75A9f55E91603B8BabfEAA2c0",
+    "BabyStepsStrategy": "0x865B84d6bA604D24a43eADD464f6f75101965D06"
+  },
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+}

@@ -1,0 +1,249 @@
+import React from 'react';
+import { useToast } from '../../context/ToastContext';
+import { formatPrice } from 'fum_library/helpers';
+
+const PriceRangeChart = ({
+  lowerPrice,
+  upperPrice,
+  currentPrice,
+  token0Symbol,
+  token1Symbol,
+  isInverted,
+  isActive
+}) => {
+  const { showError } = useToast();
+
+  // Validate inputs and handle edge cases
+  const validateInputs = () => {
+    try {
+      // Convert inputs to numbers if they're strings
+      const lower = typeof lowerPrice === 'string' ? parseFloat(lowerPrice) : lowerPrice;
+      const upper = typeof upperPrice === 'string' ? parseFloat(upperPrice) : upperPrice;
+      const current = typeof currentPrice === 'string' ? parseFloat(currentPrice) : currentPrice;
+
+      // Check if prices are valid numbers
+      if (isNaN(lower) || isNaN(upper) || isNaN(current)) {
+        console.error("Invalid price values:", { lowerPrice, upperPrice, currentPrice });
+        return { valid: false };
+      }
+
+      // Check if range is valid (lower should be less than upper)
+      if (lower >= upper) {
+        console.error("Invalid price range: lower price must be less than upper price", { lower, upper });
+        return { valid: false };
+      }
+
+      return {
+        valid: true,
+        lowerPrice: lower,
+        upperPrice: upper,
+        currentPrice: current
+      };
+    } catch (error) {
+      console.error("Error validating price inputs:", error);
+      showError("Error validating price data");
+      return { valid: false };
+    }
+  };
+
+  // Run validation
+  const validation = validateInputs();
+
+  // If validation fails, show placeholder
+  if (!validation.valid) {
+    return (
+      <div className="text-center pt-5 mt-3">
+        <p className="text-muted">Chart visualization unavailable</p>
+      </div>
+    );
+  }
+
+  // Use validated values
+  const { lowerPrice: lower, upperPrice: upper, currentPrice: current } = validation;
+
+  try {
+    // Calculate position within range (as percentage)
+    let rangePct = 0;
+
+    // Handle division by zero or very small denominators
+    if (Math.abs(upper - lower) < 0.000001) {
+      rangePct = 50; // If range is too small, just put marker in the middle
+    } else {
+      // Calculate percentage (don't clamp - we'll use this to detect out of range)
+      rangePct = ((current - lower) / (upper - lower)) * 100;
+    }
+
+    // Determine if price is out of range
+    const isOutOfRange = rangePct < 0 || rangePct > 100;
+    const isAboveRange = rangePct > 100;
+    const isBelowRange = rangePct < 0;
+
+    // For display purposes - handle potential formatting errors
+    let displayLower = "N/A";
+    let displayUpper = "N/A";
+    let displayCurrent = "N/A";
+
+    try {
+      displayLower = formatPrice(lower);
+      displayUpper = formatPrice(upper);
+      displayCurrent = formatPrice(current);
+    } catch (formatError) {
+      console.error("Error formatting price values:", formatError);
+    }
+
+    // Generate token pair label with fallbacks
+    const token0 = token0Symbol || "Token0";
+    const token1 = token1Symbol || "Token1";
+    // When isInverted is true: baseToken=token0, quoteToken=token1, price shows token1 per token0
+    // When isInverted is false: baseToken=token1, quoteToken=token0, price shows token0 per token1
+    const pairLabel = isInverted
+      ? `${token1} per ${token0}`
+      : `${token0} per ${token1}`;
+
+    const activeColor = '#7a0000'; // Crimson
+    const inactiveColor = '#dc3545'; // Danger red
+    const chartColor = isActive ? activeColor : inactiveColor;
+
+    // Styles for the chart
+    const chartStyles = {
+      container: {
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        padding: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between'
+      },
+      rangeBar: {
+        position: 'relative',
+        height: '40px',
+        backgroundColor: '#d0d0d0',
+        borderRadius: '20px',
+        marginTop: '20px',
+        marginBottom: '10px'
+      },
+      activeRange: {
+        position: 'absolute',
+        height: '100%',
+        backgroundColor: chartColor,
+        opacity: 0.4,
+        left: '25%',
+        width: '50%',
+        borderRadius: '0'
+      },
+      priceMarker: {
+        position: 'absolute',
+        width: '3px',
+        height: '50px',
+        backgroundColor: '#000',
+        left: `${rangePct}%`,
+        top: '-5px'
+      },
+      priceLabel: {
+        position: 'absolute',
+        left: `${rangePct}%`,
+        top: '-25px',
+        transform: 'translateX(-50%)',
+        backgroundColor: '#f5f5f5',
+        color: isOutOfRange ? '#dc3545' : 'var(--blue-accent)',
+        padding: '2px 6px',
+        borderRadius: '4px',
+        border: 'none',
+        fontSize: '12px',
+        fontWeight: 'bold'
+      },
+      lowerPriceLabel: {
+        position: 'absolute',
+        left: '25%',
+        bottom: '-25px',
+        transform: 'translateX(-50%)',
+        fontSize: '12px',
+        color: 'var(--blue-accent)',
+        fontWeight: 'bold'
+      },
+      upperPriceLabel: {
+        position: 'absolute',
+        left: '75%',
+        bottom: '-25px',
+        transform: 'translateX(-50%)',
+        fontSize: '12px',
+        color: 'var(--blue-accent)',
+        fontWeight: 'bold'
+      },
+      footer: {
+        marginTop: '30px',
+        fontSize: '12px',
+        textAlign: 'center',
+        color: '#666'
+      }
+    };
+
+    // Determine arrow indicator for out of range prices
+    let priceDisplayText = displayCurrent;
+    if (isAboveRange) {
+      priceDisplayText = `${displayCurrent} →`;
+    } else if (isBelowRange) {
+      priceDisplayText = `← ${displayCurrent}`;
+    }
+
+    // Calculate position for marker and label (clamp to 0-100 for positioning)
+    const clampedPct = Math.min(Math.max(rangePct, 0), 100);
+
+    return (
+      <div style={chartStyles.container}>
+        <div style={chartStyles.rangeBar}>
+          {/* Active price range */}
+          <div
+            style={{
+              ...chartStyles.activeRange,
+              left: '25%',
+              width: '50%'
+            }}
+          />
+
+          {/* Current price marker - only show if in range */}
+          {!isOutOfRange && (
+            <div
+              style={{
+                ...chartStyles.priceMarker,
+                left: `${clampedPct}%`
+              }}
+            />
+          )}
+
+          {/* Current price label */}
+          <div
+            style={{
+              ...chartStyles.priceLabel,
+              left: `${clampedPct}%`
+            }}
+          >
+            {priceDisplayText}
+          </div>
+
+          {/* Lower price label */}
+          <div style={chartStyles.lowerPriceLabel}>
+            {displayLower}
+          </div>
+
+          {/* Upper price label */}
+          <div style={chartStyles.upperPriceLabel}>
+            {displayUpper}
+          </div>
+        </div>
+      </div>
+    );
+  } catch (error) {
+    console.error("Error rendering price range chart:", error);
+    showError("Error rendering price chart");
+
+    return (
+      <div className="text-center pt-5 mt-3">
+        <p className="text-muted">Chart visualization unavailable</p>
+      </div>
+    );
+  }
+};
+
+export default PriceRangeChart;
