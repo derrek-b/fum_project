@@ -2002,6 +2002,58 @@ describe("TJPositionManager", function() {
         expect(posAfter.active).to.be.true;
       });
 
+      it("should collect fees when only Y-side accrues in active bin (asymmetric fees)", async function() {
+        const positionId = await createTestPosition();
+        const vaultAddr = await vault.getAddress();
+        const pmAddr = await positionManager.getAddress();
+
+        // Simulate asymmetric fee accrual: Y reserves grow but X stays the same
+        // Active bin (8388608) has reserveX=5000, reserveY=5500 — only Y grew
+        // This is the scenario where round-trip swaps generate fees only on one side
+        await mockLBPair.setBinReserves(8388607, 0, 11000);   // below active: Y grew
+        await mockLBPair.setBinReserves(8388608, 5000, 5500);  // active: only Y grew, X unchanged
+        await mockLBPair.setBinReserves(8388609, 10000, 0);    // above active: no change
+
+        // Verify getAccruedFees detects Y-side fees in active bin
+        const [feesX, feesY] = await positionManager.getAccruedFees(positionId);
+        // Bin 8388607: Y grew → feesY[0] > 0
+        expect(feesY[0]).to.be.gt(0);
+        // Bin 8388608 (active): X unchanged → feesX[1] == 0, Y grew → feesY[1] > 0
+        expect(feesX[1]).to.equal(0);
+        expect(feesY[1]).to.be.gt(0);
+        // Bin 8388609: no change → both 0
+        expect(feesX[2]).to.equal(0);
+        expect(feesY[2]).to.equal(0);
+
+        await mockLBRouter.setRemoveReturnValues(
+          ethers.parseEther("0.01"), 100n * 10n ** 6n
+        );
+
+        const collectCalldata = encodeCollectFees(vaultAddr, positionId);
+        const tx = await vault.collect([pmAddr], [collectCalldata]);
+        const receipt = await tx.wait();
+
+        // Verify FeesCollected event was emitted (Y-side fallback worked)
+        const feesCollectedEvents = receipt.logs.filter(log => {
+          try {
+            const parsed = positionManager.interface.parseLog(log);
+            return parsed && parsed.name === "FeesCollected";
+          } catch { return false; }
+        });
+        expect(feesCollectedEvents.length).to.equal(1);
+
+        // Verify liquidityMinted decreased for bins with fees
+        const posAfter = await positionManager.getPosition(positionId);
+        // Bin 8388607 (index 0): had Y-side fees → should decrease
+        // Bin 8388608 (index 1): had Y-side fees with X unchanged → Y-fallback should detect and decrease
+        // Bin 8388609 (index 2): no fees → may stay same or only change minimally
+        const posBefore = await createTestPosition(); // fresh position for comparison
+        const freshPos = await positionManager.getPosition(posBefore);
+
+        // The key assertion: active bin (index 1) LB tokens were burned despite X-side giving 0
+        expect(posAfter.liquidityMinted[1]).to.be.lt(freshPos.liquidityMinted[1]);
+      });
+
       it("should reset baselines so getAccruedFees returns zero after collection", async function() {
         const positionId = await createTestPosition();
         const vaultAddr = await vault.getAddress();

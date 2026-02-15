@@ -484,11 +484,14 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             // Calculate LB tokens that represent the fee value:
             // principalLb = originalShare * supply / reserve
             // feeLb = liquidityMinted - principalLb
+            // Try X-side first; if it yields 0 (fees only on Y), fall back to Y-side.
+            // Active bins have both reserves, so both branches may apply.
             uint256 feeLbTokens;
             if (uint256(reserveX) > 0) {
                 uint256 principalLb = pos.originalShareX[i] * supply / uint256(reserveX);
                 feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
-            } else if (uint256(reserveY) > 0) {
+            }
+            if (feeLbTokens == 0 && uint256(reserveY) > 0) {
                 uint256 principalLb = pos.originalShareY[i] * supply / uint256(reserveY);
                 feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
             }
