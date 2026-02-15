@@ -749,6 +749,133 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         console.log(`V4 swap - Quoted: ${ethers.utils.formatUnits(swapData.quote.amountOut, 6)} USDC, Actual: ${ethers.utils.formatUnits(parsed[0].actualAmountOut, 6)} USDC, Slippage: ${slippageBps}bps`);
       }, 120000);
     });
+
+    describe('Cross-Version Swap Events', () => {
+      // Helper: create a Uniswap V2 Swap event log
+      const createMockV2SwapLog = (pairAddress, amount0In, amount1In, amount0Out, amount1Out, logIndex = 0) => {
+        const topic = ethers.utils.id('Swap(address,uint256,uint256,uint256,uint256,address)');
+        const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+        const toTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+        const encodedData = ethers.utils.defaultAbiCoder.encode(
+          ['uint256', 'uint256', 'uint256', 'uint256'],
+          [amount0In, amount1In, amount0Out, amount1Out]
+        );
+        return {
+          address: pairAddress,
+          topics: [topic, senderTopic, toTopic],
+          data: encodedData,
+          logIndex
+        };
+      };
+
+      // Helper: create a Uniswap V3 Swap event log
+      const createMockV3SwapLog = (poolAddress, amount0, amount1, logIndex = 0) => {
+        const topic = ethers.utils.id('Swap(address,address,int256,int256,uint160,uint128,int24)');
+        const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+        const recipientTopic = ethers.utils.hexZeroPad('0x0987654321098765432109876543210987654321', 32);
+        const encodedData = ethers.utils.defaultAbiCoder.encode(
+          ['int256', 'int256', 'uint160', 'uint128', 'int24'],
+          [amount0, amount1, '79228162514264337593543950336', '1000000000', 0]
+        );
+        return {
+          address: poolAddress,
+          topics: [topic, senderTopic, recipientTopic],
+          data: encodedData,
+          logIndex
+        };
+      };
+
+      // Helper: create a Uniswap V4 Swap event log (for unit tests without real execution)
+      const createMockV4SwapLog = (poolManagerAddress, amount0, amount1, logIndex = 0) => {
+        const topic = ethers.utils.id('Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)');
+        const poolIdTopic = ethers.utils.hexZeroPad('0xaabbccdd', 32);
+        const senderTopic = ethers.utils.hexZeroPad('0x1234567890123456789012345678901234567890', 32);
+        const encodedData = ethers.utils.defaultAbiCoder.encode(
+          ['int128', 'int128', 'uint160', 'uint128', 'int24', 'uint24'],
+          [amount0, amount1, '79228162514264337593543950336', '1000000000', 0, 3000]
+        );
+        return {
+          address: poolManagerAddress,
+          topics: [topic, poolIdTopic, senderTopic],
+          data: encodedData,
+          logIndex
+        };
+      };
+
+      it('should parse V2 swap events', () => {
+        const pairAddress = '0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc';
+        // V2: amount0In=1000000 USDC, amount1Out=500000000000000000 WETH
+        const mockLog = createMockV2SwapLog(pairAddress, '1000000', '0', '0', '500000000000000000', 0);
+
+        const receipt = { logs: [mockLog] };
+        const metadata = [{
+          tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+          tokenOutAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+          expectedSwapEvents: 1
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000');
+        expect(result[0].actualAmountOut).toBe('500000000000000000');
+      });
+
+      it('should parse V3 swap events', () => {
+        const poolAddress = '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640';
+        // V3: amount0=1000000 (positive=in), amount1=-500000000000000000 (negative=out)
+        const mockLog = createMockV3SwapLog(poolAddress, '1000000', '-500000000000000000', 0);
+
+        const receipt = { logs: [mockLog] };
+        const metadata = [{
+          tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+          tokenOutAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+          expectedSwapEvents: 1
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].actualAmountIn).toBe('1000000');
+        expect(result[0].actualAmountOut).toBe('500000000000000000');
+      });
+
+      it('should parse cross-version multi-hop (V2 -> V4)', () => {
+        const v2PairAddress = '0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc';
+        const poolManager = '0x000000000004444c5dc75cB358380D2e3dE08A90';
+
+        // First hop: V2 pair, USDC -> WETH
+        // amount0In=1000000000 USDC, amount1Out=500000000000000000 WETH
+        const v2Log = createMockV2SwapLog(v2PairAddress, '1000000000', '0', '0', '500000000000000000', 0);
+
+        // Second hop: V4 pool, WETH -> WBTC
+        // V4 convention: positive = user received, negative = user sent
+        // amount0=2500000 WBTC (user received), amount1=-500000000000000000 WETH (user sent)
+        const v4Log = createMockV4SwapLog(poolManager, '2500000', '-500000000000000000', 1);
+
+        const receipt = { logs: [v2Log, v4Log] };
+        const metadata = [{
+          tokenInAddress: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+          tokenOutAddress: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC
+          routes: [{
+            tokenPath: [
+              '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+              '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+              '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'  // WBTC
+            ],
+            poolCount: 2
+          }]
+        }];
+
+        const result = adapter.parseSwapReceipt(receipt, metadata);
+
+        expect(result).toHaveLength(1);
+        // First hop (V2): amountIn = amount0In = 1000000000
+        expect(result[0].actualAmountIn).toBe('1000000000');
+        // Last hop (V4): amountOut = abs(-2500000) = 2500000
+        expect(result[0].actualAmountOut).toBe('2500000');
+      });
+    });
   });
 
   describe('_generateSwapData', () => {

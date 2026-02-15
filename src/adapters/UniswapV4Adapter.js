@@ -159,6 +159,94 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
+   * Get the topic hash for Uniswap V2 Swap events
+   * @returns {string} Keccak256 topic hash
+   * @private
+   */
+  _getSwapTopicV2() {
+    return ethers.utils.id('Swap(address,uint256,uint256,uint256,uint256,address)');
+  }
+
+  /**
+   * Get the topic hash for Uniswap V3 Swap events
+   * @returns {string} Keccak256 topic hash
+   * @private
+   */
+  _getSwapTopicV3() {
+    return ethers.utils.id('Swap(address,address,int256,int256,uint160,uint128,int24)');
+  }
+
+  /**
+   * Parse a Uniswap V2 Swap event log
+   * @param {Object} log - Raw log with data containing [uint256, uint256, uint256, uint256]
+   * @returns {Object} Parsed amounts { amount0In, amount1In, amount0Out, amount1Out }
+   * @private
+   */
+  _parseV2SwapEvent(log) {
+    const decoded = ethers.utils.defaultAbiCoder.decode(
+      ['uint256', 'uint256', 'uint256', 'uint256'],
+      log.data
+    );
+    return {
+      amount0In: decoded[0].toString(),
+      amount1In: decoded[1].toString(),
+      amount0Out: decoded[2].toString(),
+      amount1Out: decoded[3].toString(),
+    };
+  }
+
+  /**
+   * Parse a Uniswap V3 Swap event log
+   * @param {Object} log - Raw log with data containing [int256, int256, uint160, uint128, int24]
+   * @returns {Object} Parsed amounts { amount0, amount1 } (signed)
+   * @private
+   */
+  _parseV3SwapEvent(log) {
+    const decoded = ethers.utils.defaultAbiCoder.decode(
+      ['int256', 'int256', 'uint160', 'uint128', 'int24'],
+      log.data
+    );
+    return {
+      amount0: decoded[0],
+      amount1: decoded[1]
+    };
+  }
+
+  /**
+   * Extract amountIn and amountOut from a parsed swap event, regardless of protocol version.
+   *
+   * - V2: unsigned amounts — sum amount0In+amount1In (only one non-zero), same for out
+   * - V3/V4: signed amounts — positive = pool received (user's input), negative = pool sent (user's output)
+   *
+   * @param {string} protocol - 'V2', 'V3', or 'V4'
+   * @param {Object} parsed - Protocol-specific parsed event data
+   * @returns {{ amountIn: bigint, amountOut: bigint }}
+   * @private
+   */
+  _extractSwapAmounts(protocol, parsed) {
+    if (protocol === 'V2') {
+      return {
+        amountIn: BigInt(parsed.amount0In) + BigInt(parsed.amount1In),
+        amountOut: BigInt(parsed.amount0Out) + BigInt(parsed.amount1Out)
+      };
+    }
+    const a0 = BigInt(parsed.amount0.toString());
+    const a1 = BigInt(parsed.amount1.toString());
+    if (protocol === 'V4') {
+      // V4: positive = user received (output), negative = user sent (input)
+      return {
+        amountIn: a0 < 0n ? -a0 : -a1,
+        amountOut: a0 > 0n ? a0 : a1
+      };
+    }
+    // V3: positive = pool received (user input), negative = pool sent (user output)
+    return {
+      amountIn: a0 > 0n ? a0 : a1,
+      amountOut: a0 < 0n ? -a0 : -a1
+    };
+  }
+
+  /**
    * Get the event filter for monitoring swap events on this platform
    *
    * V4 difference: All swaps emit from the singleton PoolManager contract.
@@ -2374,7 +2462,11 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       gasEstimate: route.estimatedGasUsed.toString(),
       route: route.route.map(r => ({
         protocol: r.protocol,
-        pools: r.poolAddresses || r.pools?.map(p => p.address)
+        pools: r.poolAddresses || r.pools?.map(p => p.address),
+        tokenPath: (r.route.path || r.route.currencyPath || []).map(t =>
+          t.isNative ? ethers.constants.AddressZero : (t.address || t.wrapped?.address || '').toLowerCase()
+        ),
+        poolCount: r.route.pools?.length || r.route.pairs?.length || 1,
       }))
     };
 
@@ -2684,7 +2776,11 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         tokenOutAddress: tokenOut.address,
         quotedAmountIn,
         quotedAmountOut,
-        isAmountIn
+        isAmountIn,
+        routes: (swapData.quote.route || []).map(r => ({
+          tokenPath: r.tokenPath,
+          poolCount: r.poolCount,
+        }))
       });
     }
 
@@ -3182,32 +3278,52 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     const actualSwaps = [];
 
-    // Get V4 Swap event topic
-    const swapTopicHash = ethers.utils.id(this._getSwapEventSignature());
+    // Compute topic hashes for all Uniswap swap versions
+    const topicV2 = this._getSwapTopicV2();
+    const topicV3 = this._getSwapTopicV3();
+    const topicV4 = ethers.utils.id(this._getSwapEventSignature());
 
-    // Collect all swap events from the receipt
-    // V4 difference: All swaps emit from PoolManager, not individual pools
-    const swapEvents = [];
+    // Step 1: Scan ALL receipt logs, collecting swap events from all versions
+    const allSwapEvents = [];
     for (const log of receipt.logs) {
+      if (!log.topics || !log.topics[0]) continue;
+      const topic0 = log.topics[0];
       try {
-        if (log.topics[0] === swapTopicHash) {
-          // Decode V4 swap event data manually (ethers parseLog has issues with int128)
+        if (topic0 === topicV4) {
           const decoded = ethers.utils.defaultAbiCoder.decode(
             ['int128', 'int128', 'uint160', 'uint128', 'int24', 'uint24'],
             log.data
           );
-          swapEvents.push({
-            poolId: log.topics[1],  // V4: poolId from indexed topic
-            amount0: decoded[0],    // int128
-            amount1: decoded[1]     // int128
+          allSwapEvents.push({
+            protocol: 'V4',
+            parsed: { amount0: decoded[0], amount1: decoded[1] },
+            logIndex: log.logIndex,
+            address: log.address?.toLowerCase()
+          });
+        } else if (topic0 === topicV3) {
+          allSwapEvents.push({
+            protocol: 'V3',
+            parsed: this._parseV3SwapEvent(log),
+            logIndex: log.logIndex,
+            address: log.address?.toLowerCase()
+          });
+        } else if (topic0 === topicV2) {
+          allSwapEvents.push({
+            protocol: 'V2',
+            parsed: this._parseV2SwapEvent(log),
+            logIndex: log.logIndex,
+            address: log.address?.toLowerCase()
           });
         }
       } catch (e) {
-        // Not a V4 Swap event, continue
+        // Not a valid swap event, skip
       }
     }
 
-    // Match swap events to metadata in order (swaps execute sequentially)
+    // Sort by logIndex to maintain emission order
+    allSwapEvents.sort((a, b) => (a.logIndex ?? 0) - (b.logIndex ?? 0));
+
+    // Step 2: Match events to metadata sequentially
     let eventIndex = 0;
 
     for (const metadata of swapMetadata) {
@@ -3219,82 +3335,40 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         throw new Error("Swap metadata must have tokenOutAddress");
       }
 
-      const numEvents = metadata.expectedSwapEvents || 1;
-      const tokenInAddress = metadata.tokenInAddress.toLowerCase();
-      const tokenOutAddress = metadata.tokenOutAddress.toLowerCase();
-
       let totalAmountIn = BigInt(0);
       let totalAmountOut = BigInt(0);
 
-      // MULTI-HOP/SPLIT ROUTE: Use tokenPath to intelligently parse events
       if (metadata.routes && metadata.routes.length > 0) {
-        for (let routeIdx = 0; routeIdx < metadata.routes.length; routeIdx++) {
-          const route = metadata.routes[routeIdx];
-          const { tokenPath, poolCount } = route;
-
-          // For this route, we consume poolCount events
+        // ROUTE-AWARE PARSING: Use tokenPath for multi-hop/split routes
+        for (const { tokenPath, poolCount } of metadata.routes) {
           for (let hopIdx = 0; hopIdx < poolCount; hopIdx++) {
-            if (eventIndex >= swapEvents.length) {
-              break;
+            if (eventIndex >= allSwapEvents.length) break;
+
+            const event = allSwapEvents[eventIndex];
+            const amounts = this._extractSwapAmounts(event.protocol, event.parsed);
+
+            if (hopIdx === 0) {
+              totalAmountIn += amounts.amountIn;
             }
-
-            const event = swapEvents[eventIndex];
-            const isFirstHop = (hopIdx === 0);
-            const isLastHop = (hopIdx === poolCount - 1);
-
-            // For first hop: extract amountIn using tokenPath[0]
-            if (isFirstHop) {
-              const firstToken = tokenPath[0].toLowerCase();
-              const secondToken = tokenPath[1].toLowerCase();
-              const isToken0 = firstToken < secondToken;
-
-              const amountIn = isToken0
-                ? BigInt(event.amount0.abs().toString())
-                : BigInt(event.amount1.abs().toString());
-
-              totalAmountIn += amountIn;
-            }
-
-            // For last hop: extract amountOut using tokenPath[poolCount]
-            if (isLastHop) {
-              const secondToLastToken = tokenPath[poolCount - 1].toLowerCase();
-              const lastToken = tokenPath[poolCount].toLowerCase();
-              const isToken0 = secondToLastToken < lastToken;
-
-              const amountOut = isToken0
-                ? BigInt(event.amount1.abs().toString())
-                : BigInt(event.amount0.abs().toString());
-
-              totalAmountOut += amountOut;
+            if (hopIdx === poolCount - 1) {
+              totalAmountOut += amounts.amountOut;
             }
 
             eventIndex++;
           }
         }
       } else {
-        // SIMPLE ROUTE: Single event, use basic token ordering
-        const isTokenInToken0 = tokenInAddress < tokenOutAddress;
-
-        // Consume exactly numEvents events for this metadata entry
+        // SIMPLE ROUTE: No route info — consume one event per metadata entry
+        const numEvents = metadata.expectedSwapEvents || 1;
         for (let i = 0; i < numEvents; i++) {
-          if (eventIndex < swapEvents.length) {
-            const event = swapEvents[eventIndex];
+          if (eventIndex >= allSwapEvents.length) break;
 
-            const actualIn = isTokenInToken0
-              ? BigInt(event.amount0.abs().toString())
-              : BigInt(event.amount1.abs().toString());
+          const event = allSwapEvents[eventIndex];
+          const amounts = this._extractSwapAmounts(event.protocol, event.parsed);
 
-            const actualOut = isTokenInToken0
-              ? BigInt(event.amount1.abs().toString())
-              : BigInt(event.amount0.abs().toString());
-
-            totalAmountIn += actualIn;
-            totalAmountOut += actualOut;
-            eventIndex++;
-          } else {
-            // Not enough events - swap may have failed partially
-            break;
-          }
+          totalAmountIn += amounts.amountIn;
+          totalAmountOut += amounts.amountOut;
+          eventIndex++;
         }
       }
 
