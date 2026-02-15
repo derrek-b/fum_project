@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTraderJoeTestVault } from '../../helpers/traderjoe-vault-setup.js';
+import { configureTJStrategyParameters } from '../../helpers/traderjoe-swap-utils.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
@@ -89,6 +90,12 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition Workflow'
       value: ethers.utils.parseEther('10')
     });
     await tx.wait();
+
+    // Narrow range from default 5% to 1% for faster position creation
+    await configureTJStrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
+      targetRangeUpper: 100,
+      targetRangeLower: 100
+    });
 
     console.log('Test vault created at:', testVault.vaultAddress);
   }, 180000);

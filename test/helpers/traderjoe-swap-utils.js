@@ -139,6 +139,7 @@ export async function executeTraderJoeSwap(testEnv, params) {
     tokenOut,
     amountIn,
     binStep = 20,
+    version = 3,
     wallet,
     slippage = 5,
     nonce
@@ -160,7 +161,7 @@ export async function executeTraderJoeSwap(testEnv, params) {
   // Build path
   const path = {
     pairBinSteps: [binStep],
-    versions: [2],
+    versions: [version],
     tokenPath: [tokenIn, tokenOut]
   };
 
@@ -329,4 +330,67 @@ export async function findLBPairAddress(testEnv, tokenA, tokenB, binStep = 20) {
 
   const pairInfo = await lbFactory.getLBPairInformation(sortedTokenA, sortedTokenB, binStep);
   return pairInfo.LBPair;
+}
+
+/**
+ * Configure strategy parameters for a TJ vault
+ * @param {Object} testEnv - Test environment
+ * @param {string} vaultAddress - Vault address
+ * @param {Object} vault - Vault contract instance
+ * @param {Object} params - Strategy parameters
+ */
+export async function configureTJStrategyParameters(testEnv, vaultAddress, vault, params = {}) {
+  const {
+    targetRangeUpper = 25,    // 0.25%
+    targetRangeLower = 25,    // 0.25%
+    maxSlippage = 500,        // 5%
+    emergencyExitTrigger = 50, // 0.5%
+    feeReinvestment = true,
+    reinvestmentTrigger = 100, // $1.00
+    reinvestmentRatio = 5000  // 50%
+  } = params;
+
+  const babyStepsStrategyAddress = testEnv.deployedContracts.BabyStepsStrategy;
+
+  // Authorize vault to modify parameters
+  const strategyContract = new ethers.Contract(
+    babyStepsStrategyAddress,
+    ['function authorizeVault(address vault) external'],
+    testEnv.hardhatServer.signers[0]
+  );
+
+  const authTx = await strategyContract.authorizeVault(vaultAddress);
+  await authTx.wait();
+
+  // Encode parameter calls
+  const strategyInterface = new ethers.utils.Interface([
+    'function setRangeParameters(uint16 upperRange, uint16 lowerRange) external',
+    'function setRiskParameters(uint16 slippage, uint16 exitTrigger) external',
+    'function setFeeParameters(bool reinvest, uint256 trigger, uint16 ratio) external'
+  ]);
+
+  const setRangeData = strategyInterface.encodeFunctionData('setRangeParameters', [
+    targetRangeUpper,
+    targetRangeLower
+  ]);
+
+  const setRiskData = strategyInterface.encodeFunctionData('setRiskParameters', [
+    maxSlippage,
+    emergencyExitTrigger
+  ]);
+
+  const setFeeData = strategyInterface.encodeFunctionData('setFeeParameters', [
+    feeReinvestment,
+    reinvestmentTrigger,
+    reinvestmentRatio
+  ]);
+
+  // Execute through vault
+  const executeTx = await vault.execute(
+    [babyStepsStrategyAddress, babyStepsStrategyAddress, babyStepsStrategyAddress],
+    [setRangeData, setRiskData, setFeeData]
+  );
+  await executeTx.wait();
+
+  console.log(`  TJ Strategy parameters configured for vault ${vaultAddress}`);
 }
