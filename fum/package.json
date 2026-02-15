@@ -17,7 +17,6 @@
     "contracts:sync": "node scripts/sync-contracts-to-ecosystem.js",
     "contracts:test": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat test'",
     "contracts:test:coverage": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat coverage'",
-    "hardhat-node": "bash -c 'cd ../fum_testing && npx hardhat node'",
     "deployment-setup": "npm run contracts:sync",
     "seed-localhost": "bash -c 'node test/scripts/create-test-vault.js && node test/scripts/seed.js'",
     "manipulate-price:up": "node test/scripts/manipulate-price.js --direction=up",
