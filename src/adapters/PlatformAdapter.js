@@ -40,6 +40,16 @@
  * | getAccruedFeesUSD            | Strategy.handleSwapEvent            | CONFIRMED |
  * | sortTokens                   | Strategy pool token ordering        | CONFIRMED |
  * | getOptimalTokenRatio         | Strategy.createNewPosition          | CONFIRMED |
+ * ----------------------------------------------------------------------------------
+ *
+ * OPTIONAL CAPABILITY METHODS (default no-op implementations, override to enable):
+ * ----------------------------------------------------------------------------------
+ * | Method                              | Used By                        | Status    |
+ * |-------------------------------------|--------------------------------|-----------|
+ * | getPoolIncentives                   | Strategy (pool selection)      | OPTIONAL  |
+ * | getIncentivePreCloseTransactions    | Strategy (close position)      | OPTIONAL  |
+ * | getIncentivePostCreateTransactions  | Strategy (create position)     | OPTIONAL  |
+ * | getIncentiveClaimTransactions       | Strategy (fee collection)      | OPTIONAL  |
  * =============================================================================
  */
 export default class PlatformAdapter {
@@ -613,5 +623,110 @@ export default class PlatformAdapter {
    */
   async getPoolData(poolId, provider) {
     throw new Error("getPoolData must be implemented by subclasses");
+  }
+
+  // ===========================================================================
+  // Optional Capabilities — Incentive Rewards
+  // ===========================================================================
+  // These methods provide safe defaults (no incentives, empty transactions).
+  // Adapters override them to enable incentive support for their platform.
+  //
+  // Detection model varies by platform:
+  //   - Uniswap V3: Event scan on UniswapV3Staker contract
+  //   - Uniswap V4 / SushiSwap / Camelot: Merkl API query
+  //   - Trader Joe V2.2: getLBHooksParameters() on the LBPair
+  //   - PancakeSwap V3: MasterChefV3 contract query
+  //
+  // Lifecycle model varies by platform:
+  //   - Custody-transfer (V3, PancakeSwap): NFT must be staked/unstaked around
+  //     position creation and closure — override pre-close and post-create methods
+  //   - Auto-tracking (V4, TJ, Sushi, Camelot): No staking required, rewards
+  //     accrue automatically — pre-close and post-create return empty arrays
+  // ===========================================================================
+
+  /**
+   * Check if a pool has active incentive/reward programs
+   *
+   * Queries platform-specific sources (on-chain contracts, off-chain APIs)
+   * to determine if the given pool has active incentive campaigns.
+   *
+   * Called by the strategy during pool selection (selectBestPool) to tag
+   * the pool object with incentive data for downstream use.
+   *
+   * @param {string} poolAddress - Pool contract address or identifier
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Incentive status
+   * @returns {boolean} result.active - Whether any incentive programs are currently active
+   * @returns {Array<Object>} result.programs - Active incentive programs
+   * @returns {string} result.programs[].rewardToken - Reward token address
+   * @returns {string} result.programs[].rewardTokenSymbol - Reward token symbol (if available)
+   * @returns {number} result.programs[].endTime - Program end timestamp (0 if ongoing/unknown)
+   */
+  async getPoolIncentives(poolAddress, provider) {
+    return { active: false, programs: [] };
+  }
+
+  /**
+   * Get transactions required before closing a position with active incentives
+   *
+   * For custody-transfer platforms (Uniswap V3, PancakeSwap), the position NFT
+   * must be unstaked/withdrawn from the staking contract before the position
+   * can be closed. This method returns those transactions.
+   *
+   * For auto-tracking platforms (V4, TJ, SushiSwap, Camelot), returns empty array.
+   *
+   * @param {Object} position - Position object from vault cache
+   * @param {string} position.id - Position/token ID
+   * @param {string} position.pool - Pool address or identifier
+   * @param {Object} incentives - Incentive data from getPoolIncentives()
+   * @param {Array<Object>} incentives.programs - Active incentive programs
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Array<Object>>} Array of transaction data objects { to, data, value }
+   */
+  async getIncentivePreCloseTransactions(position, incentives, provider) {
+    return [];
+  }
+
+  /**
+   * Get transactions required after creating a position in an incentivized pool
+   *
+   * For custody-transfer platforms (Uniswap V3, PancakeSwap), the position NFT
+   * must be deposited into the staking contract after creation. This method
+   * returns those transactions.
+   *
+   * For auto-tracking platforms (V4, TJ, SushiSwap, Camelot), returns empty array.
+   *
+   * @param {string} positionId - Newly created position/token ID
+   * @param {Object} incentives - Incentive data from getPoolIncentives()
+   * @param {Array<Object>} incentives.programs - Active incentive programs
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Array<Object>>} Array of transaction data objects { to, data, value }
+   */
+  async getIncentivePostCreateTransactions(positionId, incentives, provider) {
+    return [];
+  }
+
+  /**
+   * Get transactions to claim accrued incentive rewards
+   *
+   * Returns the platform-specific transactions needed to collect any
+   * accumulated incentive rewards for a vault's position(s) in a pool.
+   *
+   * Claiming mechanics vary by platform:
+   *   - Uniswap V3: unstakeToken → claimReward → restakeToken
+   *   - Uniswap V4 / SushiSwap / Camelot: Merkle proof claim to Distributor contract
+   *   - Trader Joe V2.2: claim() on the hooks rewarder contract
+   *   - PancakeSwap V3: harvest() on MasterChefV3
+   *
+   * Called by the strategy during fee collection to piggyback incentive
+   * claims alongside normal trading fee collection.
+   *
+   * @param {string} vaultAddress - Vault address that holds/staked the position
+   * @param {string} poolAddress - Pool address or identifier
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Array<Object>>} Array of transaction data objects { to, data, value }
+   */
+  async getIncentiveClaimTransactions(vaultAddress, poolAddress, provider) {
+    return [];
   }
 }
