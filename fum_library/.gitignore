@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+bytecode/
+.env
+.env.*
+!.env.example
+!test/.env.test.example
+
+**/.claude/settings.local.json
+artifacts/
+cache/
+*.tgz

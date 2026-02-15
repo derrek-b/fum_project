@@ -1,0 +1,1427 @@
+# Changelog
+
+All notable changes to the F.U.M. library will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.2.1] - 2025-12-17
+
+### WETH Token Helpers Consistency
+
+Fixes `getAllTokens()` and related functions to include WETH as a derived token entry, consistent with `getAllTokenSymbols()`.
+
+#### **Token Helpers Changes**
+- **FIXED**: `getAllTokens()` now includes WETH entry derived from ETH's `wethAddresses`
+- **FIXED**: `validateTokensExist()` now uses `getAllTokens()` to properly validate WETH
+- **FIXED**: `getTokensByType()` now uses `getAllTokens()` to include WETH in volatile tokens
+- **FIXED**: `getTokenByAddress()` returns token with `symbol: 'WETH'` for WETH addresses (not 'ETH')
+
+#### **Technical Details**
+- WETH is now a first-class token entry in `getAllTokens()` with properties:
+  - `symbol: 'WETH'`
+  - `name: 'Wrapped Ether'`
+  - `isNative: false`
+  - `addresses`: copied from ETH's `wethAddresses`
+- This makes `getAllTokens()` consistent with `getAllTokenSymbols()` which includes WETH
+- Pool token symbols now correctly return 'WETH' for WETH addresses (e.g., in `getPositionsForVDS`)
+
+**Status**: Production Ready
+**Breaking Changes**:
+- `getTokenByAddress()` with WETH address now returns `symbol: 'WETH'` instead of `symbol: 'ETH'`
+- `getAllTokens()` returns 6 tokens instead of 5 (WETH added)
+
+---
+
+## [1.2.0] - 2025-12-16
+
+### Native ETH Vault Withdrawals
+
+Adds native ETH withdrawal support to PositionVault contract, plus WETH unwrap option.
+
+#### **Contract Changes (PositionVault)**
+- **ADDED**: `withdrawETH(uint256 amount)` - Withdraw native ETH from vault to owner
+- **ADDED**: `unwrapAndWithdrawETH(address weth, uint256 amount)` - Unwrap WETH to ETH and withdraw to owner
+- **ADDED**: `IWETH` interface for WETH unwrapping
+- Both functions use `onlyAuthorized` modifier (owner or executor can call)
+- Both functions emit `TokensWithdrawn` event with `address(0)` for native ETH
+
+#### **Token Configuration**
+- **ADDED**: `wethLogoURI` property for native tokens (allows WETH to display its own logo)
+
+**Status**: Production Ready
+**Breaking Changes**: None
+
+---
+
+## [1.1.1] - 2025-12-16
+
+### Native ETH Unwrapping Fix
+
+Fixes critical bug preventing native ETH unwrapping during liquidity removal and fee collection.
+
+#### **Bug Fix**
+- **FIXED**: `generateRemoveLiquidityData()` and `generateClaimFeesData()` now correctly handle native ETH unwrapping
+  - **Root Cause**: Using `MaxUint128` for `expectedCurrencyOwed` caused overflow when SDK added burn amounts
+  - **Symptom**: "Insufficient WETH9" error when removing liquidity or collecting fees from ETH positions
+  - **Solution**: Changed `expectedCurrencyOwed` from `MaxUint128` to `0` for both functions
+  - The SDK adds burn amounts to `expectedCurrencyOwed`, so `MaxUint128 + burnAmount` overflowed past 128 bits
+  - Using `0` lets the SDK calculate correct minimums from burn amounts alone
+  - No slippage risk since unwrap/sweep are atomic 1:1 operations within the multicall
+
+#### **Technical Details**
+- `expectedCurrencyOwed` is only used for: (1) detecting native currency type, (2) calculating `amountMinimum` for unwrapWETH9/sweepToken
+- The actual `collect` call internally uses `MaxUint128` for `amount0Max`/`amount1Max` regardless
+- Non-native token pairs are unaffected (SDK ignores these values when `involvesETH` is false)
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Impact**: Native ETH unwrapping now works correctly for remove liquidity, close position, and collect fees operations
+
+---
+
+## [1.1.0] - 2025-12-15
+
+### Native ETH Support
+
+Adds first-class support for native ETH alongside WETH for Uniswap V3 position management.
+
+#### **Token Configuration**
+- **CHANGED**: Renamed `WETH` token to `ETH` with `isNative: true` flag
+- **ADDED**: `wethAddresses` property for native tokens (maps chainId to WETH contract address)
+- **UPDATED**: Native token `addresses` now return `null` (use `wethAddresses` for contract interactions)
+
+#### **Token Helpers**
+- **ADDED**: `getWethAddress(chainId)` - Get WETH contract address for a chain
+- **ADDED**: `isNativeToken(symbol)` - Check if token is native (ETH)
+- **ADDED**: `getTokenAddressForPool(symbol, chainId)` - Get address for V3 pool operations (returns WETH for ETH)
+- **UPDATED**: `getTokenByAddress()` - Now matches WETH addresses to ETH token
+- **UPDATED**: `getTokensByChain()` - Checks `wethAddresses` for native tokens
+- **UPDATED**: `getTokenAddress()` - Returns `null` for native tokens (documented behavior)
+
+#### **Test Updates**
+- **UPDATED**: Token validation tests for new `isNative` and `wethAddresses` properties
+- **UPDATED**: CoinGecko tests to use `ETH` symbol instead of `WETH`
+- **UPDATED**: Token helper tests for native token handling
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: `WETH` symbol renamed to `ETH` - update any hardcoded references
+**Impact**: Frontend can now display combined ETH + WETH balances and handle wrapping transparently
+
+---
+
+## [1.0.1] - 2025-12-09
+
+### Node.js 22+ & Deployment Preparation
+
+Updates for Railway/Vercel deployment compatibility and developer workflow improvements.
+
+#### **Node.js Compatibility**
+- **UPDATED**: Minimum Node.js version to 22+ (required for ES module JSON import syntax `with { type: 'json' }`)
+- **ADDED**: `.nvmrc` file for nvm auto-switching
+- **UPDATED**: README.md Node badge to reflect 22+ requirement
+
+#### **Bug Fixes**
+- **FIXED**: Strategy icon "Steps" → "Footprints" (Steps doesn't exist in lucide-react)
+- **FIXED**: Added named export for `platforms` in platforms.js (was only default export)
+- **FIXED**: Removed duplicate `validateChainId` from platformHelpers.js (now imports from chainHelpers)
+
+#### **Developer Workflow**
+- **ADDED**: `npm run sync` - Creates symlinks to fum and fum_automation for local development
+- **ADDED**: `npm run unsync` - Restores GitHub dependencies
+- **UPDATED**: `npm run pack` - Now checks if sibling directories exist before attempting install
+- **UPDATED**: All scripts gracefully skip missing sibling projects with clear messages
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None
+**Impact**: Deployment compatibility, developer experience
+
+---
+
+## [1.0.0] - 2025-12-09
+
+### Production Release
+
+First production release of fum_library with stable APIs and comprehensive documentation.
+
+#### **Repository Cleanup & Documentation**
+- **ADDED**: LICENSE.md with proprietary license terms
+- **UPDATED**: README.md with proper GitHub repository links
+- **UPDATED**: TESTING.md documentation improvements
+- **UPDATED**: API documentation with new adapter and service references
+- **REMOVED**: .env.example (sensitive configuration)
+- **REMOVED**: ARCHITECTURE.md (consolidated into docs/)
+- **REMOVED**: LICENCE.md (replaced with LICENSE.md)
+- **REMOVED**: Deprecated bytecode files (BatchExecutor, MockERC20, MockPositionNFT, ParrisIslandStrategy)
+- **REMOVED**: Old tarball (fum_library-0.20.0.tgz)
+
+#### **Chain Configuration**
+- **UPDATED**: Arbitrum executor address for production (`0x42d9df99e78ba0573b2990d6177d6eef7145c8e6`)
+- **UPDATED**: Strategy configurations for production deployment
+- **ADDED**: init.js module for library initialization
+
+#### **Contract Artifacts**
+- **UPDATED**: BabyStepsStrategy bytecode and ABI (v1.0.0)
+- **UPDATED**: PositionVault bytecode and ABI (v1.0.0)
+- **UPDATED**: VaultFactory bytecode and ABI (v1.0.0)
+
+#### **Test Infrastructure**
+- **UPDATED**: Test setup and configuration for improved reliability
+- **UPDATED**: Ganache configuration for local testing
+- **UPDATED**: Unit tests for chainHelpers, strategyHelpers, wallet, theGraph
+
+**Status**: ✅ Production Ready
+**Breaking Changes**: None from v0.24.0
+**Impact**: Stable API for mainnet deployment
+
+## [0.24.0] - 2025-12-01
+
+### Added - Minimum Buffer Swap Value Threshold
+
+Added chain-configurable minimum USD threshold for buffer swaps to prevent economically irrational swaps (e.g., swapping 1 wei worth $0.00 for $2.65 in gas).
+
+#### **Chain Configuration (`chains.js`)**
+- Added `minBufferSwapValue` property to all chains:
+  - Arbitrum (42161): $0.10
+  - Local (1337): $0.10
+  - Ethereum (1): $1.00
+
+#### **New Helper Function (`chainHelpers.js`)**
+- `getMinBufferSwapValue(chainId)`: Returns minimum buffer swap value in USD for the specified chain
+  - Validates chainId parameter
+  - Throws if chain not supported or value not configured
+  - Used by automation service to skip dust swaps below threshold
+
+**Usage**: Buffer swaps below the threshold are skipped with a log message, preventing gas waste on economically irrational trades.
+
+### Removed - `enabled` Property from Platform Addresses
+
+Removed the `enabled` property from `platformAddresses` in chain configuration. Platform presence in config now implicitly indicates enabled status (YAGNI - the property was never used to disable platforms).
+
+#### **Files Changed**
+- **`chains.js`**: Removed `enabled: true` from all platform entries (Arbitrum, Local, Ethereum)
+- **`chainHelpers.js`**:
+  - `getPlatformAddresses()`: Removed check for `platformConfig.enabled`
+  - `lookupChainPlatformIds()`: Simplified to return all platform IDs (removed filter)
+- **`UniswapV3Adapter.js`**: Removed `addresses.enabled` check from constructor
+
+**Breaking Change**: Code that explicitly checked `platformAddresses.*.enabled` will need to be updated. However, this property was internal and not part of the public API.
+
+## [0.23.0] - 2025-01-28
+
+### Changed - Baby Steps Strategy Templates Production-Ready
+
+Comprehensive overhaul of all Baby Steps (bob) strategy templates for production deployment.
+
+#### **Standardized Across All Templates**
+- **maxUtilization**: All templates now use 90% (was 60-95% varying)
+- **maxSlippage**: All non-stablecoin templates use 0.5% (was 0.3-1.0% varying)
+- **emergencyExitTrigger**: All non-stablecoin templates use 10% (was 10-20% varying)
+  - Emergency exit triggers on price movement between rebalances, not from original entry
+  - 10% catches flash crashes without false positives during normal volatility
+
+#### **Stablecoin Template (USDC/USDT optimized)**
+- **targetRange**: Tightened to ±0.2% (was ±0.5%) for better capital efficiency
+- **rebalanceThreshold**: Set to 12.5% of range (was 0.05%) - provides actual buffer before falling out of range
+- **emergencyExitTrigger**: 1% (appropriate for stablecoin pairs)
+- **maxSlippage**: 0.2% (tighter for deep stablecoin pools)
+
+#### **Rebalance Thresholds (% of range width)**
+- **Conservative**: 6% (was 3%) - more buffer before rebalancing
+- **Moderate**: 4% (was 1.5%) - reasonable middle ground
+- **Aggressive**: 0.8% (unchanged) - tight is the point
+- **Custom**: 4% (matches moderate)
+
+#### **Fee Reinvestment Settings**
+- **Conservative**: Enabled feeReinvestment (was false), 30% ratio (70% to user)
+- **Moderate**: 50% ratio (balanced)
+- **Aggressive**: 90% ratio (maximize compounding)
+- **Stablecoin**: 100% ratio (low IL risk, compound everything)
+- **Triggers**: $50 for all non-stablecoin, $10 for stablecoin
+
+**Status**: ✅ Production-ready defaults
+**Breaking Changes**: Template defaults changed - existing vaults unaffected (parameters stored on-chain)
+
+## [0.22.2] - 2025-11-23
+
+### Changed
+- **Contract artifacts updated** (2025-11-26): Rebuilt ABIs and bytecode for PositionVault v0.5.0 security refactor
+  - New constrained functions: `swap()`, `approve()`, `mint()`, `increaseLiquidity()`, `decreaseLiquidity()`, `collect()`, `burn()`
+  - Updated test setup for new contract structure
+
+### Fixed
+- **Runtime API key construction for Arbitrum RPC**: Fixed ESM import timing issue where `NEXT_PUBLIC_ALCHEMY_API_KEY` was undefined at config load time
+  - **Root Cause**: Environment variables in template literals are evaluated at module import time, before `dotenv.config()` runs in ESM
+  - **Solution**: `getChainRpcUrls()` now appends API key at runtime for Arbitrum (chain 42161)
+  - **chains.js**: Arbitrum `rpcUrls` now contains base URL only (without API key)
+  - **chainHelpers.js**: `getChainRpcUrls(42161)` constructs full URL with API key at call time
+  - Throws descriptive error if `NEXT_PUBLIC_ALCHEMY_API_KEY` is not set when requesting Arbitrum RPC
+
+### Changed
+- **PositionVault.sol `getPositionIds()` deprecated**: Added deprecation notice to contract
+  - Function is unreliable because Uniswap V3's NonfungiblePositionManager uses `_mint()` not `_safeMint()`
+  - `onERC721Received` is never called when positions are created, so positions aren't registered
+  - Consumers should query positions directly from the NFT contract via platform adapters
+
+## [0.22.1] - 2025-11-21
+
+### Fixed
+- **UniswapV3Adapter `priceToTick` validation**: Added explicit validation for same token addresses
+  - Now throws `'Base and quote token addresses cannot be the same'` instead of cryptic SDK error
+- **Test corrections**:
+  - Fixed inverted token pairs test to verify round-trip consistency rather than incorrect tick negation assumption
+  - Adjusted very small price test to use valid Uniswap V3 tick range value (0.01 instead of 0.0000001)
+  - Increased `calculateTokenAmounts` tolerance from 0.1% to 1% to account for price movements during test setup
+
+## [0.22.0] - 2025-11-18
+
+### Added
+- **New parameter types for better type safety**:
+  - `integer`: For whole number values (counts, days, positions)
+  - `decimal`: For decimal values with max 2 decimal places (ratios, multipliers)
+- **Enhanced precision validation**:
+  - All `percent`, `fiat-currency`, and `decimal` types enforce max 2 decimal places
+  - Aligns with on-chain precision limits (basis points/cents storage)
+  - Prevents silent rounding issues during contract calls
+
+### Changed - BREAKING CHANGES
+- **Parameter type system refined**:
+  - Replaced generic `number` type with explicit `integer` and `decimal` types
+  - Updated all count/day parameters to `type: "integer"` in strategy configs
+  - `validateStrategyParams()` now validates integer types (must be whole numbers)
+  - `validateStrategyParams()` now enforces 2 decimal max for `decimal`, `percent`, `fiat-currency`
+- **Test suite updates**:
+  - Added `validateIntegerParameter()` and `validateDecimalParameter()` test validators
+  - Enhanced `validatePercentParameter()` and `validateFiatCurrencyParameter()` with precision checks
+  - Template validation now enforces precision limits on default values
+
+### Improved
+- **Type safety**: Explicit integer vs decimal distinction prevents configuration errors
+- **Validation accuracy**: Precision validation catches user input errors before contract calls
+- **Developer experience**: Clear parameter types improve code documentation and maintainability
+
+## [0.21.2] - 2025-11-18
+
+### Added
+- **Position validation for strategy configuration**: New `validatePositionsForStrategy()` function
+  - Validates vault positions against strategy token configuration before saving
+  - Alerts users when positions contain tokens not included in strategy configuration
+  - Flags positions with missing or invalid pool data for user awareness
+  - Returns structured warning data with position IDs, token pairs, and non-matching tokens
+
+### Changed - BREAKING CHANGES
+- **Strategy validation functions now return structured data**:
+  - `validateTokensForStrategy()`: Changed return format from `string[]` to `{ isValid: boolean, warnings: Array<WarningObject> }`
+  - `validatePositionsForStrategy()`: Returns same structured format as `validateTokensForStrategy()`
+  - Warning objects include `type`, `count`, and `items` properties for better UI rendering
+  - Enables separation of concerns: library returns data, UI handles presentation
+  - All validation edge cases (missing pool data, undefined tokens) now flagged as warnings instead of silently skipped
+
+### Improved
+- **Enhanced validation coverage**: Both token and position validation now alert users to data quality issues
+  - Missing pool data, undefined token symbols, and null values are flagged as "Unable to validate"
+  - Ensures users are aware when positions cannot be properly validated against strategy configuration
+- **Test coverage**: Added 26 comprehensive tests for `validatePositionsForStrategy()`
+  - Success cases, warning cases, edge cases, and real-world scenarios
+  - Updated 26 existing tests for `validateTokensForStrategy()` to match new structured format
+
+## [0.21.1] - 2025-11-15
+
+### Fixed
+- **Strategy parameter normalization**: Fixed fiat-currency parameters in strategy template defaults
+  - Template defaults now return dollar values (e.g., `50.00`) instead of cent values (e.g., `5000`)
+  - Ensures consistency with blockchain-loaded parameter values
+  - Affects `reinvestmentTrigger`, `minPositionSize`, and `minPoolLiquidity` parameters
+  - Updated all strategy templates (conservative, moderate, aggressive, stablecoin, custom) with normalized values
+
+### Changed
+- Removed debugging console.log statements from production code
+
+## [0.21.0] - 2025-10-02
+
+### Changed - BREAKING CHANGES
+- **Refactored swap quoting API for EXACT_OUTPUT support**:
+  - `getBestSwapQuote()`: Changed signature to support both EXACT_INPUT and EXACT_OUTPUT modes
+    - Removed: `amountIn` parameter
+    - Added: `amount` parameter (input for EXACT_INPUT, output for EXACT_OUTPUT)
+    - Added: `isAmountIn` boolean parameter (true = EXACT_INPUT, false = EXACT_OUTPUT)
+    - Now returns both `amountIn` and `amountOut` in all modes
+  - `getSwapRoute()`: Same signature changes as getBestSwapQuote
+    - Enables asking "how much input do I need for X output?" (EXACT_OUTPUT mode)
+    - Maintains existing "how much output for X input?" (EXACT_INPUT mode)
+
+### Improved
+- **Swap optimization**: Reduced redundant AlphaRouter calls
+  - Strategy code now uses EXACT_OUTPUT quoting for deficit covering
+  - Eliminates proportional calculation and redundant re-quote when sufficient tokens available
+  - Reduces AlphaRouter calls from 3 to 2 (or 1 in best case) per swap operation
+
+### Technical Details
+- Platform-agnostic architecture maintained: Core strategies use boolean `isAmountIn` parameter
+- Platform handlers translate to platform-specific types (e.g., Uniswap's `TradeType.EXACT_INPUT/OUTPUT`)
+- All test cases updated with comprehensive coverage for both quote modes
+- Validation added for `isAmountIn` parameter type safety
+
+## [0.20.0] - 2025-10-01
+
+### Added
+- **AlphaRouter integration** - Smart routing for optimal swap paths:
+  - `getBestSwapQuote()`: Quote-only method for price discovery using Uniswap's AlphaRouter
+  - `getSwapRoute()`: Execution-ready routes with Universal Router integration
+  - `generateAlphaSwapData()`: Transaction builder with Permit2 signature wrapping
+  - Supports multi-hop routing, split routes, and V2/V3 pool mixing for optimal pricing
+  - Test chain (1337) automatically uses Arbitrum fork for AlphaRouter quotes
+
+- **Universal Router support**:
+  - Added Universal Router address to chain configurations for all networks
+  - Integrated Universal Router ABI and interface for transaction encoding
+  - Support for command-based execution pattern (PERMIT2_PERMIT + V3_SWAP_EXACT_IN)
+
+- **Permit2 integration** - Gasless token approvals:
+  - `_encodePermit2Input()`: Helper to encode PermitSingle struct with signature
+  - `_wrapWithPermit2()`: Wraps Universal Router calldata with PERMIT2_PERMIT command
+  - Validates amounts fit in uint160 (Permit2 requirement)
+  - Supports nonce-based replay protection and deadline expiration
+
+### Changed
+- **UniswapV3Adapter enhancements**:
+  - Added AlphaRouter instance with optimized configuration for test chains
+  - Created `_createTokenInstance()` helper for consistent Token creation across methods
+  - Enhanced validation for address, amount, and Permit2 parameters
+  - Improved error messages for invalid inputs
+
+### Technical Details
+- AlphaRouter initialized with chainId-aware provider (uses Arbitrum 42161 for test chain 1337)
+- Universal Router uses `execute(bytes,bytes[])` 2-parameter function signature
+- Permit2 encoding uses proper tuple structure: `((address,uint160,uint48,uint48),address,uint256)`
+- Command prepending: `0x0a` (PERMIT2_PERMIT) + existing commands
+- Comprehensive test coverage: 595 tests passing including new AlphaRouter methods
+
+## [0.19.2] - 2025-09-28
+
+### Added
+- **Ethers v5 compatibility** - Complete migration from ethers v6 to v5 for broader ecosystem compatibility
+
+### Changed
+- **UniswapV3Adapter test suite improvements**:
+  - Enhanced test cleanup processes using vault.execute() pattern
+  - Fixed position count validation tests
+  - Improved tolerance handling for token amount calculations
+  - Extended test timeouts for complex cleanup operations
+- **Vault discovery optimization**:
+  - Removed liquidity filtering from `discoverAvailableVaults()` for broader vault discovery
+  - Simplified vault detection logic
+
+### Fixed
+- **Test stability improvements**:
+  - Fixed position NFT cleanup in cache tests using proper vault execution pattern
+  - Resolved ethers v5/v6 compatibility issues in test suite
+  - Fixed function overload handling for NFT transfers
+  - Corrected BigNumber handling across ethers version migration
+
+### Removed
+- **Debugging artifacts**: Cleaned up all temporary debugging logs from test suite
+
+## [0.19.1] - 2025-09-26
+
+### Added
+- **New token helper functions** for stablecoin detection:
+  - `isStablecoin(symbol)`: Check if a single token is a stablecoin
+  - `detectStablePair(tokenAddressA, tokenAddressB, chainId)`: Detect if both tokens in a pair are stablecoins
+  - Useful for applying different slippage and fee tier strategies for stable vs volatile pairs
+
+### Changed
+- **Fixed reinvestmentTrigger parameter configuration**:
+  - Corrected value representation to use cents consistently (5000 = $50.00)
+  - Updated min/max/step values: min: 500 ($5), max: 10000 ($100), step: 500 ($5)
+  - Aligned template defaults with parameter constraints
+
+### Removed
+- **Removed deprecated maxFeeTier property** from strategy configurations:
+  - Removed from Baby Steps and Parris Island strategies
+  - Cleaned up related test validations
+  - Fee tier selection is now handled dynamically by platform adapters
+
+### Fixed
+- **UniswapV3Adapter improvements**:
+  - Enhanced fee tier selection logic for better pool matching
+  - Improved error handling and validation
+  - Updated tests for better coverage
+
+## [0.19.0] - 2025-09-17
+
+### Added - Minimum Deployment Threshold System
+
+#### **BREAKING CHANGES - New Minimum Deployment Architecture**
+- **Added comprehensive minimum deployment threshold system**: Three-tier minimum validation to prevent dust transactions and gas estimation failures
+  - **Chain level**: `minDeploymentForGas` property for gas economics across different networks
+  - **Platform level**: `minLiquidityAmount` property for protocol-specific minimums
+  - **Strategy level**: `minDeploymentMultiplier` property for complexity-based scaling
+  - **Root Cause**: Floating-point precision was causing tiny positive values (like $0.000001) to pass deployment checks, leading to failed gas estimation when trying to add dust amounts of liquidity
+
+#### **Chain Configuration Updates**
+- **Added `minDeploymentForGas` to all chain configurations**:
+  - Ethereum mainnet (chainId 1): `100` USD (high gas costs)
+  - Arbitrum One (chainId 42161): `10` USD (low gas costs)
+  - Local/Ganache (chainId 1337): `10` USD (development environment)
+  - Based on real-world gas economics and transaction costs per network
+
+#### **Platform Configuration Updates**
+- **Added `minLiquidityAmount` to platform configurations**:
+  - Uniswap V3: `10` USD minimum liquidity deployment
+  - Prevents protocol-level transaction failures with insufficient amounts
+  - Accounts for Uniswap V3's minimum position requirements
+
+#### **Strategy Configuration Updates**
+- **Added `minDeploymentMultiplier` to all strategy configurations**:
+  - Baby Steps (bob): `1.0` (simple strategy, no complexity penalty)
+  - Parris Island (parris): `2.0` (complex strategy, 2x minimum threshold)
+  - Fed strategy: `1.5` (moderate complexity, 1.5x minimum threshold)
+  - Scales minimum deployment based on strategy complexity and gas requirements
+
+#### **New Helper Functions**
+- **Added `getMinDeploymentForGas(chainId)` in chainHelpers**: Retrieves chain-specific gas minimum
+  - Validates chainId parameter and throws descriptive errors for unsupported chains
+  - Returns minimum deployment amount in USD based on gas economics
+  - Used for preventing uneconomical transactions on high-gas networks
+
+- **Added `getMinLiquidityAmount(platformId)` in platformHelpers**: Retrieves platform-specific minimum
+  - Validates platformId parameter and throws descriptive errors for unsupported platforms
+  - Returns minimum liquidity amount in USD based on protocol requirements
+  - Used for preventing protocol-level transaction failures
+
+- **Added `getMinDeploymentMultiplier(strategyId)` in strategyHelpers**: Retrieves strategy complexity multiplier
+  - Validates strategyId parameter and throws descriptive errors for unsupported strategies
+  - Returns multiplier value based on strategy complexity (1.0-2.0 range)
+  - Used for scaling minimum deployment based on strategy gas requirements
+
+#### **Comprehensive Test Coverage**
+- **Added complete test suites for all new configurations**: Validates all new properties in chain, platform, and strategy configs
+- **Added comprehensive helper function tests**: Parameter validation, success cases, and error scenarios
+- **Updated existing tests**: Modified configuration tests to validate new required properties
+- **Error handling validation**: Tests for invalid chainIds, platformIds, and strategyIds
+
+#### **Integration in BabyStepsStrategy**
+- **Updated `calculateAvailableDeployment()` method**: Now uses three-tier minimum validation
+  - Calculates chain minimum using `getMinDeploymentForGas()`
+  - Calculates platform minimum using `getMinLiquidityAmount()` for all target platforms
+  - Calculates strategy multiplier using `getMinDeploymentMultiplier()`
+  - Effective minimum = `max(chainMinimum, maxPlatformMinimum) * strategyMultiplier`
+  - Returns 0 if available deployment is below effective minimum threshold
+
+#### **Benefits**
+- **Eliminates dust transaction failures**: Prevents gas estimation errors from tiny liquidity additions
+- **Prevents uneconomical transactions**: Accounts for gas costs relative to transaction value
+- **Multi-level validation**: Comprehensive coverage across network, protocol, and strategy levels
+- **Configurable per environment**: Different minimums for mainnet vs testnet gas costs
+- **Strategy-aware scaling**: Complex strategies have appropriately higher minimums
+
+#### **Architecture Impact**
+- **Backward compatible**: Existing code continues to work with enhanced validation
+- **Event-driven compatible**: Works seamlessly with existing vault utilization calculations
+- **Future-proof**: New chains, platforms, and strategies can easily add minimum configurations
+- **Performance optimized**: Validation happens before expensive blockchain operations
+
+## [0.18.1] - 2025-08-31
+
+### Added - Vault Authorization Discovery
+
+#### **New getAuthorizedVaults Function**
+- **Added**: `getAuthorizedVaults(executorAddress, provider)` to blockchain/contracts module
+- **Purpose**: Discovers all vaults that have authorized a specific executor address
+- **Implementation**: 
+  - Iterates through all vaults from the factory contract
+  - Checks each vault's executor to match the provided address
+  - Returns array of authorized vault addresses
+  - Includes comprehensive parameter validation and error handling
+- **Testing**: Complete unit test coverage with 12 test cases covering success scenarios and error conditions
+- **Usage**: Enables automation services to discover which vaults they are authorized to manage
+- **Integration**: Replaces VaultRegistry.getAuthorizedVaults() in automation services
+
+#### **Enhanced Error Handling**
+- **Fail-fast approach**: Function throws on any vault check failure to ensure complete discovery
+- **Validation**: Robust input validation for executor address format and provider instance
+- **Error propagation**: Proper error messages with context for debugging
+
+## [0.18.0] - 2025-08-23
+
+### Enhanced - Position Data Quality & Testing
+
+#### **Zero Liquidity Position Filtering**
+- **Added intelligent position filtering**: `getPositionsForVDS` now automatically filters out positions with zero liquidity
+  - **Root Cause**: Zero liquidity positions appear as valid positions but cannot generate fees or be managed effectively
+  - **Implementation**: Added liquidity validation check that filters positions where `liquidity === '0'`
+  - **Benefits**: VDS (Vault Data Service) only receives positions that can actually generate returns
+  - **Logging**: Added detailed filtering statistics showing total vs active positions
+
+#### **Enhanced Test Infrastructure**
+- **Fixed contract ABI completeness**: Resolved test failures due to incomplete token contract ABIs
+  - **Issue**: Test token contracts only included `approve` function, missing required `balanceOf` function
+  - **Fix**: Added `balanceOf` function to all test token contract ABI definitions
+  - **Impact**: Eliminates "balanceOf is not a function" errors in position creation tests
+- **Improved test account funding**: Enhanced test environment with automatic account funding
+  - **Added**: Automatic ETH funding for test accounts 1-4 during environment setup
+  - **Amount**: 10 ETH per account for comprehensive testing scenarios
+  - **Benefits**: Eliminates "insufficient funds" errors in multi-account test scenarios
+  - **Location**: Integrated into `test-env.js` setup process for all tests
+
+#### **Test Robustness Improvements**
+- **Simplified event parsing**: Enhanced position token ID extraction from blockchain events
+  - **Method**: Direct extraction from Transfer event `topics[3]` instead of interface parsing
+  - **Reliability**: Eliminates parsing failures when event interface cannot decode logs
+  - **Performance**: Faster token ID extraction without complex parsing overhead
+- **Enhanced debugging workflow**: Improved test debugging and cleanup processes
+  - **Debug markers**: Used consistent emoji markers (🔍) for easy identification and removal
+  - **Systematic cleanup**: Removed all debug logging after successful test validation
+
+#### **Architecture Benefits**
+- **Data quality**: VDS consumers get higher quality position data without manual filtering
+- **Test reliability**: More robust test suite with fewer intermittent failures
+- **Developer experience**: Better debugging tools and cleaner test output
+- **Future-proof**: Enhanced event parsing patterns applicable to other blockchain interactions
+
+#### **Migration Impact**
+- **No breaking changes**: Existing code continues to work, but now receives filtered position data
+- **Improved performance**: Applications processing positions will skip zero-liquidity entries automatically
+- **Better analytics**: Position counts and statistics now reflect only productive positions
+
+## [0.17.1] - 2025-08-18
+
+### Fixed - Account Separation
+- **Separated deployer and executor accounts**: Updated executor address to use account #4 instead of account #0
+  - **Before**: Both vault deployer and automation executor used account #0 (`0x18eE269ff740eA684da2Be21dE294e44253D0eb8`)
+  - **After**: Deployer uses account #0, executor uses account #4 (`0xabA472B2EA519490EE10E643A422D578a507197A`)
+  - **Benefits**: Eliminates nonce conflicts and transaction authorization issues between vault operations and automation execution
+
+## [0.17.0] - 2025-08-18
+
+### Fixed - Deterministic Test Environment
+
+#### **BREAKING CHANGES - Test Configuration**
+- **Fixed non-deterministic contract addresses**: Replaced default Hardhat test mnemonic with custom mnemonic for consistent address generation
+  - **Root Cause**: Someone was using the default Hardhat test mnemonic on real Arbitrum mainnet, causing nonce changes and non-deterministic contract addresses
+  - **Impact**: Tests would get different contract addresses between runs, breaking address validation and causing hard-to-debug failures
+  - **Solution**: Implemented custom mnemonic `'debris coral coral sleep shed prison nation mountain fatigue prosper dose portion'`
+  - **Before**: Used `'test test test test test test test test test test test junk'` (Hardhat default)
+  - **After**: Uses custom mnemonic ensuring deterministic addresses across all test runs
+
+- **Updated test executor address for chain 1337**: Changed from `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` to `0xabA472B2EA519490EE10E643A422D578a507197A`
+  - **Root Cause**: Vault deployer and executor were using the same account, causing transaction conflicts
+  - **Impact**: Strategy transactions would fail with nonce issues and authorization errors
+  - **Solution**: Updated `executorAddress` in chains.js to use account #4 (separate from deployer account #0)
+
+#### **Added Fast-Fail Address Validation**
+- **Added deterministic address validation**: Contract deployment now validates addresses against stored values and fails fast if they don't match
+  - **Benefits**: Catches address generation issues within seconds instead of running 2-3 minute tests before hitting errors
+  - **Implementation**: Compares deployed addresses with stored addresses in contracts.js file
+  - **Error handling**: Provides clear error messages about potential causes (mnemonic changes, deployment order, etc.)
+
+#### **Updated Test Account Configuration**
+- **Updated TEST_ACCOUNTS array**: All test accounts now derived from custom mnemonic
+  - Account 0: `0x18eE269ff740eA684da2Be21dE294e44253D0eb8` (deployer/vault owner)
+  - Account 1: `0x45695CF68386Ab226678F238455a8Dd41c028d69`
+  - Account 2: `0xDAAe129a01d2A49cD031246D21f1bD7812e1F059`
+  - Account 3: `0xe2dD4a816bB1a4A2128053F5b9CF59Eeeda07E12`
+  - Account 4: `0xabA472B2EA519490EE10E643A422D578a507197A` (executor/automation service)
+
+#### **Migration Guide**
+- **For test environments**: No action required - new addresses will be automatically used
+- **For custom test setups**: Update any hardcoded addresses to use the new deterministic addresses
+- **For CI/CD**: Tests should now be more reliable with consistent contract addresses
+
+## [0.16.0] - 2025-08-17
+
+### Fixed - Critical Token Lookup Bug
+
+#### **BREAKING CHANGES - Token Configuration**
+- **Fixed USD₮0 token symbol mismatch**: Changed `symbol` from `"USDT"` to `"USD₮0"` to match configuration key
+  - **Root Cause**: AutomationService stored tokens by symbol (`"USDT"`) but `getTokenAddress()` expected config key (`"USD₮0"`)
+  - **Impact**: Token balance fetching was failing with "Token USDT not found" errors
+  - **Solution**: Made symbol match the configuration key for consistent internal lookups
+  - **Before**: `{ "USD₮0": { symbol: "USDT", ... } }`
+  - **After**: `{ "USD₮0": { symbol: "USD₮0", ... } }`
+
+#### **Added displaySymbol Property**
+- **Added `displaySymbol` to all token configurations**: New property for user-friendly display
+  - USD₮0 gets `displaySymbol: "USDT"` (clean version without special characters)
+  - All other tokens get `displaySymbol` same as `symbol` (USDC, WETH, WBTC, LINK)
+  - Enables clean separation between internal lookups and user interfaces
+  - Required property validated by test suite
+
+#### **Enhanced Token Validation Tests**
+- **Updated token configuration tests**: Added comprehensive validation for new `displaySymbol` property
+  - Added `displaySymbol` to required string properties
+  - Added validation that `symbol` matches token key for consistent lookups
+  - Added validation that `displaySymbol` contains only uppercase letters/numbers
+  - Ensures configuration integrity and prevents future lookup failures
+
+#### **Benefits**
+- **Fixes token balance fetching**: Service initialization no longer fails on USD₮0 token lookup
+- **Maintains official symbols**: Preserves special characters in official token symbols (₮)
+- **Improves user experience**: Provides clean display symbols for UI components
+- **Prevents regressions**: Test validation ensures symbol/key consistency
+
+#### **Migration Guide**
+```javascript
+// No code changes required for consumers
+// Token lookups that were failing will now work correctly
+
+// Before (0.15.x) - Token lookups failed
+const balance = await fetchTokenBalances(vault, ['USD₮0']); // Failed with "Token USDT not found"
+
+// After (0.16.x) - Token lookups work correctly
+const balance = await fetchTokenBalances(vault, ['USD₮0']); // Works correctly
+
+// New displaySymbol property available for UI display
+const config = getTokenConfig('USD₮0');
+console.log(config.symbol);        // "USD₮0" (for internal lookups)
+console.log(config.displaySymbol); // "USDT" (for user display)
+```
+
+## [0.15.0] - 2025-08-12
+
+### Changed - Repository Maintenance
+
+#### **Node Modules Cleanup**
+- **Removed node_modules from tracking**: Cleaned up git tracking to exclude node_modules directory
+  - Updated .gitignore to properly exclude node_modules from version control
+  - Removes accidental tracking of npm dependencies in repository
+  - Reduces repository size and focuses on source code changes only
+
+## [0.14.0] - 2025-08-09
+
+### Added - Pool Age Validation Support
+
+#### **New getPoolAge Function in The Graph Service**
+- **Added getPoolAge function**: New service function to retrieve pool creation timestamps from The Graph subgraphs
+  - Supports both Uniswap and Messari schema types with automatic query selection
+  - Returns pool creation timestamp in seconds since epoch
+  - Includes comprehensive parameter validation and error handling
+- **Multi-schema support**: Automatically handles different timestamp field names
+  - Uniswap schema: Uses `createdAtTimestamp` field from `pool` entity
+  - Messari schema: Uses `createdTimestamp` field from `liquidityPool` entity
+- **Comprehensive test coverage**: Added full test suite with 100+ test cases
+  - Parameter validation tests for all function parameters
+  - Success cases for both schema types with real API integration
+  - Configuration error handling for unsupported platforms and chains
+  - Network/API error simulation with mocked responses
+
+#### **Enhanced Pool Validation in BabyStepsStrategy**
+- **Added pool age validation**: Extended `validatePoolCriteria` function to include minimum pool age requirements
+  - Fetches pool creation timestamp via new `getPoolAge` function
+  - Calculates pool age in days and validates against `minPoolAge` strategy parameter
+  - Provides detailed logging for validation results and failures
+- **Improved validation workflow**: Complete pool validation now includes:
+  - TVL validation (existing)
+  - Fee tier validation (existing)
+  - Pool age validation (new)
+- **Environment variable integration**: Uses `process.env.NEXT_PUBLIC_THEGRAPH_API_KEY` for API authentication
+
+## [0.13.0] - 2025-08-08
+
+### Added - Multi-Schema The Graph Support
+
+#### **Enhanced The Graph Service for Multiple Subgraph Schemas**
+- **Added queryType support**: Platform configurations now include `queryType` field to distinguish between different subgraph schemas
+  - `uniswap`: Uses official Uniswap V3 schema with `poolDayDatas` entity and `tvlUSD` field
+  - `messari`: Uses Messari standardized schema with `liquidityPoolDailySnapshots` entity and `totalValueLockedUSD` field
+- **Updated platform configuration**: Added structured subgraph configuration with ID and query type
+  - Ethereum mainnet (chain 1): Official Uniswap V3 subgraph (`5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV`)
+  - Arbitrum/Ganache (chains 42161/1337): Messari subgraph (`FQ6JYszEKApsBpAmiHesRsd9Ygc6mzmpNRANeVQFYoVX`)
+
+#### **Fixed The Graph Gateway URL**
+- **Updated endpoint URL**: Changed from deprecated `gateway.thegraph.com` to `gateway-arbitrum.network.thegraph.com`
+  - Fixes connection issues after The Graph's migration to Arbitrum in 2024
+  - Maintains compatibility with existing API keys
+
+#### **Improved Test Coverage**
+- **Comprehensive test restructure**: Reformatted theGraph tests to match library standards
+  - Added thorough parameter validation tests for all function parameters
+  - Enhanced success case testing with schema-specific test descriptions
+  - Added special cases section for edge case testing
+  - Consolidated mocked tests into organized error scenarios
+- **Multi-schema validation**: Added real API tests for both Uniswap V3 and Messari subgraphs
+  - Ethereum mainnet pool testing with Uniswap V3 schema
+  - Arbitrum pool testing with Messari schema
+
+### Changed
+- **theGraph service refactor**: `getPoolTVLAverage` function now dynamically selects query based on platform configuration
+- **Platform configuration structure**: Subgraph entries changed from simple string IDs to objects with `id` and `queryType` properties
+
+## [0.12.2] - 2025-08-03
+
+### Changed - Data Structure Standardization
+
+#### **Removed lastUpdated from Pool Metadata**
+- **Removed unnecessary timestamp**: Pool metadata no longer includes `lastUpdated` field
+  - Pool data now only contains stable metadata: `token0Symbol`, `token1Symbol`, `fee`, `platform`
+  - Since no time-sensitive data is cached, timestamps are not needed
+  - Simplifies data structure and reduces memory footprint
+
+#### **Updated Test Suite for Object-Based Position Data**
+- **Fixed all getPositions tests**: Updated test expectations to match object-based position format
+  - Changed array type checks to object type checks
+  - Updated array access patterns (`positions[0]`) to object access (`Object.values(positions)[0]`)
+  - Modified length checks to use `Object.keys().length` instead of array `.length`
+  - Updated empty case expectations from `[]` to `{}`
+- **Enhanced getPositionsForVDS test validation**: Added comprehensive data validation with actual test environment values
+  - Validates exact position ID, tick values, liquidity, and pool address from test setup
+  - Confirms token symbols match WETH/USDC in correct order
+  - Verifies pool metadata structure contains only expected fields
+
+### Changed - Data Structure Standardization
+
+#### **getPositions Method Standardization**
+- **Updated `getPositions()` return format**: Now returns positions as ID-keyed objects instead of arrays
+  - **Before**: `{ positions: [array], poolData: {} }`
+  - **After**: `{ positions: {id1: position1, id2: position2}, poolData: {} }`
+  - Standardizes data format across entire codebase for consistent object-based access patterns
+
+#### **Simplified getPositionsForVDS Implementation**
+- **Updated iteration logic**: Now iterates over object values instead of array elements
+  - Changed from `result.positions.forEach()` to `Object.values(result.positions).forEach()`
+  - **Maintained data paring**: Still reduces 13 position fields down to 6 essential VDS fields
+  - **Performance improvement**: Direct object key access instead of array iteration
+
+#### **Test and Documentation Updates**
+- **Updated test assertions**: All tests now expect object format instead of array format
+- **Updated README examples**: Shows object-based position access patterns
+- **Maintained backward compatibility**: Internal change only, no external API impact
+
+#### **Benefits**
+- **Consistent data structures**: All position data now uses standardized ID-keyed object format
+- **Better performance**: Direct position access by ID instead of array searching
+- **Simplified codebase**: Single data format standard eliminates format conversion complexity
+- **Future-proof**: Sets foundation for consistent object-based data patterns across all adapters
+
+## [0.12.1] - 2025-08-03
+
+### Added - Vault Data Service Integration
+
+#### **New getPositionsForVDS Method**
+- **Added `getPositionsForVDS()` method to PlatformAdapter base class**: Abstract method for VaultDataService integration
+  - Method signature: `async getPositionsForVDS(address, provider)`
+  - Returns normalized position data specifically formatted for VaultDataService
+  - Enables event-driven poolData caching architecture
+  - Separates VDS-specific data handling from general position fetching
+
+#### **UniswapV3Adapter Implementation**
+- **Implemented `getPositionsForVDS()` in UniswapV3Adapter**: Complete integration with existing getPositions logic
+  - Normalizes position data to VDS format with consistent structure
+  - Adds `lastUpdated` timestamps to both positions and poolData
+  - Returns `{ positions: {}, poolData: {} }` object for event emission
+  - Leverages existing getPositions method for data consistency
+
+#### **Event-Driven Architecture Support**
+- **Enhanced poolData structure**: All poolData now includes lastUpdated timestamps
+  - Supports AutomationService caching via PoolDataFetched events
+  - Eliminates need for cross-service poolData parameter passing
+  - Reduces function complexity by removing 4+ layer parameter bubbling
+
+#### **Benefits**
+- **Cleaner separation of concerns**: VDS gets properly formatted data without adapter modifications
+- **Event-driven caching**: poolData flows to AutomationService through events, not parameters
+- **Consistent timestamps**: All cached data includes when it was last updated
+- **Future-proof architecture**: Other adapters can implement same pattern for VDS integration
+
+## [0.12.0] - 2025-01-30
+
+### BREAKING CHANGES - Dependency Management & Node.js 20+ Support
+
+#### **Ethers.js Moved to Peer Dependencies**
+- **Moved `ethers` from dependencies to peerDependencies**: Prevents dual package hazard
+  - Consumers must now install ethers themselves: `npm install ethers@^6.13.5`
+  - Ensures single ethers instance across library and consumer projects
+  - Fixes "Invalid provider. Must be an ethers provider instance" errors
+  - Still included in devDependencies for library development
+
+#### **Added JSON Import Assertions**
+- **Updated JSON imports for Node.js 20+ compatibility**:
+  - Added `with { type: 'json' }` to all JSON imports
+  - Affects: UniswapV3Adapter.js, test-env.js
+  - Required for Node.js 20+ with ESM modules
+  - Example: `import artifact from './file.json' with { type: 'json' };`
+
+#### **New Pack Script**
+- **Added `pack` script**: Builds and creates npm package in one command
+  - Usage: `npm run pack`
+  - Useful for local testing without npm publish
+
+#### **Benefits**
+- **Eliminates dual package issues**: Single ethers instance across all modules
+- **Node.js 20+ compatibility**: Proper JSON import syntax
+- **Better local testing**: Easy package creation for development
+
+#### **Migration Guide**
+```javascript
+// If using fum_library, ensure ethers is installed:
+npm install ethers@^6.13.5
+
+// For local development, use npm pack instead of npm link:
+cd fum_library
+npm run pack
+cd ../your-project
+npm install ../fum_library/fum_library-0.12.0.tgz
+```
+
+## [0.11.1] - 2025-01-26
+
+### Added - Abstract Method & Enhanced Validation
+
+#### **BREAKING CHANGES**
+- **Added abstract `getPoolData()` method to PlatformAdapter**: All future adapters must implement this method
+  - Ensures consistent pool data API across all DeFi platforms
+  - Method signature: `async getPoolData(poolAddress, options, provider)`
+  - Options parameter is now required (not optional with default `{}`)
+
+#### **Enhanced Parameter Validation**
+- **Improved `UniswapV3Adapter.getPoolData()` validation**:
+  - `options` parameter now required (breaking change from `options = {}`)
+  - `includeTicks` must be array of integers if provided
+  - `includeTokens` must be boolean if provided
+  - Better error messages for all validation failures
+
+#### **Test Coverage**
+- **Added comprehensive test suite for `getPoolData()` method**
+  - Basic functionality tests with real test environment data
+  - Parameter validation tests for all edge cases
+  - Value verification tests using known test pool (WETH/USDC 500)
+  - Tests for all option combinations (`{}`, `{includeTicks}`, `{includeTokens}`, combined)
+
+#### **Benefits**
+- **Platform Consistency**: Future adapters must implement unified pool data method
+- **Better Reliability**: Robust parameter validation prevents runtime errors
+- **Complete Coverage**: Critical method now has comprehensive tests
+- **Architectural Integrity**: Base class enforces required method implementation
+
+## [0.11.0] - 2025-01-25
+
+### Added - Unified Pool Data Method
+
+#### **New UniswapV3Adapter Method**
+- **Added `getPoolData(poolAddress, options, provider)` method**: Unified pool data fetching
+  - Replaces fragmented pool data approaches across automation service and strategies
+  - Optional tick data fetching via `options.includeTicks` array
+  - Optional token address fetching via `options.includeTokens` boolean
+  - Comprehensive pool state data with proper validation and error handling
+  - Fixes broken strategy calls to non-existent `getPoolData` method
+
+#### **Method Signature**
+```javascript
+async getPoolData(poolAddress, options = {}, provider)
+// options.includeTicks: Array<number> - tick indices to fetch
+// options.includeTokens: boolean - whether to include token0/token1 addresses
+// Returns: Complete pool data object with lastUpdated timestamps
+```
+
+#### **Benefits**
+- **Fixes broken strategy code**: Strategies can now call `adapter.getPoolData(poolAddress)`
+- **Eliminates duplication**: Single method replaces 3 different pool data approaches
+- **Flexible data fetching**: Get only the data you need via options
+- **Proper timestamps**: All returned data includes `lastUpdated` fields
+- **Consistent validation**: Standardized error handling and address normalization
+
+## [0.10.0] - 2025-01-25
+
+### BREAKING CHANGES - API Encapsulation
+
+#### **Main Export Changes**
+- **Removed direct config exports**: Configs are now internal implementation details
+  - `export * from './configs/index.js'` removed from main entry point
+  - Prevents direct access to raw configuration objects
+  - Forces usage of validated helper functions instead
+  
+- **Added helper exports to main entry**: Helpers are now available from root import
+  - `export * from './helpers/index.js'` added to main entry point
+  - Cleaner imports: `import { getTokenBySymbol } from 'fum_library'`
+  - No longer need subpath imports for common utilities
+
+#### **Benefits**
+- **Better encapsulation**: Library internals are properly hidden
+- **Safer API**: All data access goes through validated helper functions
+- **Future flexibility**: Can change internal configs without breaking consumers
+- **Cleaner imports**: Single import point for most common functions
+
+#### **Migration Guide**
+```javascript
+// Before (0.9.x) - Direct config access
+import { CHAINS, TOKENS } from 'fum_library/configs';
+const chain = CHAINS[42161]; // Direct access, no validation
+
+// After (0.10.0) - Helper function access
+import { getChainConfig, getTokenBySymbol } from 'fum_library';
+const chain = getChainConfig(42161); // Validated, safe access
+const token = getTokenBySymbol('USDC'); // Returns null if not found
+
+// Subpath imports still work for organization
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+```
+
+## [0.9.0] - 2025-01-25
+
+### Major Library Refactor - Cleaner Architecture & Better Separation of Concerns
+
+#### **BREAKING CHANGES**
+- **Removed `vaults.js` module**: Moved to fum_automation as `vaultDataHelpers.js`
+  - Vault data orchestration is project-specific, not a shared library concern
+  - Each project (fum, fum_automation) now owns its data orchestration logic
+  - Library now only contains truly shared primitives (contracts, adapters, helpers)
+
+- **Moved `mapStrategyParameters()` function**: Now in `strategyHelpers.js`
+  - Added comprehensive validation for strategyId and params
+  - Added parameter count validation per strategy
+  - Added type validation for boolean/numeric parameters
+  - Better error messages for all failure cases
+
+#### **New Features**
+- **Added `getContractInfoByAddress()` in contracts.js**: Simple contract address lookup
+  - Returns `{ contractName, chainId }` for any deployed contract address
+  - Replaces complex address mapping logic in removed vault functions
+  - Throws descriptive errors for invalid or unknown addresses
+
+- **Enhanced parameter validation**: New validators in strategyHelpers
+  - `validateAddress()` - Validates Ethereum addresses using ethers.getAddress()
+  - `validateChainId()` - Validates positive integer chain IDs
+  - `validateProvider()` - Validates ethers provider instances
+
+#### **Improvements**
+- **Cleaner module exports**: Removed vaults.js from blockchain/index.js
+- **Better error handling**: All functions now throw errors instead of returning null
+- **Improved imports**: Cleaned up unused imports across the library
+- **Test coverage**: Added comprehensive tests for mapStrategyParameters
+
+#### **Architecture Benefits**
+- **Clear ownership**: Each project owns its specific orchestration logic
+- **Smaller library**: Removed ~900 lines of project-specific code
+- **Better maintainability**: No confusion about which project uses what
+- **Independent evolution**: Projects can optimize for their specific needs
+
+#### **Migration Guide**
+```javascript
+// If using vaults.js functions, they're now in fum_automation:
+import { getVaultData } from 'fum_automation/src/helpers/vaultDataHelpers';
+
+// mapStrategyParameters moved to strategyHelpers:
+import { mapStrategyParameters } from 'fum_library/helpers/strategyHelpers';
+
+// New contract lookup function:
+import { getContractInfoByAddress } from 'fum_library/blockchain/contracts';
+const { contractName, chainId } = getContractInfoByAddress('0x...');
+```
+
+## [0.8.0] - 2025-01-16
+
+### Major AdapterFactory Refactor & Breaking Changes
+
+#### **BREAKING CHANGES**
+- **`getAdaptersForChain()` return type changed**: Now returns `{adapters: [], failures: []}` object instead of array
+  - Provides transparency about adapter creation failures
+  - Allows partial success scenarios where some adapters work and others fail
+  - Consumers can implement custom error handling and retry logic
+  
+- **`getAdapter()` error behavior changed**: Now throws errors instead of returning `null`
+  - Missing platform → throws `"No adapter available for platform: {platformId}"`
+  - Adapter creation failure → throws `"Failed to create {platformId} adapter for chain {chainId}: {error}"`
+  - Consistent fail-fast behavior throughout the API
+
+- **`registerAdapter()` renamed**: Now called `registerAdapterForTestingOnly()`
+  - Makes it explicit that this is for testing/plugin scenarios only
+  - Not intended for production adapter registration
+  - Registered adapters are not persistent across application restarts
+
+#### **Enhanced Error Handling**
+- **Consistent parameter validation**: Uses established patterns for chainId and platformId validation
+- **Descriptive error messages**: All errors include context about what operation failed and why
+- **Graceful failure tracking**: `getAdaptersForChain()` captures individual adapter failures without breaking the entire operation
+
+#### **API Improvements**
+- **Better separation of concerns**: Uses `chainHelpers` instead of direct config access
+- **Robust failure handling**: No silent failures - all errors are either thrown or tracked
+- **Clear documentation**: All methods have explicit error handling documentation
+
+#### **Test Coverage**
+- **Comprehensive test suite**: 40+ test cases covering all methods and edge cases
+- **Real-world testing**: Uses actual chain configurations and adapters
+- **Minimal mocking**: Only mocks what's absolutely necessary for specific test scenarios
+
+#### **Migration Guide**
+```javascript
+// Before (0.7.x)
+const adapters = AdapterFactory.getAdaptersForChain(42161);
+console.log(`Found ${adapters.length} adapters`);
+
+// After (0.8.x)
+const result = AdapterFactory.getAdaptersForChain(42161);
+console.log(`Found ${result.adapters.length} adapters`);
+if (result.failures.length > 0) {
+  console.warn('Some adapters failed:', result.failures);
+}
+
+// Before (0.7.x)
+const adapter = AdapterFactory.getAdapter('platform', 42161);
+if (adapter) {
+  // use adapter
+} else {
+  // handle null case
+}
+
+// After (0.8.x)
+try {
+  const adapter = AdapterFactory.getAdapter('platform', 42161);
+  // use adapter
+} catch (error) {
+  // handle error
+}
+```
+
+## [0.7.0] - 2025-01-16
+
+### Major UniswapV3Adapter Refactor & Architectural Improvements
+
+#### **BREAKING CHANGES**
+- **Removed transaction execution functions**: `claimFees()`, `addLiquidity()`, `createPosition()`, `decreaseLiquidity()`, and `closePosition()` have been removed from UniswapV3Adapter
+  - These functions mixed platform-specific logic with generic transaction execution
+  - Calling code now handles transaction execution, UI callbacks, and state management
+  - Adapter focuses solely on generating platform-specific transaction data
+
+#### **New Features**
+- **Added `getAddLiquidityQuote()` function**: Centralized V3 liquidity calculations
+  - Extracts position calculation logic from `generateAddLiquidityData()`
+  - Uses Uniswap SDK's `Position.fromAmounts()`, `Position.fromAmount0()`, `Position.fromAmount1()` methods
+  - Handles token sorting, tick validation, and SDK optimization
+  - Returns comprehensive quote object with position data and metadata
+
+#### **Enhanced Functions**
+- **`generateAddLiquidityData()` improvements**:
+  - Refactored to use `getAddLiquidityQuote()` for calculations
+  - Removed `walletAddress` parameter (not needed for data generation)
+  - Now returns full quote object in addition to transaction data
+  - Simplified parameter validation and error handling
+
+- **`generateCreatePositionData()` complete rewrite**:
+  - Now uses same logic as `generateAddLiquidityData()` via `getAddLiquidityQuote()`
+  - Added `walletAddress` parameter for recipient address
+  - Unified architecture between creating and adding to positions
+  - Improved parameter validation and error handling
+
+#### **Test Suite Enhancements**
+- **Comprehensive test coverage**: Added 40+ new tests across all functions
+- **Real position data**: Tests now use `env.testPosition` instead of hardcoded values
+- **Token sorting fixes**: Properly handle WETH/USDC token order in tests
+- **SDK rounding tolerance**: Account for Uniswap SDK optimization differences
+- **Edge case testing**: Out-of-range positions, single token inputs, scaling scenarios
+- **Error validation**: Comprehensive parameter validation testing
+
+#### **Architecture Improvements**
+- **Better separation of concerns**: Adapter generates data, calling code handles execution
+- **Improved testability**: Data generation functions are pure and easier to test
+- **Cleaner abstraction**: Removed UI-specific callbacks and state management
+- **Enhanced flexibility**: Calling code can customize transaction flow and error handling
+
+#### **Migration Guide**
+```javascript
+// Before (0.6.x) - Adapter handled everything
+await adapter.addLiquidity({
+  position, token0Amount, token1Amount, provider, address, chainId,
+  poolData, token0Data, token1Data, slippageTolerance, deadlineMinutes,
+  onStart, onSuccess, onError, onFinish
+});
+
+// After (0.7.x) - Adapter generates data, you handle execution
+const txData = await adapter.generateAddLiquidityData({
+  position, token0Amount, token1Amount, provider,
+  poolData, token0Data, token1Data, slippageTolerance, deadlineMinutes
+});
+
+// Your code handles transaction execution and UI callbacks
+const signer = await provider.getSigner();
+const tx = await signer.sendTransaction(txData);
+const receipt = await tx.wait();
+```
+
+#### **Benefits**
+- **Cleaner code**: Platform-specific logic separated from generic blockchain operations
+- **Better testing**: Pure functions without side effects are easier to test
+- **More flexible**: Applications can customize transaction flow and error handling
+- **Future-proof**: Architecture supports additional platforms and transaction types
+
+## [0.3.0] - 2025-06-17
+
+### Security & Reliability Improvements
+- **BREAKING**: `fetchTokenPrices()` now requires explicit cache strategy parameter
+  - Added mandatory `cacheStrategy` parameter: '0-SECONDS', '5-SECONDS', '30-SECONDS', '1-MINUTE', '2-MINUTES', '10-MINUTES'
+  - Forces developers to make conscious decisions about data freshness vs performance
+  - Prevents accidental use of stale price data in financial calculations
+- **BREAKING**: `getCoingeckoId()` now throws errors instead of returning fallback values
+  - No longer returns `symbol.toLowerCase()` for unknown tokens
+  - Prevents wrong price data from being used for unmapped tokens
+  - Forces explicit token mapping registration for new tokens
+- **BREAKING**: `getContract()` fails fast on network detection issues
+  - No longer defaults to localhost chainId (1337) when provider network is unavailable
+  - Throws error: "Provider network not available. Cannot determine which contracts to use."
+  - Prevents cross-chain transaction disasters and wrong contract deployments
+- **BREAKING**: `getConnectedAccounts()` throws errors instead of silent failures
+  - No longer returns empty array `[]` when wallet connection fails
+  - Throws error: "Failed to get connected accounts: {error details}"
+  - Prevents wallet connection state confusion in applications
+
+### Configuration Security
+- **Environment Variable Migration**: Removed hardcoded RPC URLs and API keys
+  - Created `.env.example` template for secure configuration
+  - Updated `src/configs/chains.js` to use environment variables for private keys
+  - Eliminated placeholder API keys and localhost fallbacks
+  - Developers must provide their own RPC endpoints when creating providers
+
+### API Failures & Error Handling
+- **Price Service Reliability**: `fetchTokenPrices()` now fails fast on API errors
+  - No longer returns stale cached data when CoinGecko API fails
+  - Throws error: "Failed to fetch current token prices: {details}. Cannot proceed with stale data."
+  - Prevents catastrophic trading decisions based on outdated price information
+
+### Documentation Updates
+- **Complete Documentation Sync**: Updated all documentation to reflect breaking changes
+  - Fixed `fetchTokenPrices()` examples throughout documentation to include required cache strategy
+  - Added comprehensive error handling examples for new failure modes
+  - Updated architecture diagrams and sequence flows
+  - Marked broken functions (`calculateUsdValue`, `prefetchTokenPrices`) in documentation
+
+### Broken Functions (Will be fixed in next release)
+- `calculateUsdValue()` - Calls `fetchTokenPrices()` without required cache strategy
+- `prefetchTokenPrices()` - Calls `fetchTokenPrices()` without required cache strategy
+
+### Migration Guide
+```javascript
+// Before (0.2.x)
+const prices = await fetchTokenPrices(['ETH', 'USDC']);
+
+// After (0.3.x)
+const prices = await fetchTokenPrices(['ETH', 'USDC'], '30-SECONDS');
+
+// Register unknown tokens instead of relying on fallbacks
+registerTokenMapping('MYTOKEN', 'my-token-coingecko-id');
+
+// Handle network validation errors
+try {
+  const contract = getContract('VaultFactory', provider, signer);
+} catch (error) {
+  if (error.message.includes('Provider network not available')) {
+    // Handle network connection issues
+  }
+}
+```
+
+## [0.2.0] - 2025-06-17
+
+### Added
+- **Pool Discovery System**: New `discoverAvailablePools` method added to PlatformAdapter base class
+  - Abstract method that all adapters must implement for standardized pool discovery
+  - Returns array of pool information objects with address, fee, liquidity, sqrtPriceX96, and tick data
+  - Enables dynamic fee tier evaluation across all DeFi platforms
+- **UniswapV3 Pool Discovery Implementation**: Complete implementation in UniswapV3Adapter
+  - `discoverAvailablePools` method that checks all fee tiers (100, 500, 3000, 10000 basis points)
+  - `getPoolAddressFromFactory` helper method for factory contract interactions
+  - Only returns pools with active liquidity to ensure viable trading options
+  - Comprehensive error handling for non-existent or inactive pools
+
+### Changed
+- **BREAKING**: PlatformAdapter now requires `discoverAvailablePools` implementation
+  - All future adapters must implement this method for pool discovery
+  - Provides consistent interface for fee tier evaluation across platforms
+  - Enables platform-agnostic pool optimization in strategies
+
+### Architecture
+- **Enhanced Adapter Pattern**: Pool discovery logic now centralized in adapters where it belongs
+  - Removes platform-specific logic from strategies
+  - Enables consistent pool discovery across all DeFi platforms
+  - Supports future adapter implementations (PancakeSwap, SushiSwap, etc.)
+
+### Developer Experience
+- **Standardized Pool Interface**: All adapters return consistent pool data format
+  - Simplifies strategy development by providing uniform pool information
+  - Enables cross-platform fee tier optimization
+  - Reduces code duplication in strategy implementations
+
+## [0.1.9] - 2025-06-13
+
+### Added
+- **Comprehensive API Documentation**: Complete function-level documentation system
+  - Created detailed API reference documentation for all modules in `/docs/api-reference/`
+  - Added comprehensive parameter tables, return values, and examples for all functions
+  - Included error handling documentation and usage patterns
+  - Added TypeScript-style type definitions for better development experience
+
+### Changed
+- **Enhanced JSDoc Comments**: Upgraded all JSDoc comments to professional standard
+  - Added `@module` declarations for all source files
+  - Implemented `@memberof` tags for proper function association
+  - Added `@example` blocks with practical use cases for all functions
+  - Added `@throws` documentation for error conditions
+  - Added `@since` version tags for API stability tracking
+  - Fixed `@returns` format to use single-line object syntax for better IntelliSense support
+
+### Documentation
+- **New API Reference Structure**:
+  - `/docs/api-reference/adapters/` - Platform adapter documentation
+  - `/docs/api-reference/blockchain/` - Wallet and contract utilities
+  - `/docs/api-reference/helpers/` - All helper function documentation
+  - `/docs/api-reference/services/` - CoinGecko service documentation
+- **Function Documentation Includes**:
+  - Function signatures with TypeScript-style types
+  - Detailed parameter descriptions with types and requirements
+  - Return value specifications with object property breakdowns
+  - Practical code examples for each function
+  - Error handling scenarios and best practices
+  - Common usage patterns and workflows
+- **Improved Developer Experience**:
+  - Better IDE IntelliSense support with enhanced JSDoc
+  - Comprehensive cross-references between related functions
+  - Clear documentation hierarchy and navigation
+
+## [0.1.9] - 2025-06-13
+
+### Changed
+- Improved JSDoc documentation throughout the codebase
+  - Added detailed object property descriptions for all object parameters
+  - Added comprehensive file-level documentation to core modules
+  - Standardized return type documentation format
+- Code cleanup and maintenance
+  - Removed unused imports from source files
+  - Removed unused imports from test files
+
+### Documentation
+- Enhanced IntelliSense support with detailed parameter property descriptions
+- Added module-level documentation for better code navigation
+- Improved consistency in documentation format across all files
+
+## [0.1.8] - 2025-06-09
+
+### Fixed
+- Fixed decimal precision errors in all parseUnits calls across UniswapV3Adapter
+  - Round token amounts to token decimals before calling parseUnits in generateAddLiquidityData
+  - Round token amounts to token decimals before calling parseUnits in generateRemoveLiquidityData  
+  - Round token amounts to token decimals before calling parseUnits in generateMintData
+  - Round token amounts to token decimals before calling parseUnits in generateCollectFeesData
+  - Resolves "too many decimals for format" errors when processing high-precision amounts
+
+## [0.1.7] - 2025-06-09
+
+### Fixed
+- Added missing Uniswap V3 router addresses to chain configurations
+  - Added routerAddress to Ethereum mainnet (0xE592427A0AEce92De3Edee1F18E0157C05861564)
+  - Added routerAddress to Arbitrum One (0xE592427A0AEce92De3Edee1F18E0157C05861564)  
+  - Added routerAddress to local fork (1337) using same address as Arbitrum
+  - Resolves "No Uniswap V3 router configuration found for chainId" errors
+
+## [0.1.6] - 2025-06-09
+
+### Added
+- New swap functionality in UniswapV3Adapter:
+  - `generateSwapData` method for creating Uniswap V3 swap transaction data
+  - Support for exactInputSingle swaps with configurable parameters
+  - Proper ETH value handling for ETH swaps
+  - Comprehensive parameter validation and error handling
+- Abstract `generateSwapData` method added to PlatformAdapter base class
+- Unit tests for swap functionality with multiple test scenarios:
+  - Normal ERC20 token swaps
+  - ETH swap scenarios with proper value setting
+  - Error handling for missing parameters
+  - Error handling for unsupported chains
+
+### Fixed
+- Import statements updated to include SwapRouter ABI for swap functionality
+
+## [0.1.5] - 2025-05-11
+
+### Added
+- Comprehensive unit testing suite:
+  - Implemented testing infrastructure using Vitest
+  - Created tests for formatHelpers.js functions for data formatting utilities
+  - Added tests for tokenHelpers.js functions for token management
+  - Added tests for chainHelpers.js functions for chain management
+  - Added tests for platformHelpers.js functions for platform interaction
+  - Added tests for strategyHelpers.js functions for strategy configuration
+  - Created tests for UniswapV3Adapter core price calculation methods
+  - Added tests for vaultHelpers.js functions for vault management
+- Added testing documentation and guidelines in TESTING.md
+- Fixed decimal adjustment in UniswapV3Adapter price calculations
+
+### Changed
+- Updated module imports to use explicit file extensions for better compatibility
+- Removed redundant code in adapters/index.js exports
+
+## [0.1.4] - 2025-05-06
+
+### Added
+- New vaultHelpers.js module with comprehensive vault management functionality:
+  - `mapStrategyParameters` for converting raw strategy parameters to named objects
+  - `fetchStrategyParameters` to retrieve parameter values from strategy contracts
+  - `getVaultStrategies` for loading all strategy configurations for a chain
+  - `getVaultBasicInfo` and `getVaultTokenBalances` for vault inspection
+  - `getVaultPositions` and `calculatePositionsTVL` for liquidity position management
+  - `getVaultData` and `getAllUserVaultData` for complete vault analysis
+- Improved vault data gathering with token price calculations
+- Enhanced strategy parameter mapping for multiple strategy types
+
+### Fixed
+- Minor bug fixes and code refinements
+
+## [0.1.3] - 2025-04-30
+
+### Added
+- New helper functionality in strategyHelpers.js
+  - Added `validateTokensForStrategy` function to compare vault tokens against strategy token selections
+  - Provides validation messages for mismatched tokens that will need to be swapped
+- Fine-tuned strategy configuration parameters
+- Improved documentation for strategy parameter validations
+
+### Fixed
+- Minor bug fixes and code refinements
+
+## [0.1.2] - 2025-04-25
+
+### Added
+- Baby Steps strategy implementation
+  - Simplified parameter set for beginner users
+  - Streamlined UI interactions for position management
+- Enhanced ABI handling for contract interactions
+
+### Fixed
+- Various refactoring bug fixes
+- Stability improvements in adapter functionality
+
+## [0.1.1] - 2025-04-21
+
+### Added
+- ABI returning functionality in platform adapters
+  - Added `getPoolABI()` method to retrieve pool contract ABI
+  - Added `getPositionManagerABI()` method to retrieve position manager ABI
+- Improved type documentation throughout codebase
+- Additional JSDoc comments for better code clarity
+
+### Fixed
+- Export paths in package.json for better module resolution
+- Minor bug fixes in contract interaction utilities
+
+## [0.1.0] - 2025-04-10
+
+### Added
+- Initial library structure migration from original project
+- Core modules:
+  - Adapters for DeFi platforms (Uniswap V3)
+  - Blockchain utilities for contract interactions and wallet connections
+  - Configuration for chains, platforms, strategies, and tokens
+  - Helper functions for chains, platforms, tokens, and formatting
+  - CoinGecko service for token price data
+  - Contract artifacts with ABIs and deployment addresses
+
+### Changed
+- Refactored codebase for modular exports
+- Restructured project to support NPM package format
+- Improved error handling across all modules
+
+[0.1.5]: https://github.com/D-fied/fum_library/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/D-fied/fum_library/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/D-fied/fum_library/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/D-fied/fum_library/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/D-fied/fum_library/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/D-fied/fum_library/releases/tag/v0.1.0

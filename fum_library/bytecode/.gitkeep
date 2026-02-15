@@ -1,0 +1,4 @@
+# This directory contains contract bytecode for testing
+# Bytecode files are synced from the fum project using:
+# npm run sync-bytecode (if implemented)
+# Or manually copy from ../fum/bytecode/

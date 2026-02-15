@@ -1,0 +1,1072 @@
+/**
+ * Platform Helpers Unit Tests
+ *
+ * Tests for platform configuration utilities and validation functions
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import {
+  validatePlatformId,
+  getPlatformMetadata,
+  getPlatformName,
+  getPlatformColor,
+  getPlatformLogo,
+  getAvailablePlatforms,
+  lookupPlatformById,
+  getPlatformFeeTiers,
+  getPlatformTickSpacing,
+  getPlatformTickBounds,
+  lookupSupportedPlatformIds
+} from '../../../src/helpers/platformHelpers.js';
+
+describe('Platform Helpers', () => {
+  // Note: validateChainId tests are in chainHelpers.test.js
+
+  describe('validatePlatformId', () => {
+    describe('Success Cases', () => {
+      it('should accept valid platform strings', () => {
+        expect(() => validatePlatformId('uniswapV3')).not.toThrow();
+        expect(() => validatePlatformId('aaveV3')).not.toThrow();
+        expect(() => validatePlatformId('unknownPlatform')).not.toThrow();
+      });
+
+      it('should accept single character strings', () => {
+        expect(() => validatePlatformId('a')).not.toThrow();
+        expect(() => validatePlatformId('1')).not.toThrow();
+      });
+
+      it('should accept strings with special characters', () => {
+        expect(() => validatePlatformId('uniswap-v3')).not.toThrow();
+        expect(() => validatePlatformId('platform_test')).not.toThrow();
+        expect(() => validatePlatformId('platform.test')).not.toThrow();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null platformId', () => {
+        expect(() => validatePlatformId(null)).toThrow('platformId parameter is required');
+      });
+
+      it('should throw error for undefined platformId', () => {
+        expect(() => validatePlatformId(undefined)).toThrow('platformId parameter is required');
+      });
+
+      it('should throw error for number platformId', () => {
+        expect(() => validatePlatformId(1)).toThrow('platformId must be a string');
+        expect(() => validatePlatformId(123)).toThrow('platformId must be a string');
+        expect(() => validatePlatformId(0)).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for boolean platformId', () => {
+        expect(() => validatePlatformId(true)).toThrow('platformId must be a string');
+        expect(() => validatePlatformId(false)).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for array platformId', () => {
+        expect(() => validatePlatformId(['uniswapV3'])).toThrow('platformId must be a string');
+        expect(() => validatePlatformId([])).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for object platformId', () => {
+        expect(() => validatePlatformId({ platform: 'uniswapV3' })).toThrow('platformId must be a string');
+        expect(() => validatePlatformId({})).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for empty string platformId', () => {
+        expect(() => validatePlatformId('')).toThrow('platformId cannot be empty');
+      });
+
+      it('should throw error for special values', () => {
+        expect(() => validatePlatformId(NaN)).toThrow('platformId must be a string');
+        expect(() => validatePlatformId(Infinity)).toThrow('platformId must be a string');
+        expect(() => validatePlatformId(-Infinity)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformMetadata', () => {
+    describe('Success Cases', () => {
+      it('should return metadata for known platforms', () => {
+        const metadata = getPlatformMetadata('uniswapV3');
+
+        // Test full structure is there
+        expect(metadata).toBeDefined();
+        expect(typeof metadata).toBe('object');
+
+        // Test actual values
+        expect(metadata.id).toBe('uniswapV3');
+        expect(metadata.name).toBe('Uniswap V3');
+        expect(metadata.logo).toBe('/Platform_Logos/uniswap.svg');
+        expect(metadata.color).toBe('#FF007A');
+        expect(metadata.description).toBe('Uniswap V3 concentrated liquidity positions');
+
+        // Test fee tiers object structure
+        expect(typeof metadata.feeTiers).toBe('object');
+        expect(Array.isArray(metadata.feeTiers)).toBe(false);
+        expect(metadata.feeTiers).toEqual({
+          100: { spacing: 1 },
+          500: { spacing: 10 },
+          3000: { spacing: 60 },
+          10000: { spacing: 200 }
+        });
+
+        // Test features object structure
+        expect(typeof metadata.features).toBe('object');
+        expect(metadata.features.concentratedLiquidity).toBe(true);
+        expect(metadata.features.multipleFeeTiers).toBe(true);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported platform', () => {
+        expect(() => getPlatformMetadata('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformMetadata(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformMetadata('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformMetadata(123)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformName', () => {
+    describe('Success Cases', () => {
+      it('should return actual name for known platforms', () => {
+        const name = getPlatformName('uniswapV3');
+        expect(typeof name).toBe('string');
+        expect(name).toBe('Uniswap V3');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unknown platforms', () => {
+        expect(() => getPlatformName('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for platforms with missing or empty name', async () => {
+        // Mock platforms config with platform that has no name property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutName: {
+              id: 'platformWithoutName',
+              // No name property
+              color: '#000000'
+            },
+            platformWithEmptyName: {
+              id: 'platformWithEmptyName',
+              name: '', // Empty name
+              color: '#000000'
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformName('platformWithoutName')).toThrow('Platform platformWithoutName name not configured');
+        expect(() => platformHelpers.getPlatformName('platformWithEmptyName')).toThrow('Platform platformWithEmptyName name not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformName(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformName('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformName(123)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformColor', () => {
+    describe('Success Cases', () => {
+      it('should return actual color for known platforms', () => {
+        const color = getPlatformColor('uniswapV3');
+        expect(typeof color).toBe('string');
+        expect(color).toBe('#FF007A');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unknown platforms', () => {
+        expect(() => getPlatformColor('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for platforms with missing or empty color', async () => {
+        // Mock platforms config with platform that has no color property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutColor: {
+              id: 'platformWithoutColor',
+              name: 'Platform Without Color'
+              // No color property
+            },
+            platformWithEmptyColor: {
+              id: 'platformWithEmptyColor',
+              name: 'Platform With Empty Color',
+              color: '' // Empty color
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformColor('platformWithoutColor')).toThrow('Platform platformWithoutColor color not configured');
+        expect(() => platformHelpers.getPlatformColor('platformWithEmptyColor')).toThrow('Platform platformWithEmptyColor color not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformColor(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformColor('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformColor(123)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformLogo', () => {
+    describe('Success Cases', () => {
+      it('should return actual logo URL for known platforms', () => {
+        const logo = getPlatformLogo('uniswapV3');
+        expect(typeof logo).toBe('string');
+        expect(logo).toBe('/Platform_Logos/uniswap.svg');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unknown platforms', () => {
+        expect(() => getPlatformLogo('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for platforms with missing or empty logo', async () => {
+        // Mock platforms config with platform that has no logo property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutLogo: {
+              id: 'platformWithoutLogo',
+              name: 'Platform Without Logo',
+              color: '#000000'
+              // No logo property
+            },
+            platformWithEmptyLogo: {
+              id: 'platformWithEmptyLogo',
+              name: 'Platform With Empty Logo',
+              color: '#000000',
+              logo: '' // Empty logo
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformLogo('platformWithoutLogo')).toThrow('Platform platformWithoutLogo logo not configured');
+        expect(() => platformHelpers.getPlatformLogo('platformWithEmptyLogo')).toThrow('Platform platformWithEmptyLogo logo not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformLogo(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformLogo('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformLogo(123)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformFeeTiers', () => {
+    describe('Success Cases', () => {
+      it('should return array of fee tiers for known platforms', () => {
+        const feeTiers = getPlatformFeeTiers('uniswapV3');
+        expect(Array.isArray(feeTiers)).toBe(true);
+        expect(feeTiers).toEqual([100, 500, 3000, 10000]);
+
+        // Test all values are numbers and positive
+        feeTiers.forEach(tier => {
+          expect(typeof tier).toBe('number');
+          expect(tier).toBeGreaterThan(0);
+        });
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unknown platforms', () => {
+        expect(() => getPlatformFeeTiers('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for platforms with missing or invalid feeTiers', async () => {
+        // Mock platforms config with platform missing feeTiers
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutFeeTiers: {
+              id: 'platformWithoutFeeTiers',
+              name: 'Platform Without Fee Tiers',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true }
+              // No feeTiers property
+            },
+            platformWithInvalidFeeTiers: {
+              id: 'platformWithInvalidFeeTiers',
+              name: 'Platform With Invalid Fee Tiers',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: 'not-an-array' // String instead of array
+            },
+            platformWithEmptyFeeTiers: {
+              id: 'platformWithEmptyFeeTiers',
+              name: 'Platform With Empty Fee Tiers',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: [] // Empty array
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformFeeTiers('platformWithoutFeeTiers')).toThrow('Platform platformWithoutFeeTiers feeTiers not configured');
+        expect(() => platformHelpers.getPlatformFeeTiers('platformWithInvalidFeeTiers')).toThrow('Platform platformWithInvalidFeeTiers feeTiers not configured');
+        expect(() => platformHelpers.getPlatformFeeTiers('platformWithEmptyFeeTiers')).toThrow('Platform platformWithEmptyFeeTiers feeTiers not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformFeeTiers(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformFeeTiers('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformFeeTiers(123)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getAvailablePlatforms', () => {
+    describe('Success Cases', () => {
+      it('should return array of available platforms for supported chains', () => {
+        const platforms = getAvailablePlatforms(42161);
+        expect(Array.isArray(platforms)).toBe(true);
+        expect(platforms.length).toBeGreaterThan(0);
+
+        // Test the actual uniswapV3 platform values from config
+        const uniswapV3 = platforms.find(p => p.id === 'uniswapV3');
+        expect(uniswapV3).toBeDefined();
+
+        // Test metadata values from platforms config
+        expect(uniswapV3.id).toBe('uniswapV3');
+        expect(uniswapV3.name).toBe('Uniswap V3');
+        expect(uniswapV3.logo).toBe('/Platform_Logos/uniswap.svg');
+        expect(uniswapV3.color).toBe('#FF007A');
+        expect(uniswapV3.description).toBe('Uniswap V3 concentrated liquidity positions');
+
+        // Test address values from chains config (Arbitrum)
+        expect(uniswapV3.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
+        expect(uniswapV3.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
+        expect(uniswapV3.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+        expect(uniswapV3.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chains', () => {
+        expect(() => getAvailablePlatforms(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for platform with missing name', async () => {
+        // Mock platforms config with platform missing name property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutName: {
+              id: 'platformWithoutName',
+              // No name property
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description'
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutName: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getAvailablePlatforms(999)).toThrow('Platform platformWithoutName name not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing logo', async () => {
+        // Mock platforms config with platform missing logo property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutLogo: {
+              id: 'platformWithoutLogo',
+              name: 'Platform Without Logo',
+              // No logo property
+              color: '#FF007A',
+              description: 'Test description'
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutLogo: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getAvailablePlatforms(999)).toThrow('Platform platformWithoutLogo logo not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing color', async () => {
+        // Mock platforms config with platform missing color property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutColor: {
+              id: 'platformWithoutColor',
+              name: 'Platform Without Color',
+              logo: '/test-logo.svg',
+              // No color property
+              description: 'Test description'
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutColor: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getAvailablePlatforms(999)).toThrow('Platform platformWithoutColor color not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing description', async () => {
+        // Mock platforms config with platform missing description property
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutDescription: {
+              id: 'platformWithoutDescription',
+              name: 'Platform Without Description',
+              logo: '/test-logo.svg',
+              color: '#FF007A'
+              // No description property
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutDescription: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getAvailablePlatforms(999)).toThrow('Platform platformWithoutDescription description not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getAvailablePlatforms(null)).toThrow('chainId parameter is required');
+        expect(() => getAvailablePlatforms('1')).toThrow('chainId must be a number');
+        expect(() => getAvailablePlatforms(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('lookupPlatformById', () => {
+    describe('Success Cases', () => {
+      it('should return complete platform config for valid platform and chain', () => {
+        const platform = lookupPlatformById('uniswapV3', 42161);
+        expect(platform).toBeDefined();
+
+        // Test actual values from configs
+        expect(platform.id).toBe('uniswapV3');
+        expect(platform.name).toBe('Uniswap V3');
+        expect(platform.logo).toBe('/Platform_Logos/uniswap.svg');
+        expect(platform.color).toBe('#FF007A');
+        expect(platform.description).toBe('Uniswap V3 concentrated liquidity positions');
+
+        // Test address values from chains config (Arbitrum)
+        expect(platform.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
+        expect(platform.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
+        expect(platform.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+        expect(platform.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
+
+        // Test features and feeTiers structure
+        expect(typeof platform.features).toBe('object');
+        expect(platform.features.concentratedLiquidity).toBe(true);
+        expect(platform.features.multipleFeeTiers).toBe(true);
+        expect(Array.isArray(platform.feeTiers)).toBe(true);
+        expect(platform.feeTiers).toEqual([100, 500, 3000, 10000]);
+      });
+
+      it('should return null for platform not available on chain', async () => {
+        // Mock platforms config with a platform that exists
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            testPlatform: {
+              id: 'testPlatform',
+              name: 'Test Platform',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config where the platform is not configured for chain 42161
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            42161: {
+              name: 'Arbitrum One',
+              rpcUrls: ['https://arb-mainnet.g.alchemy.com/v2'],
+              executorAddress: '0x42d9df99e78ba0573b2990d6177d6eef7145c8e6',
+              platformAddresses: {
+                // testPlatform is not configured for this chain
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        const platform = platformHelpers.lookupPlatformById('testPlatform', 42161);
+        expect(platform).toBeNull();
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => lookupPlatformById('uniswapV3', 999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for platform with missing name', async () => {
+        // Mock platforms config with platform missing name
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutName: {
+              id: 'platformWithoutName',
+              // No name property
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutName: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithoutName', 999)).toThrow('Platform platformWithoutName name not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing logo', async () => {
+        // Mock platforms config with platform missing logo
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutLogo: {
+              id: 'platformWithoutLogo',
+              name: 'Platform Without Logo',
+              // No logo property
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutLogo: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithoutLogo', 999)).toThrow('Platform platformWithoutLogo logo not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing color', async () => {
+        // Mock platforms config with platform missing color
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutColor: {
+              id: 'platformWithoutColor',
+              name: 'Platform Without Color',
+              logo: '/test-logo.svg',
+              // No color property
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutColor: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithoutColor', 999)).toThrow('Platform platformWithoutColor color not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with missing description', async () => {
+        // Mock platforms config with platform missing description
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutDescription: {
+              id: 'platformWithoutDescription',
+              name: 'Platform Without Description',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              // No description property
+              features: { test: true },
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithoutDescription: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithoutDescription', 999)).toThrow('Platform platformWithoutDescription description not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with invalid features', async () => {
+        // Mock platforms config with platform with invalid features
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithInvalidFeatures: {
+              id: 'platformWithInvalidFeatures',
+              name: 'Platform With Invalid Features',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: [], // Array instead of object
+              feeTiers: [500]
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithInvalidFeatures: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithInvalidFeatures', 999)).toThrow('Platform platformWithInvalidFeatures features not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for platform with invalid feeTiers', async () => {
+        // Mock platforms config with platform with invalid feeTiers
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithInvalidFeeTiers: {
+              id: 'platformWithInvalidFeeTiers',
+              name: 'Platform With Invalid Fee Tiers',
+              logo: '/test-logo.svg',
+              color: '#FF007A',
+              description: 'Test description',
+              features: { test: true },
+              feeTiers: 'not-an-array' // String instead of array
+            }
+          }
+        }));
+
+        // Mock chains config with platform addresses
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                platformWithInvalidFeeTiers: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                  positionManagerAddress: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+                  routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+                  quoterAddress: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+                  enabled: true
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.lookupPlatformById('platformWithInvalidFeeTiers', 999)).toThrow('Platform platformWithInvalidFeeTiers feeTiers not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate both platformId and chainId parameters', () => {
+        expect(() => lookupPlatformById(null, 42161)).toThrow('platformId parameter is required');
+        expect(() => lookupPlatformById('uniswapV3', null)).toThrow('chainId parameter is required');
+        expect(() => lookupPlatformById('', 42161)).toThrow('platformId cannot be empty');
+        expect(() => lookupPlatformById('uniswapV3', -1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('lookupSupportedPlatformIds', () => {
+    describe('Success Cases', () => {
+      it('should return array of platform IDs', () => {
+        const platformIds = lookupSupportedPlatformIds();
+        expect(Array.isArray(platformIds)).toBe(true);
+
+        platformIds.forEach(id => {
+          expect(typeof id).toBe('string');
+          expect(id.length).toBeGreaterThan(0);
+        });
+      });
+
+      it('should include known platforms', () => {
+        const platformIds = lookupSupportedPlatformIds();
+        expect(platformIds).toContain('uniswapV3');
+      });
+    });
+  });
+
+  describe('getPlatformTickSpacing', () => {
+    describe('Success Cases', () => {
+      it('should return correct tick spacing for Uniswap V3 fee tiers', () => {
+        expect(getPlatformTickSpacing('uniswapV3', 100)).toBe(1);
+        expect(getPlatformTickSpacing('uniswapV3', 500)).toBe(10);
+        expect(getPlatformTickSpacing('uniswapV3', 3000)).toBe(60);
+        expect(getPlatformTickSpacing('uniswapV3', 10000)).toBe(200);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid platform', () => {
+        expect(() => getPlatformTickSpacing('unknownPlatform', 500)).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for invalid fee tier', () => {
+        expect(() => getPlatformTickSpacing('uniswapV3', 250)).toThrow('Invalid fee tier: 250. Must be one of: 100, 500, 3000, 10000');
+        expect(() => getPlatformTickSpacing('uniswapV3', 999)).toThrow('Invalid fee tier: 999. Must be one of: 100, 500, 3000, 10000');
+      });
+
+      it('should throw error for invalid fee parameter types', () => {
+        expect(() => getPlatformTickSpacing('uniswapV3', NaN)).toThrow('Invalid fee: NaN. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', Infinity)).toThrow('Invalid fee: Infinity. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', null)).toThrow('Invalid fee: null. Must be a finite number.');
+        expect(() => getPlatformTickSpacing('uniswapV3', 'string')).toThrow('Invalid fee: string. Must be a finite number.');
+      });
+
+      it('should throw error for invalid platformId parameter types', () => {
+        expect(() => getPlatformTickSpacing(null, 500)).toThrow('platformId parameter is required');
+        expect(() => getPlatformTickSpacing('', 500)).toThrow('platformId cannot be empty');
+        expect(() => getPlatformTickSpacing(123, 500)).toThrow('platformId must be a string');
+      });
+    });
+  });
+
+  describe('getPlatformTickBounds', () => {
+    describe('Success Cases', () => {
+      it('should return correct tick bounds for Uniswap V3', () => {
+        const bounds = getPlatformTickBounds('uniswapV3');
+        expect(bounds).toEqual({
+          minTick: -887272,
+          maxTick: 887272
+        });
+        expect(typeof bounds.minTick).toBe('number');
+        expect(typeof bounds.maxTick).toBe('number');
+        expect(bounds.minTick).toBeLessThan(bounds.maxTick);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for invalid platform', () => {
+        expect(() => getPlatformTickBounds('unknownPlatform')).toThrow('Platform unknownPlatform is not supported');
+      });
+
+      it('should throw error for invalid platformId parameter types', () => {
+        expect(() => getPlatformTickBounds(null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformTickBounds('')).toThrow('platformId cannot be empty');
+        expect(() => getPlatformTickBounds(123)).toThrow('platformId must be a string');
+      });
+
+      it('should throw error for platform with invalid tick bounds', async () => {
+        // Mock platforms config with platform missing tick bounds
+        vi.doMock('../../../src/configs/platforms.js', () => ({
+          default: {
+            platformWithoutBounds: {
+              id: 'platformWithoutBounds',
+              name: 'Platform Without Bounds',
+              feeTiers: { 500: { spacing: 10 } }
+              // Missing minTick/maxTick
+            },
+            platformWithInvalidBounds: {
+              id: 'platformWithInvalidBounds',
+              name: 'Platform With Invalid Bounds',
+              feeTiers: { 500: { spacing: 10 } },
+              minTick: 100,
+              maxTick: 50  // Invalid: minTick > maxTick
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const platformHelpers = await import('../../../src/helpers/platformHelpers.js');
+
+        expect(() => platformHelpers.getPlatformTickBounds('platformWithoutBounds')).toThrow('Platform platformWithoutBounds tick bounds not configured');
+        expect(() => platformHelpers.getPlatformTickBounds('platformWithInvalidBounds')).toThrow('Platform platformWithInvalidBounds invalid tick bounds: minTick must be less than maxTick');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/platforms.js');
+        vi.resetModules();
+      });
+    });
+  });
+
+});

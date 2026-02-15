@@ -1,0 +1,80 @@
+{
+  "name": "fum_library",
+  "version": "1.2.1",
+  "author": "Derrek Brack & Claude Code",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "description": "Shared utilities for FUM DeFi management",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./configs": "./dist/configs/index.js",
+    "./adapters": "./dist/adapters/index.js",
+    "./helpers": "./dist/helpers/index.js",
+    "./helpers/formatHelpers": "./dist/helpers/formatHelpers.js",
+    "./helpers/chainHelpers": "./dist/helpers/chainHelpers.js",
+    "./helpers/tokenHelpers": "./dist/helpers/tokenHelpers.js",
+    "./helpers/platformHelpers": "./dist/helpers/platformHelpers.js",
+    "./helpers/strategyHelpers": "./dist/helpers/strategyHelpers.js",
+    "./helpers/vaultHelpers": "./dist/helpers/vaultHelpers.js",
+    "./helpers/Permit2Helper": "./dist/helpers/Permit2Helper.js",
+    "./blockchain": "./dist/blockchain/index.js",
+    "./blockchain/wallet": "./dist/blockchain/wallet.js",
+    "./blockchain/contracts": "./dist/blockchain/contracts.js",
+    "./services": "./dist/services/index.js",
+    "./services/coingecko": "./dist/services/coingecko.js",
+    "./artifacts": "./dist/artifacts/index.js",
+    "./artifacts/contracts": "./dist/artifacts/contracts.js",
+    "./artifacts/contracts.js": "./dist/artifacts/contracts.js",
+    "./test/setup/hardhat-config": "./test/setup/hardhat-config.js",
+    "./test/setup/test-contracts": "./test/setup/test-contracts.js",
+    "./test/test-env": "./test/test-env.js"
+  },
+  "files": [
+    "dist",
+    "test/setup",
+    "test/test-env.js",
+    "bytecode",
+    "hardhat.config.cjs",
+    "hardhat.avalanche.config.cjs"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run docs",
+    "docs": "node scripts/generate-docs.js",
+    "prepublishOnly": "npm run build",
+    "pack": "npm run build && npm pack && ([ -d ../fum ] && cd ../fum && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-1.2.1.tgz --legacy-peer-deps && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm uninstall fum_library 2>/dev/null; npm install file:../fum_library/fum_library-1.2.1.tgz --include=dev && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library pack complete'",
+    "sync": "npm run build && npm link && ([ -d ../fum ] && cd ../fum && npm link fum_library --legacy-peer-deps && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm link fum_library && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library sync complete'",
+    "unsync": "([ -d ../fum ] && cd ../fum && npm install fum_library@github:derrek-b/fum_library --legacy-peer-deps --force && echo '  ✓ fum' || echo '  ⊘ fum (not found)') && ([ -d ../fum_automation ] && cd ../fum_automation && npm install fum_library@github:derrek-b/fum_library --force && echo '  ✓ fum_automation' || echo '  ⊘ fum_automation (not found)') && echo '✅ fum_library unsync complete'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "node scripts/test-integration.js",
+    "test:unit": "vitest run unit"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0",
+    "@traderjoe-xyz/sdk-v2": "^3.0.30",
+    "@uniswap/sdk-core": "^5.9.0",
+    "@uniswap/smart-order-router": "^4.7.7",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4",
+    "@uniswap/v3-sdk": "^3.18.2",
+    "@uniswap/v4-core": "^1.0.0",
+    "@uniswap/v4-periphery": "^1.0.0",
+    "@uniswap/v4-sdk": "^1.0.0",
+    "jsbi": "^3.2.5",
+    "tslib": "^2.8.1"
+  },
+  "peerDependencies": {
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "chai": "^5.2.0",
+    "dotenv": "^16.5.0",
+    "ethers": "^5.7.2",
+    "hardhat": "^2.22.19",
+    "sinon": "^20.0.0",
+    "vitest": "^3.1.3"
+  }
+}

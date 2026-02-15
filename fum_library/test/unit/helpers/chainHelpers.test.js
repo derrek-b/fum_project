@@ -1,0 +1,743 @@
+/**
+ * Chain Helpers Unit Tests
+ *
+ * Tests for chain configuration utilities and validation functions
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import {
+  validateChainId,
+  getChainConfig,
+  getChainName,
+  getChainRpcUrls,
+  getExecutorAddress,
+  isChainSupported,
+  lookupSupportedChainIds,
+  getPlatformAddresses,
+  lookupChainPlatformIds,
+  getMinDeploymentForGas,
+  getMinSwapValue,
+  getTransactionDeadlineMinutes,
+  configureChainHelpers
+} from '../../../src/helpers/chainHelpers.js';
+
+describe('Chain Helpers', () => {
+  describe('validateChainId', () => {
+    describe('Success Cases', () => {
+      it('should accept valid positive integers', () => {
+        expect(() => validateChainId(1)).not.toThrow();
+        expect(() => validateChainId(42161)).not.toThrow();
+        expect(() => validateChainId(1337)).not.toThrow();
+      });
+
+      it('should accept integers represented as floats (1.0, 42161.0)', () => {
+        expect(() => validateChainId(1.0)).not.toThrow();
+        expect(() => validateChainId(42161.0)).not.toThrow();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for null chainId', () => {
+        expect(() => validateChainId(null)).toThrow('chainId parameter is required');
+      });
+
+      it('should throw error for undefined chainId', () => {
+        expect(() => validateChainId(undefined)).toThrow('chainId parameter is required');
+      });
+
+      it('should throw error for string chainId', () => {
+        expect(() => validateChainId('1')).toThrow('chainId must be a number');
+        expect(() => validateChainId('ethereum')).toThrow('chainId must be a number');
+      });
+
+      it('should throw error for array chainId', () => {
+        expect(() => validateChainId([1])).toThrow('chainId must be a number');
+      });
+
+      it('should throw error for object chainId', () => {
+        expect(() => validateChainId({ chainId: 1 })).toThrow('chainId must be a number');
+      });
+
+      it('should throw error for boolean chainId', () => {
+        expect(() => validateChainId(true)).toThrow('chainId must be a number');
+        expect(() => validateChainId(false)).toThrow('chainId must be a number');
+      });
+
+      it('should throw error for NaN chainId', () => {
+        expect(() => validateChainId(NaN)).toThrow('chainId must be a finite number');
+      });
+
+      it('should throw error for Infinity chainId', () => {
+        expect(() => validateChainId(Infinity)).toThrow('chainId must be a finite number');
+        expect(() => validateChainId(-Infinity)).toThrow('chainId must be a finite number');
+      });
+
+      it('should throw error for zero chainId', () => {
+        expect(() => validateChainId(0)).toThrow('chainId must be greater than 0');
+      });
+
+      it('should throw error for negative chainId', () => {
+        expect(() => validateChainId(-1)).toThrow('chainId must be greater than 0');
+        expect(() => validateChainId(-42161)).toThrow('chainId must be greater than 0');
+      });
+
+      it('should throw error for decimal chainId', () => {
+        expect(() => validateChainId(1.5)).toThrow('chainId must be an integer');
+        expect(() => validateChainId(42161.123)).toThrow('chainId must be an integer');
+      });
+    });
+  });
+
+  describe('getChainConfig', () => {
+    describe('Success Cases', () => {
+      it('should return correct config for Arbitrum One (chainId 42161)', () => {
+        const config = getChainConfig(42161);
+
+        expect(config).toBeDefined();
+        expect(typeof config).toBe('object');
+        expect(config.name).toBe('Arbitrum One');
+        expect(config.rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2']);  // Base URL - API key appended by getChainRpcUrls()
+        expect(config.executorAddress).toBe('0x42d9df99e78ba0573b2990d6177d6eef7145c8e6');
+        expect(config.platformAddresses).toHaveProperty('uniswapV3');
+      });
+
+      it('should return correct config for Avalanche (chainId 43114)', () => {
+        const config = getChainConfig(43114);
+
+        expect(config).toBeDefined();
+        expect(typeof config).toBe('object');
+        expect(config.name).toBe('Avalanche');
+        expect(config.rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2']);
+        expect(config.executorAddress).toBe('0x0');
+        expect(config.platformAddresses).toHaveProperty('traderjoeV2_2');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getChainConfig(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getChainConfig(null)).toThrow('chainId parameter is required');
+        expect(() => getChainConfig('1')).toThrow('chainId must be a number');
+        expect(() => getChainConfig(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getChainName', () => {
+    describe('Success Cases', () => {
+      it('should return "Arbitrum One" for chainId 42161', () => {
+        const name = getChainName(42161);
+        expect(name).toBe('Arbitrum One');
+      });
+
+      it('should return "Avalanche" for chainId 43114', () => {
+        const name = getChainName(43114);
+        expect(name).toBe('Avalanche');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getChainName(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for chains with missing or empty name', async () => {
+        // Mock chains config with chain that has no name property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              // No name property
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x0'
+            },
+            888: {
+              name: '', // Empty name
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x0'
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getChainName(777)).toThrow('Chain 777 name not configured');
+        expect(() => chainHelpers.getChainName(888)).toThrow('Chain 888 name not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getChainName(null)).toThrow('chainId parameter is required');
+        expect(() => getChainName('1')).toThrow('chainId must be a number');
+        expect(() => getChainName(0)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getChainRpcUrls', () => {
+    describe('Success Cases', () => {
+      it('should return correct RPC URLs for Arbitrum One (chainId 42161) with API key appended', () => {
+        // Configure API key for test using the new configure pattern
+        configureChainHelpers({ alchemyApiKey: 'test-api-key-123' });
+
+        const rpcUrls = getChainRpcUrls(42161);
+
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2/test-api-key-123']);
+      });
+
+      it('should return correct RPC URLs for Avalanche (chainId 43114) with API key appended', () => {
+        // Configure API key for test using the new configure pattern
+        configureChainHelpers({ alchemyApiKey: 'test-api-key-123' });
+
+        const rpcUrls = getChainRpcUrls(43114);
+
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2/test-api-key-123']);
+      });
+
+      it('should return static RPC URLs for local fork (chainId 1337) without modification', () => {
+        const rpcUrls = getChainRpcUrls(1337);
+
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['http://localhost:8545']);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getChainRpcUrls(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for Arbitrum (chainId 42161) when API key is not configured', () => {
+        // Clear API key configuration for test
+        configureChainHelpers({ alchemyApiKey: null });
+
+        expect(() => getChainRpcUrls(42161)).toThrow('Alchemy API key not configured');
+      });
+
+      it('should throw error when no RPC URL is configured', async () => {
+        // Mock chains config to include a chain without rpcUrls
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            555: {
+              name: 'Test Chain Without RPC',
+              executorAddress: '0x0'
+              // No rpcUrls property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getChainRpcUrls(555)).toThrow('No RPC URL configured for chain 555');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for empty RPC URLs array', async () => {
+        // Mock chains config with empty rpcUrls array
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            666: {
+              name: 'Test Chain With Empty RPC Array',
+              rpcUrls: [], // Empty array
+              executorAddress: '0x0'
+            },
+            777: {
+              name: 'Test Chain With Non-Array RPC',
+              rpcUrls: 'not-an-array', // Not an array
+              executorAddress: '0x0'
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getChainRpcUrls(666)).toThrow('Chain 666 RPC URLs not configured');
+        expect(() => chainHelpers.getChainRpcUrls(777)).toThrow('Chain 777 RPC URLs not configured');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getChainRpcUrls(null)).toThrow('chainId parameter is required');
+        expect(() => getChainRpcUrls('1')).toThrow('chainId must be a number');
+        expect(() => getChainRpcUrls(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getExecutorAddress', () => {
+    describe('Success Cases', () => {
+      it('should return correct executor address for Forked Arbitrum (chainId 1337)', () => {
+        const address = getExecutorAddress(1337);
+
+        expect(typeof address).toBe('string');
+        expect(address).toBe('0xabA472B2EA519490EE10E643A422D578a507197A');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getExecutorAddress(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error for chains with 0x0 executor address', () => {
+        // Avalanche still has 0x0 (no executor deployed yet)
+        expect(() => getExecutorAddress(43114)).toThrow('No executor address configured for chain 43114');
+        // Note: Arbitrum (42161) now has a real executor address, so it doesn't throw
+      });
+
+      it('should throw error for chains with empty string executor address', async () => {
+        // Mock chains config with empty string executor address
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain With Empty Executor',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '' // Empty string
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExecutorAddress(999)).toThrow('No executor address configured for chain 999');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error when no executor address property is configured', async () => {
+        // Mock chains config to include a chain without executorAddress property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            555: {
+              name: 'Test Chain Without Executor',
+              rpcUrls: ['http://test.com']
+              // No executorAddress property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getExecutorAddress(555)).toThrow('No executor address configured for chain 555');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getExecutorAddress(null)).toThrow('chainId parameter is required');
+        expect(() => getExecutorAddress('1')).toThrow('chainId must be a number');
+        expect(() => getExecutorAddress(0)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('isChainSupported', () => {
+    describe('Success Cases', () => {
+      it('should return true for Arbitrum One (chainId 42161)', () => {
+        expect(isChainSupported(42161)).toBe(true);
+      });
+
+      it('should return true for Avalanche (chainId 43114)', () => {
+        expect(isChainSupported(43114)).toBe(true);
+      });
+
+      it('should return false for unsupported chains', () => {
+        expect(isChainSupported(999999)).toBe(false);
+        expect(isChainSupported(888888)).toBe(false);
+        expect(isChainSupported(137)).toBe(false); // Polygon - not configured
+        expect(isChainSupported(1)).toBe(false); // Ethereum - removed
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should validate chainId parameter', () => {
+        expect(() => isChainSupported(null)).toThrow('chainId parameter is required');
+        expect(() => isChainSupported('1')).toThrow('chainId must be a number');
+        expect(() => isChainSupported(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('lookupSupportedChainIds', () => {
+    describe('Success Cases', () => {
+      it('should return array containing the current configured chain IDs', () => {
+        const chainIds = lookupSupportedChainIds();
+
+        expect(Array.isArray(chainIds)).toBe(true);
+        expect(chainIds).toContain(42161);  // Arbitrum One
+        expect(chainIds).toContain(43114);  // Avalanche
+        expect(chainIds).toContain(1337);   // Forked Arbitrum
+
+        chainIds.forEach(id => {
+          expect(typeof id).toBe('number');
+          expect(id).toBeGreaterThan(0);
+        });
+      });
+
+      it('should return unique chain IDs', () => {
+        const chainIds = lookupSupportedChainIds();
+        const uniqueIds = [...new Set(chainIds)];
+
+        expect(chainIds.length).toBe(uniqueIds.length);
+      });
+    });
+  });
+
+  describe('getPlatformAddresses', () => {
+    describe('Success Cases', () => {
+      it('should return correct UniswapV3 addresses for Arbitrum One (chainId 42161)', () => {
+        const addresses = getPlatformAddresses(42161, 'uniswapV3');
+
+        expect(addresses).toBeDefined();
+        expect(typeof addresses).toBe('object');
+        expect(addresses.factoryAddress).toBe('0x1F98431c8aD98523631AE4a59f267346ea31F984');
+        expect(addresses.positionManagerAddress).toBe('0xC36442b4a4522E871399CD717aBDD847Ab11FE88');
+        expect(addresses.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+        expect(addresses.quoterAddress).toBe('0x61fFE014bA17989E743c5F6cB21bF9697530B21e');
+      });
+
+      it('should return correct Trader Joe V2.2 addresses for Avalanche (chainId 43114)', () => {
+        const addresses = getPlatformAddresses(43114, 'traderjoeV2_2');
+
+        expect(addresses).toBeDefined();
+        expect(typeof addresses).toBe('object');
+        expect(addresses.lbFactoryAddress).toBe('0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c');
+        expect(addresses.lbRouterAddress).toBe('0x18556DA13313f3532c54711497A8FedAC273220E');
+        expect(addresses.lbQuoterAddress).toBe('0x9A550a522BBaDFB69019b0432800Ed17855A51C3');
+        expect(addresses.positionManagerAddress).toBe('0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getPlatformAddresses(999999, 'uniswapV3')).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when no platformAddresses property is configured', async () => {
+        // Mock chains config to include a chain without platformAddresses property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain Without Platform Addresses',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123'
+              // No platformAddresses property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getPlatformAddresses(777, 'uniswapV3')).toThrow('No platform addresses configured for chain 777');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should throw error for unconfigured platform', () => {
+        expect(() => getPlatformAddresses(42161, 'nonexistentPlatform')).toThrow('Platform nonexistentPlatform not configured for chain 42161');
+        expect(() => getPlatformAddresses(42161, 'aaveV3')).toThrow('Platform aaveV3 not configured for chain 42161');
+        expect(() => getPlatformAddresses(1337, 'compound')).toThrow('Platform compound not configured for chain 1337');
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getPlatformAddresses(null, 'uniswapV3')).toThrow('chainId parameter is required');
+        expect(() => getPlatformAddresses('1', 'uniswapV3')).toThrow('chainId must be a number');
+        expect(() => getPlatformAddresses(-1, 'uniswapV3')).toThrow('chainId must be greater than 0');
+      });
+
+      it('should validate platformId parameter', () => {
+        expect(() => getPlatformAddresses(42161, null)).toThrow('platformId parameter is required');
+        expect(() => getPlatformAddresses(42161, undefined)).toThrow('platformId parameter is required');
+        expect(() => getPlatformAddresses(42161, 123)).toThrow('platformId must be a string');
+        expect(() => getPlatformAddresses(42161, '')).toThrow('platformId cannot be empty');
+      });
+    });
+  });
+
+  describe('lookupChainPlatformIds', () => {
+    describe('Success Cases', () => {
+      it('should return array containing expected platforms for supported chains', () => {
+        const chain42161Platforms = lookupChainPlatformIds(42161);
+        const chain1337Platforms = lookupChainPlatformIds(1337);
+        const chain43114Platforms = lookupChainPlatformIds(43114);
+
+        expect(Array.isArray(chain42161Platforms)).toBe(true);
+        expect(Array.isArray(chain1337Platforms)).toBe(true);
+        expect(Array.isArray(chain43114Platforms)).toBe(true);
+
+        expect(chain42161Platforms).toContain('uniswapV3');
+        expect(chain1337Platforms).toContain('uniswapV3');
+        expect(chain43114Platforms).toContain('traderjoeV2_2');
+      });
+
+      it('should return all configured platforms', async () => {
+        // Mock chains config with multiple platforms
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            999: {
+              name: 'Test Chain With Multiple Platforms',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                uniswapV3: {
+                  factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+                },
+                aaveV3: {
+                  factoryAddress: '0x789',
+                },
+                compound: {
+                  factoryAddress: '0xabc',
+                }
+              }
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        const platformIds = chainHelpers.lookupChainPlatformIds(999);
+
+        expect(platformIds).toContain('uniswapV3');
+        expect(platformIds).toContain('aaveV3');
+        expect(platformIds).toContain('compound');
+        expect(platformIds).toHaveLength(3);
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => lookupChainPlatformIds(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when no platformAddresses property is configured', async () => {
+        // Mock chains config to include a chain without platformAddresses property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            888: {
+              name: 'Test Chain Without Platform Addresses',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123'
+              // No platformAddresses property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.lookupChainPlatformIds(888)).toThrow('No platform addresses configured for chain 888');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => lookupChainPlatformIds(null)).toThrow('chainId parameter is required');
+        expect(() => lookupChainPlatformIds('1')).toThrow('chainId must be a number');
+        expect(() => lookupChainPlatformIds(0)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getMinDeploymentForGas', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getMinDeploymentForGas(42161)).toBe('number');
+        expect(typeof getMinDeploymentForGas(43114)).toBe('number');
+        expect(typeof getMinDeploymentForGas(1337)).toBe('number');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMinDeploymentForGas(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when minDeploymentForGas is not configured', async () => {
+        // Mock chains config to include a chain without minDeploymentForGas property
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain Without Min Deployment',
+              rpcUrls: ['http://test.com'],
+              executorAddress: '0x123',
+              platformAddresses: {
+                uniswapV3: { factoryAddress: '0x456' }
+              }
+              // No minDeploymentForGas property
+            }
+          }
+        }));
+
+        // Reset modules to use the mocked config
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getMinDeploymentForGas(777)).toThrow('No minimum deployment amount configured for chain 777');
+
+        // Restore original config
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMinDeploymentForGas(null)).toThrow('chainId parameter is required');
+        expect(() => getMinDeploymentForGas(undefined)).toThrow('chainId parameter is required');
+        expect(() => getMinDeploymentForGas('1')).toThrow('chainId must be a number');
+        expect(() => getMinDeploymentForGas(0)).toThrow('chainId must be greater than 0');
+        expect(() => getMinDeploymentForGas(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getMinSwapValue', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getMinSwapValue(42161)).toBe('number');
+        expect(typeof getMinSwapValue(43114)).toBe('number');
+        expect(typeof getMinSwapValue(1337)).toBe('number');
+      });
+
+      it('should return expected values for each chain', () => {
+        expect(getMinSwapValue(42161)).toBe(0.10);  // Arbitrum
+        expect(getMinSwapValue(1337)).toBe(0.10);   // Local
+        expect(getMinSwapValue(43114)).toBe(0.10);  // Avalanche
+      });
+
+      it('should return values >= 0', () => {
+        expect(getMinSwapValue(42161)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(43114)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(1337)).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMinSwapValue(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when minSwapValue is not configured', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              rpcUrl: 'http://localhost:8545',
+              // minSwapValue intentionally missing
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getMinSwapValue(777)).toThrow('No minimum swap value configured for chain 777');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMinSwapValue(null)).toThrow('chainId parameter is required');
+        expect(() => getMinSwapValue(undefined)).toThrow('chainId parameter is required');
+        expect(() => getMinSwapValue('1')).toThrow('chainId must be a number');
+        expect(() => getMinSwapValue(0)).toThrow('chainId must be greater than 0');
+        expect(() => getMinSwapValue(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getTransactionDeadlineMinutes', () => {
+    describe('Success Cases', () => {
+      it('should return a number for valid chains', () => {
+        expect(typeof getTransactionDeadlineMinutes(42161)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(43114)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(1337)).toBe('number');
+      });
+
+      it('should return expected values for each chain', () => {
+        expect(getTransactionDeadlineMinutes(42161)).toBe(5);   // Arbitrum - fast L2
+        expect(getTransactionDeadlineMinutes(1337)).toBe(5);    // Local fork (Arbitrum)
+        expect(getTransactionDeadlineMinutes(43114)).toBe(5);   // Avalanche
+      });
+
+      it('should return values > 0', () => {
+        expect(getTransactionDeadlineMinutes(42161)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(43114)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(1337)).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getTransactionDeadlineMinutes(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should throw error when transactionDeadlineMinutes is not configured', async () => {
+        vi.doMock('../../../src/configs/chains.js', () => ({
+          default: {
+            777: {
+              name: 'Test Chain',
+              rpcUrl: 'http://localhost:8545',
+              // transactionDeadlineMinutes intentionally missing
+            }
+          }
+        }));
+
+        vi.resetModules();
+        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
+
+        expect(() => chainHelpers.getTransactionDeadlineMinutes(777)).toThrow('No transaction deadline configured for chain 777');
+
+        vi.doUnmock('../../../src/configs/chains.js');
+        vi.resetModules();
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getTransactionDeadlineMinutes(null)).toThrow('chainId parameter is required');
+        expect(() => getTransactionDeadlineMinutes(undefined)).toThrow('chainId parameter is required');
+        expect(() => getTransactionDeadlineMinutes('1')).toThrow('chainId must be a number');
+        expect(() => getTransactionDeadlineMinutes(0)).toThrow('chainId must be greater than 0');
+        expect(() => getTransactionDeadlineMinutes(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+});
