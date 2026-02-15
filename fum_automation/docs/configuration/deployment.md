@@ -1,0 +1,871 @@
+# Deployment Configuration
+
+This guide covers deployment configurations for the FUM Automation Service across different environments and deployment scenarios.
+
+## Environment Types
+
+### Development Environment
+
+**Characteristics:**
+- Local development with test networks
+- Enhanced debugging and logging
+- Hot reloading and development tools
+- Reduced security constraints
+
+**Configuration:**
+```javascript
+// .env.local (development)
+NODE_ENV=development
+DEBUG_MODE=true
+LOG_LEVEL=debug
+
+# Test network RPC URLs
+RPC_URL_1337=http://localhost:8545
+RPC_URL_31337=http://localhost:8545
+
+# Test automation service address
+AUTOMATION_SERVICE_ADDRESS=0x1234567890123456789012345678901234567890
+
+# Development-specific settings
+MAX_CONCURRENT_VAULTS=3
+POLLING_INTERVAL_MS=10000
+BATCH_SIZE=2
+
+# Enable all debugging features
+ENABLE_METRICS=true
+ENABLE_DEBUG_LOGGING=true
+LOG_PERFORMANCE_METRICS=true
+```
+
+**Service Configuration:**
+```javascript
+// config/development.js
+export default {
+  chains: [1337, 31337], // Local test networks
+  strategies: ['bob', 'parris'],
+  defaultStrategy: 'bob',
+  
+  // Conservative limits for development
+  maxConcurrentVaults: 3,
+  pollingIntervalMs: 10000, // 10 seconds
+  batchSize: 2,
+  batchDelayMs: 500,
+  
+  // Enhanced debugging
+  logLevel: 'debug',
+  debugMode: true,
+  enableMetrics: true,
+  
+  // Lenient error handling
+  maxSlippageBps: 200, // 2%
+  emergencyStopEnabled: false,
+  
+  providers: {
+    1337: {
+      rpcUrl: process.env.RPC_URL_1337,
+      pollingInterval: 1000,
+      maxConnections: 5
+    },
+    31337: {
+      rpcUrl: process.env.RPC_URL_31337,
+      pollingInterval: 1000,
+      maxConnections: 5
+    }
+  }
+};
+```
+
+---
+
+### Staging Environment
+
+**Characteristics:**
+- Production-like environment with limited scope
+- Real network connections but restricted permissions
+- Comprehensive testing and validation
+- Performance monitoring and alerts
+
+**Configuration:**
+```bash
+# .env.staging
+NODE_ENV=staging
+DEBUG_MODE=false
+LOG_LEVEL=info
+
+# Testnet RPC URLs
+RPC_URL_5=https://eth-goerli.g.alchemy.com/v2/YOUR_STAGING_KEY
+RPC_URL_421613=https://arb-goerli.g.alchemy.com/v2/YOUR_STAGING_KEY
+
+# Staging automation service address
+AUTOMATION_SERVICE_ADDRESS=0xStagingAutomationServiceAddress
+
+# Production-like performance settings
+MAX_CONCURRENT_VAULTS=8
+POLLING_INTERVAL_MS=30000
+BATCH_SIZE=4
+
+# Monitoring and alerts
+ENABLE_METRICS=true
+METRICS_PORT=9090
+HEALTH_CHECK_PORT=8080
+
+# External service configurations
+COINGECKO_API_KEY=your-staging-coingecko-key
+MONITORING_WEBHOOK=https://your-monitoring-service.com/webhooks/staging
+```
+
+**Service Configuration:**
+```javascript
+// config/staging.js
+export default {
+  chains: [5, 421613], // Goerli, Arbitrum Goerli
+  strategies: ['bob', 'parris'],
+  defaultStrategy: 'bob',
+  
+  // Production-like performance
+  maxConcurrentVaults: 8,
+  pollingIntervalMs: 30000, // 30 seconds
+  batchSize: 4,
+  batchDelayMs: 200,
+  
+  // Production logging
+  logLevel: 'info',
+  debugMode: false,
+  enableMetrics: true,
+  
+  // Production risk parameters
+  maxSlippageBps: 100, // 1%
+  emergencyStopEnabled: true,
+  
+  providers: {
+    5: {
+      rpcUrl: process.env.RPC_URL_5,
+      fallbackRpcUrls: [
+        'https://goerli.infura.io/v3/YOUR_BACKUP_KEY'
+      ],
+      pollingInterval: 4000,
+      maxConnections: 10,
+      requestTimeout: 30000
+    },
+    421613: {
+      rpcUrl: process.env.RPC_URL_421613,
+      pollingInterval: 2000,
+      maxConnections: 10,
+      requestTimeout: 30000
+    }
+  },
+  
+  // Monitoring configuration
+  monitoring: {
+    enabled: true,
+    metricsPort: parseInt(process.env.METRICS_PORT),
+    healthCheckPort: parseInt(process.env.HEALTH_CHECK_PORT),
+    alertWebhook: process.env.MONITORING_WEBHOOK
+  }
+};
+```
+
+---
+
+### Production Environment
+
+**Characteristics:**
+- Full production deployment with real assets
+- Maximum security and error handling
+- Comprehensive monitoring and alerting
+- High availability and disaster recovery
+
+**Configuration:**
+```bash
+# .env.production
+NODE_ENV=production
+DEBUG_MODE=false
+LOG_LEVEL=warn
+
+# Production RPC URLs with redundancy
+RPC_URL_1=https://eth-mainnet.g.alchemy.com/v2/YOUR_PRODUCTION_KEY
+RPC_URL_1_FALLBACK=https://mainnet.infura.io/v3/YOUR_BACKUP_KEY
+RPC_URL_42161=https://arb-mainnet.g.alchemy.com/v2/YOUR_PRODUCTION_KEY
+RPC_URL_42161_FALLBACK=https://arbitrum-mainnet.infura.io/v3/YOUR_BACKUP_KEY
+
+# Production automation service address
+AUTOMATION_SERVICE_ADDRESS=0xProductionAutomationServiceAddress
+
+# Production performance settings
+MAX_CONCURRENT_VAULTS=15
+POLLING_INTERVAL_MS=60000
+BATCH_SIZE=5
+
+# Security and monitoring
+ENABLE_METRICS=true
+METRICS_PORT=9090
+HEALTH_CHECK_PORT=8080
+ENABLE_AUTHENTICATION=true
+API_KEY_REQUIRED=true
+
+# External service configurations
+COINGECKO_API_KEY=your-production-coingecko-key
+MONITORING_WEBHOOK=https://your-monitoring-service.com/webhooks/production
+SLACK_WEBHOOK=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+PAGERDUTY_INTEGRATION_KEY=your-pagerduty-key
+
+# Database configuration (if using persistent storage)
+DATABASE_URL=postgresql://user:password@localhost:5432/fum_automation_prod
+REDIS_URL=redis://localhost:6379
+
+# Security configurations
+RATE_LIMIT_PER_MINUTE=120
+MAX_REQUEST_SIZE=10mb
+CORS_ORIGINS=https://your-dashboard.com,https://your-app.com
+```
+
+**Service Configuration:**
+```javascript
+// config/production.js
+export default {
+  chains: [1, 42161], // Ethereum Mainnet, Arbitrum One
+  strategies: ['bob', 'parris'],
+  defaultStrategy: 'bob',
+  
+  // Production performance
+  maxConcurrentVaults: 15,
+  pollingIntervalMs: 60000, // 1 minute
+  batchSize: 5,
+  batchDelayMs: 100,
+  
+  // Production logging
+  logLevel: 'warn',
+  debugMode: false,
+  enableMetrics: true,
+  
+  // Strict risk parameters
+  maxSlippageBps: 50, // 0.5%
+  emergencyStopEnabled: true,
+  
+  providers: {
+    1: {
+      rpcUrl: process.env.RPC_URL_1,
+      fallbackRpcUrls: [
+        process.env.RPC_URL_1_FALLBACK,
+        'https://cloudflare-eth.com'
+      ],
+      pollingInterval: 4000,
+      maxConnections: 20,
+      requestTimeout: 30000,
+      retryAttempts: 3
+    },
+    42161: {
+      rpcUrl: process.env.RPC_URL_42161,
+      fallbackRpcUrls: [
+        process.env.RPC_URL_42161_FALLBACK
+      ],
+      pollingInterval: 2000,
+      maxConnections: 20,
+      requestTimeout: 30000,
+      retryAttempts: 3
+    }
+  },
+  
+  // Production monitoring
+  monitoring: {
+    enabled: true,
+    metricsPort: parseInt(process.env.METRICS_PORT),
+    healthCheckPort: parseInt(process.env.HEALTH_CHECK_PORT),
+    alertWebhook: process.env.MONITORING_WEBHOOK,
+    slackWebhook: process.env.SLACK_WEBHOOK,
+    pagerDutyKey: process.env.PAGERDUTY_INTEGRATION_KEY
+  },
+  
+  // Security configuration
+  security: {
+    enableAuthentication: process.env.ENABLE_AUTHENTICATION === 'true',
+    apiKeyRequired: process.env.API_KEY_REQUIRED === 'true',
+    rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE),
+    maxRequestSize: process.env.MAX_REQUEST_SIZE,
+    corsOrigins: process.env.CORS_ORIGINS?.split(',') || []
+  },
+  
+  // Database configuration
+  database: {
+    url: process.env.DATABASE_URL,
+    poolSize: 10,
+    connectionTimeout: 30000
+  },
+  
+  // Cache configuration
+  cache: {
+    redis: {
+      url: process.env.REDIS_URL,
+      ttl: 300000, // 5 minutes
+      maxKeys: 10000
+    }
+  }
+};
+```
+
+## Deployment Methods
+
+### Docker Deployment
+
+**Dockerfile:**
+```dockerfile
+FROM node:18-alpine
+
+# Install system dependencies
+RUN apk add --no-cache git python3 make g++
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S automation -u 1001
+
+# Change ownership
+RUN chown -R automation:nodejs /app
+USER automation
+
+# Expose ports
+EXPOSE 8080 9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Start application
+CMD ["npm", "start"]
+```
+
+**docker-compose.yml:**
+```yaml
+version: '3.8'
+
+services:
+  fum-automation:
+    build: .
+    image: fum-automation:latest
+    container_name: fum-automation-service
+    restart: unless-stopped
+    
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    
+    env_file:
+      - .env.production
+    
+    ports:
+      - "8080:8080"  # Health check port
+      - "9090:9090"  # Metrics port
+    
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+    
+    networks:
+      - fum-network
+    
+    depends_on:
+      - redis
+      - postgres
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    container_name: fum-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - fum-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: fum-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fum_automation
+      POSTGRES_USER: fum_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - fum-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fum-prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - fum-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fum-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    networks:
+      - fum-network
+
+volumes:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  fum-network:
+    driver: bridge
+```
+
+### Kubernetes Deployment
+
+**deployment.yaml:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fum-automation
+  namespace: fum
+  labels:
+    app: fum-automation
+    version: v1.0.0
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fum-automation
+  template:
+    metadata:
+      labels:
+        app: fum-automation
+    spec:
+      serviceAccountName: fum-automation
+      containers:
+      - name: automation-service
+        image: fum-automation:latest
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - containerPort: 8080
+          name: health
+        - containerPort: 9090
+          name: metrics
+        
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        
+        envFrom:
+        - configMapRef:
+            name: fum-config
+        - secretRef:
+            name: fum-secrets
+        
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        - name: log-volume
+          mountPath: /app/logs
+      
+      volumes:
+      - name: config-volume
+        configMap:
+          name: fum-automation-config
+      - name: log-volume
+        persistentVolumeClaim:
+          claimName: fum-logs-pvc
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - fum-automation
+              topologyKey: kubernetes.io/hostname
+```
+
+**service.yaml:**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: fum-automation-service
+  namespace: fum
+  labels:
+    app: fum-automation
+spec:
+  selector:
+    app: fum-automation
+  ports:
+  - name: health
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  type: ClusterIP
+```
+
+### Serverless Deployment
+
+**AWS Lambda Configuration:**
+```javascript
+// lambda/handler.js
+import { AutomationService } from '../src/AutomationService.js';
+import config from '../config/lambda.js';
+
+let automationService;
+
+export const handler = async (event, context) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+  
+  try {
+    // Initialize service if not already done
+    if (!automationService) {
+      automationService = new AutomationService(config);
+      await automationService.start();
+    }
+    
+    // Process based on event type
+    switch (event.eventType) {
+      case 'scheduled':
+        // Periodic evaluation triggered by CloudWatch Events
+        const results = await automationService.processAllVaults();
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            processed: results.length,
+            successful: results.filter(r => r.success).length
+          })
+        };
+        
+      case 'webhook':
+        // Process specific vault triggered by webhook
+        const vaultAddress = event.vaultAddress;
+        const chainId = event.chainId;
+        const result = await automationService.processVault({ vaultAddress, chainId });
+        return {
+          statusCode: 200,
+          body: JSON.stringify(result)
+        };
+        
+      default:
+        return {
+          statusCode: 400,
+          body: JSON.stringify({ error: 'Unknown event type' })
+        };
+    }
+  } catch (error) {
+    console.error('Lambda execution error:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: error.message })
+    };
+  }
+};
+```
+
+## Environment Variables Reference
+
+### Core Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NODE_ENV` | Yes | `development` | Environment type |
+| `DEBUG_MODE` | No | `false` | Enable debug logging |
+| `LOG_LEVEL` | No | `info` | Logging level |
+| `AUTOMATION_SERVICE_ADDRESS` | Yes | - | Contract address |
+| `MAX_CONCURRENT_VAULTS` | No | `10` | Concurrent processing limit |
+| `POLLING_INTERVAL_MS` | No | `60000` | Evaluation interval |
+| `BATCH_SIZE` | No | `5` | Vault batch size |
+
+### Blockchain Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RPC_URL_1` | Conditional | Ethereum mainnet RPC |
+| `RPC_URL_42161` | Conditional | Arbitrum One RPC |
+| `RPC_URL_137` | Conditional | Polygon RPC |
+| `RPC_URL_*_FALLBACK` | No | Fallback RPC URLs |
+
+### External Services
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `COINGECKO_API_KEY` | No | CoinGecko API key |
+| `MONITORING_WEBHOOK` | No | Monitoring service webhook |
+| `SLACK_WEBHOOK` | No | Slack notifications |
+| `PAGERDUTY_INTEGRATION_KEY` | No | PagerDuty alerts |
+
+### Database and Cache
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Conditional | PostgreSQL connection |
+| `REDIS_URL` | Conditional | Redis connection |
+
+### Security
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ENABLE_AUTHENTICATION` | No | API authentication |
+| `API_KEY_REQUIRED` | No | Require API keys |
+| `RATE_LIMIT_PER_MINUTE` | No | Rate limiting |
+| `CORS_ORIGINS` | No | CORS allowed origins |
+
+## Configuration Validation
+
+### Validation Script
+
+```javascript
+// scripts/validate-config.js
+import config from '../config/index.js';
+
+function validateConfig(config) {
+  const errors = [];
+  
+  // Required fields
+  if (!config.chains?.length) {
+    errors.push('chains array is required and must not be empty');
+  }
+  
+  if (!config.strategies?.length) {
+    errors.push('strategies array is required and must not be empty');
+  }
+  
+  // Provider validation
+  for (const chainId of config.chains) {
+    if (!config.providers?.[chainId]?.rpcUrl) {
+      errors.push(`RPC URL required for chain ${chainId}`);
+    }
+  }
+  
+  // Performance validation
+  if (config.maxConcurrentVaults > 50) {
+    errors.push('maxConcurrentVaults should not exceed 50');
+  }
+  
+  if (config.pollingIntervalMs < 10000) {
+    errors.push('pollingIntervalMs should be at least 10000 (10 seconds)');
+  }
+  
+  // Security validation
+  if (config.maxSlippageBps > 500) {
+    errors.push('maxSlippageBps should not exceed 500 (5%)');
+  }
+  
+  return errors;
+}
+
+const errors = validateConfig(config);
+if (errors.length > 0) {
+  console.error('Configuration validation failed:');
+  errors.forEach(error => console.error(`- ${error}`));
+  process.exit(1);
+} else {
+  console.log('Configuration validation passed');
+}
+```
+
+### Health Check Endpoint
+
+```javascript
+// routes/health.js
+export async function healthCheck(req, res) {
+  const health = await automationService.getHealthStatus();
+  
+  const response = {
+    status: health.service,
+    timestamp: new Date().toISOString(),
+    uptime: health.uptime,
+    version: process.env.npm_package_version,
+    environment: process.env.NODE_ENV,
+    components: health.components
+  };
+  
+  const statusCode = health.service === 'healthy' ? 200 : 
+                    health.service === 'degraded' ? 206 : 503;
+  
+  res.status(statusCode).json(response);
+}
+```
+
+## Deployment Checklist
+
+### Pre-Deployment
+
+- [ ] Configuration validation passes
+- [ ] All required environment variables set
+- [ ] RPC endpoint connectivity verified
+- [ ] Database migrations completed (if applicable)
+- [ ] Monitoring endpoints configured
+- [ ] SSL/TLS certificates valid
+- [ ] Security review completed
+- [ ] Load testing completed
+
+### Deployment
+
+- [ ] Service starts successfully
+- [ ] Health checks pass
+- [ ] All configured chains accessible
+- [ ] Vault discovery working
+- [ ] Event listeners registered
+- [ ] Metrics collection active
+- [ ] Log aggregation working
+
+### Post-Deployment
+
+- [ ] Monitor service metrics
+- [ ] Verify vault processing
+- [ ] Check error rates
+- [ ] Validate performance metrics
+- [ ] Test alerting systems
+- [ ] Verify backup procedures
+- [ ] Document any issues
+
+## Scaling Considerations
+
+### Horizontal Scaling
+
+**Load Balancer Configuration:**
+```nginx
+upstream fum_automation {
+    least_conn;
+    server automation1:8080 max_fails=3 fail_timeout=30s;
+    server automation2:8080 max_fails=3 fail_timeout=30s;
+    server automation3:8080 max_fails=3 fail_timeout=30s;
+}
+
+server {
+    listen 80;
+    server_name automation.yourapp.com;
+    
+    location / {
+        proxy_pass http://fum_automation;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+    
+    location /health {
+        proxy_pass http://fum_automation/health;
+        access_log off;
+    }
+}
+```
+
+### Vertical Scaling
+
+**Resource Recommendations:**
+
+| Environment | CPU | Memory | Disk | Network |
+|-------------|-----|--------|------|---------|
+| Development | 1 core | 2GB | 20GB | 100Mbps |
+| Staging | 2 cores | 4GB | 50GB | 500Mbps |
+| Production | 4+ cores | 8GB+ | 100GB+ | 1Gbps+ |
+
+### Auto-Scaling Rules
+
+```yaml
+# HPA configuration
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fum-automation-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fum-automation
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+---
+
+For related documentation:
+- [Strategy Parameter Configuration](./strategy-parameters.md)
+- [Monitoring and Observability](./monitoring.md)
+- [Getting Started Guide](../getting-started/README.md)

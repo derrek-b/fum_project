@@ -1,0 +1,957 @@
+# Custom Strategy Development
+
+This guide provides comprehensive examples and patterns for creating custom strategies in the FUM Automation Service.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Strategy Architecture](#strategy-architecture)
+- [Basic Custom Strategy](#basic-custom-strategy)
+- [Advanced Custom Strategy](#advanced-custom-strategy)
+- [Platform-Specific Implementation](#platform-specific-implementation)
+- [Testing Custom Strategies](#testing-custom-strategies)
+- [Best Practices](#best-practices)
+- [Common Patterns](#common-patterns)
+
+## Overview
+
+The FUM Automation Service uses a flexible strategy pattern that allows you to create custom automated trading strategies. All strategies extend the base `StrategyBase` class and can be platform-specific.
+
+### Strategy Hierarchy
+
+```
+StrategyBase (Abstract)
+├── YourCustomStrategy
+│   ├── UniswapV3YourCustomStrategy
+│   ├── AaveYourCustomStrategy
+│   └── CompoundYourCustomStrategy
+├── BabyStepsStrategy
+└── ParrisIslandStrategy
+```
+
+## Strategy Architecture
+
+### Base Strategy Interface
+
+```javascript
+// src/strategies/YourCustomStrategy.js
+import { StrategyBase } from './StrategyBase.js';
+
+export class YourCustomStrategy extends StrategyBase {
+  constructor(config) {
+    super(config);
+    // Custom initialization
+  }
+
+  // Required abstract methods
+  async shouldExecute(vaultData) { /* Implementation */ }
+  async execute(vaultData) { /* Implementation */ }
+  async calculateMetrics(vaultData) { /* Implementation */ }
+  
+  // Optional overrides
+  async validateConfig() { /* Custom validation */ }
+  async handleError(error, context) { /* Custom error handling */ }
+}
+```
+
+## Basic Custom Strategy
+
+### Example: Mean Reversion Strategy
+
+This strategy buys when prices are below average and sells when above average.
+
+```javascript
+// src/strategies/MeanReversionStrategy.js
+import { StrategyBase } from './StrategyBase.js';
+
+/**
+ * Mean Reversion Strategy
+ * @module MeanReversionStrategy
+ * @description Implements mean reversion trading logic
+ */
+export class MeanReversionStrategy extends StrategyBase {
+  /**
+   * Creates a Mean Reversion Strategy instance
+   * @param {Object} config - Strategy configuration
+   * @param {number} config.lookbackPeriod - Price history lookback in minutes
+   * @param {number} config.deviationThreshold - Standard deviation threshold
+   * @param {number} config.positionSize - Position size as percentage
+   * @param {number} config.holdingPeriod - Minimum holding period in minutes
+   */
+  constructor(config) {
+    super(config);
+    
+    // Mean reversion specific parameters
+    this.lookbackPeriod = config.lookbackPeriod || 60; // 1 hour
+    this.deviationThreshold = config.deviationThreshold || 1.5; // 1.5 std dev
+    this.positionSize = config.positionSize || 0.1; // 10%
+    this.holdingPeriod = config.holdingPeriod || 30; // 30 minutes
+    
+    // State tracking
+    this.priceHistory = [];
+    this.positions = new Map();
+    this.lastAction = new Map();
+  }
+
+  /**
+   * Determines if strategy should execute
+   * @param {Object} vaultData - Current vault data
+   * @returns {Promise<boolean>} True if should execute
+   */
+  async shouldExecute(vaultData) {
+    try {
+      // Check if enough time has passed since last action
+      const lastActionTime = this.lastAction.get(vaultData.address);
+      if (lastActionTime && Date.now() - lastActionTime < this.holdingPeriod * 60000) {
+        return false;
+      }
+
+      // Check if we have enough price history
+      if (this.priceHistory.length < this.lookbackPeriod) {
+        return false;
+      }
+
+      // Calculate mean reversion signal
+      const signal = await this.calculateMeanReversionSignal(vaultData);
+      return Math.abs(signal) > this.deviationThreshold;
+
+    } catch (error) {
+      await this.handleError(error, 'shouldExecute');
+      return false;
+    }
+  }
+
+  /**
+   * Executes the mean reversion strategy
+   * @param {Object} vaultData - Current vault data
+   * @returns {Promise<Object>} Execution result
+   */
+  async execute(vaultData) {
+    try {
+      const signal = await this.calculateMeanReversionSignal(vaultData);
+      const currentPrice = await this.getCurrentPrice(vaultData);
+      
+      let action = null;
+      
+      if (signal < -this.deviationThreshold) {
+        // Price is below mean - BUY signal
+        action = await this.executeBuySignal(vaultData, currentPrice);
+      } else if (signal > this.deviationThreshold) {
+        // Price is above mean - SELL signal
+        action = await this.executeSellSignal(vaultData, currentPrice);
+      }
+
+      // Update state
+      this.lastAction.set(vaultData.address, Date.now());
+      
+      return {
+        success: true,
+        action: action,
+        signal: signal,
+        price: currentPrice,
+        timestamp: Date.now()
+      };
+
+    } catch (error) {
+      await this.handleError(error, 'execute');
+      return {
+        success: false,
+        error: error.message,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  /**
+   * Calculates mean reversion signal
+   * @param {Object} vaultData - Vault data
+   * @returns {Promise<number>} Signal strength (-3 to +3)
+   */
+  async calculateMeanReversionSignal(vaultData) {
+    const currentPrice = await this.getCurrentPrice(vaultData);
+    
+    // Update price history
+    this.priceHistory.push({
+      price: currentPrice,
+      timestamp: Date.now()
+    });
+
+    // Trim history to lookback period
+    const cutoffTime = Date.now() - (this.lookbackPeriod * 60000);
+    this.priceHistory = this.priceHistory.filter(p => p.timestamp > cutoffTime);
+
+    // Calculate statistics
+    const prices = this.priceHistory.map(p => p.price);
+    const mean = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+    const variance = prices.reduce((sum, price) => sum + Math.pow(price - mean, 2), 0) / prices.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Calculate signal (normalized deviation)
+    return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+  }
+
+  /**
+   * Executes buy signal
+   * @param {Object} vaultData - Vault data
+   * @param {number} currentPrice - Current asset price
+   * @returns {Promise<Object>} Transaction result
+   */
+  async executeBuySignal(vaultData, currentPrice) {
+    const availableBalance = await this.getAvailableBalance(vaultData);
+    const buyAmount = availableBalance * this.positionSize;
+
+    if (buyAmount > 0) {
+      // Execute buy order through platform adapter
+      const result = await this.platformAdapter.executeBuy({
+        vaultAddress: vaultData.address,
+        amount: buyAmount.toString(),
+        maxSlippage: this.maxSlippage
+      });
+
+      // Track position
+      this.positions.set(vaultData.address, {
+        type: 'long',
+        entryPrice: currentPrice,
+        amount: buyAmount,
+        timestamp: Date.now()
+      });
+
+      return {
+        type: 'buy',
+        amount: buyAmount,
+        price: currentPrice,
+        transactionHash: result.transactionHash
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Executes sell signal
+   * @param {Object} vaultData - Vault data
+   * @param {number} currentPrice - Current asset price
+   * @returns {Promise<Object>} Transaction result
+   */
+  async executeSellSignal(vaultData, currentPrice) {
+    const position = this.positions.get(vaultData.address);
+    
+    if (position && position.type === 'long') {
+      // Close long position
+      const result = await this.platformAdapter.executeSell({
+        vaultAddress: vaultData.address,
+        amount: position.amount.toString(),
+        maxSlippage: this.maxSlippage
+      });
+
+      const pnl = (currentPrice - position.entryPrice) * position.amount;
+      
+      // Clear position
+      this.positions.delete(vaultData.address);
+
+      return {
+        type: 'sell',
+        amount: position.amount,
+        price: currentPrice,
+        entryPrice: position.entryPrice,
+        pnl: pnl,
+        transactionHash: result.transactionHash
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Calculates strategy performance metrics
+   * @param {Object} vaultData - Vault data
+   * @returns {Promise<Object>} Performance metrics
+   */
+  async calculateMetrics(vaultData) {
+    const position = this.positions.get(vaultData.address);
+    const currentPrice = await this.getCurrentPrice(vaultData);
+    
+    let unrealizedPnL = 0;
+    if (position) {
+      unrealizedPnL = (currentPrice - position.entryPrice) * position.amount;
+    }
+
+    return {
+      strategy: 'MeanReversion',
+      hasPosition: !!position,
+      positionType: position?.type,
+      unrealizedPnL: unrealizedPnL,
+      signalStrength: await this.calculateMeanReversionSignal(vaultData),
+      priceHistoryCount: this.priceHistory.length,
+      lastAction: this.lastAction.get(vaultData.address)
+    };
+  }
+
+  /**
+   * Validates strategy configuration
+   * @returns {Promise<boolean>} True if valid
+   */
+  async validateConfig() {
+    const baseValid = await super.validateConfig();
+    
+    if (!baseValid) return false;
+
+    // Validate mean reversion specific parameters
+    if (this.lookbackPeriod < 10 || this.lookbackPeriod > 1440) {
+      throw new Error('lookbackPeriod must be between 10 and 1440 minutes');
+    }
+
+    if (this.deviationThreshold < 0.5 || this.deviationThreshold > 5.0) {
+      throw new Error('deviationThreshold must be between 0.5 and 5.0');
+    }
+
+    if (this.positionSize <= 0 || this.positionSize > 1) {
+      throw new Error('positionSize must be between 0 and 1');
+    }
+
+    return true;
+  }
+}
+
+// Export default configuration
+export const defaultMeanReversionConfig = {
+  name: 'Mean Reversion Strategy',
+  version: '1.0.0',
+  lookbackPeriod: 60,
+  deviationThreshold: 1.5,
+  positionSize: 0.1,
+  holdingPeriod: 30,
+  maxSlippage: 0.01,
+  enabled: true,
+  dryRun: true
+};
+```
+
+## Advanced Custom Strategy
+
+### Example: Multi-Timeframe Momentum Strategy
+
+This advanced strategy analyzes momentum across multiple timeframes.
+
+```javascript
+// src/strategies/MultiTimeframeMomentumStrategy.js
+import { StrategyBase } from './StrategyBase.js';
+
+/**
+ * Multi-Timeframe Momentum Strategy
+ * @module MultiTimeframeMomentumStrategy
+ * @description Advanced momentum strategy analyzing multiple timeframes
+ */
+export class MultiTimeframeMomentumStrategy extends StrategyBase {
+  constructor(config) {
+    super(config);
+    
+    // Timeframe configuration
+    this.timeframes = config.timeframes || [
+      { period: 15, weight: 0.2 },   // 15 min - 20% weight
+      { period: 60, weight: 0.3 },   // 1 hour - 30% weight
+      { period: 240, weight: 0.3 },  // 4 hour - 30% weight
+      { period: 1440, weight: 0.2 }  // 1 day - 20% weight
+    ];
+    
+    // Momentum parameters
+    this.momentumThreshold = config.momentumThreshold || 0.6;
+    this.confirmationRequired = config.confirmationRequired || 2;
+    this.dynamicPositionSizing = config.dynamicPositionSizing || true;
+    
+    // Risk management
+    this.maxPositionSize = config.maxPositionSize || 0.25;
+    this.stopLossPercent = config.stopLossPercent || 0.05;
+    this.takeProfitPercent = config.takeProfitPercent || 0.15;
+    
+    // State management
+    this.priceData = new Map();
+    this.momentumSignals = new Map();
+    this.activePositions = new Map();
+  }
+
+  async shouldExecute(vaultData) {
+    try {
+      // Ensure we have sufficient data for all timeframes
+      if (!await this.hasSufficientData(vaultData)) {
+        return false;
+      }
+
+      // Calculate composite momentum score
+      const momentumScore = await this.calculateCompositeMomentum(vaultData);
+      
+      // Check if momentum exceeds threshold
+      return Math.abs(momentumScore) > this.momentumThreshold;
+
+    } catch (error) {
+      await this.handleError(error, 'shouldExecute');
+      return false;
+    }
+  }
+
+  async execute(vaultData) {
+    try {
+      const momentumScore = await this.calculateCompositeMomentum(vaultData);
+      const currentPrice = await this.getCurrentPrice(vaultData);
+      
+      // Determine position size based on momentum strength
+      const positionSize = this.calculateDynamicPositionSize(momentumScore);
+      
+      let action = null;
+      
+      if (momentumScore > this.momentumThreshold) {
+        // Strong bullish momentum - LONG position
+        action = await this.openLongPosition(vaultData, currentPrice, positionSize);
+      } else if (momentumScore < -this.momentumThreshold) {
+        // Strong bearish momentum - SHORT position (if supported)
+        action = await this.openShortPosition(vaultData, currentPrice, positionSize);
+      }
+
+      // Set stop loss and take profit levels
+      if (action) {
+        await this.setRiskManagement(vaultData, action, currentPrice);
+      }
+
+      return {
+        success: true,
+        action: action,
+        momentumScore: momentumScore,
+        positionSize: positionSize,
+        price: currentPrice,
+        timestamp: Date.now()
+      };
+
+    } catch (error) {
+      await this.handleError(error, 'execute');
+      return {
+        success: false,
+        error: error.message,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  /**
+   * Calculates composite momentum across all timeframes
+   * @param {Object} vaultData - Vault data
+   * @returns {Promise<number>} Composite momentum score (-1 to +1)
+   */
+  async calculateCompositeMomentum(vaultData) {
+    let weightedMomentum = 0;
+    let totalWeight = 0;
+
+    for (const timeframe of this.timeframes) {
+      const momentum = await this.calculateTimeframeMomentum(vaultData, timeframe.period);
+      weightedMomentum += momentum * timeframe.weight;
+      totalWeight += timeframe.weight;
+    }
+
+    return totalWeight > 0 ? weightedMomentum / totalWeight : 0;
+  }
+
+  /**
+   * Calculates momentum for a specific timeframe
+   * @param {Object} vaultData - Vault data
+   * @param {number} period - Timeframe period in minutes
+   * @returns {Promise<number>} Momentum score for timeframe
+   */
+  async calculateTimeframeMomentum(vaultData, period) {
+    const priceData = await this.getPriceData(vaultData, period);
+    
+    if (priceData.length < 2) return 0;
+
+    // Calculate rate of change
+    const currentPrice = priceData[priceData.length - 1].price;
+    const pastPrice = priceData[0].price;
+    const rateOfChange = (currentPrice - pastPrice) / pastPrice;
+
+    // Calculate moving average convergence
+    const shortMA = this.calculateMovingAverage(priceData.slice(-10));
+    const longMA = this.calculateMovingAverage(priceData.slice(-20));
+    const maSignal = longMA > 0 ? (shortMA - longMA) / longMA : 0;
+
+    // Calculate volume-weighted momentum if volume data available
+    const volumeWeight = this.calculateVolumeWeight(priceData);
+
+    // Combine signals
+    return (rateOfChange * 0.5 + maSignal * 0.3 + volumeWeight * 0.2);
+  }
+
+  /**
+   * Calculates dynamic position size based on momentum strength
+   * @param {number} momentumScore - Composite momentum score
+   * @returns {number} Position size as percentage of available capital
+   */
+  calculateDynamicPositionSize(momentumScore) {
+    if (!this.dynamicPositionSizing) {
+      return this.basePositionSize || 0.1;
+    }
+
+    const absScore = Math.abs(momentumScore);
+    const scaleFactor = Math.min(absScore / this.momentumThreshold, 2.0);
+    const baseSize = this.basePositionSize || 0.1;
+    
+    return Math.min(baseSize * scaleFactor, this.maxPositionSize);
+  }
+
+  async calculateMetrics(vaultData) {
+    const momentumScore = await this.calculateCompositeMomentum(vaultData);
+    const position = this.activePositions.get(vaultData.address);
+    
+    // Calculate timeframe-specific momentum
+    const timeframeMomentum = {};
+    for (const tf of this.timeframes) {
+      timeframeMomentum[`${tf.period}min`] = 
+        await this.calculateTimeframeMomentum(vaultData, tf.period);
+    }
+
+    return {
+      strategy: 'MultiTimeframeMomentum',
+      compositeMomentum: momentumScore,
+      timeframeMomentum: timeframeMomentum,
+      hasPosition: !!position,
+      positionDetails: position ? {
+        type: position.type,
+        size: position.size,
+        entryPrice: position.entryPrice,
+        unrealizedPnL: await this.calculateUnrealizedPnL(vaultData, position)
+      } : null
+    };
+  }
+}
+```
+
+## Platform-Specific Implementation
+
+### Example: Uniswap V3 Implementation
+
+```javascript
+// src/strategies/multiTimeframe/UniswapV3MultiTimeframeMomentumStrategy.js
+import { MultiTimeframeMomentumStrategy } from '../MultiTimeframeMomentumStrategy.js';
+
+/**
+ * Uniswap V3 Multi-Timeframe Momentum Strategy
+ * @module UniswapV3MultiTimeframeMomentumStrategy
+ */
+export class UniswapV3MultiTimeframeMomentumStrategy extends MultiTimeframeMomentumStrategy {
+  constructor(config) {
+    super(config);
+    
+    // Uniswap V3 specific parameters
+    this.poolFee = config.poolFee || 3000; // 0.3%
+    this.tickSpacing = config.tickSpacing || 60;
+    this.rangeFactor = config.rangeFactor || 0.1; // 10% range around current price
+  }
+
+  /**
+   * Opens a long position using Uniswap V3 liquidity provision
+   * @param {Object} vaultData - Vault data
+   * @param {number} currentPrice - Current price
+   * @param {number} positionSize - Position size
+   * @returns {Promise<Object>} Transaction result
+   */
+  async openLongPosition(vaultData, currentPrice, positionSize) {
+    const { token0, token1 } = await this.getVaultTokens(vaultData);
+    const availableBalance = await this.getAvailableBalance(vaultData);
+    const investmentAmount = availableBalance * positionSize;
+
+    // Calculate price range for liquidity position
+    const lowerPrice = currentPrice * (1 - this.rangeFactor);
+    const upperPrice = currentPrice * (1 + this.rangeFactor);
+
+    // Convert prices to ticks
+    const lowerTick = this.priceToTick(lowerPrice);
+    const upperTick = this.priceToTick(upperPrice);
+
+    // Execute liquidity provision
+    const result = await this.platformAdapter.addLiquidity({
+      token0: token0.address,
+      token1: token1.address,
+      fee: this.poolFee,
+      tickLower: lowerTick,
+      tickUpper: upperTick,
+      amount0Desired: investmentAmount / 2, // Split equally
+      amount1Desired: investmentAmount / 2,
+      amount0Min: 0, // Set minimum amounts based on slippage
+      amount1Min: 0,
+      recipient: vaultData.address,
+      deadline: Math.floor(Date.now() / 1000) + 1200 // 20 minutes
+    });
+
+    // Track the position
+    this.activePositions.set(vaultData.address, {
+      type: 'long',
+      size: positionSize,
+      entryPrice: currentPrice,
+      tokenId: result.tokenId,
+      lowerTick: lowerTick,
+      upperTick: upperTick,
+      timestamp: Date.now()
+    });
+
+    return {
+      type: 'long',
+      platform: 'UniswapV3',
+      tokenId: result.tokenId,
+      amount: investmentAmount,
+      priceRange: { lower: lowerPrice, upper: upperPrice },
+      transactionHash: result.transactionHash
+    };
+  }
+
+  /**
+   * Converts price to Uniswap V3 tick
+   * @param {number} price - Price to convert
+   * @returns {number} Corresponding tick
+   */
+  priceToTick(price) {
+    // Simplified tick calculation - implement proper Uniswap V3 math
+    return Math.floor(Math.log(price) / Math.log(1.0001));
+  }
+
+  /**
+   * Collects fees from Uniswap V3 position
+   * @param {Object} vaultData - Vault data
+   * @returns {Promise<Object>} Fee collection result
+   */
+  async collectFees(vaultData) {
+    const position = this.activePositions.get(vaultData.address);
+    if (!position || !position.tokenId) return null;
+
+    return await this.platformAdapter.collectFees({
+      tokenId: position.tokenId,
+      recipient: vaultData.address,
+      amount0Max: '0xffffffffffffffffffffffff',
+      amount1Max: '0xffffffffffffffffffffffff'
+    });
+  }
+}
+```
+
+## Testing Custom Strategies
+
+### Unit Testing Framework
+
+```javascript
+// test/strategies/MeanReversionStrategy.test.js
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MeanReversionStrategy } from '../../src/strategies/MeanReversionStrategy.js';
+
+describe('MeanReversionStrategy', () => {
+  let strategy;
+  let mockVaultData;
+  let mockPlatformAdapter;
+
+  beforeEach(() => {
+    mockPlatformAdapter = {
+      executeBuy: vi.fn(),
+      executeSell: vi.fn(),
+      getCurrentPrice: vi.fn()
+    };
+
+    strategy = new MeanReversionStrategy({
+      lookbackPeriod: 60,
+      deviationThreshold: 1.5,
+      positionSize: 0.1,
+      platformAdapter: mockPlatformAdapter
+    });
+
+    mockVaultData = {
+      address: '0x1234567890abcdef',
+      tokens: [
+        { address: '0xA0b86a33E6441c8C2A34567890abcdef12345678', symbol: 'USDC' },
+        { address: '0xB0b86a33E6441c8C2A34567890abcdef12345678', symbol: 'WETH' }
+      ]
+    };
+  });
+
+  describe('shouldExecute', () => {
+    it('should return false when insufficient price history', async () => {
+      const result = await strategy.shouldExecute(mockVaultData);
+      expect(result).toBe(false);
+    });
+
+    it('should return true when deviation exceeds threshold', async () => {
+      // Populate price history with trending data
+      strategy.priceHistory = Array.from({ length: 60 }, (_, i) => ({
+        price: 100 + i, // Steadily increasing prices
+        timestamp: Date.now() - (59 - i) * 60000
+      }));
+
+      mockPlatformAdapter.getCurrentPrice.mockResolvedValue(200); // High deviation
+
+      const result = await strategy.shouldExecute(mockVaultData);
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('execute', () => {
+    it('should execute buy signal when price below mean', async () => {
+      // Setup price history with high prices
+      strategy.priceHistory = Array.from({ length: 60 }, () => ({
+        price: 150,
+        timestamp: Date.now() - Math.random() * 3600000
+      }));
+
+      mockPlatformAdapter.getCurrentPrice.mockResolvedValue(100); // Low current price
+      mockPlatformAdapter.executeBuy.mockResolvedValue({
+        transactionHash: '0xabc123'
+      });
+
+      strategy.getAvailableBalance = vi.fn().mockResolvedValue(1000);
+
+      const result = await strategy.execute(mockVaultData);
+
+      expect(result.success).toBe(true);
+      expect(result.action.type).toBe('buy');
+      expect(mockPlatformAdapter.executeBuy).toHaveBeenCalled();
+    });
+  });
+
+  describe('calculateMetrics', () => {
+    it('should return correct metrics', async () => {
+      mockPlatformAdapter.getCurrentPrice.mockResolvedValue(150);
+      
+      const metrics = await strategy.calculateMetrics(mockVaultData);
+
+      expect(metrics).toHaveProperty('strategy', 'MeanReversion');
+      expect(metrics).toHaveProperty('hasPosition');
+      expect(metrics).toHaveProperty('signalStrength');
+    });
+  });
+});
+```
+
+### Integration Testing
+
+```javascript
+// test/integration/customStrategy.test.js
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { AutomationService } from '../../src/AutomationService.js';
+import { MeanReversionStrategy } from '../../src/strategies/MeanReversionStrategy.js';
+import { startTestEnvironment, stopTestEnvironment } from '../helpers/testUtils.js';
+
+describe('Custom Strategy Integration', () => {
+  let automationService;
+  let testVaults;
+
+  beforeAll(async () => {
+    const testEnv = await startTestEnvironment();
+    testVaults = testEnv.vaults;
+
+    // Initialize automation service with custom strategy
+    automationService = new AutomationService({
+      strategies: [
+        new MeanReversionStrategy({
+          lookbackPeriod: 30,
+          deviationThreshold: 1.0,
+          positionSize: 0.05,
+          dryRun: true
+        })
+      ]
+    });
+
+    await automationService.initialize();
+  });
+
+  afterAll(async () => {
+    await automationService.shutdown();
+    await stopTestEnvironment();
+  });
+
+  it('should register and execute custom strategy', async () => {
+    // Register test vault
+    await automationService.registerVault(testVaults[0].address);
+
+    // Wait for strategy execution
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Verify strategy execution
+    const vaultInfo = await automationService.getVaultInfo(testVaults[0].address);
+    expect(vaultInfo.strategies).toHaveLength(1);
+    expect(vaultInfo.strategies[0].name).toBe('MeanReversionStrategy');
+  });
+});
+```
+
+## Best Practices
+
+### 1. Strategy Design Principles
+
+```javascript
+// Good: Modular and testable
+export class WellDesignedStrategy extends StrategyBase {
+  constructor(config) {
+    super(config);
+    this.validateParameters(config);
+    this.initializeState();
+  }
+
+  validateParameters(config) {
+    // Validate all parameters with clear error messages
+    if (!config.threshold || config.threshold <= 0) {
+      throw new Error('threshold must be positive number');
+    }
+  }
+
+  initializeState() {
+    // Initialize all state variables
+    this.signals = new Map();
+    this.positions = new Map();
+  }
+}
+
+// Bad: Monolithic and hard to test
+export class PoorlyDesignedStrategy extends StrategyBase {
+  async execute(vaultData) {
+    // Everything in one giant method
+    // No error handling
+    // No state management
+    // Hard to test or maintain
+  }
+}
+```
+
+### 2. Error Handling
+
+```javascript
+async execute(vaultData) {
+  try {
+    // Main execution logic
+    const result = await this.performTrading(vaultData);
+    return { success: true, ...result };
+  } catch (error) {
+    // Log error with context
+    this.logger.error('Strategy execution failed', {
+      strategy: this.constructor.name,
+      vault: vaultData.address,
+      error: error.message,
+      stack: error.stack
+    });
+
+    // Handle specific error types
+    if (error.code === 'INSUFFICIENT_FUNDS') {
+      await this.handleInsufficientFunds(vaultData);
+    } else if (error.code === 'SLIPPAGE_EXCEEDED') {
+      await this.handleSlippageError(vaultData);
+    }
+
+    return { success: false, error: error.message };
+  }
+}
+```
+
+### 3. State Management
+
+```javascript
+class StatefulStrategy extends StrategyBase {
+  constructor(config) {
+    super(config);
+    
+    // Use Maps for efficient lookups
+    this.positions = new Map();
+    this.signals = new Map();
+    this.metrics = new Map();
+  }
+
+  // Persist state for recovery
+  async saveState() {
+    const state = {
+      positions: Array.from(this.positions.entries()),
+      signals: Array.from(this.signals.entries()),
+      timestamp: Date.now()
+    };
+    
+    await this.stateManager.save(this.constructor.name, state);
+  }
+
+  // Restore state on restart
+  async loadState() {
+    const state = await this.stateManager.load(this.constructor.name);
+    if (state) {
+      this.positions = new Map(state.positions);
+      this.signals = new Map(state.signals);
+    }
+  }
+}
+```
+
+## Common Patterns
+
+### 1. Signal Aggregation
+
+```javascript
+async calculateCompositeSignal(vaultData) {
+  const signals = await Promise.all([
+    this.calculateTechnicalSignal(vaultData),
+    this.calculateFundamentalSignal(vaultData),
+    this.calculateSentimentSignal(vaultData)
+  ]);
+
+  return signals.reduce((composite, signal, index) => {
+    const weight = this.signalWeights[index];
+    return composite + (signal * weight);
+  }, 0) / this.signalWeights.reduce((sum, w) => sum + w, 0);
+}
+```
+
+### 2. Risk Management
+
+```javascript
+async checkRiskLimits(vaultData, proposedAction) {
+  const currentExposure = await this.calculateExposure(vaultData);
+  const newExposure = currentExposure + proposedAction.amount;
+
+  // Check position size limits
+  if (newExposure > this.maxPositionSize) {
+    throw new Error('Position size limit exceeded');
+  }
+
+  // Check correlation limits
+  const correlation = await this.calculateCorrelation(vaultData);
+  if (correlation > this.maxCorrelation) {
+    throw new Error('Correlation limit exceeded');
+  }
+
+  // Check drawdown limits
+  const drawdown = await this.calculateDrawdown(vaultData);
+  if (drawdown > this.maxDrawdown) {
+    throw new Error('Drawdown limit exceeded');
+  }
+}
+```
+
+### 3. Performance Tracking
+
+```javascript
+async trackPerformance(vaultData, action) {
+  const performance = {
+    timestamp: Date.now(),
+    action: action,
+    price: await this.getCurrentPrice(vaultData),
+    portfolio: await this.getPortfolioValue(vaultData)
+  };
+
+  // Store performance data
+  await this.performanceTracker.record(vaultData.address, performance);
+
+  // Calculate rolling metrics
+  const metrics = await this.calculateRollingMetrics(vaultData);
+  
+  // Trigger alerts if needed
+  if (metrics.sharpeRatio < this.minSharpeRatio) {
+    await this.alertManager.trigger('LOW_PERFORMANCE', {
+      vault: vaultData.address,
+      strategy: this.constructor.name,
+      sharpeRatio: metrics.sharpeRatio
+    });
+  }
+}
+```
+
+## See Also
+
+- [Strategy System Architecture](../architecture/strategy-system.md)
+- [Strategy Parameters Configuration](../configuration/strategy-parameters.md)
+- [Testing Guide](../../TESTING.md)
+- [API Reference](../api-reference/strategies/strategy-base.md)

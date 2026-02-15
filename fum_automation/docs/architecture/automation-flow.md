@@ -1,0 +1,823 @@
+# Automation Flow Patterns
+
+## Overview
+
+The FUM Automation Service orchestrates complex workflows that span vault discovery, strategy evaluation, and automated execution. This document details the complete automation flows and interaction patterns that drive the system.
+
+## Core Automation Lifecycle
+
+### Service Startup Flow
+
+```mermaid
+sequenceDiagram
+    participant AS as AutomationService
+    participant VR as VaultRegistry
+    participant VDS as VaultDataService
+    participant EM as EventManager
+    participant S as Strategy
+    
+    AS->>AS: Initialize configuration
+    AS->>VR: Initialize vault registry
+    AS->>VDS: Initialize data service
+    AS->>EM: Initialize event manager
+    
+    AS->>VR: discoverAuthorizedVaults()
+    VR->>VR: Scan for authorized vaults
+    VR-->>AS: Return authorized vault list
+    
+    loop For each authorized vault
+        AS->>VDS: loadVault(vaultAddress)
+        VDS-->>AS: Return enhanced vault data
+        AS->>AS: determineStrategy(vault)
+        AS->>S: initializeVaultStrategy(vault)
+        S->>EM: registerEventListeners()
+        S->>EM: schedulePeriodicEvaluation()
+    end
+    
+    AS->>AS: Service ready
+```
+
+### Vault Discovery and Registration
+
+The automation service continuously discovers and registers new vaults through multiple mechanisms:
+
+#### 1. Initial Discovery
+```javascript
+async discoverAuthorizedVaults() {
+  const discoveredVaults = new Map();
+  
+  for (const chainId of this.config.chains) {
+    try {
+      // Get all vaults that have authorized this automation service
+      const vaults = await this.vaultRegistry.getAuthorizedVaults(chainId);
+      
+      for (const vault of vaults) {
+        const key = `${vault.address}-${chainId}`;
+        discoveredVaults.set(key, {
+          ...vault,
+          chainId,
+          discoveredAt: Date.now(),
+          status: 'discovered'
+        });
+      }
+    } catch (error) {
+      this.logger.error('AutomationService', `Failed to discover vaults on chain ${chainId}`, { error: error.message });
+    }
+  }
+  
+  return discoveredVaults;
+}
+```
+
+#### 2. Real-time Authorization Monitoring
+```javascript
+// Monitor authorization events across all chains
+async setupAuthorizationMonitoring() {
+  for (const chainId of this.config.chains) {
+    const provider = this.getProvider(chainId);
+    
+    // Listen for vault authorization events
+    await this.eventManager.registerFilterListener({
+      provider,
+      filter: {
+        topics: [
+          ethers.utils.id("ExecutorAuthorized(address,address)"),
+          null, // any vault
+          ethers.utils.zeroPadValue(this.config.automationServiceAddress, 32)
+        ]
+      },
+      handler: async (log) => {
+        const vaultAddress = log.topics[1];
+        await this.handleVaultAuthorization(vaultAddress, chainId);
+      },
+      vaultAddress: '0x0000000000000000000000000000000000000000', // Special address for global events
+      eventType: 'authorization',
+      chainId,
+      additionalId: 'vault_authorized'
+    });
+    
+    // Listen for vault deauthorization events  
+    await this.eventManager.registerFilterListener({
+      provider,
+      filter: {
+        topics: [
+          ethers.utils.id("ExecutorDeauthorized(address,address)"),
+          null,
+          ethers.utils.zeroPadValue(this.config.automationServiceAddress, 32)
+        ]
+      },
+      handler: async (log) => {
+        const vaultAddress = log.topics[1];
+        await this.handleVaultDeauthorization(vaultAddress, chainId);
+      },
+      vaultAddress: '0x0000000000000000000000000000000000000000',
+      eventType: 'authorization',
+      chainId,
+      additionalId: 'vault_deauthorized'
+    });
+  }
+}
+```
+
+### Vault Processing Workflow
+
+#### Complete Vault Processing Pipeline
+
+```javascript
+async processVault(vault) {
+  const processingContext = {
+    vaultAddress: vault.address,
+    chainId: vault.chainId,
+    startTime: Date.now(),
+    operationId: `${vault.address}-${Date.now()}`
+  };
+  
+  try {
+    // 1. Load enhanced vault data
+    this.logger.info('AutomationService', `Processing vault ${vault.address}`, processingContext);
+    
+    const vaultData = await this.vaultDataService.loadVault(vault.address, vault.chainId);
+    if (!vaultData.success) {
+      throw new Error(`Failed to load vault data: ${vaultData.error}`);
+    }
+    
+    processingContext.positionCount = vaultData.positions.length;
+    processingContext.strategyType = vaultData.strategy?.strategyId;
+    
+    // 2. Get appropriate strategy
+    const strategy = this.getStrategyForVault(vaultData.vault);
+    if (!strategy) {
+      throw new Error(`No strategy available for vault ${vault.address}`);
+    }
+    
+    // 3. Evaluate initial assets if needed
+    const initialAssetsEval = await strategy.evaluateInitialAssets(
+      vaultData.vault, 
+      vaultData.positions
+    );
+    
+    if (initialAssetsEval.needsInitialAssets) {
+      await this.handleInitialAssetsActions(vault, initialAssetsEval.actions, processingContext);
+    }
+    
+    // 4. Process each position
+    const positionResults = [];
+    for (const position of vaultData.positions) {
+      try {
+        const result = await this.processPosition(position, strategy, processingContext);
+        positionResults.push(result);
+      } catch (error) {
+        this.logger.error('AutomationService', `Position processing failed`, {
+          ...processingContext,
+          positionId: position.id,
+          error: error.message
+        });
+        positionResults.push({ 
+          positionId: position.id, 
+          success: false, 
+          error: error.message 
+        });
+      }
+    }
+    
+    // 5. Update vault processing metrics
+    const processingTime = Date.now() - processingContext.startTime;
+    const successfulPositions = positionResults.filter(r => r.success).length;
+    
+    this.logger.info('AutomationService', `Vault processing completed`, {
+      ...processingContext,
+      processingTimeMs: processingTime,
+      successfulPositions,
+      totalPositions: positionResults.length
+    });
+    
+    this.eventManager.emit('vault_processed', {
+      vaultAddress: vault.address,
+      chainId: vault.chainId,
+      results: positionResults,
+      processingTime
+    });
+    
+    return {
+      success: true,
+      vault: vaultData.vault,
+      positionResults,
+      processingTime
+    };
+    
+  } catch (error) {
+    const processingTime = Date.now() - processingContext.startTime;
+    
+    this.logger.error('AutomationService', `Vault processing failed`, {
+      ...processingContext,
+      processingTimeMs: processingTime,
+      error: error.message
+    });
+    
+    this.eventManager.emit('vault_processing_failed', {
+      vaultAddress: vault.address,
+      chainId: vault.chainId,
+      error: error.message,
+      processingTime
+    });
+    
+    return {
+      success: false,
+      error: error.message,
+      processingTime
+    };
+  }
+}
+```
+
+#### Position-Level Processing
+
+```javascript
+async processPosition(position, strategy, context) {
+  const positionContext = {
+    ...context,
+    positionId: position.id,
+    platform: position.platform,
+    poolAddress: position.poolAddress
+  };
+  
+  try {
+    // 1. Evaluate rebalancing need
+    this.logger.info('AutomationService', `Evaluating position ${position.id}`, positionContext);
+    
+    const rebalanceEval = await strategy.evaluateRebalance(position);
+    
+    positionContext.shouldRebalance = rebalanceEval.shouldRebalance;
+    positionContext.evaluationReason = rebalanceEval.reason;
+    
+    // 2. Handle rebalancing actions
+    if (rebalanceEval.shouldRebalance && rebalanceEval.actions.length > 0) {
+      this.eventManager.emit('rebalance_started', {
+        vaultAddress: position.vaultAddress,
+        positionId: position.id,
+        reason: rebalanceEval.reason,
+        actionCount: rebalanceEval.actions.length
+      });
+      
+      const actionResults = await this.executeActions(
+        rebalanceEval.actions, 
+        positionContext
+      );
+      
+      this.eventManager.emit('rebalance_completed', {
+        vaultAddress: position.vaultAddress,
+        positionId: position.id,
+        success: actionResults.every(r => r.success),
+        actionResults
+      });
+      
+      return {
+        positionId: position.id,
+        success: true,
+        rebalanced: true,
+        evaluation: rebalanceEval,
+        actionResults
+      };
+    } else {
+      // 3. Check for fee collection opportunities
+      const feeEval = await strategy.evaluateFeeCollection?.(position);
+      
+      if (feeEval?.shouldCollect) {
+        this.eventManager.emit('fee_collection_started', {
+          vaultAddress: position.vaultAddress,
+          positionId: position.id,
+          feeAmount: feeEval.estimatedFees
+        });
+        
+        const feeResults = await this.executeActions(
+          feeEval.actions,
+          positionContext
+        );
+        
+        this.eventManager.emit('fee_collection_completed', {
+          vaultAddress: position.vaultAddress,
+          positionId: position.id,
+          success: feeResults.every(r => r.success),
+          collectedFees: feeEval.estimatedFees
+        });
+        
+        return {
+          positionId: position.id,
+          success: true,
+          rebalanced: false,
+          feesCollected: true,
+          feeResults
+        };
+      }
+    }
+    
+    // 4. No action needed
+    this.logger.info('AutomationService', `No action needed for position ${position.id}`, {
+      ...positionContext,
+      result: 'no_action'
+    });
+    
+    return {
+      positionId: position.id,
+      success: true,
+      rebalanced: false,
+      feesCollected: false,
+      reason: rebalanceEval.reason
+    };
+    
+  } catch (error) {
+    this.logger.error('AutomationService', `Position processing error`, {
+      ...positionContext,
+      error: error.message
+    });
+    
+    return {
+      positionId: position.id,
+      success: false,
+      error: error.message
+    };
+  }
+}
+```
+
+## Event-Driven Processing Patterns
+
+### 1. Reactive Processing (Event-Triggered)
+
+Events trigger immediate evaluation and potential action:
+
+```javascript
+// Price movement triggers
+async handleSignificantPriceMovement(poolAddress, priceChange, context) {
+  // Find all positions affected by this pool
+  const affectedPositions = await this.findPositionsByPool(poolAddress, context.chainId);
+  
+  this.logger.info('AutomationService', `Price movement detected`, {
+    poolAddress,
+    priceChange: priceChange.toFixed(4),
+    affectedPositions: affectedPositions.length
+  });
+  
+  // Process affected positions with priority
+  const processingPromises = affectedPositions.map(async position => {
+    const vault = await this.vaultDataService.loadVault(position.vaultAddress, context.chainId);
+    const strategy = this.getStrategyForVault(vault.vault);
+    
+    return this.processPosition(position, strategy, {
+      ...context,
+      trigger: 'price_movement',
+      priceChange
+    });
+  });
+  
+  const results = await Promise.all(processingPromises);
+  
+  this.eventManager.emit('price_movement_processed', {
+    poolAddress,
+    priceChange,
+    affectedPositions: affectedPositions.length,
+    actionsTaken: results.filter(r => r.rebalanced || r.feesCollected).length
+  });
+}
+
+// Strategy parameter updates
+async handleStrategyParameterUpdate(vaultAddress, chainId, newParameters) {
+  this.logger.info('AutomationService', `Strategy parameters updated`, {
+    vaultAddress,
+    chainId,
+    parameterCount: Object.keys(newParameters).length
+  });
+  
+  // Reload vault data to get updated strategy
+  const vaultData = await this.vaultDataService.loadVault(vaultAddress, chainId);
+  
+  // Re-evaluate all positions with new parameters
+  const strategy = this.getStrategyForVault(vaultData.vault);
+  
+  for (const position of vaultData.positions) {
+    await this.processPosition(position, strategy, {
+      vaultAddress,
+      chainId,
+      trigger: 'parameter_update',
+      operationId: `param-update-${Date.now()}`
+    });
+  }
+  
+  this.eventManager.emit('strategy_parameters_updated', {
+    vaultAddress,
+    chainId,
+    newParameters
+  });
+}
+```
+
+### 2. Periodic Processing (Timer-Based)
+
+Regular evaluation cycles ensure nothing is missed:
+
+```javascript
+// Scheduled periodic evaluation
+async performPeriodicEvaluation() {
+  const startTime = Date.now();
+  const evaluationId = `periodic-${startTime}`;
+  
+  this.logger.info('AutomationService', 'Starting periodic evaluation', {
+    evaluationId,
+    authorizedVaultCount: this.authorizedVaults.size
+  });
+  
+  try {
+    // Get all currently authorized vaults
+    const vaultsToProcess = Array.from(this.authorizedVaults.values())
+      .filter(vault => vault.status === 'active');
+    
+    // Process vaults in batches to prevent overwhelming the system
+    const batchSize = this.config.batchSize || 5;
+    const batches = this.chunkArray(vaultsToProcess, batchSize);
+    
+    let processedCount = 0;
+    let successCount = 0;
+    
+    for (const batch of batches) {
+      const batchPromises = batch.map(vault => this.processVault(vault));
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      batchResults.forEach((result, index) => {
+        processedCount++;
+        if (result.status === 'fulfilled' && result.value.success) {
+          successCount++;
+        } else {
+          this.logger.warn('AutomationService', `Vault processing failed in periodic evaluation`, {
+            evaluationId,
+            vaultAddress: batch[index].address,
+            error: result.reason?.message || 'Unknown error'
+          });
+        }
+      });
+      
+      // Small delay between batches to prevent rate limiting
+      if (batches.indexOf(batch) < batches.length - 1) {
+        await this.sleep(this.config.batchDelayMs || 100);
+      }
+    }
+    
+    const evaluationTime = Date.now() - startTime;
+    
+    this.logger.info('AutomationService', 'Periodic evaluation completed', {
+      evaluationId,
+      processedVaults: processedCount,
+      successfulVaults: successCount,
+      evaluationTimeMs: evaluationTime
+    });
+    
+    this.eventManager.emit('periodic_evaluation_completed', {
+      evaluationId,
+      processedVaults: processedCount,
+      successfulVaults: successCount,
+      evaluationTime
+    });
+    
+  } catch (error) {
+    this.logger.error('AutomationService', 'Periodic evaluation failed', {
+      evaluationId,
+      error: error.message
+    });
+    
+    this.eventManager.emit('periodic_evaluation_failed', {
+      evaluationId,
+      error: error.message
+    });
+  }
+}
+```
+
+### 3. Hybrid Processing (Event + Timer)
+
+Combines reactive and periodic patterns for optimal coverage:
+
+```javascript
+// Adaptive evaluation scheduling
+class AdaptiveScheduler {
+  constructor(eventManager, baseIntervalMs = 60000) {
+    this.eventManager = eventManager;
+    this.baseIntervalMs = baseIntervalMs;
+    this.vaultSchedules = new Map();
+    
+    // Subscribe to events that affect scheduling
+    this.eventManager.subscribe('rebalance_completed', this.handleRebalanceEvent.bind(this));
+    this.eventManager.subscribe('price_movement_detected', this.handlePriceEvent.bind(this));
+  }
+  
+  // Adjust evaluation frequency based on activity
+  handleRebalanceEvent(data) {
+    const schedule = this.vaultSchedules.get(data.vaultAddress) || {
+      intervalMs: this.baseIntervalMs,
+      lastRebalance: Date.now(),
+      rebalanceCount: 0
+    };
+    
+    schedule.rebalanceCount++;
+    schedule.lastRebalance = Date.now();
+    
+    // Increase frequency if frequent rebalancing
+    if (schedule.rebalanceCount > 3) {
+      schedule.intervalMs = Math.max(this.baseIntervalMs / 2, 30000); // Min 30 seconds
+    } else {
+      schedule.intervalMs = this.baseIntervalMs;
+    }
+    
+    this.vaultSchedules.set(data.vaultAddress, schedule);
+    this.rescheduleVault(data.vaultAddress, schedule.intervalMs);
+  }
+  
+  // Immediate evaluation on significant price movements
+  handlePriceEvent(data) {
+    if (Math.abs(data.priceChange) > 0.05) { // 5% price movement
+      // Schedule immediate evaluation
+      setTimeout(() => {
+        this.evaluateVault(data.vaultAddress);
+      }, 1000); // 1 second delay to batch rapid events
+    }
+  }
+}
+```
+
+## Error Handling and Recovery Patterns
+
+### Circuit Breaker Pattern
+
+```javascript
+class CircuitBreaker {
+  constructor(threshold = 5, timeWindowMs = 300000) { // 5 failures in 5 minutes
+    this.threshold = threshold;
+    this.timeWindowMs = timeWindowMs;
+    this.failures = [];
+    this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+  }
+  
+  async execute(operation, context) {
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastFailure > this.timeWindowMs) {
+        this.state = 'HALF_OPEN';
+      } else {
+        throw new Error('Circuit breaker is OPEN');
+      }
+    }
+    
+    try {
+      const result = await operation();
+      
+      if (this.state === 'HALF_OPEN') {
+        this.reset();
+      }
+      
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      throw error;
+    }
+  }
+  
+  recordFailure() {
+    const now = Date.now();
+    this.failures.push(now);
+    this.lastFailure = now;
+    
+    // Remove old failures outside time window
+    this.failures = this.failures.filter(
+      failureTime => now - failureTime < this.timeWindowMs
+    );
+    
+    if (this.failures.length >= this.threshold) {
+      this.state = 'OPEN';
+    }
+  }
+  
+  reset() {
+    this.failures = [];
+    this.state = 'CLOSED';
+  }
+}
+
+// Usage in AutomationService
+this.circuitBreaker = new CircuitBreaker();
+
+async processVaultWithCircuitBreaker(vault) {
+  return this.circuitBreaker.execute(
+    () => this.processVault(vault),
+    { vaultAddress: vault.address }
+  );
+}
+```
+
+### Retry and Backoff Strategies
+
+```javascript
+// Exponential backoff for failed operations
+async retryWithBackoff(operation, maxRetries = 3, baseDelayMs = 1000) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt === maxRetries) {
+        break;
+      }
+      
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+      const jitterMs = Math.random() * 1000; // Add jitter to prevent thundering herd
+      
+      this.logger.warn('AutomationService', `Operation failed, retrying in ${delayMs + jitterMs}ms`, {
+        attempt,
+        maxRetries,
+        error: error.message
+      });
+      
+      await this.sleep(delayMs + jitterMs);
+    }
+  }
+  
+  throw new Error(`Operation failed after ${maxRetries} attempts: ${lastError.message}`);
+}
+```
+
+## Performance Optimization Patterns
+
+### Batching and Concurrency
+
+```javascript
+// Batch similar operations for efficiency
+async processBatchedOperations(operations, batchSize = 10) {
+  const batches = this.chunkArray(operations, batchSize);
+  const results = [];
+  
+  for (const batch of batches) {
+    const batchResults = await Promise.allSettled(
+      batch.map(op => this.executeOperation(op))
+    );
+    
+    results.push(...batchResults);
+    
+    // Rate limiting between batches
+    await this.sleep(100);
+  }
+  
+  return results;
+}
+
+// Concurrent processing with concurrency limits
+async processWithConcurrencyLimit(items, processor, limit = 5) {
+  const semaphore = new Semaphore(limit);
+  
+  const promises = items.map(async item => {
+    await semaphore.acquire();
+    try {
+      return await processor(item);
+    } finally {
+      semaphore.release();
+    }
+  });
+  
+  return Promise.allSettled(promises);
+}
+```
+
+### Caching and Memoization
+
+```javascript
+// Cache expensive calculations
+class StrategyEvaluationCache {
+  constructor(ttlMs = 30000) {
+    this.cache = new Map();
+    this.ttlMs = ttlMs;
+  }
+  
+  async getOrCompute(key, computer) {
+    const cached = this.cache.get(key);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.ttlMs) {
+      return cached.value;
+    }
+    
+    const value = await computer();
+    this.cache.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+    
+    return value;
+  }
+}
+```
+
+## Monitoring and Observability
+
+### Flow Metrics Collection
+
+```javascript
+// Track processing metrics
+class FlowMetrics {
+  constructor() {
+    this.metrics = {
+      vaultsProcessed: 0,
+      positionsEvaluated: 0,
+      rebalancesExecuted: 0,
+      feesCollected: 0,
+      errors: 0,
+      averageProcessingTime: 0
+    };
+    this.processingTimes = [];
+  }
+  
+  recordVaultProcessing(processingTime, success) {
+    this.metrics.vaultsProcessed++;
+    
+    if (success) {
+      this.processingTimes.push(processingTime);
+      this.updateAverageProcessingTime();
+    } else {
+      this.metrics.errors++;
+    }
+  }
+  
+  recordRebalance() {
+    this.metrics.rebalancesExecuted++;
+  }
+  
+  recordFeeCollection() {
+    this.metrics.feesCollected++;
+  }
+  
+  updateAverageProcessingTime() {
+    const recent = this.processingTimes.slice(-100); // Last 100 operations
+    this.metrics.averageProcessingTime = 
+      recent.reduce((sum, time) => sum + time, 0) / recent.length;
+  }
+  
+  getMetrics() {
+    return { ...this.metrics };
+  }
+}
+```
+
+### Health Check Endpoints
+
+```javascript
+// Service health monitoring
+async getHealthStatus() {
+  const status = {
+    service: 'healthy',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    components: {}
+  };
+  
+  try {
+    // Check vault registry
+    status.components.vaultRegistry = {
+      status: 'healthy',
+      authorizedVaults: this.authorizedVaults.size
+    };
+    
+    // Check event manager
+    status.components.eventManager = {
+      status: 'healthy',
+      activeListeners: this.eventManager.getListenerCount()
+    };
+    
+    // Check provider connections
+    for (const chainId of this.config.chains) {
+      try {
+        const provider = this.getProvider(chainId);
+        const blockNumber = await provider.getBlockNumber();
+        status.components[`chain_${chainId}`] = {
+          status: 'healthy',
+          latestBlock: blockNumber
+        };
+      } catch (error) {
+        status.components[`chain_${chainId}`] = {
+          status: 'unhealthy',
+          error: error.message
+        };
+        status.service = 'degraded';
+      }
+    }
+    
+  } catch (error) {
+    status.service = 'unhealthy';
+    status.error = error.message;
+  }
+  
+  return status;
+}
+```
+
+---
+
+For detailed implementation examples:
+- [AutomationService API](../api-reference/automation-service/automation-service.md)
+- [Strategy Implementation Guide](../examples/custom-strategies.md)
+- [Monitoring and Observability](../configuration/monitoring.md)

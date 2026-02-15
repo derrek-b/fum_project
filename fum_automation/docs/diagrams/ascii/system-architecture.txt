@@ -1,0 +1,78 @@
+FUM Automation System Architecture
+=====================================
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                FUM AUTOMATION SYSTEM                            │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────────────┐ │
+│  │ AutomationService│<-->│   EventManager   │<-->│      VaultRegistry         │ │
+│  │                 │    │                  │    │                             │ │
+│  │ - start()       │    │ - registerFilter │    │ - getAuthorizedVaults()     │ │
+│  │ - stop()        │    │ - removeListener │    │ - subscribeToEvents()       │ │
+│  │ - handleEvents()│    │ - cleanup()      │    │ - stopListening()           │ │
+│  └─────────────────┘    └──────────────────┘    └─────────────────────────────┘ │
+│           │                        │                            │               │
+│           │                        │                            │               │
+│           v                        │                            │               │
+│  ┌─────────────────┐              │                            │               │
+│  │ VaultDataService│<─────────────┘                            │               │
+│  │                 │                                           │               │
+│  │ - getVault()    │                                           │               │
+│  │ - refreshData() │                                           │               │
+│  │ - updateState() │                                           │               │
+│  └─────────────────┘                                           │               │
+│           │                                                    │               │
+│           │                                                    │               │
+│           v                                                    │               │
+│  ┌─────────────────────────────────────────────────────────────┴─────────────┐ │
+│  │                           STRATEGY FRAMEWORK                              │ │
+│  │                                                                           │ │
+│  │  ┌─────────────────┐                                                     │ │
+│  │  │   StrategyBase  │  (Abstract Base Class)                              │ │
+│  │  │                 │                                                     │ │
+│  │  │ - setupMonitor()│                                                     │ │
+│  │  │ - evaluateState()│                                                    │ │
+│  │  │ - executeRebal()│                                                     │ │
+│  │  └─────────────────┘                                                     │ │
+│  │           │                                                               │ │
+│  │           │                                                               │ │
+│  │  ┌────────┴─────────┐                                                    │ │
+│  │  │                  │                                                    │ │
+│  │  v                  v                                                    │ │
+│  │ ┌─────────────────┐ ┌─────────────────────────┐                         │ │
+│  │ │ BabyStepsStrategy│ │ ParrisIslandStrategy   │                         │ │
+│  │ │ (Conservative)  │ │ (Aggressive)           │                         │ │
+│  │ └─────────────────┘ └─────────────────────────┘                         │ │
+│  │          │                        │                                     │ │
+│  │          │                        │                                     │ │
+│  │          v                        v                                     │ │
+│  │ ┌─────────────────┐ ┌─────────────────────────┐                         │ │
+│  │ │UniswapV3BabySteps│ │UniswapV3ParrisIsland   │                         │ │
+│  │ │Strategy         │ │Strategy                │                         │ │
+│  │ │(Platform Impl)  │ │(Platform Impl)         │                         │ │
+│  │ └─────────────────┘ └─────────────────────────┘                         │ │
+│  └───────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                              EXTERNAL INTEGRATIONS                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────────────┐ │
+│  │   Blockchain    │    │   DeFi Protocols │    │      FUM Library           │ │
+│  │                 │    │                  │    │                             │ │
+│  │ - Events        │    │ - Uniswap V3     │    │ - Contracts                 │ │
+│  │ - Transactions  │    │ - Position Mgmt  │    │ - Chain Helpers             │ │
+│  │ - State Queries │    │ - Liquidity Pools│    │ - Adapters                  │ │
+│  └─────────────────┘    └──────────────────┘    └─────────────────────────────┘ │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Data Flow:
+==========
+1. VaultRegistry discovers authorized vaults from blockchain
+2. AutomationService starts monitoring via EventManager
+3. EventManager registers filters for price/fee events
+4. Strategy instances handle position evaluation and rebalancing
+5. VaultDataService maintains cached vault state and position data
+6. Logger captures all operations for debugging and monitoring

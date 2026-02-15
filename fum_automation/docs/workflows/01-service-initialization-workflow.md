@@ -1,0 +1,226 @@
+# Service Initialization Workflow
+
+**Workflow ID**: 01  
+**Trigger**: Manual service startup via `new AutomationService(config)` then `.start()`  
+**Purpose**: Bootstrap the automation service from configuration to operational monitoring state  
+**Complexity**: High (multi-phase initialization with dependencies, cache loading, event subscription setup)
+
+## Overview
+
+The Service Initialization Workflow establishes the complete automation service infrastructure from scratch. This workflow sets up blockchain connectivity, initializes all cache structures, loads existing authorized vaults, creates platform adapters, configures comprehensive event monitoring, and transitions the service to an operational state ready for automated vault management.
+
+## Manual Trigger
+
+**Source**: Application startup or manual service restart  
+**Entry Points**: `new AutomationService(config)` followed by `service.start()`  
+**When Triggered**: Service deployment, restart after configuration changes, or recovery from shutdown  
+**Prerequisites**: Valid configuration with required addresses, URLs, and parameters
+
+## Complete Function Call Chain
+
+```
+🚀 Manual Service Startup
+    ↓
+📋 AutomationService.constructor(config)
+    ├── Configuration validation
+    │   ├── _validateAddress(config.automationServiceAddress)
+    │   ├── _validateChainId(config.chainId)
+    │   ├── _validateWebSocketUrl(config.wsUrl)
+    │   └── _validateBoolean(config.debug)
+    ├── Environment setup
+    │   └── dotenv.config({ path: config.envPath })
+    ├── Core service properties initialization
+    │   ├── Data structures: vaultLocks, adapters, tokens, poolData
+    │   ├── Failed vault tracking: failedVaults, blacklistedVaults
+    │   └── State flags: isRunning, isShuttingDown
+    ├── EventManager initialization
+    │   └── new EventManager() + setDebug()
+    ├── VaultDataService creation
+    │   └── new VaultDataService(eventManager)
+    ├── Strategy instantiation with dependency injection
+    │   └── BabyStepsStrategy(strategyDependencies)
+    └── Event subscriptions setup
+        ├── 'VaultAuthGranted' → handleVaultAuthorization
+        ├── 'VaultAuthRevoked' → handleVaultRevocation  
+        ├── 'VaultUnrecoverable' → addToBlacklist
+        ├── 'PositionRebalanced' → eventManager.refreshSwapListeners
+        ├── 'TargetTokensUpdated' → handleTargetTokensUpdate
+        ├── 'TargetPlatformsUpdated' → handleTargetPlatformsUpdate
+        ├── 'StrategyParameterUpdated' → handleParameterUpdate
+        └── 'SwapEventDetected' → handleSwapEvent
+        ↓
+🎬 AutomationService.start()
+    ├── Guard checks (already running / shutting down)
+    ├── Phase 1: Core Service Setup (MUST succeed)
+    │   ├── initialize() [Core service initialization]
+    │   │   ├── WebSocket provider setup
+    │   │   │   └── new ethers.providers.WebSocketProvider(wsUrl)
+    │   │   ├── Strategy dependency updates
+    │   │   │   └── Update provider, adapters, tokens, serviceConfig
+    │   │   ├── VaultDataService initialization
+    │   │   │   └── vaultDataService.initialize(provider, chainId)
+    │   │   ├── Pool data event listener
+    │   │   │   └── eventManager.subscribe('PoolDataFetched')
+    │   │   ├── Platform adapter initialization
+    │   │   │   └── _initializeAdapters()
+    │   │   │       └── AdapterFactory.getAdaptersForChain(chainId)
+    │   │   ├── Token configuration initialization  
+    │   │   │   └── _initializeTokens()
+    │   │   │       └── getTokensByChain(chainId)
+    │   │   ├── Token sharing with VaultDataService
+    │   │   │   └── vaultDataService.setTokens(tokens)
+    │   │   ├── VaultDataService event logging setup
+    │   │   │   └── _setupVaultDataServiceLogging()
+    │   │   └── Contract pre-initialization
+    │   │       ├── getVaultFactory(provider)
+    │   │       ├── getContract('bob', provider)
+    │   │       ├── getContract('parris', provider)
+    │   │       └── getContract('BatchExecutor', provider)
+    │   ├── isRunning = true
+    │   ├── Blacklist loading
+    │   │   └── loadBlacklist()
+    │   ├── Authorization event monitoring setup
+    │   │   └── eventManager.subscribeToAuthorizationEvents()
+    │   ├── Strategy parameter event monitoring setup
+    │   │   └── eventManager.subscribeToStrategyParameterEvents()
+    │   └── Failed vault retry timer
+    │       └── startFailedVaultRetryTimer()
+    ├── Phase 2: Vault Loading (Failures handled gracefully)
+    │   ├── Get authorized vault addresses
+    │   │   └── retryWithBackoff(() => getAuthorizedVaults(automationServiceAddress, provider))
+    │   └── For each authorized vault:
+    │       ├── Blacklist check
+    │       │   └── isBlacklisted(vaultAddress)
+    │       └── setupVault(vaultAddress, { forceRefresh: true })
+    │           ├── Step 1: Load vault data
+    │           │   └── vaultDataService.getVault(vaultAddress, forceRefresh)
+    │           ├── Step 2: Initialize vault for strategy
+    │           │   └── initializeVaultForStrategy(vault)
+    │           │       └── strategy.initializeVaultStrategy(vault)
+    │           └── Step 3: Start monitoring
+    │               └── startMonitoringVault(vault)
+    │                   ├── eventManager.subscribeToSwapEvents(vault, poolData, adapters, provider)
+    │                   └── strategy.setupAdditionalMonitoring(vault) [if implemented]
+    └── Service startup completion
+        ├── Result summary logging
+        └── eventManager.emit('ServiceStarted')
+```
+
+## Function Inventory by Module
+
+### AutomationService.js - Core Functions (USED)
+- **constructor**: Service instantiation and event subscription setup
+- **start**: Main startup orchestration
+- **initialize**: Core service initialization  
+- **_initializeAdapters**: Platform adapter setup
+- **_initializeTokens**: Token configuration loading
+- **_setupVaultDataServiceLogging**: Event logging configuration
+- **loadBlacklist**: Persistent blacklist loading
+- **startFailedVaultRetryTimer**: Periodic retry mechanism
+- **setupVault**: Individual vault setup orchestration
+- **initializeVaultForStrategy**: Strategy-specific vault initialization
+- **startMonitoringVault**: Event monitoring setup for vault
+- **isBlacklisted**: Blacklist checking utility
+
+### AutomationService.js - Event Handlers (USED)
+- **handleVaultAuthorization**: Vault authorization processing
+- **handleVaultRevocation**: Vault revocation processing  
+- **handleTargetTokensUpdate**: Target token change handling
+- **handleTargetPlatformsUpdate**: Target platform change handling
+- **handleParameterUpdate**: Strategy parameter change handling
+- **handleSwapEvent**: Swap event processing
+- **addToBlacklist**: Vault blacklisting
+
+### EventManager.js - Core Functions (USED)
+- **constructor**: Event manager instantiation
+- **setDebug**: Debug logging configuration
+- **subscribe**: Event subscription
+- **subscribeToAuthorizationEvents**: ExecutorChanged event monitoring
+- **subscribeToStrategyParameterEvents**: Strategy parameter monitoring
+- **subscribeToSwapEvents**: Swap event monitoring setup
+- **refreshSwapListeners**: Swap listener refresh after rebalancing
+
+### VaultDataService.js - Core Functions (USED)
+- **constructor**: Service instantiation with event manager
+- **initialize**: Provider and chain setup
+- **setTokens**: Token configuration sharing
+- **getVault**: Vault data loading with retry
+- **_loadVaultDataInternal**: Internal vault data loading
+
+### BabyStepsStrategy.js - Initialization Functions (USED)
+- **constructor**: Strategy instantiation with dependencies
+- **initializeVaultStrategy**: Vault-specific initialization
+
+### External Library Functions (USED)
+- **AdapterFactory.getAdaptersForChain**: Platform adapter loading
+- **getTokensByChain**: Token configuration loading
+- **getAuthorizedVaults**: Authorized vault discovery
+- **getVaultFactory**: Factory contract initialization
+- **getContract**: Strategy/executor contract initialization
+
+### RetryHelper.js - Utility Functions (USED)
+- **retryWithBackoff**: Retry logic for critical operations
+
+## Error Handling Paths
+
+### Core Service Failures (Service Cannot Start)
+- Configuration validation errors → Constructor throws
+- Provider connection failures → initialize() fails → start() returns failure
+- Contract initialization failures → initialize() fails → start() returns failure
+- EventManager setup failures → Constructor throws
+
+### Vault Loading Failures (Handled Gracefully)
+- Individual vault load failures → Tracked in failedVaults → Periodic retry
+- Vault strategy initialization failures → Tracked in failedVaults → Periodic retry
+- Monitoring setup failures → Tracked in failedVaults → Periodic retry
+- Blacklisted vaults → Skipped with logging
+
+### Retry Mechanisms
+- **getAuthorizedVaults**: 3 retries with exponential backoff
+- **strategy.initializeVaultStrategy**: 2 retries with exponential backoff  
+- **eventManager.subscribeToSwapEvents**: 2 retries with exponential backoff
+- **Failed vault retry timer**: 5-minute intervals for persistent failures
+
+## Event Flow During Initialization
+
+### Events Subscribed To (Constructor)
+- **VaultAuthGranted**: Triggers vault authorization workflow
+- **VaultAuthRevoked**: Triggers vault revocation workflow  
+- **VaultUnrecoverable**: Triggers blacklisting
+- **PositionRebalanced**: Triggers swap listener refresh
+- **TargetTokensUpdated**: Triggers vault reconfiguration
+- **TargetPlatformsUpdated**: Triggers vault reconfiguration
+- **StrategyParameterUpdated**: Triggers parameter update notification
+- **SwapEventDetected**: Triggers swap event processing workflow
+- **PoolDataFetched**: Triggers pool data caching
+
+### Events Emitted During Startup
+- **ServiceStartFailed**: Core initialization failure
+- **ServiceStarted**: Successful startup with summary
+
+## Critical vs Optional Operations
+
+### Critical (Must Succeed)
+- Configuration validation
+- WebSocket provider setup  
+- VaultDataService initialization
+- Platform adapter loading
+- Token configuration loading
+- Contract pre-initialization
+- Authorization event monitoring setup
+
+### Optional (Graceful Failure)
+- Individual vault loading
+- Vault strategy initialization  
+- Vault monitoring setup
+- Pool data caching
+- Failed vault retry mechanisms
+
+## End State
+
+Upon successful completion, the AutomationService is in operational state:
+- **isRunning = true**
+- All authorized vaults discovered and setup attempted
+- Event monitoring active for authorization changes and swap events
+- Periodic retry mechanisms running for failed operations
+- Ready to respond to vault lifecycle events and price changes

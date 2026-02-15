@@ -1,0 +1,646 @@
+# Strategy System Architecture
+
+## Overview
+
+The Strategy System is the core intelligence of the FUM Automation Service, implementing a flexible architecture that separates strategy logic from platform-specific implementations. This design enables easy addition of new automation strategies while maintaining consistent interfaces and shared utilities.
+
+## Design Philosophy
+
+### Strategy Pattern Implementation
+The strategy system follows the classic Strategy Pattern with enhancements for blockchain automation:
+
+```
+┌─────────────────────────────────────────┐
+│              StrategyBase               │ ← Abstract foundation
+│  ┌─────────────────────────────────────┐ │
+│  │     Common Utilities & Patterns     │ │
+│  │  • Event registration helpers       │ │
+│  │  • Position data validation        │ │
+│  │  • Logging and error handling      │ │
+│  │  • Abstract method enforcement     │ │
+│  └─────────────────────────────────────┘ │
+└─────────────────────────────────────────┘
+              ▲                    ▲
+              │                    │
+┌─────────────────────┐  ┌─────────────────────┐
+│   BabyStepsStrategy │  │ ParrisIslandStrategy│ ← Strategy implementations
+│                     │  │                     │
+│  • Simple range     │  │  • Adaptive ranges  │
+│  • Conservative     │  │  • ML-ready hooks   │
+│  • Easy parameters  │  │  • Advanced params  │
+└─────────────────────┘  └─────────────────────┘
+              ▲                    ▲
+              │                    │
+┌─────────────────────┐  ┌─────────────────────┐
+│  UniswapV3BabySteps │  │UniswapV3ParrisIsland│ ← Platform implementations
+│                     │  │                     │
+│  • V3-specific      │  │  • V3-specific      │
+│  • Pool math        │  │  • Advanced pool    │
+│  • Tick handling    │  │  • Liquidity opts   │
+└─────────────────────┘  └─────────────────────┘
+```
+
+### Separation of Strategy and Platform
+- **Strategy Logic**: Algorithm-specific decision making (when to rebalance, target ranges)
+- **Platform Implementation**: Protocol-specific execution details (tick math, transaction building)
+- **Shared Infrastructure**: Common patterns and utilities used by all strategies
+
+## Core Strategy Interface
+
+### Abstract Methods (Must Implement)
+
+```javascript
+abstract class StrategyBase {
+  // Strategy identification
+  abstract get type(): string
+  
+  // Core evaluation methods
+  abstract async evaluateRebalance(position): Promise<RebalanceEvaluation>
+  abstract async evaluateInitialAssets(vault, positions): Promise<InitialAssetsEvaluation>
+  
+  // Factory method for platform-specific instances
+  static abstract createForPlatform(platformId, service): StrategyInstance
+}
+
+// Return type definitions
+interface RebalanceEvaluation {
+  shouldRebalance: boolean
+  reason: string
+  actions: Array<{
+    type: 'rebalance' | 'fee_collection' | 'emergency_exit'
+    description: string
+    transactions?: TransactionData[]
+    estimatedGas?: number
+    priority: 'low' | 'medium' | 'high' | 'critical'
+  }>
+  metadata?: {
+    currentRange?: { lower: number, upper: number }
+    targetRange?: { lower: number, upper: number }
+    pricePosition?: number
+    utilization?: number
+  }
+}
+
+interface InitialAssetsEvaluation {
+  needsInitialAssets: boolean
+  reason: string
+  actions: Array<{
+    type: 'swap' | 'add_liquidity' | 'collect_fees'
+    description: string
+    transactions?: TransactionData[]
+  }>
+}
+```
+
+### Shared Utilities (Provided by Base)
+
+```javascript
+class StrategyBase {
+  // Event management helpers
+  async registerEventFilter({ eventType, filter, handler, additionalId })
+  async registerInterval({ callback, intervalMs, additionalId })
+  
+  // Position data helpers
+  validatePositionData(position): ValidationResult
+  enhancePositionWithStrategy(position): EnhancedPosition
+  
+  // Logging helpers
+  logEvaluation(level, message, data, actionType?, actionResult?)
+  logAction(actionType, result, metadata)
+  
+  // Configuration helpers
+  getStrategyParameters(vault): StrategyParameters
+  getChainConfig(chainId): ChainConfiguration
+  
+  // Utility functions
+  calculatePriceImpact(amounts, poolData): number
+  estimateGasUsage(transactions): Promise<number>
+  formatCurrency(amount, decimals): string
+}
+```
+
+## Strategy Implementations
+
+### 1. Baby Steps Strategy
+
+**Philosophy**: Simple, conservative automation focused on maintaining positions within predefined ranges.
+
+**Key Characteristics**:
+- Fixed range targets around current price
+- Conservative rebalancing thresholds
+- Simple parameter set for easy configuration
+- Predictable behavior suitable for risk-averse users
+
+**Core Parameters**:
+```javascript
+const bobParameters = {
+  // Range management
+  targetRangeUpper: 105,     // 5% above current price
+  targetRangeLower: 95,      // 5% below current price
+  rebalanceThresholdUpper: 2, // Rebalance when 2% beyond upper
+  rebalanceThresholdLower: 2, // Rebalance when 2% beyond lower
+  
+  // Risk management
+  maxSlippage: 0.5,          // 0.5% maximum slippage
+  emergencyExitTrigger: 1,   // 1% emergency exit threshold
+  maxUtilization: 95,        // 95% maximum vault utilization
+  
+  // Fee management
+  feeReinvestment: true,     // Auto-reinvest collected fees
+  reinvestmentTrigger: 100,  // $100 minimum for reinvestment
+  reinvestmentRatio: 80      // 80% of fees reinvested
+};
+```
+
+**Evaluation Logic**:
+```javascript
+async evaluateRebalance(position) {
+  const currentPrice = await this.getCurrentPrice(position);
+  const { targetRangeUpper, targetRangeLower } = this.parameters;
+  
+  // Calculate target range based on current price
+  const upperTarget = currentPrice * (targetRangeUpper / 100);
+  const lowerTarget = currentPrice * (targetRangeLower / 100);
+  
+  // Check if price is outside thresholds
+  const upperThreshold = upperTarget * (1 + this.parameters.rebalanceThresholdUpper / 100);
+  const lowerThreshold = lowerTarget * (1 - this.parameters.rebalanceThresholdLower / 100);
+  
+  if (currentPrice > upperThreshold) {
+    return {
+      shouldRebalance: true,
+      reason: `Price ${currentPrice} above upper threshold ${upperThreshold}`,
+      actions: this.generateRebalanceActions('shift_down', position)
+    };
+  }
+  
+  if (currentPrice < lowerThreshold) {
+    return {
+      shouldRebalance: true,
+      reason: `Price ${currentPrice} below lower threshold ${lowerThreshold}`,
+      actions: this.generateRebalanceActions('shift_up', position)
+    };
+  }
+  
+  return { shouldRebalance: false, reason: 'Price within acceptable range', actions: [] };
+}
+```
+
+### 2. Parris Island Strategy
+
+**Philosophy**: Advanced adaptive strategy that adjusts ranges based on market conditions and historical performance.
+
+**Key Characteristics**:
+- Dynamic range adjustment based on volatility
+- Machine learning integration points
+- Advanced risk management features
+- Adaptive parameters that learn from market behavior
+
+**Core Parameters** (extends Baby Steps):
+```javascript
+const parrisParameters = {
+  // ... all Bob parameters plus:
+  
+  // Adaptive behavior
+  adaptiveRanges: true,
+  rebalanceCountThresholdHigh: 5,    // High-frequency threshold
+  rebalanceCountThresholdLow: 2,     // Low-frequency threshold
+  adaptiveTimeframeHigh: 86400,      // 24-hour analysis window
+  adaptiveTimeframeLow: 43200,       // 12-hour analysis window
+  
+  // Range adjustments
+  rangeAdjustmentPercentHigh: 10,    // 10% range expansion when high frequency
+  thresholdAdjustmentPercentHigh: 5, // 5% threshold relaxation
+  rangeAdjustmentPercentLow: -5,     // 5% range contraction when low frequency
+  thresholdAdjustmentPercentLow: -2, // 2% threshold tightening
+  
+  // Advanced risk management
+  oracleSource: 0,                   // Primary oracle for price validation
+  priceDeviationTolerance: 2,        // 2% maximum oracle deviation
+  maxPositionSizePercent: 50,        // 50% maximum single position size
+  minPositionSize: "1000",           // $1000 minimum position
+  targetUtilization: 80,             // 80% target vault utilization
+  
+  // Platform selection
+  platformSelectionCriteria: 0,     // Best yield selection
+  minPoolLiquidity: "1000000"       // $1M minimum pool liquidity
+};
+```
+
+**Adaptive Evaluation Logic**:
+```javascript
+async evaluateRebalance(position) {
+  // Base evaluation from Baby Steps
+  const baseEvaluation = await super.evaluateRebalance(position);
+  
+  if (!this.parameters.adaptiveRanges) {
+    return baseEvaluation;
+  }
+  
+  // Analyze recent rebalancing frequency
+  const recentRebalances = await this.getRecentRebalances(
+    position.vaultAddress,
+    this.parameters.adaptiveTimeframeHigh
+  );
+  
+  const adaptiveAdjustments = this.calculateAdaptiveAdjustments(recentRebalances);
+  
+  // Apply adaptive modifications
+  if (adaptiveAdjustments.shouldAdjust) {
+    return {
+      ...baseEvaluation,
+      reason: `${baseEvaluation.reason} (Adaptive: ${adaptiveAdjustments.reason})`,
+      actions: this.enhanceActionsWithAdaptiveLogic(
+        baseEvaluation.actions,
+        adaptiveAdjustments
+      ),
+      metadata: {
+        ...baseEvaluation.metadata,
+        adaptiveAdjustments,
+        rebalanceFrequency: recentRebalances.length,
+        adaptiveMode: adaptiveAdjustments.mode
+      }
+    };
+  }
+  
+  return baseEvaluation;
+}
+
+calculateAdaptiveAdjustments(recentRebalances) {
+  const frequency = recentRebalances.length;
+  
+  if (frequency >= this.parameters.rebalanceCountThresholdHigh) {
+    // High frequency - expand ranges to reduce churn
+    return {
+      shouldAdjust: true,
+      mode: 'expand',
+      reason: `High rebalance frequency (${frequency})`,
+      rangeMultiplier: 1 + (this.parameters.rangeAdjustmentPercentHigh / 100),
+      thresholdMultiplier: 1 + (this.parameters.thresholdAdjustmentPercentHigh / 100)
+    };
+  }
+  
+  if (frequency <= this.parameters.rebalanceCountThresholdLow) {
+    // Low frequency - tighten ranges for better efficiency
+    return {
+      shouldAdjust: true,
+      mode: 'contract',
+      reason: `Low rebalance frequency (${frequency})`,
+      rangeMultiplier: 1 + (this.parameters.rangeAdjustmentPercentLow / 100),
+      thresholdMultiplier: 1 + (this.parameters.thresholdAdjustmentPercentLow / 100)
+    };
+  }
+  
+  return { shouldAdjust: false };
+}
+```
+
+## Platform-Specific Implementations
+
+### UniswapV3 Adaptations
+
+Both strategies have UniswapV3-specific implementations that handle:
+
+**Tick Math and Range Calculation**:
+```javascript
+// Convert price ranges to tick ranges
+calculateTickRange(targetPrice, rangePercent) {
+  const upperPrice = targetPrice * (1 + rangePercent / 100);
+  const lowerPrice = targetPrice * (1 - rangePercent / 100);
+  
+  const upperTick = TickMath.getTickAtSqrtRatio(
+    encodeSqrtRatioX96(upperPrice, token0Decimals, token1Decimals)
+  );
+  const lowerTick = TickMath.getTickAtSqrtRatio(
+    encodeSqrtRatioX96(lowerPrice, token0Decimals, token1Decimals)
+  );
+  
+  // Round to nearest valid tick spacing
+  return {
+    upperTick: Math.floor(upperTick / this.tickSpacing) * this.tickSpacing,
+    lowerTick: Math.ceil(lowerTick / this.tickSpacing) * this.tickSpacing
+  };
+}
+```
+
+**Optimal Token Allocation**:
+```javascript
+// Calculate optimal token amounts for new position
+async calculateOptimalAllocation(vault, targetTicks, totalValue) {
+  const currentTick = await this.getCurrentTick(vault.poolAddress);
+  
+  // Use UniswapV3 SDK for precise calculations
+  const position = new Position({
+    pool: this.pool,
+    liquidity: targetLiquidity,
+    tickLower: targetTicks.lowerTick,
+    tickUpper: targetTicks.upperTick
+  });
+  
+  const { amount0, amount1 } = position.mintAmounts;
+  
+  // Adjust for current vault token balances
+  return this.optimizeForAvailableTokens(
+    { amount0, amount1 },
+    vault.tokenBalances,
+    totalValue
+  );
+}
+```
+
+**Transaction Generation**:
+```javascript
+// Generate swap and liquidity transactions
+async generateRebalanceTransactions(position, newAllocation) {
+  const transactions = [];
+  
+  // 1. Collect fees if significant
+  if (position.fees.total > this.parameters.reinvestmentTrigger) {
+    transactions.push(await this.buildFeeCollectionTx(position));
+  }
+  
+  // 2. Remove current liquidity
+  transactions.push(await this.buildRemoveLiquidityTx(position));
+  
+  // 3. Swap to target allocation if needed
+  const swapTx = await this.buildSwapTx(
+    position.currentAllocation,
+    newAllocation
+  );
+  if (swapTx) {
+    transactions.push(swapTx);
+  }
+  
+  // 4. Add liquidity at new range
+  transactions.push(await this.buildAddLiquidityTx(newAllocation));
+  
+  return transactions;
+}
+```
+
+## Strategy Registration and Factory
+
+### Strategy Factory Pattern
+
+```javascript
+class StrategyFactory {
+  static strategies = new Map();
+  
+  // Register strategy class
+  static register(strategyId, strategyClass) {
+    this.strategies.set(strategyId, strategyClass);
+  }
+  
+  // Create strategy instance for specific platform
+  static create(strategyId, platformId, service) {
+    const StrategyClass = this.strategies.get(strategyId);
+    if (!StrategyClass) {
+      throw new Error(`Unknown strategy: ${strategyId}`);
+    }
+    
+    return StrategyClass.createForPlatform(platformId, service);
+  }
+  
+  // Get available strategies
+  static getAvailableStrategies() {
+    return Array.from(this.strategies.keys());
+  }
+}
+
+// Registration
+StrategyFactory.register('bob', BabyStepsStrategy);
+StrategyFactory.register('parris', ParrisIslandStrategy);
+
+// Usage in AutomationService
+getStrategyForVault(vault) {
+  const strategyId = vault.strategy?.strategyId || this.config.defaultStrategy;
+  const platformId = this.determinePlatform(vault);
+  
+  return StrategyFactory.create(strategyId, platformId, this);
+}
+```
+
+### Platform Detection
+
+```javascript
+// Determine platform from vault configuration
+determinePlatform(vault) {
+  // Check vault's selected platforms
+  if (vault.strategy?.selectedPlatforms?.length > 0) {
+    return vault.strategy.selectedPlatforms[0]; // Use primary platform
+  }
+  
+  // Check positions for platform hints
+  for (const position of vault.positions) {
+    if (position.platform) {
+      return position.platform;
+    }
+  }
+  
+  // Default to UniswapV3
+  return 'uniswapV3';
+}
+```
+
+## Strategy Lifecycle Management
+
+### Initialization Process
+
+```javascript
+async initializeVaultStrategy(vault, positions) {
+  // 1. Load strategy parameters
+  const parameters = await this.loadStrategyParameters(vault);
+  this.parameters = { ...this.defaultParameters, ...parameters };
+  
+  // 2. Set up event monitoring
+  await this.setupEventMonitoring(vault, positions);
+  
+  // 3. Validate initial state
+  const validation = await this.validateInitialState(vault, positions);
+  if (!validation.isValid) {
+    throw new Error(`Strategy validation failed: ${validation.errors.join(', ')}`);
+  }
+  
+  // 4. Register periodic evaluation
+  await this.schedulePeriodicEvaluation(vault);
+  
+  this.logEvaluation('info', `Strategy initialized for vault ${vault.address}`, {
+    strategyType: this.type,
+    platform: this.platformName,
+    parameterCount: Object.keys(this.parameters).length
+  });
+}
+```
+
+### Event Monitoring Setup
+
+```javascript
+async setupEventMonitoring(vault, positions) {
+  // Monitor strategy parameter changes
+  await this.registerEventFilter({
+    eventType: 'strategy',
+    filter: {
+      address: vault.strategyAddress,
+      topics: [ethers.utils.id("ParametersUpdated(address)")]
+    },
+    handler: this.handleParameterUpdate,
+    additionalId: 'parameters'
+  });
+  
+  // Monitor position changes
+  for (const position of positions) {
+    await this.registerEventFilter({
+      eventType: 'position',
+      filter: this.createPositionFilter(position),
+      handler: this.handlePositionUpdate,
+      additionalId: position.id
+    });
+  }
+  
+  // Monitor significant price movements
+  const poolAddresses = [...new Set(positions.map(p => p.poolAddress))];
+  for (const poolAddress of poolAddresses) {
+    await this.registerEventFilter({
+      eventType: 'price',
+      filter: this.createPriceFilter(poolAddress),
+      handler: this.handlePriceMovement,
+      additionalId: poolAddress.toLowerCase()
+    });
+  }
+}
+```
+
+## Performance and Optimization
+
+### Evaluation Caching
+
+```javascript
+class StrategyEvaluationCache {
+  constructor(ttlMs = 30000) { // 30 second cache
+    this.cache = new Map();
+    this.ttlMs = ttlMs;
+  }
+  
+  getCacheKey(position) {
+    return `${position.vaultAddress}-${position.id}-${position.lastUpdateBlock}`;
+  }
+  
+  get(position) {
+    const key = this.getCacheKey(position);
+    const cached = this.cache.get(key);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.ttlMs) {
+      return cached.evaluation;
+    }
+    
+    return null;
+  }
+  
+  set(position, evaluation) {
+    const key = this.getCacheKey(position);
+    this.cache.set(key, {
+      evaluation,
+      timestamp: Date.now()
+    });
+    
+    // Cleanup old entries
+    if (this.cache.size > 1000) {
+      const oldestKeys = Array.from(this.cache.keys()).slice(0, 100);
+      oldestKeys.forEach(k => this.cache.delete(k));
+    }
+  }
+}
+```
+
+### Concurrent Processing
+
+```javascript
+// Process multiple positions concurrently
+async evaluateMultiplePositions(positions) {
+  const evaluationPromises = positions.map(async position => {
+    try {
+      const evaluation = await this.evaluateRebalance(position);
+      return { position, evaluation, success: true };
+    } catch (error) {
+      this.logEvaluation('error', `Evaluation failed for position ${position.id}`, { error: error.message });
+      return { position, error, success: false };
+    }
+  });
+  
+  const results = await Promise.all(evaluationPromises);
+  
+  // Separate successful and failed evaluations
+  const successful = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
+  
+  if (failed.length > 0) {
+    this.logEvaluation('warn', `${failed.length} position evaluations failed`, {
+      failedPositions: failed.map(f => f.position.id)
+    });
+  }
+  
+  return successful.map(s => ({ position: s.position, evaluation: s.evaluation }));
+}
+```
+
+## Extension Guidelines
+
+### Adding New Strategies
+
+1. **Extend StrategyBase**: Implement all abstract methods
+2. **Define Parameters**: Create parameter schema with validation
+3. **Implement Platform Variants**: Create platform-specific subclasses
+4. **Add Tests**: Comprehensive test coverage for strategy logic
+5. **Register Strategy**: Add to strategy factory
+6. **Document**: Add strategy documentation and examples
+
+```javascript
+// Template for new strategy
+class NewStrategy extends StrategyBase {
+  constructor(service) {
+    super(service);
+    this.type = "new_strategy";
+  }
+  
+  // Define default parameters
+  get defaultParameters() {
+    return {
+      // Strategy-specific parameters
+    };
+  }
+  
+  // Implement required methods
+  async evaluateRebalance(position) {
+    // Strategy-specific logic
+  }
+  
+  async evaluateInitialAssets(vault, positions) {
+    // Initial asset evaluation logic
+  }
+  
+  // Factory method for platform creation
+  static createForPlatform(platformId, service) {
+    switch (platformId) {
+      case 'uniswapV3':
+        return new UniswapV3NewStrategy(service);
+      default:
+        throw new Error(`Platform ${platformId} not supported by NewStrategy`);
+    }
+  }
+}
+```
+
+### Platform Integration
+
+1. **Study Existing Adapters**: Understand patterns in UniswapV3 implementations
+2. **Implement Core Methods**: Focus on transaction generation and optimization
+3. **Handle Protocol Specifics**: Address unique protocol requirements
+4. **Add Configuration**: Include protocol addresses and parameters
+5. **Test Thoroughly**: Verify against protocol test networks
+
+---
+
+For more information about strategy implementation:
+- [BabyStepsStrategy API](../api-reference/strategies/baby-steps-strategy.md)
+- [ParrisIslandStrategy API](../api-reference/strategies/parris-island-strategy.md)
+- [Creating Custom Strategies](../examples/custom-strategies.md)

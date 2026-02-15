@@ -1,0 +1,242 @@
+# Vault Revocation Workflow
+
+**Workflow ID**: 03  
+**Trigger**: Blockchain ExecutorChanged event (isAuthorized = false)  
+**Purpose**: Clean shutdown and removal of revoked vault from automation service  
+**Complexity**: Medium (event detection, monitoring cleanup, resource deallocation, state cleanup)
+
+## Overview
+
+The Vault Revocation Workflow detects when a vault revokes authorization from the automation service via ExecutorChanged events, then systematically shuts down all monitoring, cleans up resources, removes cached data, and optionally clears any blacklist entries. This workflow ensures complete cleanup and proper resource management when vaults are no longer under automation service management.
+
+## Event-Driven Trigger
+
+**Source**: Blockchain contract event emission  
+**Entry Point**: ExecutorChanged(address executor, bool isAuthorized) where isAuthorized = false  
+**Detection**: EventManager filter listener monitoring all ExecutorChanged events  
+**Prerequisites**: Service initialization complete, authorization event monitoring active, vault was previously authorized
+
+## Complete Function Call Chain
+
+```
+🎯 Blockchain Event: ExecutorChanged(automationServiceAddress, false)
+    ↓
+📡 EventManager Filter Detection
+    ├── subscribeToAuthorizationEvents() [Previously registered during service init]
+    ├── ExecutorChanged event filter matches
+    └── handleExecutorChanged(log) 
+        ├── Parse event data from topics
+        │   ├── executorAddress = log.topics[1] 
+        │   ├── isAuthorized = log.topics[2].endsWith('1') = false
+        │   └── vaultAddress = log.address
+        ├── Validate executor matches automation service address
+        └── Emit internal event: 'VaultAuthRevoked'
+            └── eventManager.emit('VaultAuthRevoked', { vaultAddress, executorAddress })
+                ↓
+🎬 AutomationService Event Handler
+    └── handleVaultRevocation(vaultAddress) [Subscribed in constructor]
+        ├── Service shutdown check
+        ├── Vault address validation
+        ├── Get strategy ID for cleanup
+        │   └── vaultDataService.getVaultStrategyId(vaultAddress)
+        ├── Execute comprehensive cleanup
+        │   └── cleanupVault(vaultAddress, strategyId)
+        │       ├── Step 1: Stop vault monitoring
+        │       │   └── retryWithBackoff(() => stopMonitoringVault(vaultAddress, strategyId))
+        │       │       ├── Strategy-specific cleanup
+        │       │       │   └── strategy.cleanup(vaultAddress) [BabyStepsStrategy]
+        │       │       │       ├── Clean position check timestamps
+        │       │       │       │   └── Remove lastPositionCheck entries for vault
+        │       │       │       ├── Clean emergency exit baseline cache
+        │       │       │       │   └── Delete emergencyExitBaseline[vaultAddress]
+        │       │       │       └── Emit VaultPositionChecksCleared event
+        │       │       └── Remove all vault-specific event listeners
+        │       │           └── eventManager.removeAllVaultListeners(vaultAddress)
+        │       │               ├── Find all listeners for vault
+        │       │               ├── Remove each listener (contracts, filters, intervals)
+        │       │               └── Emit AllVaultListenersRemoved event
+        │       ├── Step 2: Clear vault locks
+        │       │   └── unlockVault(vaultAddress) [if locked]
+        │       └── Step 3: Remove vault from data cache
+        │           └── vaultDataService.removeVault(vaultAddress)
+        │               ├── Delete from vaults Map
+        │               └── Emit vaultRemoved event
+        ├── Clear blacklist if present
+        │   └── removeFromBlacklist(vaultAddress) [if isBlacklisted]
+        │       ├── Delete from blacklistedVaults Map
+        │       ├── saveBlacklist() [Persist to file]
+        │       └── Emit VaultUnblacklisted event
+        ├── Emit comprehensive results
+        │   └── eventManager.emit('VaultOffboarded')
+        │       ├── Include all cleanup results
+        │       ├── Success/failure status
+        │       └── Error details if any
+        ├── Send notification
+        │   └── sendTelegramMessage() [Revocation notification]
+        │       ├── Format revocation message
+        │       ├── POST to Telegram Bot API
+        │       └── Log notification status
+        └── Log final summary
+            ├── Success: All cleanup completed
+            └── Partial: Some operations failed
+```
+
+## Function Inventory by Module
+
+### EventManager.js - Event Detection (USED)
+- **subscribeToAuthorizationEvents**: Authorization monitoring setup (reused from service init)
+- **handleExecutorChanged**: ExecutorChanged event processing (internal handler)
+- **emit**: Internal event emission (VaultAuthRevoked, VaultOffboarded, etc.)
+- **removeAllVaultListeners**: Comprehensive listener cleanup
+
+### AutomationService.js - Core Workflow Functions (USED)
+- **handleVaultRevocation**: Main revocation handler (event subscriber)
+- **cleanupVault**: Vault cleanup orchestration
+- **stopMonitoringVault**: Monitoring shutdown
+- **removeFromBlacklist**: Blacklist entry removal
+- **isBlacklisted**: Blacklist checking utility
+- **unlockVault**: Vault lock cleanup
+- **sendTelegramMessage**: Revocation notification
+
+### VaultDataService.js - Data Management (USED)
+- **getVaultStrategyId**: Strategy ID retrieval for cleanup
+- **removeVault**: Vault data cache removal
+- **saveBlacklist**: Blacklist persistence (if blacklist changed)
+
+### BabyStepsStrategy.js - Strategy Cleanup (USED)
+- **cleanup**: Baby Steps-specific resource cleanup
+  - Position check timestamp cleanup
+  - Emergency exit baseline cache cleanup
+  - Strategy-specific event emission
+
+### RetryHelper.js - Utility Functions (USED)
+- **retryWithBackoff**: Retry logic for monitoring shutdown
+
+## Success and Failure Paths
+
+### Complete Success Path
+1. **ExecutorChanged event detected** → Revocation validated
+2. **Strategy cleanup successful** → All strategy resources cleared
+3. **Monitoring stopped** → All event listeners removed
+4. **Vault unlocked** → Race condition prevention cleared
+5. **Cache cleared** → Vault data removed from service
+6. **Blacklist cleared** → Vault can be re-authorized cleanly
+7. **Success notification sent** → VaultOffboarded event, Telegram message
+
+### Partial Success Scenarios
+
+#### Monitoring Shutdown Failures
+- **Strategy cleanup fails** → Continue with listener removal
+- **Listener removal fails** → Continue with other cleanup steps
+- **Result tracking** → Errors logged but process continues
+
+#### Cache/State Cleanup (Cannot Fail)
+- **Vault unlock** → Always succeeds (simple flag clear)
+- **Cache removal** → Always succeeds (Map.delete operation)
+- **Blacklist removal** → Always succeeds (Map.delete operation)
+
+### Error Recovery Mechanisms
+- **Retry logic** → stopMonitoringVault retried up to 3 times
+- **Graceful degradation** → Service continues operating despite individual vault failures
+- **Comprehensive error tracking** → All failures logged in results object
+- **Event emission** → Success/failure status always reported
+
+## Event Flow During Revocation
+
+### Events Consumed
+- **ExecutorChanged** (blockchain): Authorization revocation detection
+- **VaultAuthRevoked** (internal): Triggers revocation workflow
+
+### Events Emitted During Cleanup
+- **VaultPositionChecksCleared**: Strategy-specific cleanup completion
+- **AllVaultListenersRemoved**: Event listener cleanup completion
+- **vaultRemoved**: Vault cache removal notification
+- **VaultUnblacklisted**: Blacklist entry removal (if applicable)
+- **VaultMonitoringStopped**: Monitoring shutdown success/failure
+- **VaultOffboarded**: Final revocation completion with comprehensive results
+
+### Notifications
+- **Telegram Notification**: Vault revocation alert with vault address
+- **Comprehensive Logging**: Success/failure status with error details
+
+## Resource Cleanup Scope
+
+### Strategy-Specific Resources (BabyStepsStrategy)
+- **Position check timestamps**: lastPositionCheck entries cleared
+- **Emergency exit baselines**: emergencyExitBaseline cache cleared
+- **Strategy internal state**: All vault-specific data removed
+
+### Event Monitoring Resources
+- **Swap event listeners**: All pool-specific listeners for vault positions
+- **Contract event listeners**: All vault-specific contract events
+- **Filter listeners**: Any custom filter listeners for the vault
+- **Interval listeners**: Any periodic monitoring for the vault
+
+### Service State Resources
+- **Vault locks**: Race condition prevention flags
+- **Vault data cache**: Complete vault data removal from VaultDataService
+- **Failed vault tracking**: Removed from retry mechanisms
+- **Blacklist entries**: Cleared to allow clean re-authorization
+
+## Critical vs Optional Operations
+
+### Critical (Process Must Complete)
+- ExecutorChanged event detection and parsing
+- Vault address validation
+- VaultAuthRevoked event emission
+- handleVaultRevocation execution
+
+### Important (Affects Service State)
+- Event listener removal
+- Vault data cache cleanup
+- Vault lock clearing
+- Strategy resource cleanup
+
+### Optional (Failure is Logged)
+- Blacklist removal (only if vault was blacklisted)
+- Telegram notifications
+- Individual listener removal failures (process continues)
+
+## Data State Changes
+
+### Before Revocation
+- Vault monitored by automation service
+- Active swap event listeners for vault positions
+- Vault data cached in service
+- Strategy maintaining vault-specific state
+
+### After Successful Revocation
+- **Vault completely removed** from automation service management
+- **No active monitoring** for the vault
+- **All cached data cleared** from service memory
+- **Strategy state cleaned** of vault-specific entries
+- **Blacklist cleared** (if previously blacklisted)
+- **Service ready** to re-authorize vault cleanly if needed
+
+### After Partial Revocation (Some Failures)
+- **Vault logically removed** from service (not monitored)
+- **Some resources may remain** (tracked in error logs)
+- **Service continues operating** normally for other vaults
+- **Failed operations logged** for debugging
+
+## Integration Points
+
+### Reuses Service Infrastructure
+- EventManager authorization monitoring (shared with authorization workflow)
+- RetryHelper retry mechanisms
+- VaultDataService data management
+- Telegram notification system
+
+### Enables Clean Re-authorization
+- **Complete resource cleanup** allows vault to be re-authorized without conflicts
+- **Blacklist clearing** removes any failure history
+- **State reset** ensures fresh start for potential re-authorization
+
+## End State
+
+Upon successful completion:
+- **Vault completely offboarded** from automation service
+- **All monitoring ceased** for the vault
+- **Resources fully cleaned** up and deallocated
+- **Service state consistent** and ready for continued operation
+- **Clean slate available** for potential vault re-authorization

@@ -1,0 +1,554 @@
+# Event Management Architecture
+
+## Overview
+
+The EventManager is the cornerstone of the FUM Automation Service's event-driven architecture. It provides centralized management of blockchain event subscriptions, timer-based events, and internal automation events with comprehensive cleanup and debugging capabilities.
+
+## Design Philosophy
+
+### Event-Driven Automation
+The automation service operates on the principle that all meaningful actions are triggered by events:
+- **Blockchain Events**: Strategy parameter changes, authorization updates, position modifications
+- **Timer Events**: Periodic evaluation cycles, health checks, cache refreshes
+- **Internal Events**: Cross-component communication, state changes, error conditions
+
+### Lifecycle Management
+One of the primary challenges in long-running blockchain applications is proper cleanup of event listeners to prevent memory leaks and zombie connections. The EventManager addresses this through:
+- **Automatic cleanup** on service shutdown
+- **Reference tracking** for all registered listeners
+- **Graceful degradation** when cleanup fails
+- **Debug visibility** into active listeners
+
+## Core Components
+
+### Event Registration System
+
+```javascript
+// Event registration patterns
+class EventManager {
+  // Contract event listeners
+  registerContractListener({
+    contract,           // ethers.Contract instance
+    eventName,         // Event name to listen for
+    handler,           // Event handler function
+    vaultAddress,      // Associated vault
+    eventType,         // Category: 'strategy', 'token', 'platform'
+    chainId,           // Chain identifier
+    additionalId       // Optional sub-identifier
+  })
+  
+  // Provider filter listeners  
+  registerFilterListener({
+    provider,          // ethers.Provider instance
+    filter,            // ethers.EventFilter
+    handler,           // Event handler function
+    vaultAddress,      // Associated vault
+    eventType,         // Event category
+    chainId,           // Chain identifier
+    additionalId       // Optional sub-identifier
+  })
+  
+  // Timer-based events
+  registerInterval({
+    callback,          // Function to execute
+    intervalMs,        // Execution interval
+    vaultAddress,      // Associated vault
+    eventType,         // Event category
+    chainId,           // Chain identifier
+    additionalId       // Optional sub-identifier
+  })
+}
+```
+
+### Key Generation Strategy
+
+The EventManager uses a consistent key generation strategy to ensure uniqueness and enable targeted cleanup:
+
+```javascript
+// Key format: {vaultAddress}-{eventType}-{chainId}-{additionalId}
+generateListenerKey({ vaultAddress, eventType, chainId, additionalId }) {
+  return `${vaultAddress.toLowerCase()}-${eventType}-${chainId}${additionalId ? `-${additionalId}` : ''}`;
+}
+
+// Example keys:
+// "0xabc123-strategy-1-parameters"
+// "0xabc123-price-1"
+// "0xabc123-platform-42161-uniswapv3"
+```
+
+## Event Categories and Patterns
+
+### 1. Strategy Events
+
+**Purpose**: Monitor changes to strategy configuration and state
+
+**Event Types**:
+- Strategy parameter updates
+- Template changes
+- Strategy activation/deactivation
+- Emergency stops
+
+**Registration Pattern**:
+```javascript
+// Strategy parameter monitoring
+const key = eventManager.registerContractListener({
+  contract: strategyContract,
+  eventName: 'ParametersUpdated',
+  handler: async (vaultAddress, newParams) => {
+    logger.info('Strategy', `Parameters updated for vault ${vaultAddress}`);
+    await this.handleParameterUpdate(vaultAddress, newParams);
+  },
+  vaultAddress: vault.address,
+  eventType: 'strategy',
+  chainId: vault.chainId,
+  additionalId: 'parameters'
+});
+```
+
+### 2. Position Events
+
+**Purpose**: Track changes to vault positions and liquidity
+
+**Event Types**:
+- Position creation/destruction
+- Liquidity additions/removals
+- Fee collection events
+- Rebalancing transactions
+
+**Registration Pattern**:
+```javascript
+// Position change monitoring
+const key = eventManager.registerFilterListener({
+  provider: provider,
+  filter: {
+    address: positionManagerAddress,
+    topics: [
+      ethers.utils.id("Transfer(address,address,uint256)"),
+      null,
+      ethers.utils.zeroPadValue(vault.address, 32)
+    ]
+  },
+  handler: async (log) => {
+    const tokenId = parseInt(log.topics[3], 16);
+    await this.handlePositionTransfer(vault.address, tokenId);
+  },
+  vaultAddress: vault.address,
+  eventType: 'position',
+  chainId: vault.chainId,
+  additionalId: 'transfers'
+});
+```
+
+### 3. Price Events
+
+**Purpose**: Monitor price movements that may trigger rebalancing
+
+**Event Types**:
+- Significant price movements
+- Oracle updates
+- Pool ratio changes
+- Volatility spikes
+
+**Registration Pattern**:
+```javascript
+// Pool price monitoring
+const key = eventManager.registerFilterListener({
+  provider: provider,
+  filter: {
+    address: poolAddress,
+    topics: [ethers.utils.id("Swap(address,address,int256,int256,uint160,uint128,int24)")]
+  },
+  handler: async (log) => {
+    const swapData = parseSwapEvent(log);
+    if (this.isSignificantPriceMove(swapData)) {
+      await this.triggerRebalanceEvaluation(vault.address);
+    }
+  },
+  vaultAddress: vault.address,
+  eventType: 'price',
+  chainId: vault.chainId,
+  additionalId: poolAddress.toLowerCase()
+});
+```
+
+### 4. Timer Events
+
+**Purpose**: Periodic tasks and health checks
+
+**Event Types**:
+- Regular evaluation cycles
+- Cache refresh operations
+- Health check pings
+- Metric collection
+
+**Registration Pattern**:
+```javascript
+// Periodic evaluation
+const key = eventManager.registerInterval({
+  callback: async () => {
+    await this.performPeriodicEvaluation(vault.address);
+  },
+  intervalMs: 60000, // 1 minute
+  vaultAddress: vault.address,
+  eventType: 'evaluation',
+  chainId: vault.chainId,
+  additionalId: 'periodic'
+});
+```
+
+## Internal Event System
+
+### Event Subscription and Emission
+
+The EventManager also provides an internal pub/sub system for component communication:
+
+```javascript
+// Subscribe to internal events
+const unsubscribe = eventManager.subscribe('rebalance_completed', (data) => {
+  console.log(`Rebalance completed for ${data.vaultAddress}`);
+  // Update metrics, send notifications, etc.
+});
+
+// Emit internal events
+eventManager.emit('rebalance_completed', {
+  vaultAddress: '0xabc123',
+  strategyType: 'bob',
+  result: 'success',
+  gasUsed: 150000,
+  slippage: 0.025
+});
+```
+
+### Standard Internal Events
+
+```javascript
+// Vault lifecycle events
+'vault_discovered'      // New vault found and registered
+'vault_authorized'      // Vault grants automation permission
+'vault_deauthorized'    // Vault revokes automation permission
+'vault_removed'         // Vault removed from monitoring
+
+// Strategy execution events  
+'rebalance_started'     // Rebalancing evaluation begins
+'rebalance_completed'   // Rebalancing operation finished
+'fee_collection_started'    // Fee collection begins
+'fee_collection_completed'  // Fee collection finished
+
+// System events
+'strategy_parameters_updated'  // Strategy config changed
+'emergency_stop_triggered'     // Emergency stop activated
+'service_degraded'            // Partial service availability
+'service_restored'            // Full service restored
+```
+
+## Cleanup and Lifecycle Management
+
+### Automatic Cleanup Strategies
+
+```javascript
+// Remove listeners for specific vault
+async removeAllVaultListeners(vault) {
+  const vaultAddress = vault.address.toLowerCase();
+  const listenerKeys = Object.keys(this.listeners).filter(
+    key => this.listeners[key].vaultAddress.toLowerCase() === vaultAddress
+  );
+  
+  let removedCount = 0;
+  for (const key of listenerKeys) {
+    if (await this.removeListener(key)) {
+      removedCount++;
+    }
+  }
+  
+  logger.info('EventManager', `Removed ${removedCount} listeners for vault ${vaultAddress}`);
+  return removedCount;
+}
+
+// Graceful shutdown cleanup
+async removeAllListeners() {
+  if (this.isCleaningUp) {
+    return 0; // Prevent concurrent cleanup
+  }
+  
+  this.isCleaningUp = true;
+  
+  try {
+    const listenerKeys = Object.keys(this.listeners);
+    let removedCount = 0;
+    
+    for (const key of listenerKeys) {
+      if (await this.removeListener(key)) {
+        removedCount++;
+      }
+    }
+    
+    logger.info('EventManager', `Removed all ${removedCount} listeners`);
+    return removedCount;
+  } finally {
+    this.isCleaningUp = false;
+  }
+}
+```
+
+### Listener Lifecycle States
+
+```javascript
+const listenerStates = {
+  'ACTIVE':    'Listener is active and processing events',
+  'REMOVING':  'Listener removal in progress',
+  'REMOVED':   'Listener has been successfully removed',
+  'FAILED':    'Listener removal failed but marked for cleanup'
+};
+
+// Listener metadata tracking
+this.listeners[key] = {
+  type: 'contract' | 'filter' | 'interval',
+  state: 'ACTIVE',
+  contract: contractInstance,     // For contract listeners
+  eventName: 'EventName',        // For contract listeners
+  provider: providerInstance,    // For filter listeners
+  filter: filterObject,          // For filter listeners
+  intervalId: timerId,           // For interval listeners
+  handler: handlerFunction,      // The actual event handler
+  vaultAddress: '0x...',        // Associated vault
+  chainId: 1,                   // Chain identifier
+  registeredAt: timestamp,      // Registration time
+  lastTriggered: timestamp      // Last event time
+};
+```
+
+## Error Handling and Recovery
+
+### Graceful Degradation Patterns
+
+```javascript
+async removeListener(key) {
+  const listener = this.listeners[key];
+  if (!listener || listener.isRemoved) {
+    return false;
+  }
+  
+  try {
+    listener.isRemoved = true; // Mark to prevent duplicate cleanup
+    
+    if (listener.type === 'contract') {
+      listener.contract.off(listener.eventName, listener.handler);
+    } else if (listener.type === 'filter') {
+      // Add delay for provider cleanup
+      await new Promise(resolve => {
+        listener.provider.off(listener.filter, listener.handler);
+        setTimeout(resolve, 10); // Small cleanup delay
+      });
+    } else if (listener.type === 'interval') {
+      clearInterval(listener.intervalId);
+    }
+    
+    delete this.listeners[key];
+    return true;
+  } catch (error) {
+    logger.error('EventManager', `Failed to remove listener ${key}:`, error);
+    // Still remove from storage to prevent memory leaks
+    delete this.listeners[key];
+    return false;
+  }
+}
+```
+
+### Error Recovery Strategies
+
+```javascript
+// Retry failed listener registrations
+async registerWithRetry(registrationFn, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await registrationFn();
+    } catch (error) {
+      lastError = error;
+      logger.warn('EventManager', `Registration attempt ${attempt} failed:`, error);
+      
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw new Error(`Failed to register after ${maxRetries} attempts: ${lastError.message}`);
+}
+```
+
+## Performance Considerations
+
+### Event Handler Optimization
+
+```javascript
+// Debounced event handling for high-frequency events
+class DebouncedHandler {
+  constructor(handler, delayMs = 1000) {
+    this.handler = handler;
+    this.delayMs = delayMs;
+    this.timeouts = new Map();
+  }
+  
+  createDebouncedHandler(key) {
+    return (...args) => {
+      // Clear existing timeout
+      if (this.timeouts.has(key)) {
+        clearTimeout(this.timeouts.get(key));
+      }
+      
+      // Set new timeout
+      const timeoutId = setTimeout(() => {
+        this.handler(...args);
+        this.timeouts.delete(key);
+      }, this.delayMs);
+      
+      this.timeouts.set(key, timeoutId);
+    };
+  }
+}
+
+// Usage for price change events
+const debouncedHandler = new DebouncedHandler(
+  async (poolAddress) => {
+    await this.evaluateRebalanceForPool(poolAddress);
+  },
+  5000 // 5 second debounce
+);
+
+eventManager.registerFilterListener({
+  // ... other params
+  handler: debouncedHandler.createDebouncedHandler(poolAddress)
+});
+```
+
+### Memory Management
+
+```javascript
+// Periodic cleanup of stale listeners
+setInterval(() => {
+  const now = Date.now();
+  const staleThreshold = 24 * 60 * 60 * 1000; // 24 hours
+  
+  for (const [key, listener] of Object.entries(this.listeners)) {
+    if (listener.lastTriggered && (now - listener.lastTriggered) > staleThreshold) {
+      logger.warn('EventManager', `Removing stale listener: ${key}`);
+      this.removeListener(key);
+    }
+  }
+}, 60 * 60 * 1000); // Check every hour
+```
+
+## Debug and Monitoring
+
+### Event Flow Visualization
+
+```javascript
+// Enhanced logging for event flow debugging
+log(message) {
+  if (this.debug) {
+    const listenerCount = Object.keys(this.listeners).length;
+    const activeListeners = Object.values(this.listeners)
+      .filter(l => !l.isRemoved).length;
+    
+    console.log(`[EventManager] ${message} (Active: ${activeListeners}/${listenerCount})`);
+  }
+}
+
+// Listener status reporting
+getListenerStatus() {
+  const status = {
+    total: Object.keys(this.listeners).length,
+    byType: {},
+    byVault: {},
+    byChain: {}
+  };
+  
+  Object.values(this.listeners).forEach(listener => {
+    // Count by type
+    status.byType[listener.type] = (status.byType[listener.type] || 0) + 1;
+    
+    // Count by vault
+    status.byVault[listener.vaultAddress] = (status.byVault[listener.vaultAddress] || 0) + 1;
+    
+    // Count by chain
+    status.byChain[listener.chainId] = (status.byChain[listener.chainId] || 0) + 1;
+  });
+  
+  return status;
+}
+```
+
+## Integration Patterns
+
+### Strategy Integration
+
+Strategies use the EventManager through the base class:
+
+```javascript
+// StrategyBase integration
+async registerEventFilter({ eventType, filter, handler, additionalId }) {
+  return this.service.eventManager.registerFilterListener({
+    provider: this.service.getProvider(this.chainId),
+    filter,
+    handler: handler.bind(this),
+    vaultAddress: this.vaultAddress,
+    eventType,
+    chainId: this.chainId,
+    additionalId
+  });
+}
+
+// Usage in concrete strategy
+async initializeVaultStrategy(vault, positions) {
+  // Register for strategy parameter changes
+  await this.registerEventFilter({
+    eventType: 'strategy',
+    filter: {
+      address: vault.strategyAddress,
+      topics: [ethers.utils.id("ParametersUpdated(address)")]
+    },
+    handler: this.handleParameterUpdate,
+    additionalId: 'parameters'
+  });
+  
+  // Register for position changes
+  for (const position of positions) {
+    await this.registerEventFilter({
+      eventType: 'position',
+      filter: this.createPositionFilter(position),
+      handler: this.handlePositionChange,
+      additionalId: position.id
+    });
+  }
+}
+```
+
+## Best Practices
+
+### Event Handler Design
+1. **Keep handlers lightweight**: Defer heavy processing to background tasks
+2. **Handle errors gracefully**: Don't let handler errors crash the event system
+3. **Use debouncing**: For high-frequency events that don't need immediate response
+4. **Log appropriately**: Include context for debugging without overwhelming logs
+
+### Cleanup Patterns
+1. **Register cleanup early**: Set up cleanup as soon as listeners are registered
+2. **Use try-finally**: Ensure cleanup happens even if errors occur
+3. **Track references**: Maintain clear mapping between business objects and listeners
+4. **Test cleanup**: Verify that cleanup actually works in test environments
+
+### Performance Guidelines
+1. **Batch operations**: Group related listener operations together
+2. **Avoid blocking**: Use async patterns to prevent blocking the event loop
+3. **Monitor memory**: Track listener counts and detect leaks early
+4. **Optimize filters**: Use specific event filters to reduce unnecessary events
+
+---
+
+For more information about related architectural components:
+- [Strategy System Architecture](./strategy-system.md)
+- [Automation Flow Patterns](./automation-flow.md)
+- [EventManager API Reference](../api-reference/utilities/event-manager.md)

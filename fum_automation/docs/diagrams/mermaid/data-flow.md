@@ -1,0 +1,230 @@
+# Data Flow Architecture
+
+## Vault Data Management
+
+```mermaid
+flowchart TD
+    subgraph "Data Sources"
+        BC[Blockchain State]
+        FC[Factory Contract]
+        VC[Vault Contracts]
+        PC[Pool Contracts]
+        PM[Position Manager]
+    end
+    
+    subgraph "Data Service Layer"
+        VDS[VaultDataService]
+        Cache[In-Memory Cache]
+        Adapters[Platform Adapters]
+    end
+    
+    subgraph "Business Logic"
+        VR[VaultRegistry]
+        AS[AutomationService]
+        S[Strategies]
+    end
+    
+    FC --> VDS
+    VC --> VDS
+    PC --> VDS
+    PM --> VDS
+    
+    VDS --> Cache
+    VDS --> Adapters
+    
+    VDS --> VR
+    VDS --> AS
+    VDS --> S
+    
+    BC --> FC
+    BC --> VC
+    BC --> PC
+    BC --> PM
+```
+
+## Data Refresh Cycles
+
+```mermaid
+sequenceDiagram
+    participant AS as AutomationService
+    participant VDS as VaultDataService
+    participant Cache as Data Cache
+    participant BC as Blockchain
+    participant S as Strategy
+    
+    Note over AS,S: Periodic Data Refresh
+    AS->>VDS: refreshVaultData(address)
+    VDS->>Cache: Check cache age
+    Cache-->>VDS: Cache expired/missing
+    VDS->>BC: Query contract state
+    BC-->>VDS: Return fresh data
+    VDS->>Cache: Update cache
+    VDS-->>AS: Return updated data
+    AS->>S: Updated vault state available
+    
+    Note over AS,S: Event-Driven Refresh
+    BC->>AS: Transaction receipt
+    AS->>VDS: updateVaultAfterRebalance(address, receipt)
+    VDS->>Cache: Invalidate affected data
+    VDS->>BC: Query updated state
+    BC-->>VDS: Fresh post-transaction state
+    VDS->>Cache: Update cache
+```
+
+## Strategy Data Access Patterns
+
+```mermaid
+flowchart LR
+    subgraph "Strategy Execution Context"
+        S[Strategy Instance]
+        SB[StrategyBase Methods]
+    end
+    
+    subgraph "Data Access Layer"
+        VDS[VaultDataService]
+        GVD[getVault]
+        RVP[refreshVaultPositions]
+        UVS[updateVaultState]
+    end
+    
+    subgraph "Cached Data"
+        VD[Vault Data]
+        PD[Position Data]
+        TD[Token Data]
+        PoolD[Pool Data]
+    end
+    
+    S --> SB
+    SB --> GVD
+    SB --> RVP
+    
+    GVD --> VDS
+    RVP --> VDS
+    
+    VDS --> VD
+    VDS --> PD
+    VDS --> TD
+    VDS --> PoolD
+```
+
+## Position Data Structure
+
+```mermaid
+erDiagram
+    Vault ||--o{ Position : contains
+    Position ||--|| Pool : "belongs to"
+    Position ||--|| Token0 : "has"
+    Position ||--|| Token1 : "has"
+    Pool ||--|| Platform : "deployed on"
+    
+    Vault {
+        string address
+        string owner
+        string name
+        number chainId
+        string[] targetTokens
+        string[] targetPlatforms
+        string strategyAddress
+        object tokens
+        object[] positions
+        object adapters
+    }
+    
+    Position {
+        string id
+        string vaultAddress
+        string pool
+        string token0
+        string token1
+        number tickLower
+        number tickUpper
+        string liquidity
+        number fee
+        string protocol
+        number chainId
+        object contracts
+        object adapter
+    }
+    
+    Pool {
+        string address
+        string sqrtPriceX96
+        number tick
+        string liquidity
+        number fee
+        string feeGrowthGlobal0X128
+        string feeGrowthGlobal1X128
+        object ticks
+        number lastUpdated
+    }
+    
+    Token {
+        string address
+        number decimals
+        string symbol
+        string name
+        string balance
+        object contract
+    }
+    
+    Platform {
+        string id
+        string name
+        string positionManagerAddress
+        boolean enabled
+        object factoryConfig
+    }
+```
+
+## Cache Management Strategy
+
+```mermaid
+stateDiagram-v2
+    [*] --> Empty: Service starts
+    Empty --> Loading: First request
+    Loading --> Fresh: Data loaded
+    Fresh --> Stale: Time passes
+    Stale --> Refreshing: Refresh triggered
+    Refreshing --> Fresh: Update complete
+    Fresh --> Invalid: Transaction detected
+    Invalid --> Refreshing: Force refresh
+    Refreshing --> [*]: Service stops
+    Fresh --> [*]: Service stops
+    Stale --> [*]: Service stops
+    
+    note right of Fresh: Cache valid\nServe from memory
+    note right of Stale: Cache expired\nRefresh in background
+    note right of Invalid: Transaction occurred\nImmediate refresh needed
+```
+
+## Data Consistency Patterns
+
+```mermaid
+flowchart TD
+    subgraph "Transaction Processing"
+        T[Transaction Submitted]
+        TR[Transaction Receipt]
+        VU[Vault Update Triggered]
+    end
+    
+    subgraph "Cache Invalidation"
+        CI[Cache Invalidated]
+        FR[Force Refresh]
+        VV[Validate Values]
+    end
+    
+    subgraph "Data Propagation"
+        UN[Update Notifications]
+        SU[Strategy Updates]
+        LU[Listener Updates]
+    end
+    
+    T --> TR
+    TR --> VU
+    VU --> CI
+    CI --> FR
+    FR --> VV
+    VV --> UN
+    UN --> SU
+    UN --> LU
+```

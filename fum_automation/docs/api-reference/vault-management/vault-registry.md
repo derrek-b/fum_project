@@ -1,0 +1,750 @@
+# VaultRegistry API Reference
+
+## Overview
+
+The `VaultRegistry` class is the central component for managing vault registration and tracking in the FUM automation service. It provides comprehensive functionality for discovering vaults that have authorized the automation service, monitoring authorization changes, and handling vault configuration events.
+
+### Key Features
+
+- **Vault Discovery**: Automatically discovers and tracks vaults that have authorized the automation service
+- **Authorization Monitoring**: Real-time detection of authorization grants and revocations
+- **Configuration Tracking**: Monitors changes to vault target tokens, platforms, and strategies
+- **Event Management**: Integrates with EventManager for efficient event handling
+- **Multi-Chain Support**: Designed to support multiple blockchain networks
+- **Caching Integration**: Works with VaultDataService for efficient data management
+
+### Import
+
+```javascript
+import VaultRegistry from './src/VaultRegistry.js';
+```
+
+## Constructor
+
+### `new VaultRegistry(config)`
+
+Creates a new VaultRegistry instance with comprehensive vault management capabilities.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `config` | `Object` | Yes | Configuration object for the VaultRegistry |
+| `config.automationServiceAddress` | `string` | Yes | Address of the automation service contract |
+| `config.eventManager` | `EventManager` | Yes | EventManager instance for handling blockchain events |
+| `config.vaultDataService` | `VaultDataService` | Yes | VaultDataService instance for vault data management |
+| `config.chainId` | `number` | Yes | The chain ID to operate on |
+| `config.onAuthorizationGranted` | `Function` | No | Callback when a vault authorizes the service |
+| `config.onAuthorizationRevoked` | `Function` | No | Callback when a vault revokes authorization |
+| `config.onTargetTokensUpdated` | `Function` | No | Callback when vault target tokens are updated |
+| `config.onTargetPlatformsUpdated` | `Function` | No | Callback when vault target platforms are updated |
+
+#### Callback Signatures
+
+```typescript
+// Authorization granted callback
+type OnAuthorizationGranted = (vault: VaultObject) => void;
+
+// Authorization revoked callback  
+type OnAuthorizationRevoked = (vault: { address: string; chainId: number }) => void;
+
+// Target tokens updated callback
+type OnTargetTokensUpdated = (vault: VaultObject, tokens: string[]) => void;
+
+// Target platforms updated callback
+type OnTargetPlatformsUpdated = (vault: VaultObject, platforms: string[]) => void;
+
+```
+
+#### Example
+
+```javascript
+import EventManager from './EventManager.js';
+import VaultDataService from './VaultDataService.js';
+
+const eventManager = new EventManager();
+const vaultDataService = new VaultDataService();
+
+const vaultRegistry = new VaultRegistry({
+  automationServiceAddress: '0x1234567890123456789012345678901234567890',
+  eventManager,
+  vaultDataService,
+  chainId: 1,
+  onAuthorizationGranted: (vault) => {
+    console.log(`New vault authorized: ${vault.name} at ${vault.address}`);
+  },
+  onAuthorizationRevoked: (vault) => {
+    console.log(`Vault authorization revoked: ${vault.address}`);
+  },
+  onTargetTokensUpdated: (vault, tokens) => {
+    console.log(`Target tokens updated for ${vault.name}: ${tokens.join(', ')}`);
+  },
+  onTargetPlatformsUpdated: (vault, platforms) => {
+    console.log(`Target platforms updated for ${vault.name}: ${platforms.join(', ')}`);
+  },
+});
+```
+
+## Methods
+
+### Provider Management
+
+#### `initializeProvider(config)`
+
+Initialize the blockchain provider for interacting with contracts. Prefers WebSocket connections for real-time event monitoring.
+
+##### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `config` | `Object` | Yes | Provider configuration |
+| `config.wsUrl` | `string` | No* | WebSocket URL for the blockchain node |
+| `config.rpcUrl` | `string` | No* | HTTP RPC URL for the blockchain node |
+| `config.chainId` | `number` | Yes | Chain ID for logging purposes |
+
+*Either `wsUrl` or `rpcUrl` must be provided
+
+##### Example
+
+```javascript
+// WebSocket provider (preferred for real-time events)
+vaultRegistry.initializeProvider({
+  wsUrl: 'wss://mainnet.infura.io/ws/v3/YOUR-PROJECT-ID',
+  chainId: 1
+});
+
+// HTTP provider fallback
+vaultRegistry.initializeProvider({
+  rpcUrl: 'https://mainnet.infura.io/v3/YOUR-PROJECT-ID',
+  chainId: 1
+});
+```
+
+### Vault Discovery
+
+#### `getAuthorizedVaults()`
+
+Get all vaults that have authorized the automation service. This method iterates through all vaults from the factory contract and checks their executor.
+
+##### Returns
+
+`Promise<Array<VaultObject>>` - Array of comprehensive vault objects
+
+##### VaultObject Interface
+
+```typescript
+interface VaultObject {
+  // Core vault properties
+  address: string;              // Vault contract address
+  owner: string;                // Vault owner address
+  name: string;                 // Vault name
+  creationTime: number;         // Vault creation timestamp
+  chainId: number;              // Chain ID where vault exists
+  
+  // Contract instance
+  contract: ethers.Contract;    // Ethers contract instance for the vault
+  
+  // Vault configuration
+  targetTokens: string[];       // Target tokens for trading
+  targetPlatforms: string[];    // Target platforms for trading
+  strategy: string;             // Current strategy address
+  
+  // Cache object for backward compatibility
+  dataCache: {
+    poolData: {};
+    positionData: {};
+  };
+  
+  // Additional properties from VaultDataService
+  [key: string]: any;
+}
+```
+
+##### Example
+
+```javascript
+try {
+  const authorizedVaults = await vaultRegistry.getAuthorizedVaults();
+  
+  console.log(`Found ${authorizedVaults.length} authorized vaults`);
+  
+  authorizedVaults.forEach(vault => {
+    console.log(`Vault: ${vault.name}`);
+    console.log(`  Address: ${vault.address}`);
+    console.log(`  Owner: ${vault.owner}`);
+    console.log(`  Created: ${new Date(vault.creationTime * 1000).toISOString()}`);
+    console.log(`  Target Tokens: ${vault.targetTokens.join(', ')}`);
+    console.log(`  Target Platforms: ${vault.targetPlatforms.join(', ')}`);
+  });
+} catch (error) {
+  console.error('Failed to get authorized vaults:', error);
+}
+```
+
+#### `getAllAuthorizedVaults()`
+
+Get all authorized vaults across all chains. Currently an alias for `getAuthorizedVaults()` since the service operates on a single chain.
+
+##### Returns
+
+`Promise<Array<VaultObject>>` - Array of authorized vault objects
+
+##### Example
+
+```javascript
+const allVaults = await vaultRegistry.getAllAuthorizedVaults();
+console.log(`Total authorized vaults: ${allVaults.length}`);
+```
+
+### Event Subscription
+
+#### `subscribeToAuthorizationEvents()` *(Moved to EventManager)*
+
+**Note**: This method has been moved to EventManager as part of the VaultRegistry deconstruction.
+
+##### Example
+
+```javascript
+// Start monitoring for authorization changes (now via EventManager)
+eventManager.subscribeToAuthorizationEvents(chainId, automationServiceAddress, provider);
+
+// Events are emitted via EventManager:
+// - VaultAuthGranted when a vault authorizes the service
+// - VaultAuthRevoked when a vault revokes authorization
+```
+
+#### `subscribeToVaultConfigEvents(vault)` *(Moved to EventManager)*
+
+**Note**: This method has been moved to EventManager as part of the VaultRegistry deconstruction.
+
+Subscribe to configuration change events for a specific vault. Monitors TargetTokensUpdated and TargetPlatformsUpdated events.
+
+##### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vault` | `Object` | Yes | The vault to monitor for events |
+| `vault.address` | `string` | Yes | Vault contract address |
+| `vault.chainId` | `number` | Yes | Chain ID where vault exists |
+
+##### Example
+
+```javascript
+const vault = {
+  address: '0x1234567890123456789012345678901234567890',
+  chainId: 1
+};
+
+try {
+  vaultRegistry.subscribeToVaultConfigEvents(vault);
+  
+  // The configured callbacks will be triggered:
+  // - onTargetTokensUpdated when tokens are updated
+  // - onTargetPlatformsUpdated when platforms are updated
+} catch (error) {
+  console.error('Failed to subscribe to config events:', error);
+}
+```
+
+#### `subscribeToVaultStrategyEvents(vault)` *(Removed)*
+
+**Note**: This method has been removed as it was not being used in the codebase.
+
+##### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vault` | `Object` | Yes | Vault object to monitor |
+| `vault.address` | `string` | Yes | Vault contract address |
+| `vault.chainId` | `number` | Yes | Chain ID where vault exists |
+
+##### Example
+
+```javascript
+const vault = {
+  address: '0x1234567890123456789012345678901234567890',
+  chainId: 1
+};
+
+try {
+  vaultRegistry.subscribeToVaultStrategyEvents(vault);
+  
+  // The configured onStrategyChanged callback will be triggered
+  // when the vault's strategy is updated
+} catch (error) {
+  console.error('Failed to subscribe to strategy events:', error);
+}
+```
+
+### Event Management
+
+#### `stopListeningForVault(vault)`
+
+Stop listening for all events related to a specific vault. Removes all event listeners associated with the vault address.
+
+##### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `vault` | `Object` | Yes | The vault to stop monitoring |
+| `vault.address` | `string` | Yes | Vault contract address |
+
+##### Example
+
+```javascript
+const vault = {
+  address: '0x1234567890123456789012345678901234567890'
+};
+
+vaultRegistry.stopListeningForVault(vault);
+// All event listeners for this vault are now removed
+```
+
+#### `stopListening()`
+
+Stop listening for all events and clean up resources. Removes all event listeners and closes WebSocket connections if applicable.
+
+##### Returns
+
+`Promise<void>`
+
+##### Example
+
+```javascript
+// Clean shutdown
+await vaultRegistry.stopListening();
+console.log('VaultRegistry has stopped all event monitoring');
+```
+
+## Event Handling
+
+The VaultRegistry integrates closely with the EventManager for efficient event handling. All event listeners are registered through the EventManager, which provides:
+
+- Automatic reconnection for WebSocket connections
+- Event deduplication
+- Centralized event management
+- Clean shutdown capabilities
+
+### Monitored Events
+
+#### ExecutorChanged
+- **Purpose**: Detect when vaults authorize or revoke the automation service
+- **Scope**: Global (all vaults)
+- **Handler**: Triggers `onAuthorizationGranted` or `onAuthorizationRevoked` callbacks
+
+#### TargetTokensUpdated
+- **Purpose**: Track changes to vault target tokens
+- **Scope**: Per-vault subscription
+- **Handler**: Triggers `onTargetTokensUpdated` callback
+
+#### TargetPlatformsUpdated
+- **Purpose**: Track changes to vault target platforms
+- **Scope**: Per-vault subscription
+- **Handler**: Triggers `onTargetPlatformsUpdated` callback
+
+#### StrategyChanged
+- **Purpose**: Track changes to vault trading strategy
+- **Scope**: Per-vault subscription
+- **Handler**: Triggers `onStrategyChanged` callback
+
+## Error Handling
+
+The VaultRegistry implements comprehensive error handling:
+
+### Constructor Errors
+
+```javascript
+try {
+  const registry = new VaultRegistry({
+    // Missing eventManager
+    automationServiceAddress: '0x...',
+    vaultDataService: new VaultDataService()
+  });
+} catch (error) {
+  // Error: EventManager is required for VaultRegistry initialization
+}
+```
+
+### Provider Errors
+
+```javascript
+try {
+  vaultRegistry.initializeProvider({
+    // Missing both wsUrl and rpcUrl
+    chainId: 1
+  });
+} catch (error) {
+  // Error: Either wsUrl or rpcUrl must be provided
+}
+```
+
+### Vault Discovery Errors
+
+```javascript
+try {
+  const vaults = await vaultRegistry.getAuthorizedVaults();
+} catch (error) {
+  console.error('Failed to discover vaults:', error);
+  // Returns empty array on error
+}
+```
+
+### Event Subscription Errors
+
+```javascript
+try {
+  vaultRegistry.subscribeToVaultConfigEvents(invalidVault);
+} catch (error) {
+  console.error('Failed to subscribe to events:', error);
+  // Error is propagated to caller
+}
+```
+
+## Performance Considerations
+
+### Vault Discovery Optimization
+
+1. **Batch Operations**: The registry fetches vault data in batches where possible
+2. **Caching**: Integrates with VaultDataService for efficient data caching
+3. **Parallel Processing**: Uses concurrent operations for vault data retrieval
+
+```javascript
+// Efficient vault discovery with caching
+const vaults = await vaultRegistry.getAuthorizedVaults();
+// Subsequent calls benefit from VaultDataService caching
+```
+
+### Event Handling Optimization
+
+1. **WebSocket Preferred**: Use WebSocket connections for real-time events
+2. **Event Deduplication**: EventManager prevents duplicate event processing
+3. **Selective Monitoring**: Subscribe only to necessary vault events
+
+```javascript
+// Optimal event subscription pattern
+eventManager.subscribeToAuthorizationEvents(chainId, automationServiceAddress, provider); // Global monitoring
+
+// Subscribe only to vaults that need config monitoring
+authorizedVaults.forEach(vault => {
+  if (vault.needsConfigMonitoring) {
+    vaultRegistry.subscribeToVaultConfigEvents(vault);
+  }
+});
+```
+
+### Memory Management
+
+1. **Event Listener Cleanup**: Always remove listeners when no longer needed
+2. **Provider Management**: Close WebSocket connections on shutdown
+3. **Vault Data Lifecycle**: VaultDataService handles data lifecycle
+
+```javascript
+// Clean up vault-specific listeners
+vaultRegistry.stopListeningForVault(vault);
+
+// Full cleanup on service shutdown
+await vaultRegistry.stopListening();
+```
+
+## Integration Examples
+
+### Complete Vault Registry Setup
+
+```javascript
+import EventManager from './EventManager.js';
+import VaultDataService from './VaultDataService.js';
+import VaultRegistry from './VaultRegistry.js';
+
+async function setupVaultRegistry() {
+  // Initialize dependencies
+  const eventManager = new EventManager();
+  const vaultDataService = new VaultDataService();
+  
+  // Create registry with full configuration
+  const vaultRegistry = new VaultRegistry({
+    automationServiceAddress: process.env.AUTOMATION_SERVICE_ADDRESS,
+    eventManager,
+    vaultDataService,
+    chainId: 1,
+    
+    // Authorization callbacks
+    onAuthorizationGranted: async (vault) => {
+      console.log(`New vault authorized: ${vault.name}`);
+      // Subscribe to vault-specific events
+      vaultRegistry.subscribeToVaultConfigEvents(vault);
+      vaultRegistry.subscribeToVaultStrategyEvents(vault);
+    },
+    
+    onAuthorizationRevoked: async (vault) => {
+      console.log(`Vault authorization revoked: ${vault.address}`);
+      // Clean up vault-specific listeners
+      vaultRegistry.stopListeningForVault(vault);
+    },
+    
+    // Configuration callbacks
+    onTargetTokensUpdated: async (vault, tokens) => {
+      console.log(`Tokens updated for ${vault.name}: ${tokens.join(', ')}`);
+      // Trigger strategy re-evaluation
+    },
+    
+    onTargetPlatformsUpdated: async (vault, platforms) => {
+      console.log(`Platforms updated for ${vault.name}: ${platforms.join(', ')}`);
+      // Update platform adapters
+    },
+    
+    onStrategyChanged: async (vault, strategyAddress) => {
+      console.log(`Strategy changed for ${vault.name}: ${strategyAddress}`);
+      // Reinitialize strategy instance
+    }
+  });
+  
+  // Initialize provider
+  vaultRegistry.initializeProvider({
+    wsUrl: process.env.WS_RPC_URL,
+    rpcUrl: process.env.HTTP_RPC_URL, // Fallback
+    chainId: 1
+  });
+  
+  // Start monitoring
+  eventManager.subscribeToAuthorizationEvents(chainId, automationServiceAddress, provider);
+  
+  // Discover existing authorized vaults
+  const vaults = await vaultRegistry.getAuthorizedVaults();
+  
+  // Subscribe to events for existing vaults
+  for (const vault of vaults) {
+    vaultRegistry.subscribeToVaultConfigEvents(vault);
+    vaultRegistry.subscribeToVaultStrategyEvents(vault);
+  }
+  
+  return vaultRegistry;
+}
+```
+
+### Integration with AutomationService
+
+```javascript
+class AutomationService {
+  constructor() {
+    this.eventManager = new EventManager();
+    this.vaultDataService = new VaultDataService();
+    
+    this.vaultRegistry = new VaultRegistry({
+      automationServiceAddress: this.config.automationServiceAddress,
+      eventManager: this.eventManager,
+      vaultDataService: this.vaultDataService,
+      chainId: this.config.chainId,
+      
+      // Handle new vault authorizations
+      onAuthorizationGranted: this.handleVaultAuthorization.bind(this),
+      
+      // Handle vault revocations
+      onAuthorizationRevoked: this.handleVaultRevocation.bind(this),
+      
+      // Handle configuration changes
+      onTargetTokensUpdated: this.handleTokensUpdate.bind(this),
+      onTargetPlatformsUpdated: this.handlePlatformsUpdate.bind(this),
+      onStrategyChanged: this.handleStrategyChange.bind(this)
+    });
+  }
+  
+  async handleVaultAuthorization(vault) {
+    // Add vault to active management
+    this.managedVaults.push(vault);
+    
+    // Initialize strategy for the vault
+    const strategy = await this.initializeStrategy(vault);
+    
+    // Start monitoring vault events
+    this.vaultRegistry.subscribeToVaultConfigEvents(vault);
+    this.vaultRegistry.subscribeToVaultStrategyEvents(vault);
+    
+    // Begin automation
+    await this.startVaultAutomation(vault, strategy);
+  }
+  
+  async handleVaultRevocation(vaultInfo) {
+    // Find and remove vault from active management
+    const index = this.managedVaults.findIndex(
+      v => v.address === vaultInfo.address && v.chainId === vaultInfo.chainId
+    );
+    
+    if (index !== -1) {
+      const vault = this.managedVaults[index];
+      
+      // Stop automation
+      await this.stopVaultAutomation(vault);
+      
+      // Clean up listeners
+      this.vaultRegistry.stopListeningForVault(vault);
+      
+      // Remove from managed list
+      this.managedVaults.splice(index, 1);
+    }
+  }
+}
+```
+
+### Dynamic Vault Monitoring
+
+```javascript
+class VaultMonitor {
+  constructor(vaultRegistry) {
+    this.vaultRegistry = vaultRegistry;
+    this.monitoringIntervals = new Map();
+  }
+  
+  async startMonitoring() {
+    // Get all authorized vaults
+    const vaults = await this.vaultRegistry.getAuthorizedVaults();
+    
+    for (const vault of vaults) {
+      // Subscribe to events
+      this.vaultRegistry.subscribeToVaultConfigEvents(vault);
+      this.vaultRegistry.subscribeToVaultStrategyEvents(vault);
+      
+      // Set up periodic health checks
+      const intervalId = setInterval(async () => {
+        await this.checkVaultHealth(vault);
+      }, 60000); // Every minute
+      
+      this.monitoringIntervals.set(vault.address, intervalId);
+    }
+  }
+  
+  async checkVaultHealth(vault) {
+    try {
+      // Get fresh vault data
+      const vaultData = await this.vaultRegistry.vaultDataService.getVault(
+        vault.address, 
+        true // Force refresh
+      );
+      
+      // Perform health checks
+      if (vaultData.paused) {
+        console.warn(`Vault ${vault.name} is paused`);
+      }
+      
+      // Check for configuration issues
+      if (vaultData.targetTokens.length === 0) {
+        console.warn(`Vault ${vault.name} has no target tokens`);
+      }
+      
+      if (vaultData.targetPlatforms.length === 0) {
+        console.warn(`Vault ${vault.name} has no target platforms`);
+      }
+    } catch (error) {
+      console.error(`Health check failed for vault ${vault.address}:`, error);
+    }
+  }
+  
+  async stopMonitoring() {
+    // Clear all intervals
+    for (const [address, intervalId] of this.monitoringIntervals) {
+      clearInterval(intervalId);
+    }
+    this.monitoringIntervals.clear();
+    
+    // Stop all event listeners
+    await this.vaultRegistry.stopListening();
+  }
+}
+```
+
+## Best Practices
+
+### 1. Always Initialize Provider
+
+```javascript
+// Always initialize provider before using registry methods
+vaultRegistry.initializeProvider({
+  wsUrl: 'wss://...',
+  chainId: 1
+});
+
+// Then discover vaults
+const vaults = await vaultRegistry.getAuthorizedVaults();
+```
+
+### 2. Handle Callbacks Properly
+
+```javascript
+const vaultRegistry = new VaultRegistry({
+  // ... other config
+  onAuthorizationGranted: async (vault) => {
+    try {
+      // Handle authorization
+      await processNewVault(vault);
+      
+      // Subscribe to vault events
+      vaultRegistry.subscribeToVaultConfigEvents(vault);
+    } catch (error) {
+      console.error(`Failed to process new vault ${vault.address}:`, error);
+    }
+  }
+});
+```
+
+### 3. Clean Up Resources
+
+```javascript
+// Component cleanup
+async function cleanup() {
+  // Stop vault-specific listeners
+  for (const vault of managedVaults) {
+    vaultRegistry.stopListeningForVault(vault);
+  }
+  
+  // Stop all listeners and close connections
+  await vaultRegistry.stopListening();
+  
+  // Clean up other resources
+  await eventManager.removeAllListeners();
+}
+```
+
+### 4. Error Recovery
+
+```javascript
+// Implement retry logic for vault discovery
+async function discoverVaultsWithRetry(maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await vaultRegistry.getAuthorizedVaults();
+    } catch (error) {
+      console.error(`Vault discovery attempt ${i + 1} failed:`, error);
+      
+      if (i === maxRetries - 1) {
+        throw error;
+      }
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+    }
+  }
+}
+```
+
+### 5. Monitor Event Health
+
+```javascript
+// Track event processing
+const eventMetrics = {
+  authorizationsGranted: 0,
+  authorizationsRevoked: 0,
+  configUpdates: 0,
+  strategyChanges: 0
+};
+
+const vaultRegistry = new VaultRegistry({
+  // ... other config
+  onAuthorizationGranted: (vault) => {
+    eventMetrics.authorizationsGranted++;
+    // Handle event
+  },
+  onAuthorizationRevoked: (vault) => {
+    eventMetrics.authorizationsRevoked++;
+    // Handle event
+  }
+});
+```
