@@ -1,311 +1,83 @@
-# Architecture Overview
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/Tracker.js, src/core/SSEBroadcaster.js, src/strategies/*, src/utils/* -->
+# Automation Service Architecture
 
-## System Philosophy
+## Overview
 
-The FUM Automation Service is built on the principle of **event-driven automation** with **modular strategy management**. The architecture separates vault management, strategy execution, and event handling into distinct, loosely-coupled components that work together to provide automated liquidity management.
+24/7 Node.js service that monitors user vaults and executes automated liquidity management. Event-driven architecture with three layers: orchestration, data management, and strategy execution.
 
-## Core Design Principles
+## Component Architecture
 
-### 1. **Event-Driven Architecture**
-- All system interactions triggered by blockchain events or timers
-- Centralized event management with proper cleanup
-- Asynchronous processing with graceful error handling
-- Real-time responsiveness to market conditions
-
-### 2. **Strategy Pattern Implementation**
 ```
-┌─────────────────────────────────────────┐
-│            Automation Service           │ ← Orchestration layer
-├─────────────────────────────────────────┤
-│             Strategy Layer              │ ← Pluggable strategies
-│  ┌──────────────┬──────────────────────┐ │
-│  │ BabySteps    │ ParrisIsland         │ │
-│  │ Strategy     │ Strategy             │ │
-│  └──────────────┴──────────────────────┘ │
-├─────────────────────────────────────────┤
-│           Platform Adapters             │ ← Protocol abstraction
-│  ┌──────────────┬──────────────────────┐ │
-│  │ UniswapV3    │ Future Protocols     │ │
-│  │ Adapter      │ (Curve, Balancer)    │ │
-│  └──────────────┴──────────────────────┘ │
-├─────────────────────────────────────────┤
-│         FUM Library Foundation          │ ← Core blockchain utilities
-└─────────────────────────────────────────┘
+┌─ Orchestration ─────────────────────────────────────────────────┐
+│  AutomationService (src/core/AutomationService.js)              │
+│  - Vault discovery, strategy allocation, processing loop        │
+│  - Vault locking, failed vault retry, blacklisting              │
+│  - Provider management, reconnection, crash handling            │
+└─────────────────────────────────────────────────────────────────┘
+        │ creates & coordinates
+        ▼
+┌─ Data Layer ────────────────┐  ┌─ Event System ─────────────────┐
+│  VaultDataService           │  │  EventManager                   │
+│  - #vaults (private Map)    │  │  - Pub/sub (subscribe/emit)     │
+│  - Position & token loading │  │  - Blockchain listener mgmt     │
+│  - Asset value calculation  │  │  - Pool-to-vault shared listen  │
+└─────────────────────────────┘  └─────────────────────────────────┘
+        │                                │
+        ▼                                ▼
+┌─ Strategy Execution ────────┐  ┌─ Supporting Services ───────────┐
+│  StrategyBase (abstract)    │  │  Tracker - tx history, ROI      │
+│  └── BabyStepsStrategy      │  │  SSEBroadcaster - frontend SSE  │
+│      (type: 'bob')          │  │  RetryHelper - backoff utilities │
+└─────────────────────────────┘  └─────────────────────────────────┘
 ```
 
-### 3. **Separation of Concerns**
-- **AutomationService**: Orchestration and lifecycle management
-- **VaultRegistry**: Vault discovery and authorization tracking  
-- **VaultDataService**: Data loading and caching with position enhancement
-- **EventManager**: Event subscription and cleanup management
-- **Strategy Classes**: Rebalancing and fee collection logic
+## Source Files
 
-### 4. **Graceful Degradation**
-- Partial data handling when some services unavailable
-- Circuit breaker patterns for external API failures
-- Comprehensive error handling with context preservation
-- Automatic retry logic with exponential backoff
-
-## Key Architectural Decisions
-
-### Event Management Strategy
-**Decision**: Centralized event manager with automatic cleanup
-**Reasoning**:
-- Prevents memory leaks from abandoned event listeners
-- Ensures proper WebSocket and provider cleanup
-- Enables systematic event debugging and monitoring
-- Supports graceful shutdown procedures
-
-### Strategy Extensibility
-**Decision**: Abstract base class with concrete platform implementations
-**Reasoning**:
-- Enforces consistent interface across all strategies
-- Provides common utilities (event registration, logging)
-- Enables easy addition of new strategies
-- Platform-specific optimizations while maintaining compatibility
-
-### Data Loading Architecture
-**Decision**: Enhanced VaultDataService with position enrichment
-**Reasoning**:
-- Centralizes complex data loading logic
-- Adds automation-specific metadata to positions
-- Provides consistent caching layer
-- Enables efficient batch operations
-
-### Asynchronous Processing
-**Decision**: Event-driven with Promise-based async patterns
-**Reasoning**:
-- Non-blocking operation for multiple vault management
-- Proper error isolation between vault operations
-- Scalable to large numbers of monitored vaults
-- Natural fit for blockchain's asynchronous nature
-
-## System Architecture Layers
-
-### 1. **Orchestration Layer** (AutomationService)
-**Responsibilities:**
-- Service lifecycle management (start/stop)
-- Vault discovery and authorization monitoring
-- Strategy allocation and execution coordination
-- Cross-cutting concerns (logging, metrics, health checks)
-
-**Key Components:**
-```javascript
-class AutomationService {
-  // Core services
-  vaultRegistry: VaultRegistry
-  vaultDataService: VaultDataService  
-  eventManager: EventManager
-  
-  // Strategy management
-  strategies: Map<string, StrategyClass>
-  activeVaults: Map<string, VaultState>
-  
-  // Configuration
-  config: AutomationConfig
-}
+```
+src/
+├── index.js                           # Re-exports all modules
+├── core/
+│   ├── AutomationService.js          # Main orchestrator (2100+ lines)
+│   ├── VaultDataService.js           # Vault data management
+│   ├── EventManager.js               # Pub/sub + blockchain listeners
+│   ├── Tracker.js                    # Transaction history & performance
+│   └── SSEBroadcaster.js            # SSE streaming to frontend
+├── strategies/
+│   ├── base/StrategyBase.js          # Abstract base class
+│   └── babySteps/BabyStepsStrategy.js # Concrete strategy
+└── utils/
+    ├── RetryHelper.js                # Retry with exponential backoff
+    └── errors.js                     # UnrecoverableError
 ```
 
-### 2. **Data Management Layer** 
-**VaultRegistry**: Tracks authorized vaults across chains
-- Real-time authorization status monitoring
-- Vault metadata caching and updates
-- Multi-chain vault discovery
-- Authorization change event handling
+## Dependency Injection
 
-**VaultDataService**: Enhanced data loading with automation context
-- Position data loading with strategy metadata
-- Token balance tracking and conversion
-- Pool data caching and refresh
-- Position-to-strategy mapping
+AutomationService creates all components in its constructor:
 
-### 3. **Strategy Execution Layer**
-**StrategyBase**: Abstract foundation for all strategies
-- Common event handling patterns
-- Shared utility functions
-- Standardized evaluation interfaces
-- Position data validation
+1. **EventManager** — created first, receives dependencies via setters (`setPoolData`, `setAdapters`, `setVaultDataService`) after `initialize()`
+2. **VaultDataService** — receives EventManager in constructor, gets provider/chainId/tokens/adapters/poolData via setters during `initialize()`
+3. **Tracker** — receives `{ dataDir, eventManager, chainId, debug }`, subscribes to events automatically
+4. **SSEBroadcaster** — receives EventManager + callback functions for data access
+5. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
 
-**Concrete Strategies**: Platform and approach-specific implementations
-- **BabyStepsStrategy**: Simple range-based automation
-- **ParrisIslandStrategy**: Advanced adaptive automation
-- **UniswapV3 Adapters**: Platform-specific optimizations
+Strategies receive shared references to AutomationService caches (vaultLocks, poolData, tokens, adapters) — not copies. This ensures all components see the same data.
 
-### 4. **Infrastructure Layer**
-**EventManager**: Centralized event lifecycle management
-- Blockchain event subscription
-- Timer-based event scheduling  
-- Event listener cleanup and garbage collection
-- Debug and monitoring support
+## Service Lifecycle
 
-**Logger**: Structured logging with automation context
-- Operation tracing and correlation
-- Performance metrics collection
-- Error categorization and reporting
-- Debug mode support
-
-## Data Flow Architecture
-
-### Vault Discovery and Registration Flow
-```
-1. AutomationService starts
-2. VaultRegistry scans for authorized vaults
-3. For each vault:
-   a. Load basic vault information
-   b. Determine active strategy
-   c. Register vault in active monitoring
-   d. Set up event listeners for changes
-4. Begin periodic evaluation cycles
-```
-
-### Strategy Evaluation Flow
-```
-1. Timer or event triggers evaluation
-2. VaultDataService loads enhanced position data
-3. Strategy evaluates current state:
-   a. Check rebalancing conditions
-   b. Analyze fee collection opportunities  
-   c. Validate position health
-4. Generate recommended actions
-5. Log evaluation results
-6. Schedule next evaluation
-```
-
-### Event Handling Flow
-```
-1. Blockchain event detected
-2. EventManager routes to appropriate handler
-3. Handler processes event:
-   a. Updates vault state if needed
-   b. Triggers strategy re-evaluation
-   c. Emits internal automation events
-4. Cleanup and schedule next actions
-```
+1. **Constructor** — Validate config, create all components, instantiate BabyStepsStrategy as `'bob'`, set up event subscriptions and crash handlers
+2. **start()** — Initialize provider, load adapters/tokens/contracts, inject dependencies into EventManager/VaultDataService, load blacklist, discover authorized vaults, setup each vault
+3. **Running** — Event-driven: blockchain events trigger strategy evaluation and execution
+4. **stop()** — Set shutdown flag, disable EventManager, clean up all vaults, remove all listeners, stop SSE/Tracker, close provider
 
 ## Extension Points
 
-### Adding New Strategies
-1. **Extend StrategyBase**: Implement required abstract methods
-2. **Platform Integration**: Create platform-specific subclasses
-3. **Registration**: Add strategy to AutomationService registry
-4. **Configuration**: Add strategy parameters to config system
+**Adding a new strategy:** Extend StrategyBase, implement 4 methods (`initializeVault`, `handleSwapEvent`, `cleanup`, `setupAdditionalMonitoring`), instantiate in AutomationService constructor, register in `this.strategies` Map.
 
-```javascript
-// Example: Adding a new MomentumStrategy
-class MomentumStrategy extends StrategyBase {
-  async evaluateRebalance(position) {
-    // Momentum-based rebalancing logic
-    const priceMovement = await this.calculatePriceMovement(position);
-    return {
-      shouldRebalance: priceMovement.magnitude > this.params.threshold,
-      reason: `Price momentum: ${priceMovement.direction}`,
-      actions: this.generateMomentumActions(priceMovement)
-    };
-  }
-}
+**Adding a new platform:** Create adapter in fum_library extending PlatformAdapter. The automation service picks up all adapters automatically via `getAdaptersForChain()`.
 
-// Platform-specific implementation
-class UniswapV3MomentumStrategy extends MomentumStrategy {
-  async generateMomentumActions(movement) {
-    // UniswapV3-specific action generation
-  }
-}
-```
+## Detailed Documentation
 
-### Adding New Platforms
-1. **Create Platform Adapter**: Extend base adapter classes
-2. **Strategy Integration**: Update existing strategies for new platform
-3. **Configuration**: Add platform addresses and parameters
-4. **Testing**: Comprehensive testing on target platform
-
-### Adding New Event Sources
-1. **Event Registration**: Use EventManager for consistent handling
-2. **Data Integration**: Update VaultDataService if new data needed
-3. **Strategy Updates**: Modify strategies to handle new event types
-4. **Monitoring**: Add appropriate logging and metrics
-
-## Performance Architecture
-
-### Concurrent Processing
-- **Vault-level parallelism**: Multiple vaults processed simultaneously
-- **Strategy isolation**: Failures in one vault don't affect others
-- **Batch optimization**: Related operations grouped for efficiency
-- **Rate limiting**: Respectful API usage with backoff strategies
-
-### Memory Management
-- **Event listener cleanup**: Automatic removal of stale listeners
-- **Data caching**: Time-based cache expiration
-- **Object pooling**: Reuse of expensive objects where appropriate
-- **Garbage collection**: Explicit cleanup in long-running operations
-
-### Network Optimization
-- **Connection pooling**: Reuse of blockchain connections
-- **Batch requests**: Multiple operations combined when possible
-- **Caching layers**: Reduce redundant blockchain queries
-- **Fallback providers**: Multiple RPC endpoints for reliability
-
-## Security Architecture
-
-### Input Validation
-- **Address validation**: All addresses validated before use
-- **Parameter bounds**: Strategy parameters within safe ranges
-- **Data sanitization**: External data properly validated
-- **Type checking**: Runtime type validation for critical paths
-
-### Access Control
-- **Authorization checking**: Vault authorization verified before actions
-- **Permission scoping**: Limited permissions for automation operations
-- **Audit logging**: All actions logged with context
-- **Emergency stops**: Circuit breakers for abnormal conditions
-
-### Error Handling
-- **Fail-safe defaults**: Safe behavior when data unavailable
-- **Error isolation**: Failures contained to specific operations
-- **Recovery procedures**: Automatic retry with exponential backoff
-- **Alerting**: Critical errors trigger appropriate notifications
-
-## Monitoring and Observability
-
-### Metrics Collection
-- **Performance metrics**: Response times, throughput, error rates
-- **Business metrics**: Rebalances performed, fees collected, TVL managed
-- **System metrics**: Memory usage, connection counts, cache hit rates
-- **Strategy metrics**: Success rates, slippage, gas usage
-
-### Logging Strategy
-- **Structured logging**: Consistent format with searchable fields
-- **Correlation IDs**: Track operations across service boundaries
-- **Log levels**: Appropriate verbosity for different environments
-- **Performance impact**: Minimal overhead in production
-
-### Health Monitoring
-- **Service health**: Endpoint for external monitoring
-- **Dependency health**: Monitor external service availability
-- **Data quality**: Validate data consistency and completeness
-- **Performance thresholds**: Alert on degraded performance
-
-## Deployment Architecture
-
-### Environment Separation
-- **Development**: Local testing with test networks
-- **Staging**: Production-like environment with limited scope
-- **Production**: Full deployment with monitoring and alerting
-
-### Configuration Management
-- **Environment-specific**: Different configs per environment
-- **Secret management**: Secure handling of API keys and private data
-- **Feature flags**: Enable/disable features without deployment
-- **Hot reloading**: Configuration updates without restart
-
-### Scaling Considerations
-- **Horizontal scaling**: Multiple service instances
-- **Load distribution**: Vault assignment across instances
-- **Shared state**: Coordination between multiple instances
-- **Database integration**: Persistent state when needed
-
----
-
-For detailed information about specific architectural components:
-- [Event Management Architecture](./event-management.md)
-- [Strategy System Architecture](./strategy-system.md)
-- [Automation Flow Patterns](./automation-flow.md)
+- [Cache Structures](./cache-structures.md) — All cached data shapes (critical reference)
+- [Strategy System](./strategy-system.md) — StrategyBase interface, BabyStepsStrategy
+- [Automation Flow](./automation-flow.md) — Event handling, vault processing flows
+- [Event Management](./event-management.md) — Pub/sub, listener lifecycle, cleanup

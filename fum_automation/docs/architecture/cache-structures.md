@@ -1,3 +1,4 @@
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js -->
 # Cache Data Structures Reference
 
 This document provides a comprehensive reference of all cached object structures used throughout the FUM Automation system. Understanding these structures is essential for working with the codebase and debugging data flow issues.
@@ -105,7 +106,7 @@ this.poolData = {
 ```javascript
 this.strategies = Map {
   'bob' => BabyStepsStrategy {
-    // Strategy instance with methods like initializeVaultStrategy(), handleSwapEvent(), etc.
+    // Strategy instance with methods like initializeVault(), handleSwapEvent(), etc.
   }
   // Additional strategy instances added here
 }
@@ -170,6 +171,26 @@ this.vaultTripHistory = Map {
 ```
 
 **Blacklist Logic**: If a vault accumulates `MAX_TRIPS_IN_WINDOW` (5) trips within `TRIP_WINDOW_MS` (24 hours), it gets blacklisted.
+
+### `this.pendingConfigUpdates` - Lock-Aware Config Update Queue
+**Type**: `Map<string, Array>`
+**Key**: Vault address (normalized)
+**Purpose**: Queue config updates that arrive while a vault is locked (being processed). Applied when vault unlocks.
+
+```javascript
+this.pendingConfigUpdates = Map {
+  '0x1234567890123456789012345678901234567890' => [
+    { type: 'tokens', data: ['USDC', 'WETH'], timestamp: 1703123456789 },
+    { type: 'params', data: 'rebalanceThreshold', timestamp: 1703123556789 }
+  ]
+}
+```
+
+**Queue Behavior**:
+- Queued when vault is locked during a `TargetTokensUpdated`, `TargetPlatformsUpdated`, or `StrategyParameterUpdated` event
+- Latest-wins dedup per type (e.g., two `tokens` updates → only last one kept)
+- Processed on `VaultUnlocked` event via `processPendingConfigUpdates()`
+- Cleared on vault cleanup/blacklist via `clearPendingConfigUpdates()`
 
 ---
 
@@ -335,6 +356,12 @@ These are class properties that hold instances, configurations, or utilities - n
 - `this.vaultDataService` - VaultDataService instance reference
 - `this.tracker` - Tracker instance for vault transaction logging
 - `this.sseBroadcaster` - SSEBroadcaster instance for real-time updates
+- `this.isShuttingDown` - Shutdown in progress flag (boolean)
+- `this.isReconnecting` - Flag preventing concurrent reconnection attempts (boolean)
+- `this.reconnectAttempts` - Current reconnect attempt count, resets on success (number)
+- `this.maxReconnectAttempts` - Max attempts before fatal error (default: 5)
+- `this.reconnectBaseDelay` - Base delay for exponential backoff (default: 1000ms → 1s, 2s, 4s, 8s, 16s)
+- `this.heartbeatInterval` - 30s interval checking provider.getBlockNumber()
 
 ### VaultDataService Dependencies
 - `this.eventManager` - EventManager instance reference

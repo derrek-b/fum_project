@@ -1,3 +1,4 @@
+<!-- Source: package.json, src/core/*.js, src/strategies/**/*.js, src/utils/*.js, test/helpers/*, test/workflow/*, backtest/README.md, docs/architecture/*.md -->
 # CLAUDE.md — fum_automation (Automation Service)
 
 ## What This Project Is
@@ -70,6 +71,7 @@ Detailed docs in `docs/architecture/`:
 - **strategy-system.md** — Strategy pattern, evaluation logic, platform-specific adaptations
 - **automation-flow.md** — Event handling and orchestration flows
 - **event-management.md** — Event subscription, lifecycle, and cleanup
+- **[backtest/README.md](../backtest/README.md)** — Historical data collection (swap events, prices) and replay for strategy evaluation
 
 ### Processing Loop
 
