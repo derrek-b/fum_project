@@ -2,6 +2,12 @@
 
 You are committing code changes and ensuring the project's documentation stays in sync. This skill handles staging, committing, and then checking if any architecture docs or CLAUDE.md files need updating based on what was committed.
 
+## Scope
+
+This skill maintains **code-coupled documentation**: architecture docs (`docs/architecture/`), API references (`docs/api-reference/`), and CLAUDE.md files. It detects staleness by comparing committed source files against `<!-- Source: ... -->` comments in each doc.
+
+**Session-level knowledge** (decisions, conventions, gotchas, workflow changes) is captured by the `/update-brain` skill, which should be run at the end of a working session.
+
 ## Arguments
 
 `$ARGUMENTS` — optional subproject name: `fum`, `fum_library`, `fum_automation`, `fum_testing`, or `root`
@@ -90,7 +96,7 @@ git diff HEAD~1 --name-only
 
 **6b. Identify affected docs using source mapping:**
 
-Each architecture doc and CLAUDE.md has a `<!-- Source: ... -->` comment at the top listing the source files it covers. For each doc in the affected subproject(s):
+Each architecture doc, API reference doc, and CLAUDE.md has a `<!-- Source: ... -->` comment at the top listing the source files it covers. For each doc in the affected subproject(s) — check `docs/architecture/`, `docs/api-reference/`, and the CLAUDE.md file:
 1. Parse the `<!-- Source: ... -->` comment
 2. Check if any listed source files (or glob patterns) overlap with the committed files
 3. If yes → that doc needs review
@@ -138,7 +144,8 @@ Do NOT write any files until the user approves.
 Write only the approved changes. For each update:
 1. Read the target doc
 2. Make the specific change (edit, not rewrite)
-3. Show a brief summary of what changed
+3. If the doc's scope changed (new source files are now relevant, or old ones were removed), update the `<!-- Source: ... -->` comment to match
+4. Show a brief summary of what changed
 
 After all updates are applied, stage the changed docs and commit:
 ```bash

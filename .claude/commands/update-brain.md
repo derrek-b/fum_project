@@ -2,6 +2,12 @@
 
 You are updating the "second brain" for the FUM project. Your job is to review what happened in this session and propose updates to the project's knowledge base.
 
+## Scope
+
+This skill captures **session-level knowledge**: decisions made, conventions established, gotchas discovered, workflow changes, and TODO items. It updates CLAUDE.md files, decision docs, and platform knowledge docs.
+
+**Architecture docs and API references** (`docs/architecture/`, `docs/api-reference/`) are maintained by the `/commit` skill via source mapping. Do not propose detailed changes to those here. However, if you notice obvious staleness in architecture docs from uncommitted work, flag it so the user can address it at commit time.
+
 ## Step 1: Gather Context
 
 Review everything that happened this session:
@@ -69,3 +75,20 @@ Do NOT write any files until the user approves.
 Once approved, write only the approved changes. Keep everything concise — the goal is a knowledge base that's quick to scan, not exhaustive documentation.
 
 After writing, show a brief summary of what was updated.
+
+## Step 6: Check Personal Memory
+
+Separately from the project knowledge base, check if anything from this session should be saved to your personal memory (`MEMORY.md`). This is not part of the proposal/approval flow above — just do a quick self-assessment.
+
+Things that belong in personal memory:
+- User preferences or corrections ("never do X", "always prefer Y")
+- Deferred work or TODOs that aren't tracked elsewhere
+- Gotchas you hit that you'd want to remember next session
+- Status of in-progress work that spans multiple sessions
+
+Things that do NOT belong (they go in project docs instead):
+- Anything about the codebase structure or conventions (that's CLAUDE.md)
+- Architecture or API details (that's docs/architecture/ or docs/api-reference/)
+- Decisions or platform knowledge (that's docs/decisions/ or docs/platform-knowledge/)
+
+If nothing needs recording, move on. If something does, update MEMORY.md directly — no approval needed for personal memory.
