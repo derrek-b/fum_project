@@ -1,3 +1,4 @@
+<!-- Source: fum/package.json, fum_library/package.json, fum_automation/package.json, fum_testing/package.json, docs/decisions/*, docs/platform-knowledge/*, fum/CLAUDE.md, fum_library/CLAUDE.md, fum_automation/CLAUDE.md, fum_testing/CLAUDE.md -->
 # CLAUDE.md — FUM Project
 
 ## What is FUM?
@@ -77,7 +78,7 @@ cd fum_testing && npx hardhat node       # Start local node
 
 ### fum_library Modules
 - `fum_library/adapters` — Platform adapters (UniswapV3Adapter, UniswapV4Adapter, TraderJoeV2_2Adapter). Each adapter implements the PlatformAdapter interface for position management, swaps, fee calculation, pool data.
-- `fum_library/helpers` — Utilities: formatHelpers, chainHelpers, tokenHelpers, platformHelpers, strategyHelpers, vaultHelpers, Permit2Helper
+- `fum_library/helpers` — Utilities: formatHelpers, chainHelpers, tokenHelpers, platformHelpers, strategyHelpers, Permit2Helper
 - `fum_library/blockchain` — Web3 provider creation, wallet connection, contract instantiation
 - `fum_library/services` — External APIs (CoinGecko price feeds with caching)
 - `fum_library/configs` — Chain configs, token lists, platform metadata
@@ -131,9 +132,10 @@ Cross-cutting docs that don't belong to a single subproject live in `docs/`:
 - `docs/platform-knowledge/` — DEX-specific quirks and gotchas (Uniswap V2/V3/V4, Trader Joe V2.2)
 
 Per-project docs:
+- `fum/docs/architecture/` — Contract system, validator pattern, frontend architecture, scripts pipeline
 - `fum_automation/docs/architecture/` — Cache structures, strategy system, automation flow, event management
 - `fum_library/docs/` — API reference, diagrams, adapter documentation
-- `fum/docs/` — Adapter pattern, adding new platforms
+- `fum_testing/docs/architecture/` — Mock contract APIs, deployment sequences, testing patterns
 
 ## Important Rules
 
