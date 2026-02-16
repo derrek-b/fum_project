@@ -1,3 +1,4 @@
+<!-- Source: src/blockchain/contracts.js -->
 # Contracts API
 
 Utilities for interacting with FUM vault contracts and related infrastructure.

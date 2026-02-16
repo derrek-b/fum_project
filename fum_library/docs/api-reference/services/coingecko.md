@@ -1,3 +1,4 @@
+<!-- Source: src/services/coingecko.js -->
 # CoinGecko Service API
 
 Token price data service providing real-time cryptocurrency prices with intelligent caching.

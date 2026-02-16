@@ -1,3 +1,4 @@
+<!-- Source: src/index.js, src/adapters/*, src/blockchain/*, src/helpers/*, src/services/*, src/configs/*, src/artifacts/* -->
 # FUM Library Module Reference
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.

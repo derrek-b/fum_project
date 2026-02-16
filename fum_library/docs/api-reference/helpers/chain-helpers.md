@@ -1,3 +1,4 @@
+<!-- Source: src/helpers/chainHelpers.js -->
 # Chain Helpers API
 
 Chain configuration utilities for managing blockchain network settings and platform integrations.

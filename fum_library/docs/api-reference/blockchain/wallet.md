@@ -1,3 +1,4 @@
+<!-- Source: src/blockchain/wallet.js -->
 # Wallet API
 
 Ethereum wallet integration utilities for browser and RPC providers.

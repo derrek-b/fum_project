@@ -1,3 +1,4 @@
+<!-- Source: src/services/theGraph.js -->
 # TheGraph Service
 
 The Graph Protocol service for querying pool data from decentralized subgraphs.

@@ -1,3 +1,4 @@
+<!-- Source: src/helpers/strategyHelpers.js -->
 # Strategy Helpers API
 
 Strategy configuration utilities for managing trading strategies, parameters, and templates.

@@ -1,3 +1,4 @@
+<!-- Source: src/helpers/platformHelpers.js -->
 # Platform Helpers API
 
 Platform configuration utilities for managing DeFi protocol integrations and metadata.

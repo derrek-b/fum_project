@@ -1,3 +1,4 @@
+<!-- Source: src/helpers/formatHelpers.js -->
 # Format Helpers API
 
 Generic formatting utilities for consistent data presentation across the FUM Library.

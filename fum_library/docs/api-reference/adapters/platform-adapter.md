@@ -1,3 +1,4 @@
+<!-- Source: src/adapters/PlatformAdapter.js -->
 # PlatformAdapter API Reference
 
 Abstract base class that defines the interface all DeFi platform adapters must implement.

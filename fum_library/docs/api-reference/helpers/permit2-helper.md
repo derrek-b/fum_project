@@ -1,3 +1,4 @@
+<!-- Source: src/helpers/Permit2Helper.js -->
 # Permit2Helper
 
 Reusable functions for Permit2 signature generation and calldata wrapping.

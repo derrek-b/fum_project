@@ -1,3 +1,4 @@
+<!-- Source: src/index.js, src/adapters/*, src/blockchain/*, src/helpers/*, src/services/*, src/configs/* -->
 # API Reference
 
 Detailed API documentation for fum_library modules.

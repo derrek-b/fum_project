@@ -1,3 +1,4 @@
+<!-- Source: src/adapters/AdapterFactory.js -->
 # AdapterFactory API Reference
 
 Factory class for creating platform-specific adapter instances.

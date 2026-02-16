@@ -1,3 +1,4 @@
+<!-- Source: src/adapters/UniswapV3Adapter.js -->
 # UniswapV3Adapter
 
 The Uniswap V3 protocol adapter for concentrated liquidity pool integration.
