@@ -1,295 +1,147 @@
+<!-- Source: src/index.js, src/init.js, src/adapters/*, src/blockchain/*, src/configs/*, src/helpers/*, src/services/*, src/artifacts/* -->
 # FUM Library Architecture
 
 ## Overview
 
-The FUM (Fund Unified Management) Library is a modular DeFi integration framework designed to provide a unified interface for interacting with various decentralized finance protocols. This document describes the architecture, design patterns, and module interactions within the library.
+Shared library consumed by `fum` (Next.js frontend) and `fum_automation` (automation service). Provides platform adapters for DEX interactions, blockchain utilities, token/chain configs, contract ABIs, and helper functions.
 
-## Table of Contents
+Installed by consumers via local tarball (`npm run pack`), not npm link.
 
-1. [Architecture Overview](#architecture-overview)
-2. [Module Structure](#module-structure)
-3. [Core Components](#core-components)
-4. [Design Patterns](#design-patterns)
-5. [Data Flow](#data-flow)
-6. [Module Dependencies](#module-dependencies)
-
-## Architecture Overview
-
-```mermaid
-graph TB
-    subgraph "External Layer"
-        User[User Application]
-    end
-    
-    subgraph "FUM Library"
-        subgraph "API Layer"
-            Index[index.js<br/>Main Entry Point]
-        end
-        
-        subgraph "Service Layer"
-            Adapters[Adapters<br/>Protocol Integration]
-            Helpers[Helpers<br/>Utility Functions]
-            Services[Services<br/>External APIs]
-        end
-        
-        subgraph "Data Layer"
-            Blockchain[Blockchain<br/>Chain Interaction]
-            Configs[Configs<br/>Static Data]
-            Artifacts[Artifacts<br/>Contract ABIs]
-        end
-    end
-    
-    subgraph "External Services"
-        Chains[Blockchain Networks]
-        APIs[External APIs<br/>CoinGecko]
-    end
-    
-    User --> Index
-    Index --> Adapters
-    Index --> Helpers
-    Adapters --> Blockchain
-    Adapters --> Configs
-    Helpers --> Services
-    Helpers --> Configs
-    Blockchain --> Chains
-    Services --> APIs
-```
-
-## Module Structure
-
-### Directory Layout
+## Directory Layout
 
 ```
 src/
-├── index.js # FUM Library - Main Entry Point
-└── init.js # @module init
+├── index.js                          # Main entry point, re-exports all modules
+├── init.js                           # initFumLibrary() — unified config initialization
 ├── adapters/
-│   ├── index.js # Adapter system for DeFi platforms
-│   ├── AdapterFactory.js # @module adapters/AdapterFactory
-│   ├── PlatformAdapter.js # Base class for DeFi platform adapters.
-│   └── UniswapV3Adapter.js # UniswapV3Adapter - Uniswap V3 Protocol Integration
+│   ├── index.js                      # Re-exports + convenience wrappers (stale — use AdapterFactory directly)
+│   ├── AdapterFactory.js             # Static registry, creates adapters by platformId
+│   ├── PlatformAdapter.js            # Abstract base class (27 required + 4 optional methods)
+│   ├── UniswapV3Adapter.js           # Uniswap V3 concentrated liquidity
+│   ├── UniswapV4Adapter.js           # Uniswap V4 (singleton PoolManager)
+│   └── TraderJoeV2_2Adapter.js       # Trader Joe V2.2 Liquidity Book
 ├── artifacts/
-│   └── contracts.js # Contract ABIs and addresses for the F.U.M. project
+│   └── contracts.js                  # Contract ABIs and deployment addresses (auto-generated)
 ├── blockchain/
-│   ├── index.js # Blockchain Module - Ethereum Interaction Utilities
-│   ├── contracts.js # @module blockchain/contracts
-│   └── wallet.js # @module blockchain/wallet
+│   ├── index.js                      # Re-exports wallet + contracts
+│   ├── wallet.js                     # Provider creation, wallet connection (ethers v5)
+│   └── contracts.js                  # Contract instantiation, vault operations (ethers v5)
 ├── configs/
-│   ├── index.js
-│   ├── chains.js # Chain configuration for F.U.M. project
-│   ├── platforms.js # Platform configuration for F.U.M. project
-│   ├── strategies.js # Strategy configuration with templates and parameters
-│   └── tokens.js # Token configuration with addresses on multiple chains
+│   ├── index.js                      # Re-exports all configs
+│   ├── chains.js                     # Chain configs, RPC URLs, platform addresses per chain
+│   ├── platforms.js                  # Platform metadata (name, color, logo, subgraphs, fee tiers)
+│   ├── strategies.js                 # Strategy templates and parameter definitions
+│   └── tokens.js                     # Token lists with addresses on each chain
 ├── helpers/
-│   ├── index.js
-│   ├── chainHelpers.js # @module helpers/chainHelpers
-│   ├── formatHelpers.js # @module helpers/formatHelpers
-│   ├── platformHelpers.js # @module helpers/platformHelpers
-│   ├── strategyHelpers.js # @module helpers/strategyHelpers
-│   └── tokenHelpers.js # @module helpers/tokenHelpers
-├── services/
-│   ├── index.js
-│   ├── coingecko.js # @module services/coingecko
-│   └── theGraph.js # @module services/theGraph
+│   ├── index.js                      # Re-exports all helpers
+│   ├── chainHelpers.js               # Chain lookups, RPC URL construction, platform IDs per chain
+│   ├── formatHelpers.js              # formatPrice, formatFeeDisplay, formatTimestamp
+│   ├── platformHelpers.js            # Platform metadata lookups
+│   ├── strategyHelpers.js            # Strategy validation and parameter management
+│   ├── tokenHelpers.js               # Token lookups, address resolution
+│   └── Permit2Helper.js              # Uniswap Permit2 signature and nonce utilities
+└── services/
+    ├── index.js                      # Re-exports all services
+    ├── coingecko.js                  # Token price fetching with in-memory cache
+    ├── theGraph.js                   # Subgraph queries (pool TVL, age, V4 pool discovery)
+    └── blockExplorer.js              # Arbiscan internal transaction queries
 ```
 
-## Core Components
+## Initialization
 
-### 1. Adapters Module
+The library requires API keys for external services. Call `initFumLibrary()` at startup:
 
-The adapters module provides a unified interface for interacting with different DeFi protocols.
+```javascript
+import { initFumLibrary } from 'fum_library';
 
-**Key Components:**
-- `PlatformAdapter`: Abstract base class defining the interface all adapters must implement
-- `UniswapV3Adapter`: Concrete implementation for Uniswap V3 protocol
-- `AdapterFactory`: Factory pattern implementation for creating platform-specific adapters
-
-**Design Pattern:** Factory Pattern with Abstract Base Class
-
-### 2. Blockchain Module
-
-Handles all direct blockchain interactions including wallet management and contract calls.
-
-**Key Components:**
-- `wallet.js`: Provider creation and wallet connection management
-- `contracts.js`: Smart contract interaction utilities
-
-**Features:**
-- Multi-chain support
-- Provider abstraction
-- Transaction management
-
-### 3. Configs Module
-
-Static configuration data for the library.
-
-**Components:**
-- `chains.js`: Blockchain network configurations
-- `platforms.js`: DeFi platform metadata
-- `strategies.js`: Trading strategy definitions
-- `tokens.js`: Token information and addresses
-
-### 4. Helpers Module
-
-Utility functions that provide common functionality across the library.
-
-**Components:**
-- `chainHelpers.js`: Chain-specific utilities
-- `formatHelpers.js`: Number and string formatting
-- `platformHelpers.js`: Platform data access
-- `strategyHelpers.js`: Strategy validation and management
-- `tokenHelpers.js`: Token data management
-
-### 5. Services Module
-
-External API integrations.
-
-**Components:**
-- `coingecko.js`: Price data fetching with caching
-
-### 6. Artifacts Module
-
-Contract ABIs and deployment addresses.
-
-## Design Patterns
-
-### 1. Factory Pattern
-Used in `AdapterFactory` to create platform-specific adapter instances.
-
-### 2. Adapter Pattern
-Each platform adapter implements a common interface, allowing uniform interaction with different protocols.
-
-### 3. Module Pattern
-Each module exports specific functionality while encapsulating implementation details.
-
-### 4. Singleton Pattern
-Configuration objects and caches are implemented as singletons.
-
-## Data Flow
-
-### Position Fetching Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Adapter
-    participant Contract
-    participant Service
-
-    User->>Adapter: getPositions(address)
-    Adapter->>Contract: Read position data
-    Contract-->>Adapter: Raw position info
-    Adapter->>Adapter: Format positions
-    Adapter-->>User: Formatted positions
-
-    User->>Service: fetchTokenPrices(symbols)
-    Service->>Service: Check cache
-    Service-->>User: Token prices
+initFumLibrary({
+  coingeckoApiKey: process.env.COINGECKO_API_KEY,
+  alchemyApiKey: process.env.ALCHEMY_API_KEY,
+  blockExplorerApiKey: process.env.BLOCK_EXPLORER_API_KEY,
+  theGraphApiKey: process.env.THE_GRAPH_API_KEY,
+});
 ```
+
+This delegates to per-service configure functions (`configureCoingecko`, `configureChainHelpers`, `configureBlockExplorer`, `configureTheGraph`). Each key is optional — only services you need require their key. Services can also be configured individually if preferred.
+
+## Module Summaries
+
+### Adapters
+
+Platform-specific implementations for DEX interactions. All adapters extend `PlatformAdapter` and are created via `AdapterFactory.getAdapter(platformId, chainId, provider)`.
+
+The base class defines 27 required methods (position discovery, pool operations, transaction generation, receipt parsing, swap event monitoring) and 4 optional incentive-related methods.
+
+See [Adapters Architecture](./adapters.md) for the full interface, data shapes, and automation usage flows.
+
+### Blockchain
+
+Provider creation and contract interaction using **ethers.js v5**.
+
+- **wallet.js** — `createWeb3Provider()`, `createJsonRpcProvider()`, `getConnectedAccounts()`, `requestWalletConnection()`, `getChainId()`, `switchChain()`
+- **contracts.js** — `getContract()`, `getVaultFactory()`, `createVault()`, `getVaultContract()`, `getUserVaults()`, `getVaultInfo()`, `executeVaultTransactions()`, `getAuthorizedVaults()`, `getContractInfoByAddress()`
+
+See [Blockchain Architecture](./blockchain.md) for details.
+
+### Configs
+
+Static configuration data. These are the source of truth for supported chains, tokens, and platforms.
+
+- **chains.js** — Chain definitions including RPC URLs, contract addresses, and `platformAddresses` per chain
+- **platforms.js** — Platform metadata (display name, color, logo, subgraph URLs, fee tiers)
+- **strategies.js** — Strategy template definitions and parameter schemas
+- **tokens.js** — Token lists with per-chain addresses, decimals, symbols
+
+### Helpers
+
+Stateless utility functions used throughout the codebase.
+
+- **chainHelpers.js** — `getChainConfig()`, `lookupChainPlatformIds()`, RPC URL construction (uses Alchemy API key if configured)
+- **formatHelpers.js** — `formatPrice()`, `formatFeeDisplay()`, `formatTimestamp()`
+- **platformHelpers.js** — Platform metadata lookups by ID
+- **strategyHelpers.js** — Strategy parameter validation and defaults
+- **tokenHelpers.js** — Token lookups by symbol/address, address resolution across chains
+- **Permit2Helper.js** — Uniswap Permit2 signature generation and nonce management for swap authorization
+
+See [Helpers Architecture](./helpers.md) for details.
+
+### Services
+
+External API integrations. Each service has a `configure*()` function called by `initFumLibrary()`.
+
+- **coingecko.js** — `fetchTokenPrices(tokenSymbols, cacheDurationMs)` with in-memory price cache. Cache duration is a number in milliseconds.
+- **theGraph.js** — `getPoolTVLAverage()`, `getPoolAge()`, `discoverV4Pools()`, `getV4PositionsByOwner()` via subgraph queries
+- **blockExplorer.js** — `getBlockExplorerService(chainId)` returns a service with `getInternalTransactions(txHash)` and `getEthTransfersForWallet(txHash, walletAddress)` for parsing Arbiscan data
+
+See [Services Architecture](./services.md) for details.
+
+### Artifacts
+
+Auto-generated contract ABIs and deployment addresses. Source of truth is `fum/contracts/` — run `npm run contracts:sync` in fum to regenerate.
+
+`bytecode/` contains compiled contract bytecodes synced from fum_testing.
+
+## Build System
+
+The build is a simple file copy (`cp -r src/* dist/`), not a bundler. The `dist/` directory gets packed into a tarball consumed by sibling projects.
 
 ## Module Dependencies
 
-### Dependency Graph
-
-```mermaid
-graph LR
-    subgraph "Entry Points"
-        Index[index.js]
-    end
-    
-    subgraph "High-Level Modules"
-        Adapters[adapters]
-        Helpers[helpers]
-    end
-    
-    subgraph "Core Modules"
-        Blockchain[blockchain]
-        Services[services]
-        Configs[configs]
-    end
-    
-    subgraph "Data Modules"
-        Artifacts[artifacts]
-    end
-    
-    Index --> Adapters
-    Index --> Configs
-    
-    Adapters --> Blockchain
-    Adapters --> Configs
-    Adapters --> Helpers
-    
-    Helpers --> Adapters
-    Helpers --> Blockchain
-    Helpers --> Services
-    Helpers --> Configs
-    Helpers --> Artifacts
-    
-    Services --> Configs
-    
-    Blockchain --> Artifacts
+```
+index.js
+├── init.js → configures services/helpers with API keys
+├── adapters/ → uses blockchain/, configs/, helpers/
+├── helpers/ → uses configs/
+├── blockchain/ → uses artifacts/, configs/
+└── services/ → standalone (configured via init)
 ```
 
-### Circular Dependencies
-The library avoids circular dependencies through careful module design and the use of dependency injection where necessary.
+Consumers import via subpath exports (`fum_library/adapters`, `fum_library/helpers/chainHelpers`, etc.) or from the main entry point.
 
-## Configuration Management
+## Detailed Documentation
 
-The library uses a layered configuration approach:
-
-1. **Static Configs**: Hard-coded in `configs/` modules
-2. **Runtime Configs**: Passed through function parameters
-3. **Environment Configs**: Read from environment variables (API keys)
-
-## Error Handling
-
-The library implements consistent error handling:
-
-1. **Validation Errors**: Thrown immediately with descriptive messages
-2. **Network Errors**: Caught and logged, graceful degradation
-3. **Data Errors**: Return partial data with `hasPartialData` flags
-
-## Performance Considerations
-
-1. **Caching**: Price data cached for 60 seconds
-2. **Batch Operations**: Multiple positions fetched in parallel
-3. **Lazy Loading**: Contract instances created on demand
-4. **Data Prefetching**: Token prices prefetched before calculations
-
-## Security Considerations
-
-1. **Input Validation**: All user inputs validated
-2. **Address Checksums**: Ethereum addresses validated
-3. **Slippage Protection**: Built into swap operations
-4. **No Private Key Storage**: Library never stores private keys
-
-## Extension Points
-
-The library is designed for extensibility:
-
-1. **New Adapters**: Implement `PlatformAdapter` interface
-2. **New Strategies**: Add to `strategies.js` config
-3. **New Chains**: Add to `chains.js` config
-4. **New Tokens**: Add to `tokens.js` or use `registerToken()`
-
-## Testing Strategy
-
-- **Unit Tests**: For pure functions and utilities
-- **Integration Tests**: For adapter implementations
-- **Mock Data**: Comprehensive mocks for external dependencies
-
----
-
-## Detailed Module Documentation
-
-For in-depth technical details on each module:
-
-- **[Adapters Architecture](./adapters.md)** - Protocol integration patterns, adding new adapters, error handling
-- **[Helpers Architecture](./helpers.md)** - Business logic organization, orchestration patterns, data processing
-- **[Services Architecture](./services.md)** - External API integration, caching strategies, rate limiting
-- **[Blockchain Architecture](./blockchain.md)** - Provider management, contract interactions, multi-chain support
-
-## Additional Documentation
-
-- **[API Reference](../api-reference/overview.md)** - Complete function and module documentation
-- **[Architecture Diagrams](../diagrams/)** - Visual system representations in multiple formats
+- [Adapters Architecture](./adapters.md) — PlatformAdapter interface, data shapes, automation flows
+- [Helpers Architecture](./helpers.md) — Utility function details
+- [Services Architecture](./services.md) — External API integrations and caching
+- [Blockchain Architecture](./blockchain.md) — Provider management, contract interactions
+- [API Reference](../api-reference/overview.md) — Per-module function documentation

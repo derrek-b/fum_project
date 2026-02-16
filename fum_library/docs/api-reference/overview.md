@@ -1,45 +1,49 @@
 # API Reference
 
-This directory contains detailed API documentation for the FUM Library.
+Detailed API documentation for fum_library modules.
 
-## Documentation
+## Module Reference
 
-- [Module Reference](./modules.md) - Complete list of all modules, files, imports, and exports
-- [Type Definitions](./types.md) - TypeScript/JSDoc type definitions (coming soon)
+- [Module Reference](./modules.md) — Auto-generated list of all files, imports, and exports (`npm run docs` to regenerate)
 
-## Quick Links
+## Adapters
 
-### Core Modules
+- [PlatformAdapter](./adapters/platform-adapter.md) — Abstract base class (27 required + 4 optional methods)
+- [AdapterFactory](./adapters/adapter-factory.md) — Factory for creating adapters by platform ID
+- [UniswapV3Adapter](./adapters/uniswap-v3-adapter.md) — Uniswap V3 implementation details
 
-- **[Adapters](./modules.md#adapters-module)** - Protocol integration adapters
-- **[Blockchain](./modules.md#blockchain-module)** - Web3 and wallet utilities  
-- **[Helpers](./modules.md#helpers-module)** - Business logic and calculations
-- **[Services](./modules.md#services-module)** - External API integrations
-- **[Configs](./modules.md#configs-module)** - Static configuration data
+## Blockchain
 
-### Key Functions
+- [contracts.js](./blockchain/contracts.md) — getContract, getVaultFactory, createVault, getVaultContract, getUserVaults, getVaultInfo, executeVaultTransactions, getAuthorizedVaults, getContractInfoByAddress
+- [wallet.js](./blockchain/wallet.md) — createWeb3Provider, createJsonRpcProvider, getConnectedAccounts, requestWalletConnection, getChainId, switchChain
 
-#### Vault Management
-- `getAllUserVaultData()` - Get all vaults for a user
-- `getVaultData()` - Get detailed data for a single vault
-- `calculatePositionsTVL()` - Calculate total value locked
+## Helpers
 
-#### Token Operations  
-- `fetchTokenPrices()` - Get current token prices
-- `getTokenBySymbol()` - Get token configuration
-- `calculateUsdValue()` - Convert token amounts to USD
+- [chainHelpers](./helpers/chain-helpers.md) — getChainConfig, getChainRpcUrls, getPlatformAddresses, lookupChainPlatformIds, getExecutorAddress
+- [tokenHelpers](./helpers/token-helpers.md) — getTokenBySymbol, getTokenByAddress, getTokenAddress, getAllTokens, getCoingeckoId, isStablecoin, isNativeToken
+- [platformHelpers](./helpers/platform-helpers.md) — getPlatformMetadata, getPlatformFeeTiers, getAvailablePlatforms, lookupPlatformById
+- [strategyHelpers](./helpers/strategy-helpers.md) — lookupStrategyById, validateStrategyParams, getDefaultStrategyParams
+- [formatHelpers](./helpers/format-helpers.md) — formatPrice, formatFeeDisplay, formatTimestamp
+- [Permit2Helper](./helpers/permit2-helper.md) — getPermit2Nonce, generatePermit2Signature, wrapWithPermit2
 
-#### Position Management
-- `getPositions()` - Fetch user positions from protocols
-- `calculateFees()` - Calculate uncollected fees
-- `batchSwapTransactions()` - Prepare batched swap transactions
+## Services
 
-## Generated Documentation
+- [coingecko](./services/coingecko.md) — fetchTokenPrices, CACHE_DURATIONS, buildApiUrl, clearPriceCache
+- [theGraph](./services/theGraph.md) — getPoolTVLAverage, getPoolAge, discoverV4Pools, getV4PositionsByOwner
 
-The module reference is automatically generated from the source code. To regenerate:
+## Configs
 
-```bash
-npm run docs
-```
+Static configuration — see `src/configs/` source files directly:
+- `chains.js` — Chain definitions, RPC URLs, platform addresses per chain
+- `platforms.js` — Platform metadata (name, color, logo, subgraphs, fee tiers)
+- `strategies.js` — Strategy templates and parameter definitions
+- `tokens.js` — Token lists with per-chain addresses
 
-This will scan all source files and update the documentation with current imports, exports, and file descriptions.
+## Architecture Documentation
+
+For design decisions, data shapes, and usage patterns, see:
+- [Architecture Overview](../architecture/overview.md)
+- [Adapters Architecture](../architecture/adapters.md) — PlatformAdapter interface, data shapes, automation flows
+- [Helpers Architecture](../architecture/helpers.md) — Helper function tables per module
+- [Services Architecture](../architecture/services.md) — CoinGecko, The Graph, block explorer details
+- [Blockchain Architecture](../architecture/blockchain.md) — Provider management, contract interactions

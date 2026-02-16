@@ -1,490 +1,377 @@
+<!-- Source: src/adapters/PlatformAdapter.js, src/adapters/AdapterFactory.js, src/adapters/UniswapV3Adapter.js, src/adapters/UniswapV4Adapter.js, src/adapters/TraderJoeV2_2Adapter.js -->
 # Adapters Architecture
 
 ## Overview
 
-The adapter module implements the **Adapter Pattern** to provide a unified interface for interacting with different DeFi protocols. Each protocol has its own adapter that translates the common interface into protocol-specific calls.
+The adapter module provides a unified interface for interacting with different DeFi protocols. Each supported platform has its own adapter that translates the common `PlatformAdapter` interface into protocol-specific contract calls, data formats, and transaction encoding.
 
-## Design Pattern
+**Current adapters:**
 
-### Abstract Base Class Pattern
+| Platform ID | Adapter Class | Protocols |
+|---|---|---|
+| `uniswapV3` | `UniswapV3Adapter` | Uniswap V3 (Arbitrum) |
+| `uniswapV4` | `UniswapV4Adapter` | Uniswap V4 (Arbitrum) |
+| `traderjoeV2_2` | `TraderJoeV2_2Adapter` | Trader Joe V2.2 Liquidity Book (Arbitrum, Avalanche) |
 
-```javascript
-// Abstract base class defines the contract
-export default class PlatformAdapter {
-  // Common interface methods that all adapters must implement
-  async getPositions(address, chainId) { throw new Error("Must implement"); }
-  async calculateFees(position, poolData) { throw new Error("Must implement"); }
-  // ... more methods
-}
+## AdapterFactory
 
-// Concrete implementation for specific protocol
-export default class UniswapV3Adapter extends PlatformAdapter {
-  async getPositions(address, chainId) {
-    // Uniswap V3 specific implementation
-  }
-}
-```
-
-### Factory Pattern
+The factory creates adapter instances from platform IDs. Adapters are constructed with a `chainId` and `provider`, and they load platform-specific contract addresses, ABIs, and configuration from `configs/chains.js` and `configs/platforms.js` internally.
 
 ```javascript
-class AdapterFactory {
-  static #PLATFORM_ADAPTERS = {
-    uniswapV3: UniswapV3Adapter,
-    // sushiswap: SushiswapAdapter,  // Future
-    // aave: AaveAdapter,            // Future
-  };
-  
-  static getAdapter(platformId, provider) {
-    const AdapterClass = this.#PLATFORM_ADAPTERS[platformId];
-    return new AdapterClass(config, provider);
-  }
-}
+import { AdapterFactory } from 'fum_library/adapters';
+
+// Get a specific adapter
+const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
+
+// Get all adapters for a chain
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
+
+// Check available platforms
+AdapterFactory.getSupportedPlatforms();  // ['uniswapV3', 'uniswapV4', 'traderjoeV2_2']
+AdapterFactory.hasAdapter('uniswapV3'); // true
 ```
 
-## Adapter Interface
+### Factory Methods
 
-### Required Methods
+| Method | Signature | Description |
+|---|---|---|
+| `getAdapter` | `(platformId, chainId, provider) → Adapter` | Create a specific adapter. Throws if platform unknown or creation fails. |
+| `getAdaptersForChain` | `(chainId, provider) → { adapters[], failures[] }` | Create all adapters for a chain. Returns failures array instead of throwing. |
+| `getSupportedPlatforms` | `() → string[]` | List all registered platform IDs. |
+| `hasAdapter` | `(platformId) → boolean` | Check if a platform ID is registered. |
 
-Every adapter must implement these core methods:
+> **Note:** The convenience wrappers in `adapters/index.js` (`getAdaptersForChain`, `getAdapter`, `registerAdapter`) have stale signatures that pass an extra `config` parameter. Use `AdapterFactory` directly until these are fixed.
 
-#### Pool and Position Discovery
+## PlatformAdapter Interface
+
+`PlatformAdapter` is the abstract base class. All adapters extend it and implement 27 required methods + optionally override 4 incentive methods.
+
+### Constructor
+
 ```javascript
-// Get pool address for token pair
-async getPoolAddress(token0, token1, fee)
-
-// Check if pool exists and get basic info
-async checkPoolExists(token0, token1, fee)
-
-// Get all user positions for the protocol (refactored for better performance)
-async getPositions(address, chainId)
+constructor(chainId, platformId, platformName)
 ```
 
-#### Public Data Utilities
-```javascript
-// Fetch token metadata and user balances
-async fetchTokenData(token0Address, token1Address, userAddress, chainId)
+- `chainId` — number, required
+- `platformId` — string (e.g., `'uniswapV3'`)
+- `platformName` — string (e.g., `'Uniswap V3'`)
 
-// Fetch pool state data
-async fetchPoolData(token0, token1, fee, chainId)
+Cannot be instantiated directly. Subclass constructors typically take `(chainId, provider)` and call `super(chainId, 'platformId', 'Platform Name')`.
 
-// Fetch tick-specific data for fee calculations
-async fetchTickData(poolAddress, tickLower, tickUpper)
-```
+### Required Methods — Grouped by Purpose
 
-#### Position Analysis
-```javascript
-// Check if position is currently in range
-isPositionInRange(position, poolData)
+#### Position Discovery & Data
 
-// Calculate price from sqrtPriceX96
-calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `getPositionsForVDS` | `(address, provider) → Promise<{positions, poolData}>` | VDS.fetchPositions | Get positions formatted for VaultDataService cache |
+| `getPositionById` | `(tokenId, provider) → Promise<{position, poolData}>` | Strategy.createNewPosition | Fetch single position by NFT tokenId (no Graph dependency) |
+| `getPoolData` | `(poolId, provider) → Promise<Object>` | VDS.fetchAssetValues | Get pool state data by pool identifier |
+| `calculateTokenAmounts` | `(position, poolData, token0Data, token1Data, provider) → Promise<[BigInt, BigInt]>` | VDS.fetchAssetValues | Calculate token amounts if position were closed |
 
-// Convert tick to price
-tickToPrice(tick, baseToken, quoteToken, chainId)
+#### Position Evaluation
 
-// Calculate token amounts if position were closed
-async calculateTokenAmounts(position, poolData, token0Data, token1Data, chainId)
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `evaluatePositionRange` | `(position, provider, options?) → Promise<Object>` | Strategy.evaluatePositions | Check if position is in range + distance metrics |
+| `getAccruedFeesUSD` | `(position, tokenPrices, provider) → Promise<Object>` | Strategy.handleSwapEvent | Calculate uncollected fees in USD |
+| `extractPositionBounds` | `(position) → { lower, upper }` | Strategy event emission | Extract position bounds in platform-agnostic format |
 
-// Calculate uncollected fees (optimized parameters)
-calculateUncollectedFees(position, poolData, token0Decimals, token1Decimals)
-```
+#### Pool Operations
+
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `selectBestPool` | `(tokenASymbol, tokenBSymbol, provider, chainId) → Promise<Object>` | Strategy.initializeVault | Discover pools, filter inactive, return best |
+| `describePool` | `(pool) → string` | Strategy logging | Human-readable pool description |
+| `getPositionRange` | `(poolData, upperPercent, lowerPercent) → Object` | Strategy.createNewPosition | Calculate position bounds from % parameters |
+| `getPoolCurrent` | `(poolData) → number` | Strategy.initializeVault | Get current pool state for baseline tracking |
+| `sortTokens` | `(token0, token1) → { sortedToken0, sortedToken1, tokensSwapped }` | Strategy pool operations | Sort tokens into platform's canonical order |
+| `getOptimalTokenRatio` | `(params) → Promise<{ token0Share, token1Share }>` | Strategy.createNewPosition | Calculate optimal token value ratio for range |
 
 #### Transaction Generation
-```javascript
-// Generate transaction data for claiming fees
-async generateClaimFeesData(params)
 
-// Generate transaction data for removing liquidity
-async generateRemoveLiquidityData(params)
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `generateClaimFeesData` | `(params) → Promise<{ to, data, value }>` | Strategy.collectFees | Generate fee claim transaction data |
+| `generateRemoveLiquidityData` | `(params) → Promise<{ to, data, value }>` | Strategy.closePositions | Generate liquidity removal transaction data |
+| `generateAddLiquidityData` | `(params) → Promise<{ to, data, value }>` | Strategy.addToPosition | Generate add-liquidity transaction data |
+| `generateCreatePositionData` | `(params) → Promise<{ to, data, value }>` | Strategy.createNewPosition | Generate new position transaction data |
+| `batchSwapTransactions` | `(swapInstructions, options) → Promise<{ transactions[], metadata[] }>` | Strategy.prepareTokens | Generate batched swap transactions with Permit2 |
+| `getBestSwapQuote` | `(params) → Promise<{ amountIn, amountOut, route }>` | Strategy.prepareTokens | Get optimal swap quote via router |
+| `getRequiredApprovals` | `(operationType, vaultAddress, tokenAddresses, provider) → Promise<Array>` | Strategy.ensureApprovals | Get approval transactions needed for an operation |
 
-// Generate transaction data for adding liquidity
-async generateAddLiquidityData(params)
+#### Receipt Parsing
 
-// Generate transaction data for creating new position
-async generateCreatePositionData(params)
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `parseClosureReceipt` | `(receipt, positionMetadata, options?) → Promise<Object>` | Strategy.closePositions | Extract principal and fees from close receipt |
+| `parseCollectReceipt` | `(receipt, positionMetadata, options?) → Promise<Object>` | Strategy.collectFees | Extract fee amounts from collect receipt |
+| `parseSwapReceipt` | `(receipt, swapMetadata) → Array<{ actualAmountIn, actualAmountOut }>` | Strategy.prepareTokens | Extract actual swap amounts from receipt |
+| `parseIncreaseLiquidityReceipt` | `(receipt, { position, poolData }) → Object` | Strategy.addToPosition | Extract amounts consumed from liquidity receipt |
 
-// Generate batched swap transactions with Permit2
-async batchSwapTransactions(swapInstructions, options)
-```
+#### Swap Event Monitoring
 
-#### Transaction Execution
-```javascript
-// Execute fee claim transaction
-async claimFees(params)
+| Method | Signature | Used By | Description |
+|---|---|---|---|
+| `getSwapEventFilter` | `(poolId) → { address, topics[] }` | EventManager | Get ethers-compatible event filter for pool swap events |
+| `parseSwapEvent` | `(log) → { tick, sqrtPriceX96, liquidity, amount0, amount1 }` | Strategy.handleSwapEvent | Parse raw swap log into normalized data |
+| `evaluatePriceMovement` | `(swapData, baseline, token0Data, token1Data) → Object` | Strategy.handleSwapEvent | Calculate price movement % from baseline |
 
-// Execute liquidity removal transaction
-async decreaseLiquidity(params)
+### Optional Methods — Incentive Rewards
 
-// Execute position closure transaction
-async closePosition(params)
+These have safe default implementations (return `{ active: false }` or `[]`). Override to enable platform-specific incentive support.
 
-// Execute liquidity addition transaction
-async addLiquidity(params)
+| Method | Default | Description |
+|---|---|---|
+| `getPoolIncentives(poolAddress, provider)` | `{ active: false, programs: [] }` | Check for active reward programs |
+| `getIncentivePreCloseTransactions(position, incentives, provider)` | `[]` | Transactions needed before closing (e.g., unstake NFT) |
+| `getIncentivePostCreateTransactions(positionId, incentives, provider)` | `[]` | Transactions needed after creating (e.g., stake NFT) |
+| `getIncentiveClaimTransactions(vaultAddress, poolAddress, provider)` | `[]` | Transactions to claim accrued rewards |
 
-// Execute position creation transaction
-async createPosition(params)
-```
+Incentive lifecycle varies by platform:
+- **Custody-transfer** (V3, PancakeSwap): NFT must be staked/unstaked — use pre-close and post-create methods
+- **Auto-tracking** (V4, TJ, Sushi, Camelot): Rewards accrue automatically — pre-close and post-create return `[]`
 
-### Data Structures
+## Key Data Shapes
 
-#### Standard Position Object
+### Position (from `getPositionsForVDS`)
+
 ```javascript
 {
-  id: "12345",                    // Position NFT ID
-  poolAddress: "0x...",          // Pool contract address
-  token0: "0x...",               // Token0 address
-  token1: "0x...",               // Token1 address
-  fee: 3000,                     // Fee tier in basis points
-  tickLower: -276324,            // Lower tick
-  tickUpper: -276200,            // Upper tick
-  liquidity: "1234567890",       // Position liquidity
-  tokensOwed0: "0",              // Owed token0 amount
-  tokensOwed1: "0",              // Owed token1 amount
-  feeGrowthInside0LastX128: "0", // Fee growth tracking
-  feeGrowthInside1LastX128: "0"  // Fee growth tracking
+  id: "12345",                              // Position NFT token ID (string)
+  pool: "0xABC...",                         // Pool address (V3) or poolId bytes32 (V4)
+  tickLower: -276324,                       // Lower tick bound
+  tickUpper: -276200,                       // Upper tick bound
+  liquidity: "1234567890",                  // Position liquidity (wei string)
+  feeGrowthInside0LastX128: "0",            // Fee growth tracker (string)
+  feeGrowthInside1LastX128: "0",            // Fee growth tracker (string)
+  tokensOwed0: "0",                         // Uncollected token0 fees (string)
+  tokensOwed1: "0",                         // Uncollected token1 fees (string)
+  lastUpdated: 1708000000000                // Timestamp of fetch (ms)
 }
 ```
 
-#### Standard Pool Data Object
+### Pool Metadata (from `getPositionsForVDS`)
+
+Returned alongside positions — stable metadata only, no time-sensitive data:
+
 ```javascript
 {
-  address: "0x...",              // Pool address
-  token0: "0x...",               // Token0 address
-  token1: "0x...",               // Token1 address
-  fee: 3000,                     // Fee tier
-  tick: -276250,                 // Current tick
-  sqrtPriceX96: "1234567890",    // Current price
-  liquidity: "9876543210",       // Total liquidity
-  feeGrowthGlobal0X128: "0",     // Global fee growth token0
-  feeGrowthGlobal1X128: "0",     // Global fee growth token1
-  ticks: {                       // Tick data for fee calculations
-    "-276324": { /* tick data */ },
-    "-276200": { /* tick data */ }
+  "0xABC...": {                             // Keyed by pool address
+    token0Symbol: "WETH",
+    token1Symbol: "USDC",
+    fee: 500,                               // Fee tier in basis points
+    platform: "uniswapV3"
   }
 }
 ```
 
-## Uniswap V3 Adapter Implementation
+### Pool Data (from `getPoolData`)
 
-### Recent Improvements
-
-#### v0.6.0 - Financial Safety & Gas Optimization
-**Problem**: Hardcoded gas limits and inconsistent slippage handling risked user funds
-**Solution**: Fail-fast gas estimation and standardized transaction parameters
+Full pool state for calculations and transaction generation:
 
 ```javascript
-// NEW: Dynamic gas estimation with fail-fast safety
-const gasLimit = await adapter._estimateGasFromTxData(signer, txData);
-// Throws clear error if transaction would revert, protecting user funds
-
-// NEW: Standardized slippage and deadline handling
-const slippagePercent = adapter._createSlippagePercent(0.5); // Validates 0-100%
-const deadline = adapter._createDeadline(20); // Configurable minutes from now
-```
-
-**Financial Safety Features:**
-- **No Fallback Gas Limits**: Fails fast instead of wasting gas on doomed transactions
-- **Input Validation**: Slippage tolerance validated (0-100%) with clear error messages
-- **Consistent Deadlines**: Configurable timeouts prevent stuck transactions
-- **Real-time Estimation**: Gas calculated per transaction based on current network state
-
-#### v0.5.0 - Modular Data Fetching
-**Problem**: The original `getPositions()` method was 250+ lines doing too much
-**Solution**: Broken into focused public utilities for reusability
-```javascript
-// Public utilities available independently
-await adapter.fetchTokenData(token0Address, token1Address, userAddress, chainId)
-await adapter.fetchPoolData(token0Data, token1Data, fee, chainId) 
-await adapter.fetchTickData(poolAddress, tickLower, tickUpper)
-```
-
-**Performance Optimizations:**
-- **Intelligent Caching**: Token and pool data cached to prevent redundant calls
-- **Simplified Type Handling**: Removed unnecessary `.toString()` conversion chains
-- **Parameter Optimization**: Functions now take only required parameters vs full objects
-- **Better Error Handling**: Granular per-position error catching
-
-### Architecture Decisions
-
-#### Price Calculation Strategy
-**Challenge**: Uniswap V3 uses `sqrtPriceX96` format which is complex to work with
-**Solution**: Public methods using the Uniswap V3 SDK for accurate price conversions
-```javascript
-calculatePriceFromSqrtPrice(sqrtPriceX96, baseToken, quoteToken, chainId)
-tickToPrice(tick, baseToken, quoteToken, chainId)
-```
-
-These methods leverage the official Uniswap SDK's `tickToPrice` function and `TickMath` utilities for accurate calculations that match the Uniswap frontend exactly.
-
-#### Fee Calculation Strategy
-**Challenge**: Uncollected fees require complex calculations involving on-chain tick data that the SDK doesn't provide
-**Solution**: Custom implementation of Uniswap V3's fee calculation logic
-```javascript
-calculateUncollectedFees(position, poolData, token0Data, token1Data)
-```
-
-This method implements the fee calculation manually because:
-- The Uniswap V3 SDK doesn't provide fee calculation methods
-- Fee calculations require real-time on-chain data (fee growth globals, tick data)
-- The SDK focuses on transaction building rather than state queries
-
-#### Gas Estimation Strategy (v0.6.0)
-**Challenge**: Hardcoded gas limits waste user money on failed transactions
-**Solution**: Dynamic estimation with fail-fast error handling
-```javascript
-// Fail-fast approach protects user funds
-try {
-  const gasLimit = await this._estimateGasFromTxData(signer, txData);
-} catch (error) {
-  // Clear error prevents wasted gas: "insufficient balance", "excessive slippage", etc.
-  throw new Error(`Transaction would likely revert: ${error.message}`);
+{
+  address: "0xABC...",                      // Pool identifier
+  sqrtPriceX96: "1234567890123456789",      // Current sqrt price (Q64.96 string)
+  tick: -276250,                            // Current tick
+  liquidity: "9876543210",                  // Active liquidity in range (string)
+  fee: 500,                                 // Fee tier (basis points)
+  feeGrowthGlobal0X128: "...",              // Global fee accumulator token0
+  feeGrowthGlobal1X128: "...",              // Global fee accumulator token1
+  lastUpdated: 1708000000000                // Timestamp of fetch (ms)
+  // V3 also includes: observationIndex, observationCardinality, feeProtocol, unlocked
 }
 ```
 
-**Benefits:**
-- **Financial Protection**: No gas wasted on doomed transactions
-- **User Guidance**: Specific error messages help fix problems
-- **Network Adaptive**: Gas estimates adjust to current conditions
+### Accrued Fees (from `getAccruedFeesUSD`)
 
-#### Transaction Data Strategy
-**Challenge**: Different operations require different contract interactions
-**Solution**: Separate methods for each operation type with consistent parameter patterns
 ```javascript
-// Pattern: generate* methods return transaction data
-// Pattern: execute* methods send transactions
-async generateClaimFeesData(params) { /* returns { to, data, value } */ }
-async claimFees(params) { /* executes transaction */ }
+{
+  totalUSD: 12.50,                          // Total fees in USD
+  token0Fees: 0.005,                        // Token0 fees (formatted, not raw)
+  token1Fees: 10.0,                         // Token1 fees (formatted, not raw)
+  token0USD: 9.50,                          // Token0 fees in USD
+  token1USD: 3.00                           // Token1 fees in USD
+}
 ```
 
-### External Dependencies
+### Range Evaluation (from `evaluatePositionRange`)
 
-#### Uniswap SDK Integration
 ```javascript
-// Uses official Uniswap SDK for accuracy
-import { Position, Pool, NonfungiblePositionManager } from '@uniswap/v3-sdk';
-import { Percent, Token, CurrencyAmount } from '@uniswap/sdk-core';
-
-// Benefits:
-// - Accurate calculations matching Uniswap frontend
-// - Maintained by Uniswap team
-// - Well-tested in production
+{
+  inRange: true,                            // Is position earning fees
+  centeredness: 0.65,                       // 0-1, 0.5 = perfectly centered
+  distanceToUpper: 0.35,                    // Fraction to upper bound
+  distanceToLower: 0.65,                    // Fraction to lower bound
+  currentTick: -276250                      // Current pool tick
+}
 ```
 
-#### Contract ABI Management
-```javascript
-// Imports ABIs from official packages
-import NonfungiblePositionManagerARTIFACT from '@uniswap/v3-periphery/artifacts/...';
-import IUniswapV3PoolARTIFACT from '@uniswap/v3-core/artifacts/...';
+### Price Movement (from `evaluatePriceMovement`)
 
-// Benefits:
-// - Always up-to-date with protocol changes
-// - No need to maintain ABI files separately
-// - Type safety for contract calls
+```javascript
+{
+  priceMovementPercent: 2.5,                // Absolute % movement
+  baselinePrice: "1850.00",                 // Baseline as human-readable string
+  currentPrice: "1803.75",                  // Current as human-readable string
+  direction: "down"                         // 'up' or 'down'
+}
 ```
 
-## Adding New Protocol Adapters
+### Closure Receipt (from `parseClosureReceipt`)
 
-### Step-by-Step Process
-
-#### 1. Create Adapter Class
 ```javascript
-// src/adapters/SushiswapAdapter.js
+{
+  principalByPosition: {
+    "12345": { amount0: BigNumber, amount1: BigNumber }
+  },
+  feesByPosition: {
+    "12345": {
+      token0: BigNumber,
+      token1: BigNumber,
+      metadata: { /* platform-specific */ }
+    }
+  }
+}
+```
+
+### Swap Receipt (from `parseSwapReceipt`)
+
+```javascript
+[
+  { actualAmountIn: "1000000000000000000", actualAmountOut: "1850000000" },
+  // one entry per swap in the batch
+]
+```
+
+### Increase Liquidity Receipt (from `parseIncreaseLiquidityReceipt`)
+
+```javascript
+{
+  tokenId: "12345",                         // Position NFT ID
+  liquidity: "9876543210",                  // Liquidity added
+  amount0: "500000000000000000",            // Actual token0 consumed
+  amount1: "925000000",                     // Actual token1 consumed
+  tickLower: -276324,                       // Only for new positions (null otherwise)
+  tickUpper: -276200,                       // Only for new positions (null otherwise)
+  poolAddress: "0xABC..."                   // Only for new positions (null otherwise)
+}
+```
+
+## Automation Service Usage Flow
+
+This is how adapters are consumed by the strategy system in `fum_automation`:
+
+### Vault Initialization
+```
+Strategy.initializeVault()
+  → adapter.selectBestPool(tokenA, tokenB, provider, chainId)
+  → adapter.getPoolCurrent(poolData)           // capture baseline
+  → adapter.getPositionRange(poolData, upper%, lower%)
+```
+
+### Position Evaluation (on each swap event)
+```
+EventManager receives swap log
+  → adapter.parseSwapEvent(log)
+  → adapter.evaluatePriceMovement(swapData, baseline, token0Data, token1Data)
+  → adapter.evaluatePositionRange(position, provider, { swapData })
+  → adapter.getAccruedFeesUSD(position, tokenPrices, provider)
+```
+
+### Rebalance: Close → Swap → Create
+```
+Strategy.closePositions()
+  → adapter.generateRemoveLiquidityData(params)    // generate tx
+  → executeVaultTransactions(...)                    // execute via vault
+  → adapter.parseClosureReceipt(receipt, metadata)  // extract principal + fees
+
+Strategy.prepareTokens()
+  → adapter.getOptimalTokenRatio(params)
+  → adapter.getBestSwapQuote(params)
+  → adapter.batchSwapTransactions(instructions, options)
+  → executeVaultTransactions(...)
+  → adapter.parseSwapReceipt(receipt, metadata)
+
+Strategy.createNewPosition()
+  → adapter.getRequiredApprovals('liquidity', vaultAddress, tokens, provider)
+  → adapter.getPositionRange(poolData, upper%, lower%)
+  → adapter.generateCreatePositionData(params)
+  → executeVaultTransactions(...)
+  → adapter.parseIncreaseLiquidityReceipt(receipt, context)
+  → adapter.getPositionById(tokenId, provider)     // fetch for cache update
+```
+
+### Fee Collection
+```
+Strategy.collectFees()
+  → adapter.generateClaimFeesData(params)
+  → executeVaultTransactions(...)
+  → adapter.parseCollectReceipt(receipt, metadata)
+```
+
+## Adding a New Adapter
+
+### 1. Create the adapter class
+
+```javascript
+// src/adapters/NewPlatformAdapter.js
 import PlatformAdapter from './PlatformAdapter.js';
 
-export default class SushiswapAdapter extends PlatformAdapter {
-  constructor(config, provider) {
-    super(config, provider, "sushiswap", "Sushiswap");
+export default class NewPlatformAdapter extends PlatformAdapter {
+  constructor(chainId, provider) {
+    super(chainId, 'newPlatform', 'New Platform');
+    // Load platform addresses from chain config
+    // Cache ABIs and contract interfaces
   }
-  
-  // Implement all required methods...
+
+  // Implement all 27 required methods...
+  // Override optional incentive methods if needed...
 }
 ```
 
-#### 2. Register with Factory
+### 2. Register with AdapterFactory
+
 ```javascript
 // src/adapters/AdapterFactory.js
-import SushiswapAdapter from './SushiswapAdapter.js';
+import NewPlatformAdapter from './NewPlatformAdapter.js';
 
 static #PLATFORM_ADAPTERS = {
   uniswapV3: UniswapV3Adapter,
-  sushiswap: SushiswapAdapter,  // Add new adapter
+  uniswapV4: UniswapV4Adapter,
+  traderjoeV2_2: TraderJoeV2_2Adapter,
+  newPlatform: NewPlatformAdapter,         // Add here
 };
 ```
 
-#### 3. Add Platform Configuration
+### 3. Add platform configuration
+
+In `configs/platforms.js` — add platform metadata (name, color, logo, subgraphs, fee tiers).
+
+In `configs/chains.js` — add contract addresses under `platformAddresses.newPlatform` for each supported chain.
+
+### 4. Export from index.js
+
 ```javascript
-// src/configs/platforms.js
-export const platforms = {
-  sushiswap: {
-    name: "Sushiswap",
-    color: "#0993EC",
-    logo: "/logos/sushiswap.svg",
-    // ... other metadata
-  }
-};
+// src/adapters/index.js
+export { default as NewPlatformAdapter } from './NewPlatformAdapter.js';
 ```
 
-#### 4. Add Chain Configurations
-```javascript
-// src/configs/chains.js
-export const chains = {
-  1: { // Ethereum
-    platformAddresses: {
-      uniswapV3: { /* existing */ },
-      sushiswap: {
-        factoryAddress: "0x...",
-        routerAddress: "0x...",
-        // ... protocol addresses
-      }
-    }
-  }
-};
-```
+## Key Decisions
 
-### Testing New Adapters
+### Why `getPositionsForVDS` vs `getPositions`?
 
-#### Unit Tests
-```javascript
-// tests/adapters/SushiswapAdapter.test.js
-describe('SushiswapAdapter', () => {
-  it('should implement all required methods', () => {
-    const adapter = new SushiswapAdapter(mockConfig, mockProvider);
-    
-    // Verify all abstract methods are implemented
-    expect(typeof adapter.getPositions).toBe('function');
-    expect(typeof adapter.calculateFees).toBe('function');
-    // ... test all methods
-  });
-});
-```
+`getPositions` is a V3-specific internal method that returns rich data with full pool state. `getPositionsForVDS` is the platform-agnostic interface method that returns only the essential fields the automation cache needs. The VDS format excludes time-sensitive data (current tick, sqrtPriceX96) because that data is fetched fresh when needed via `getPoolData` or from swap events.
 
-#### Integration Tests
-```javascript
-it('should fetch real positions from testnet', async () => {
-  const adapter = new SushiswapAdapter(testConfig, testProvider);
-  const positions = await adapter.getPositions(testAddress, testProvider);
-  expect(typeof positions.positions).toBe('object'); // ID-keyed object
-  
-  expect(positions).toHaveProperty('positions');
-  expect(positions).toHaveProperty('poolData');
-  expect(positions).toHaveProperty('tokenData');
-});
-```
+### Why separate `parseClosureReceipt` from `parseCollectReceipt`?
 
-## Error Handling Patterns
+When closing a position (decreaseLiquidity + collect), the Collect event amounts include both principal and fees. The adapter must subtract the DecreaseLiquidity amounts to isolate fees. For standalone fee collection (collect only), the Collect amounts ARE the fees. These are fundamentally different parsing operations.
 
-### Graceful Degradation
-```javascript
-async getPositions(address, chainId) {
-  try {
-    const positions = await this.fetchPositions(address);
-    const poolData = await this.fetchPoolData(positions);
-    return { positions, poolData, hasPartialData: false };
-  } catch (error) {
-    console.error('Error fetching positions:', error);
-    return { positions: [], poolData: {}, hasPartialData: true };
-  }
-}
-```
+### Why `evaluatePositionRange` instead of `isPositionInRange`?
 
-### Error Context Preservation
-```javascript
-catch (error) {
-  throw new Error(`Failed to calculate fees for position ${position.id}: ${error.message}`);
-}
-```
+Simple in/out boolean is insufficient for strategy decisions. The strategy needs to know how centered the position is, how far it is from the bounds, and it needs to work both from fresh blockchain data and from swap event data (avoiding an extra RPC call). The `options.swapData` parameter enables the fast path.
 
-### Validation Patterns
-```javascript
-async batchSwapTransactions(swapInstructions, options) {
-  // Input validation
-  if (!Array.isArray(swapInstructions)) {
-    throw new Error("swapInstructions must be an array");
-  }
+### Why `getOptimalTokenRatio` takes value shares, not amount ratios?
 
-  if (!options.recipient) {
-    throw new Error("recipient is required");
-  }
-
-  // ... continue with implementation
-}
-```
-
-## Performance Optimization
-
-### Parallel Data Fetching
-```javascript
-async getPositions(address, chainId) {
-  // Fetch position IDs first
-  const positionIds = await this.getPositionIds(address);
-  
-  // Fetch all position details in parallel
-  const positionPromises = positionIds.map(id => 
-    this.getPositionDetails(id)
-  );
-  const positions = await Promise.all(positionPromises);
-  
-  // Process results...
-}
-```
-
-### Caching Strategies
-```javascript
-// Cache expensive calculations at adapter level
-const poolDataCache = new Map();
-
-async getPoolData(poolAddress) {
-  if (poolDataCache.has(poolAddress)) {
-    return poolDataCache.get(poolAddress);
-  }
-  
-  const poolData = await this.fetchPoolData(poolAddress);
-  poolDataCache.set(poolAddress, poolData);
-  return poolData;
-}
-```
-
-### Memory Management
-```javascript
-// Clean up large objects after processing
-async processPositions(positions) {
-  const results = [];
-  
-  for (const position of positions) {
-    const processed = await this.processPosition(position);
-    results.push(processed);
-    
-    // Clear intermediate data to free memory
-    delete position.rawData;
-  }
-  
-  return results;
-}
-```
-
-## Future Extensibility
-
-### Plugin Architecture
-Future consideration for dynamic adapter loading:
-```javascript
-// Potential future enhancement
-class AdapterRegistry {
-  static async loadAdapter(platformId) {
-    const module = await import(`./adapters/${platformId}Adapter.js`);
-    return module.default;
-  }
-}
-```
-
-### Cross-Protocol Operations
-Adapters designed to support future cross-protocol features:
-```javascript
-// Future: Cross-protocol arbitrage
-async generateArbitrageData(fromProtocol, toProtocol, token, amount) {
-  const fromAdapter = AdapterFactory.getAdapter(fromProtocol, provider);
-  const toAdapter = AdapterFactory.getAdapter(toProtocol, provider);
-  
-  // Coordinate between adapters for complex operations
-}
-```
+Different tokens have different USD prices. A position centered at the current tick might need 50/50 by value but drastically different amounts. Returning `token0Share` and `token1Share` as fractions of total value (summing to 1.0) lets the strategy calculate amounts using current token prices.

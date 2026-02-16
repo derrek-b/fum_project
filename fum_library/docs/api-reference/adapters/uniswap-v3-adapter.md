@@ -12,6 +12,8 @@ This adapter provides comprehensive integration with Uniswap V3 concentrated liq
 
 The adapter is designed for single-chain operation and caches configuration data during construction for optimal performance.
 
+> This doc covers V3-specific methods beyond the base class interface. For the full `PlatformAdapter` interface (27 required + 4 optional methods), see [PlatformAdapter API Reference](./platform-adapter.md).
+
 ## Constructor
 
 ```javascript
@@ -131,17 +133,10 @@ const poolData = await adapter.fetchPoolData(
 
 ### getPoolData
 
-Get pool data by address with optional tick data and token information.
+Get core pool state data by address. Implements the `PlatformAdapter` interface method.
 
 ```javascript
-const poolData = await adapter.getPoolData(
-  poolAddress,
-  {
-    includeTicks: [195000, 205000],  // Optional tick indices to fetch
-    includeTokens: true               // Optional: include token addresses
-  },
-  provider
-);
+const poolData = await adapter.getPoolData(poolAddress, provider);
 ```
 
 #### Parameters
@@ -149,10 +144,24 @@ const poolData = await adapter.getPoolData(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `poolAddress` | `string` | Pool contract address |
-| `options` | `Object` | Options object (required) |
-| `options.includeTicks` | `number[]` | Optional array of tick indices to fetch |
-| `options.includeTokens` | `boolean` | Whether to include token0/token1 addresses |
 | `provider` | `ethers.Provider` | Ethers provider instance |
+
+#### Returns
+
+`Promise<Object>`:
+- `address: string` — Checksummed pool address
+- `sqrtPriceX96: string` — Current sqrt price (Q64.96)
+- `tick: number` — Current tick
+- `liquidity: string` — Active in-range liquidity
+- `fee: number` — Fee tier (basis points)
+- `feeGrowthGlobal0X128: string` — Global fee growth for token0
+- `feeGrowthGlobal1X128: string` — Global fee growth for token1
+- `observationIndex: number` — Oracle observation index
+- `observationCardinality: number` — Oracle cardinality
+- `observationCardinalityNext: number` — Oracle cardinality target
+- `feeProtocol: number` — Protocol fee
+- `unlocked: boolean` — Reentrancy guard state
+- `lastUpdated: number` — Timestamp of fetch (ms)
 
 ---
 
@@ -246,7 +255,9 @@ const { positions, poolData } = await adapter.getPositionsForVDS(
 
 ### isPositionInRange
 
-Check if a position is currently in range (active).
+> **V3-specific utility.** For the platform-agnostic interface method with distance metrics, use `evaluatePositionRange()` from the base class.
+
+Simple boolean check for whether a position is currently in range.
 
 ```javascript
 const inRange = adapter.isPositionInRange(currentTick, tickLower, tickUpper);
@@ -696,6 +707,6 @@ try {
 
 ## See Also
 
-- [`AdapterFactory`](./adapter-factory.md) - Factory for creating adapters
-- [`PlatformAdapter`](./platform-adapter.md) - Abstract base class
-- [Uniswap V3 Documentation](https://docs.uniswap.org/contracts/v3/overview)
+- [PlatformAdapter](./platform-adapter.md) — Base class with all 27 required + 4 optional method signatures
+- [AdapterFactory](./adapter-factory.md) — Factory for creating adapters
+- [Adapters Architecture](../../architecture/adapters.md) — Design decisions, data shapes, automation flows

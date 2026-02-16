@@ -1,130 +1,147 @@
-# Adapter Factory API
+# AdapterFactory API Reference
 
 Factory class for creating platform-specific adapter instances.
 
+**Source:** `src/adapters/AdapterFactory.js`
+
 ## Overview
 
-The `AdapterFactory` class implements the factory pattern to create appropriate adapter instances based on platform type. It manages the instantiation of platform adapters and ensures proper configuration and validation.
+`AdapterFactory` manages a static registry of platform adapter classes and creates instances on demand. Adapters are keyed by platform ID and constructed with `(chainId, provider)`.
 
-## Class: AdapterFactory
+## Registered Adapters
 
-### createAdapter
+| Platform ID | Adapter Class | Description |
+|---|---|---|
+| `uniswapV3` | `UniswapV3Adapter` | Uniswap V3 concentrated liquidity |
+| `uniswapV4` | `UniswapV4Adapter` | Uniswap V4 (singleton PoolManager) |
+| `traderjoeV2_2` | `TraderJoeV2_2Adapter` | Trader Joe V2.2 Liquidity Book |
 
-Creates a platform adapter instance based on the specified type.
+## Static Methods
 
-#### Signature
+### getAdapter(platformId, chainId, provider)
+
+Create a specific platform adapter.
+
 ```javascript
-static createAdapter(platformType: string, chainId: number): PlatformAdapter
+const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
 ```
 
-#### Parameters
+| Param | Type | Description |
+|---|---|---|
+| `platformId` | `string` | Platform identifier (e.g., `'uniswapV3'`) |
+| `chainId` | `number` | Chain ID (e.g., 42161 for Arbitrum) |
+| `provider` | `ethers.Provider` | Ethers provider instance |
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| platformType | `string` | Yes | Platform identifier (e.g., 'UNISWAP_V3') |
-| chainId | `number` | Yes | Chain ID for the adapter |
+**Returns:** Platform adapter instance.
 
-#### Returns
+**Throws:**
+- `"Platform ID must be a valid string"` — if platformId missing/not string
+- `"chainId must be a valid number"` — if chainId missing/not number
+- `"No adapter available for platform: ..."` — if platformId not registered
+- `"Failed to create ... adapter for chain ..."` — if adapter constructor fails
 
-`PlatformAdapter` - Instance of the appropriate platform adapter
+---
 
-#### Throws
+### getAdaptersForChain(chainId, provider)
 
-| Error | Condition |
-|-------|-----------|
-| `Error` | Unknown platform type |
-| `Error` | Missing required configuration |
-
-#### Supported Platform Types
-
-| Platform Type | Adapter Class | Description |
-|--------------|---------------|-------------|
-| `UNISWAP_V3` | UniswapV3Adapter | Uniswap V3 DEX |
-
-#### Example
+Create all registered adapters for a specific chain. Unlike `getAdapter`, this does not throw on individual adapter failures — it collects them in a `failures` array.
 
 ```javascript
-import AdapterFactory from './adapters/AdapterFactory.js';
-import { ethers } from 'ethers';
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
 
-// Create adapter for Arbitrum
-const adapter = AdapterFactory.createAdapter('UNISWAP_V3', 42161);
-
-// Create provider when needed for blockchain calls
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-
-// Use adapter methods (provider passed to methods that need it)
-const poolInfo = await adapter.fetchPoolData(token0, token1, 3000, 42161, provider);
-```
-
-## Adding New Platform Support
-
-To add support for a new platform:
-
-1. Create a new adapter class extending `PlatformAdapter`
-2. Implement all abstract methods
-3. Add the platform type to the factory
-
-```javascript
-// In AdapterFactory.js
-import MyNewAdapter from './MyNewAdapter.js';
-
-static createAdapter(platformType, chainId) {
-  switch (platformType) {
-    case 'UNISWAP_V3':
-      return new UniswapV3Adapter(chainId);
-    case 'MY_NEW_PLATFORM':
-      return new MyNewAdapter(chainId);
-    default:
-      throw new Error(`Unknown platform type: ${platformType}`);
-  }
+console.log(`Created ${adapters.length} adapters`);
+if (failures.length > 0) {
+  console.warn('Failed adapters:', failures.map(f => f.platformId));
 }
 ```
 
-## Adapter Configuration
+| Param | Type | Description |
+|---|---|---|
+| `chainId` | `number` | Chain ID |
+| `provider` | `ethers.Provider` | Ethers provider instance |
 
-Adapters automatically load their configuration from the library's internal config system based on the chainId. The configuration includes:
+**Returns:** `{ adapters: Array, failures: Array<{ platformId, error, errorDetails }> }`
 
-- Platform contract addresses (factory, router, position manager, etc.)
-- Supported fee tiers
-- Token definitions for the chain
-- Chain-specific metadata
+Only creates adapters for platforms enabled on the chain (via `lookupChainPlatformIds(chainId)` from chainHelpers).
 
-This eliminates the need to manually pass configuration objects to adapters.
+**Throws:** `"chainId must be a valid number"` — if chainId missing/not number.
 
-## Error Handling
+---
+
+### getSupportedPlatforms()
+
+List all registered platform IDs.
 
 ```javascript
-try {
-  const adapter = AdapterFactory.createAdapter(platformType, chainId);
-} catch (error) {
-  if (error.message.includes('Unknown platform type')) {
-    console.error('Platform not supported:', platformType);
-  } else if (error.message.includes('not available on chain')) {
-    console.error('Platform not supported on chain:', chainId);
-  } else {
-    console.error('Failed to create adapter:', error);
-  }
+AdapterFactory.getSupportedPlatforms();
+// ['uniswapV3', 'uniswapV4', 'traderjoeV2_2']
+```
+
+**Returns:** `string[]`
+
+---
+
+### hasAdapter(platformId)
+
+Check if a platform ID is registered.
+
+```javascript
+AdapterFactory.hasAdapter('uniswapV3');  // true
+AdapterFactory.hasAdapter('sushiswap');  // false
+```
+
+**Returns:** `boolean`
+
+---
+
+### registerAdapterForTestingOnly(platformId, AdapterClass)
+
+Register a new adapter class. Intended for testing and plugin scenarios only — registrations are not persistent across restarts.
+
+```javascript
+AdapterFactory.registerAdapterForTestingOnly('mockPlatform', MockAdapter);
+```
+
+**Throws:** `"Platform ID and Adapter class are required for registration"`
+
+---
+
+## Convenience Wrappers (adapters/index.js)
+
+> **Warning:** The convenience functions exported from `adapters/index.js` have stale signatures that pass an extra `config` parameter not accepted by the factory methods. Use `AdapterFactory` directly.
+
+```javascript
+// These have incorrect signatures — do NOT use:
+// getAdaptersForChain(config, chainId, provider)  ← wrong
+// getAdapter(config, platformId, provider)         ← wrong
+// registerAdapter(platformId, AdapterClass)        ← calls non-existent method
+
+// Use AdapterFactory directly instead:
+import { AdapterFactory } from 'fum_library/adapters';
+```
+
+## Usage Examples
+
+### In automation service startup
+
+```javascript
+import { AdapterFactory } from 'fum_library/adapters';
+
+const { adapters, failures } = AdapterFactory.getAdaptersForChain(42161, provider);
+
+for (const adapter of adapters) {
+  console.log(`Loaded ${adapter.platformName} (${adapter.platformId})`);
 }
 ```
 
-## Best Practices
+### Getting a specific adapter for a known platform
 
-1. **Validation**: Always validate platform type and chainId before creation
-2. **Chain Support**: Verify the platform is available on the target chain
-3. **Provider Management**: Create providers as needed for blockchain calls
-4. **Error Handling**: Implement proper error handling for factory failures
-5. **Adapter Reuse**: Cache adapter instances when possible since they're stateless
-
-## Future Enhancements
-
-- Dynamic adapter loading
-- Platform capability detection
-- Adapter versioning support
-- Configuration validation helpers
+```javascript
+const adapter = AdapterFactory.getAdapter(position.platform, chainId, provider);
+const poolData = await adapter.getPoolData(position.pool, provider);
+```
 
 ## See Also
 
-- [`PlatformAdapter`](./platform-adapter.md) - Base adapter class
-- [`UniswapV3Adapter`](./uniswap-v3-adapter.md) - Uniswap V3 implementation
-- [Platform Configuration](../configs/platforms.md) - Platform configuration structure
+- [PlatformAdapter](./platform-adapter.md) — Base class interface
+- [Adapters Architecture](../../architecture/adapters.md) — Design decisions and usage flows
