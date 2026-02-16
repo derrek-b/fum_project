@@ -1,3 +1,4 @@
+<!-- Source: package.json, src/pages/*, src/redux/*, src/hooks/*, src/components/*, contracts/*.sol, contracts/validators/*, contracts/interfaces/*, scripts/*.js, test/scripts/*.js, docs/architecture/*.md -->
 # CLAUDE.md — fum (Frontend + Smart Contracts)
 
 ## What This Project Is
@@ -66,18 +67,18 @@ test/scripts/                 # Local dev helpers (start-hardhat, seed, generate
 - **Wallet**: Web3Modal for connection, custom hooks for read/write providers
 - **Contracts**: Solidity ^0.8.0, OpenZeppelin v5
 
+## Architecture
+
+Detailed docs in `docs/architecture/`:
+- **contract-system.md** — Contract relationships, execution flow, factory registry, strategy system
+- **validator-pattern.md** — Calldata validation deep-dive, security invariants, adding new validators
+- **frontend.md** — Redux state shapes, data flow, SSE integration, component organization
+- **scripts-pipeline.md** — Contract sync, ABI/bytecode extraction, deployment, cross-project effects
+
 ## Smart Contract Workflow
 
-1. Edit contracts in `contracts/`
-2. Run `npm run contracts:sync` to distribute to ecosystem
-3. Run `npm run contracts:test` to compile + test via fum_testing
-4. After tests pass, `scripts/extract-abis.js` and `scripts/extract-bytecode.js` update fum_library
-5. Deploy with `scripts/deploy.js` which writes addresses to `deployments/` and fum_library
+Edit contracts in `contracts/`, run `npm run contracts:sync` to distribute, `npm run contracts:test` to test. See [scripts-pipeline.md](docs/architecture/scripts-pipeline.md) for the full 6-step pipeline and cross-project effects.
 
 ## Validator Pattern
 
-Each position/swap operation has a dedicated validator contract that checks parameters before execution. Validators are registered in the vault and called automatically — never bypass them.
-
-- **UniversalRouterValidator** — Validates swap calldata (token addresses, recipients, deadlines)
-- **UniswapV3PositionValidator** / **UniswapV4PositionValidator** — Validates mint/liquidity params
-- **TJPositionValidator** / **TJSwapValidator** — Validates Trader Joe operations
+Every swap/liquidity operation passes through a validator that parses calldata and enforces recipient restrictions. Validators are registered in VaultFactory and called automatically. See [validator-pattern.md](docs/architecture/validator-pattern.md) for calldata offset calculations, selector hex values, and security invariants.

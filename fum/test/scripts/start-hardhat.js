@@ -8,7 +8,6 @@ import fs from 'fs';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import contractData from 'fum_library/artifacts/contracts';
-import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,20 +85,11 @@ async function deployContracts(port) {
   const deploymentResults = {};
 
   try {
-    const arbitrumConfig = getChainConfig(42161);
-    const universalRouterAddress = arbitrumConfig.platformAddresses?.uniswapV3?.universalRouterAddress;
-    const positionManagerAddress = arbitrumConfig.platformAddresses?.uniswapV3?.positionManagerAddress;
     const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
-
-    if (!universalRouterAddress || !positionManagerAddress) {
-      throw new Error('Missing Uniswap V3 addresses in Arbitrum config');
-    }
 
     // Deploy VaultFactory
     console.log("\nDeploying VaultFactory...");
-    console.log(`Using Universal Router: ${universalRouterAddress}`);
     console.log(`Using Permit2: ${permit2Address}`);
-    console.log(`Using Position Manager: ${positionManagerAddress}`);
 
     const VaultFactoryBytecodePath = path.join(__dirname, `../../bytecode/VaultFactory.bin`);
     const VaultFactoryBytecode = "0x" + fs.readFileSync(VaultFactoryBytecodePath, "utf8").trim();
@@ -111,9 +101,7 @@ async function deployContracts(port) {
 
     const vaultFactory = await VaultFactory.deploy(
       wallet.address,
-      universalRouterAddress,
       permit2Address,
-      positionManagerAddress,
       { gasLimit: 5000000 }
     );
     console.log(`Transaction hash: ${vaultFactory.deployTransaction.hash}`);

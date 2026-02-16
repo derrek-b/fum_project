@@ -255,28 +255,14 @@ async function deploy() {
     // Check if the contract has constructor parameters
     let contract;
     if (contractName === "VaultFactory") {
-      // Get protocol addresses for this chain
-      const universalRouterAddress = networkConfig.platformAddresses?.uniswapV3?.universalRouterAddress;
-      const positionManagerAddress = networkConfig.platformAddresses?.uniswapV3?.positionManagerAddress;
       // Permit2 canonical address - same on all chains
       const permit2Address = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
 
-      if (!universalRouterAddress) {
-        throw new Error(`Universal Router address not configured for chain ${chainId}`);
-      }
-      if (!positionManagerAddress) {
-        throw new Error(`Position Manager address not configured for chain ${chainId}`);
-      }
-
-      // Deploy with owner and protocol addresses
-      console.log(`Using Universal Router: ${universalRouterAddress}`);
+      // Deploy with owner and Permit2 address
       console.log(`Using Permit2: ${permit2Address}`);
-      console.log(`Using Position Manager: ${positionManagerAddress}`);
       contract = await factory.deploy(
         wallet.address,
-        universalRouterAddress,
-        permit2Address,
-        positionManagerAddress
+        permit2Address
       );
     } else {
       // No constructor parameters for other contracts
