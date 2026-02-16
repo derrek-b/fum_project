@@ -1,3 +1,4 @@
+<!-- Source: src/core/SSEBroadcaster.js -->
 # SSEBroadcaster API
 
 **Source:** `src/core/SSEBroadcaster.js`

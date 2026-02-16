@@ -1,3 +1,4 @@
+<!-- Source: src/core/VaultDataService.js -->
 # VaultDataService API
 
 **Source:** `src/core/VaultDataService.js`

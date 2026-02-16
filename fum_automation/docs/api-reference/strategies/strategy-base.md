@@ -1,3 +1,4 @@
+<!-- Source: src/strategies/base/StrategyBase.js -->
 # StrategyBase API
 
 **Source:** `src/strategies/base/StrategyBase.js` (431 lines)

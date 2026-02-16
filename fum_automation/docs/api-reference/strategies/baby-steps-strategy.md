@@ -1,3 +1,4 @@
+<!-- Source: src/strategies/babySteps/BabyStepsStrategy.js -->
 # BabyStepsStrategy API
 
 **Source:** `src/strategies/babySteps/BabyStepsStrategy.js`

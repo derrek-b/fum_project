@@ -1,3 +1,4 @@
+<!-- Source: src/core/AutomationService.js -->
 # AutomationService API
 
 **Source:** `src/core/AutomationService.js`

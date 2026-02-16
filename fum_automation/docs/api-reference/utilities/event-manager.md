@@ -1,3 +1,4 @@
+<!-- Source: src/core/EventManager.js -->
 # EventManager API
 
 **Source:** `src/core/EventManager.js`

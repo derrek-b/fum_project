@@ -1,3 +1,4 @@
+<!-- Source: src/core/Tracker.js -->
 # Tracker API
 
 **Source:** `src/core/Tracker.js`
