@@ -1,3 +1,4 @@
+<!-- Source: package.json, hardhat.config.js, contracts/Mock*.sol, test/unit/*.test.js, docs/architecture/*.md -->
 # CLAUDE.md — fum_testing (Contract Test Environment)
 
 ## What This Project Is
@@ -41,12 +42,12 @@ test/unit/
 
 ## Mock Contracts
 
-Tests use mock contracts in `contracts/mocks/` to simulate external protocols:
-- **MockERC20** / **MockWETH** — Token contracts with mint capabilities
-- **MockPositionNFT** / **MockNonfungiblePositionManager** — Uniswap V3 position NFTs
-- **MockUniversalRouter** — Uniswap swap router
-- **MockLBPair** / **MockLBRouter** — Trader Joe V2.2 liquidity book
-- **MockPermit2** — Permit2 gasless approvals
+Tests use 8 mock contracts in `contracts/` (prefixed `Mock*`) to simulate external protocols: ERC20 tokens, WETH, Uniswap V3 position NFTs, Universal Router, Trader Joe LB pair/router, and Permit2. Most mocks expose `setShouldFail()` for error path testing and `last*` variables for call verification.
+
+## Architecture
+
+Detailed docs in `docs/architecture/`:
+- **testing-patterns.md** — Mock contract APIs, deployment sequences, calldata encoding helpers, testing gotchas
 
 ## Key Details
 
