@@ -69,18 +69,19 @@ cd fum_testing && npx hardhat node       # Start local node
 ## Architecture Overview
 
 ### Smart Contracts (fum/contracts/)
-- **PositionVault** — User-controlled vault for ERC20s, native ETH, and LP positions. Supports swaps via UniversalRouter, minting, liquidity operations, ETH wrapping.
-- **VaultFactory** — Deploys and tracks PositionVault instances.
+- **PositionVault** — User-controlled vault for ERC20s, native ETH, and LP positions. Supports swaps via UniversalRouter, minting, liquidity operations, incentive claims, ETH wrapping.
+- **VaultFactory** — Deploys and tracks PositionVault instances. Manages three validator registries (swap, liquidity, incentive).
 - **BabyStepsStrategy** — Conservative range-based automation strategy with configurable parameters.
 - **ParrisIslandStrategy** — Advanced adaptive strategy with dynamic range adjustments (in development).
 - **TJPositionManager** — Manages Trader Joe V2.2 liquidity bin positions (ERC1155-based).
+- **MerklIncentiveValidator** — Validates Merkl Distributor `claim()` calls (selector + user == vault).
 - **StrategyBase** — Abstract base contract for strategy implementations.
 
 ### fum_library Modules
 - `fum_library/adapters` — Platform adapters (UniswapV3Adapter, UniswapV4Adapter, TraderJoeV2_2Adapter). Each adapter implements the PlatformAdapter interface for position management, swaps, fee calculation, pool data.
 - `fum_library/helpers` — Utilities: formatHelpers, chainHelpers, tokenHelpers, platformHelpers, strategyHelpers, Permit2Helper
 - `fum_library/blockchain` — Web3 provider creation, wallet connection, contract instantiation
-- `fum_library/services` — External APIs (CoinGecko price feeds with caching)
+- `fum_library/services` — External APIs (CoinGecko price feeds, Merkl incentive campaigns, The Graph, block explorers)
 - `fum_library/configs` — Chain configs, token lists, platform metadata
 - `fum_library/artifacts` — Contract ABIs and deployment addresses
 
@@ -143,3 +144,12 @@ Per-project docs:
 - **Always run `npm run pack`** in fum_library after making changes there — fum and fum_automation won't see changes until the tarball is rebuilt and installed.
 - **Mark debugging logs** with a special emoji so they are easy to find and remove later.
 - Automation service cache structures are documented in `fum_automation/docs/architecture/cache-structures.md` — reference this before modifying cached data.
+
+### Fail Loud, Don't Mask Errors
+
+Do not use fallback values or defensive coding that allows execution to continue with incorrect data. Silent failures lead to decisions based on bad information — in a live automation system, this can mean missed claims, wrong rebalances, or lost funds.
+
+- **No silent fallbacks**: Don't use `value || default` or `value ?? default` to paper over data that should exist. If `campaign.rewardToken` is an object, access it directly — don't write `campaign.rewardToken?.address || ''`.
+- **No optional chaining on expected paths**: Use `?.` only when a property is genuinely optional by design, not as a safety net against bugs.
+- **Validate at boundaries, trust internally**: Validate shape/presence of external data (API responses, user input) where it enters the system. Once validated, access fields directly.
+- **Let errors propagate to callers**: Functions should throw on failure so the call chain above can retry or handle explicitly. Don't catch-and-return-defaults — that hides failures from every caller up the stack. Error handling belongs at the level that has enough context to make an informed decision (e.g., the strategy deciding whether to skip a vault vs. abort a cycle), not buried inside the function that failed.
