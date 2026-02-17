@@ -24,6 +24,7 @@
 import { ethers } from "ethers";
 import PlatformAdapter from "./PlatformAdapter.js";
 import { getBlockExplorerService } from "../services/blockExplorer.js";
+import { fetchPoolIncentives, fetchClaimData } from "../services/merkl.js";
 import { getPlatformTickBounds } from "../helpers/platformHelpers.js";
 import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
 import { getTokenByAddress, getTokenBySymbol, getWrappedNativeAddress, getWrappedNativeSymbol, isNativeToken, isWrappedNativeToken } from "../helpers/tokenHelpers.js";
@@ -4466,6 +4467,65 @@ export default class UniswapV4Adapter extends PlatformAdapter {
                   * BigInt(liquidity.toString()) / Q128;
 
     return { fees0, fees1, liquidity: BigInt(liquidity.toString()) };
+  }
+
+  // ===========================================================================
+  // Incentive Rewards — Merkl Integration (auto-tracking, no staking needed)
+  // ===========================================================================
+
+  /**
+   * Check if a V4 pool has active Merkl incentive campaigns
+   *
+   * V4 pools are identified by poolId (bytes32), which Merkl tracks directly.
+   * No token address resolution needed — poolAddress IS the poolId.
+   *
+   * @param {string} poolAddress - V4 poolId (bytes32)
+   * @param {Object} poolData - Pool metadata (unused for V4, kept for interface consistency)
+   * @param {Object} provider - Ethers provider instance (unused, Merkl is off-chain)
+   * @returns {Promise<Object>} { active: boolean, programs: Array }
+   */
+  async getPoolIncentives(poolAddress, poolData, provider) {
+    return fetchPoolIncentives(this.chainId, poolAddress);
+  }
+
+  /**
+   * Build claim transaction for unclaimed Merkl rewards
+   *
+   * Claims ALL unclaimed Merkl rewards for the vault across all pools/tokens.
+   * This is safe because Merkl uses a cumulative claim model — each claim
+   * includes the total earned amount with an updated Merkle proof.
+   *
+   * @param {string} vaultAddress - Vault address to claim rewards for
+   * @param {string} poolAddress - Pool identifier (unused — Merkl claims are vault-wide)
+   * @param {Object} poolData - Pool metadata (unused for V4)
+   * @param {Object} provider - Ethers provider instance (unused, Merkl is off-chain)
+   * @returns {Promise<Array<Object>>} Array of transaction data objects [{ to, data, value }]
+   */
+  async getIncentiveClaimTransactions(vaultAddress, poolAddress, poolData, provider) {
+    const claimData = await fetchClaimData(this.chainId, vaultAddress);
+
+    if (!claimData || !claimData.tokens || claimData.tokens.length === 0) {
+      return [];
+    }
+
+    const distributorAddress = getChainConfig(this.chainId).merklDistributorAddress;
+    if (!distributorAddress) {
+      console.error(`No Merkl Distributor address configured for chain ${this.chainId}`);
+      return [];
+    }
+
+    const iface = new ethers.utils.Interface([
+      'function claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)'
+    ]);
+
+    const data = iface.encodeFunctionData('claim', [
+      claimData.user,
+      claimData.tokens,
+      claimData.amounts,
+      claimData.proofs,
+    ]);
+
+    return [{ to: distributorAddress, data, value: '0x0' }];
   }
 
 }

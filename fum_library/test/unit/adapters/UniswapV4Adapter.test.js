@@ -12,6 +12,7 @@ import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import chains from '../../../src/configs/chains.js';
 import { configureBlockExplorer, resetBlockExplorerConfig } from '../../../src/services/blockExplorer.js';
 import { getTokenAddress, getWrappedNativeAddress } from '../../../src/helpers/tokenHelpers.js';
+import { clearIncentiveCache } from '../../../src/services/merkl.js';
 
 /**
  * Encode a direct single-pool V4 swap via the UniversalRouter.
@@ -7739,6 +7740,258 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       const unknownAddress = '0x1111111111111111111111111111111111111111';
       const result = adapter._resolveTokenSymbol(unknownAddress);
       expect(result).toBe('UNKNOWN');
+    });
+  });
+
+  // ===========================================================================
+  // Incentive Methods — Merkl Integration
+  // ===========================================================================
+
+  describe('Incentive Methods — Merkl Integration', () => {
+    // Known incentivized V4 pool on Arbitrum: USDT/USDC 0.0008%
+    const KNOWN_INCENTIVIZED_POOL = '0xab05003a63d2f34ac7eec4670bca3319f0e3d2f62af5c2b9cbd69d03fd804fd2';
+    const BOGUS_POOL_ID = '0x0000000000000000000000000000000000000000000000000000000000000001';
+
+    beforeEach(() => {
+      clearIncentiveCache();
+    });
+
+    describe('getPoolIncentives', () => {
+      // Real API tests — adapter.chainId is 1337 (Hardhat), which won't have Merkl campaigns.
+      // For real API validation, we create a temporary Arbitrum adapter.
+
+      it('should return active incentives when Merkl has campaigns', async () => {
+        const arbAdapter = new UniswapV4Adapter(42161);
+        const result = await arbAdapter.getPoolIncentives(KNOWN_INCENTIVIZED_POOL, {}, null);
+
+        expect(result).toHaveProperty('active');
+        expect(result).toHaveProperty('programs');
+        expect(typeof result.active).toBe('boolean');
+        expect(Array.isArray(result.programs)).toBe(true);
+
+        if (result.active) {
+          const program = result.programs[0];
+          expect(program.rewardToken).toMatch(/^0x[a-fA-F0-9]{40}$/);
+          expect(typeof program.rewardTokenSymbol).toBe('string');
+          expect(typeof program.endTimestamp).toBe('number');
+        }
+      }, 15000);
+
+      it('should return inactive when no campaigns exist', async () => {
+        const arbAdapter = new UniswapV4Adapter(42161);
+        const result = await arbAdapter.getPoolIncentives(BOGUS_POOL_ID, {}, null);
+
+        expect(result.active).toBe(false);
+        expect(result.programs).toEqual([]);
+      }, 15000);
+
+      it('should pass adapter chainId to Merkl API', async () => {
+        let originalFetch = global.fetch;
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => [],
+        });
+
+        try {
+          // adapter.chainId is 1337 (Hardhat)
+          await adapter.getPoolIncentives(BOGUS_POOL_ID, {}, null);
+
+          const [url] = global.fetch.mock.calls[0];
+          expect(url).toContain('chainId=1337');
+        } finally {
+          global.fetch = originalFetch;
+        }
+      });
+    });
+
+    describe('getIncentiveClaimTransactions', () => {
+      let originalFetch;
+
+      beforeEach(() => {
+        originalFetch = global.fetch;
+      });
+
+      afterEach(() => {
+        global.fetch = originalFetch;
+      });
+
+      it('should return empty array when no claim data available', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [],
+          }]),
+        });
+
+        const result = await adapter.getIncentiveClaimTransactions('0xvault', KNOWN_INCENTIVIZED_POOL, {}, null);
+        expect(result).toEqual([]);
+      });
+
+      it('should build claim tx with correct distributor address from chain config', async () => {
+        const vaultAddress = '0x1234567890123456789012345678901234567890';
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount: '500000000000000',
+              pending: '400000000000000',
+              proofs: ['0x' + 'aa'.repeat(32)],
+              token: { address: '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8', symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        const txs = await adapter.getIncentiveClaimTransactions(vaultAddress, KNOWN_INCENTIVIZED_POOL, {}, null);
+
+        expect(txs.length).toBe(1);
+        expect(txs[0].to).toBe(chains[1337].merklDistributorAddress);
+      });
+
+      it('should encode calldata with claim selector 0xa0165082', async () => {
+        const vaultAddress = '0x1234567890123456789012345678901234567890';
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount: '500000000000000',
+              pending: '400000000000000',
+              proofs: ['0x' + 'aa'.repeat(32)],
+              token: { address: '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8', symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        const txs = await adapter.getIncentiveClaimTransactions(vaultAddress, KNOWN_INCENTIVIZED_POOL, {}, null);
+
+        expect(txs[0].data.startsWith('0xa0165082')).toBe(true);
+      });
+
+      it('should decode to correct user, tokens, amounts, proofs', async () => {
+        const vaultAddress = '0x1234567890123456789012345678901234567890';
+        const tokenAddress = '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8';
+        const amount = '500000000000000';
+        const proof = '0x' + 'aa'.repeat(32);
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount,
+              pending: '400000000000000',
+              proofs: [proof],
+              token: { address: tokenAddress, symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        const txs = await adapter.getIncentiveClaimTransactions(vaultAddress, KNOWN_INCENTIVIZED_POOL, {}, null);
+
+        // Decode the calldata to verify roundtrip
+        const iface = new ethers.utils.Interface([
+          'function claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)'
+        ]);
+        const decoded = iface.decodeFunctionData('claim', txs[0].data);
+
+        expect(decoded.user.toLowerCase()).toBe(vaultAddress.toLowerCase());
+        expect(decoded.tokens.length).toBe(1);
+        expect(decoded.tokens[0].toLowerCase()).toBe(tokenAddress.toLowerCase());
+        expect(decoded.amounts[0].toString()).toBe(amount);
+        expect(decoded.proofs[0].length).toBe(1);
+        expect(decoded.proofs[0][0]).toBe(proof);
+      });
+
+      it('should set value to 0x0', async () => {
+        const vaultAddress = '0x1234567890123456789012345678901234567890';
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount: '500000000000000',
+              pending: '400000000000000',
+              proofs: ['0x' + 'aa'.repeat(32)],
+              token: { address: '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8', symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        const txs = await adapter.getIncentiveClaimTransactions(vaultAddress, KNOWN_INCENTIVIZED_POOL, {}, null);
+
+        expect(txs[0].value).toBe('0x0');
+      });
+
+      it('should return empty array when no distributor configured', async () => {
+        const vaultAddress = '0x1234567890123456789012345678901234567890';
+        const savedAddress = chains[1337].merklDistributorAddress;
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount: '500000000000000',
+              pending: '400000000000000',
+              proofs: ['0x' + 'aa'.repeat(32)],
+              token: { address: '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8', symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        // Temporarily remove distributor address
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        delete chains[1337].merklDistributorAddress;
+
+        try {
+          const txs = await adapter.getIncentiveClaimTransactions(vaultAddress, KNOWN_INCENTIVIZED_POOL, {}, null);
+          expect(txs).toEqual([]);
+          expect(consoleSpy).toHaveBeenCalledWith(
+            expect.stringContaining('No Merkl Distributor address configured')
+          );
+        } finally {
+          chains[1337].merklDistributorAddress = savedAddress;
+          consoleSpy.mockRestore();
+        }
+      });
+
+      it('should return empty array when claim data has empty tokens', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ([{
+            chain: { id: 1337 },
+            rewards: [{
+              amount: '0',
+              pending: '0',
+              proofs: [],
+              token: { address: '0xe50fA9b3c56FfB159cB0FCA61F5c9D750e8128c8', symbol: 'TK1', decimals: 18 },
+            }],
+          }]),
+        });
+
+        const result = await adapter.getIncentiveClaimTransactions('0xvault', KNOWN_INCENTIVIZED_POOL, {}, null);
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('getIncentivePreCloseTransactions (inherited default)', () => {
+      it('should return empty array', async () => {
+        const result = await adapter.getIncentivePreCloseTransactions({}, {}, null);
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('getIncentivePostCreateTransactions (inherited default)', () => {
+      it('should return empty array', async () => {
+        const result = await adapter.getIncentivePostCreateTransactions('posId', {}, null);
+        expect(result).toEqual([]);
+      });
     });
   });
 });

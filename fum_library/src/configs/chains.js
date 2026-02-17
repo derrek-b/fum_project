@@ -36,6 +36,7 @@ const chains = {
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
       },
     },
+    merklDistributorAddress: "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
   },
 
   // Local Hardhat Fork
@@ -69,6 +70,7 @@ const chains = {
         universalRouterAddress: "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
       }
     },
+    merklDistributorAddress: "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
   },
 
   // Avalanche C-Chain

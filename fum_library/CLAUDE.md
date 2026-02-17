@@ -29,7 +29,7 @@ src/
 ├── blockchain/     # Web3 provider creation, wallet connection, contract instantiation
 ├── configs/        # Chain configs (chains.js), token lists, platform metadata
 ├── helpers/        # Utilities: format, chain, token, platform, strategy, Permit2
-├── services/       # External APIs: CoinGecko price feeds with caching
+├── services/       # External APIs: CoinGecko prices, Merkl incentives, The Graph, block explorers
 └── index.js        # Main exports (re-exports from all modules)
 ```
 

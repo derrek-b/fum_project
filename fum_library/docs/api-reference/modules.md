@@ -1,9 +1,8 @@
-<!-- Source: src/index.js, src/adapters/*, src/blockchain/*, src/helpers/*, src/services/*, src/configs/*, src/artifacts/* -->
 # FUM Library Module Reference
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-02-15T15:52:06.344Z
+Generated on: 2026-02-16T22:21:18.615Z
 
 ## Table of Contents
 
@@ -130,6 +129,7 @@ Uniswap V4 Platform Adapter
 - from `../helpers/platformHelpers.js`
 - from `../helpers/tokenHelpers.js`
 - from `../services/blockExplorer.js`
+- from `../services/merkl.js`
 - from `../services/theGraph.js`
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
@@ -516,6 +516,22 @@ FUM Library - Main Entry Point
 - re-exports from `./coingecko.js`
 - re-exports from `./theGraph.js`
 - re-exports from `./blockExplorer.js`
+- re-exports from `./merkl.js`
+
+---
+
+### merkl.js
+
+@module services/merkl
+
+**Path:** `src/services/merkl.js`
+
+**Imports:**
+- from `fum_library/services/merkl`
+
+**Exports:**
+- `configureMerkl` (function)
+- `clearIncentiveCache` (function)
 
 ---
 

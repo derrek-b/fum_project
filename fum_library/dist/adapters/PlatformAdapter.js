@@ -654,6 +654,7 @@ export default class PlatformAdapter {
    * the pool object with incentive data for downstream use.
    *
    * @param {string} poolAddress - Pool contract address or identifier
+   * @param {Object} poolData - Pool metadata object (token addresses, poolKey, etc.)
    * @param {Object} provider - Ethers provider instance
    * @returns {Promise<Object>} Incentive status
    * @returns {boolean} result.active - Whether any incentive programs are currently active
@@ -662,7 +663,7 @@ export default class PlatformAdapter {
    * @returns {string} result.programs[].rewardTokenSymbol - Reward token symbol (if available)
    * @returns {number} result.programs[].endTime - Program end timestamp (0 if ongoing/unknown)
    */
-  async getPoolIncentives(poolAddress, provider) {
+  async getPoolIncentives(poolAddress, poolData, provider) {
     return { active: false, programs: [] };
   }
 
@@ -723,10 +724,11 @@ export default class PlatformAdapter {
    *
    * @param {string} vaultAddress - Vault address that holds/staked the position
    * @param {string} poolAddress - Pool address or identifier
+   * @param {Object} poolData - Pool metadata object (token addresses, poolKey, etc.)
    * @param {Object} provider - Ethers provider instance
    * @returns {Promise<Array<Object>>} Array of transaction data objects { to, data, value }
    */
-  async getIncentiveClaimTransactions(vaultAddress, poolAddress, provider) {
+  async getIncentiveClaimTransactions(vaultAddress, poolAddress, poolData, provider) {
     return [];
   }
 }

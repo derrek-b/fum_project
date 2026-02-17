@@ -8,3 +8,6 @@ export * from './theGraph.js';
 
 // Re-export everything from blockExplorer service
 export * from './blockExplorer.js';
+
+// Re-export everything from merkl service
+export * from './merkl.js';

@@ -710,7 +710,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
+      "1337": "0x6C942D6B9f70F37368505d1D2c5687A1A2992A32",
       "1338": "0x636279C6135f2F50eFDFF6650A38Defb3437AC42",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
@@ -1123,6 +1123,35 @@
             "type": "uint256[]"
           }
         ],
+        "name": "incentive",
+        "outputs": [
+          {
+            "internalType": "bool[]",
+            "name": "results",
+            "type": "bool[]"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address[]",
+            "name": "targets",
+            "type": "address[]"
+          },
+          {
+            "internalType": "bytes[]",
+            "name": "data",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "values",
+            "type": "uint256[]"
+          }
+        ],
         "name": "increaseLiquidity",
         "outputs": [
           {
@@ -1511,6 +1540,25 @@
           {
             "indexed": true,
             "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "validator",
+            "type": "address"
+          }
+        ],
+        "name": "IncentiveValidatorUpdated",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "address",
             "name": "positionManager",
             "type": "address"
           },
@@ -1752,6 +1800,25 @@
         "inputs": [
           {
             "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "name": "incentiveValidators",
+        "outputs": [
+          {
+            "internalType": "contract IIncentiveValidator",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
             "name": "vault",
             "type": "address"
           }
@@ -1820,6 +1887,24 @@
       {
         "inputs": [],
         "name": "renounceOwnership",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "internalType": "contract IIncentiveValidator",
+            "name": "validator",
+            "type": "address"
+          }
+        ],
+        "name": "setIncentiveValidator",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
@@ -1999,6 +2084,29 @@
           }
         ],
         "name": "validateDecreaseLiquidity",
+        "outputs": [],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "validateIncentive",
         "outputs": [],
         "stateMutability": "view",
         "type": "function"
@@ -3171,6 +3279,31 @@
     ],
     "addresses": {
       "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
+    }
+  },
+  "MerklIncentiveValidator": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "validateIncentive",
+        "outputs": [],
+        "stateMutability": "pure",
+        "type": "function"
+      }
+    ],
+    "addresses": {
+      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C"
     }
   }
 };
