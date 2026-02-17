@@ -81,16 +81,6 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     const targetPool = bestPool;
 
-    // Check for active incentive programs on the target pool
-    targetPool.incentives = await retryRpcCall(
-      () => adapter.getPoolIncentives(targetPool.address, this.provider),
-      'getPoolIncentives',
-      { log: (msg) => this.log(msg) }
-    );
-    if (targetPool.incentives.active) {
-      this.log(`Pool has active incentive programs: ${targetPool.incentives.programs.length} program(s)`);
-    }
-
     this.log(`🎯 Target pool selected: ${adapter.describePool(targetPool)}`);
 
     // Step 1.5: Check emergency exit baseline if exists (retry/recovery scenario)
@@ -140,61 +130,8 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 3: Close non-aligned positions
     if (Object.keys(evaluation.nonAlignedPositions).length > 0) {
-      // Check incentives for each unique pool among non-aligned positions
-      const poolIncentivesCache = {};
-      for (const position of Object.values(evaluation.nonAlignedPositions)) {
-        if (!poolIncentivesCache[position.pool]) {
-          const posPoolMetadata = this.poolData[position.pool];
-          if (posPoolMetadata) {
-            const posAdapter = this.adapters.get(posPoolMetadata.platform);
-            if (posAdapter) {
-              poolIncentivesCache[position.pool] = await retryRpcCall(
-                () => posAdapter.getPoolIncentives(position.pool, this.provider),
-                'getPoolIncentives (non-aligned)',
-                { log: (msg) => this.log(msg) }
-              );
-            }
-          }
-        }
-      }
-
-      // Execute pre-close for positions with active incentives
-      for (const [posId, position] of Object.entries(evaluation.nonAlignedPositions)) {
-        const incentives = poolIncentivesCache[position.pool];
-        if (incentives?.active) {
-          const posPoolMetadata = this.poolData[position.pool];
-          const posAdapter = this.adapters.get(posPoolMetadata.platform);
-          const preCloseTxs = await retryRpcCall(
-            () => posAdapter.getIncentivePreCloseTransactions(position, incentives, this.provider),
-            'getIncentivePreCloseTransactions',
-            { log: (msg) => this.log(msg) }
-          );
-          if (preCloseTxs.length > 0) {
-            this.log(`Executing ${preCloseTxs.length} incentive pre-close tx(s) for position ${posId}`);
-            // TODO: await this.executeBatchTransactions(vault, preCloseTxs, 'incentive pre-close', 'incentive');
-          }
-        }
-      }
-
       this.log(`Closing ${Object.keys(evaluation.nonAlignedPositions).length} non-aligned position(s)`);
       const { receipt, feesByPosition } = await this.closePositions(vault, evaluation.nonAlignedPositions);
-
-      // Claim incentive rewards after closing positions
-      for (const [poolAddress, incentives] of Object.entries(poolIncentivesCache)) {
-        if (incentives?.active) {
-          const posPoolMetadata = this.poolData[poolAddress];
-          const posAdapter = this.adapters.get(posPoolMetadata.platform);
-          const claimTxs = await retryRpcCall(
-            () => posAdapter.getIncentiveClaimTransactions(vault.address, poolAddress, this.provider),
-            'getIncentiveClaimTransactions',
-            { log: (msg) => this.log(msg) }
-          );
-          if (claimTxs.length > 0) {
-            this.log(`Executing ${claimTxs.length} incentive claim tx(s) for pool ${poolAddress}`);
-            // TODO: await this.executeBatchTransactions(vault, claimTxs, 'incentive claim', 'incentive');
-          }
-        }
-      }
 
       // Aggregate fees, emit FeesCollected, and distribute to owner
       if (Object.keys(feesByPosition).length > 0) {
@@ -796,54 +733,11 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       const targetPool = bestPool;
 
-      // Check for active incentive programs on the target pool
-      targetPool.incentives = await retryRpcCall(
-        () => adapter.getPoolIncentives(targetPool.address, this.provider),
-        'getPoolIncentives',
-        { log: (msg) => this.log(msg) }
-      );
-      if (targetPool.incentives.active) {
-        this.log(`Target pool has active incentive programs: ${targetPool.incentives.programs.length} program(s)`);
-      }
-
       this.log(`Target pool for new position: ${adapter.describePool(targetPool)}`);
 
       // Step 2: Close the out-of-range position
-      // Check incentives on the CURRENT pool (the position being closed)
-      const currentPoolIncentives = await retryRpcCall(
-        () => adapter.getPoolIncentives(position.pool, this.provider),
-        'getPoolIncentives (current pool)',
-        { log: (msg) => this.log(msg) }
-      );
-
-      if (currentPoolIncentives.active) {
-        // Pre-close: unstake/withdraw NFT if custody-transfer platform
-        const preCloseTxs = await retryRpcCall(
-          () => adapter.getIncentivePreCloseTransactions(position, currentPoolIncentives, this.provider),
-          'getIncentivePreCloseTransactions',
-          { log: (msg) => this.log(msg) }
-        );
-        if (preCloseTxs.length > 0) {
-          this.log(`Executing ${preCloseTxs.length} incentive pre-close transaction(s)`);
-          // TODO: await this.executeBatchTransactions(vault, preCloseTxs, 'incentive pre-close', 'incentive');
-        }
-      }
-
       const rebalanceBounds = adapter.extractPositionBounds(position);
       const { receipt, feesByPosition } = await this.closePositions(vault, { [position.id]: position });
-
-      // Claim incentive rewards after closing position
-      if (currentPoolIncentives.active) {
-        const claimTxs = await retryRpcCall(
-          () => adapter.getIncentiveClaimTransactions(vault.address, position.pool, this.provider),
-          'getIncentiveClaimTransactions',
-          { log: (msg) => this.log(msg) }
-        );
-        if (claimTxs.length > 0) {
-          this.log(`Executing ${claimTxs.length} incentive claim transaction(s)`);
-          // TODO: await this.executeBatchTransactions(vault, claimTxs, 'incentive claim', 'incentive');
-        }
-      }
 
       // Step 3: Process fees (if any)
       if (Object.keys(feesByPosition).length > 0) {
@@ -2347,18 +2241,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
     await this.vaultDataService.refreshTokens(vault.address);
 
-    // Post-create: stake NFT if custody-transfer platform with active incentives
-    if (targetPool.incentives?.active) {
-      const postCreateTxs = await retryRpcCall(
-        () => adapter.getIncentivePostCreateTransactions(receiptData.tokenId, targetPool.incentives, this.provider),
-        'getIncentivePostCreateTransactions',
-        { log: (msg) => this.log(msg) }
-      );
-      if (postCreateTxs.length > 0) {
-        this.log(`Executing ${postCreateTxs.length} incentive post-create transaction(s)`);
-        // TODO: await this.executeBatchTransactions(vault, postCreateTxs, 'incentive post-create', 'incentive');
-      }
-    }
   }
 
   // ===========================================================================

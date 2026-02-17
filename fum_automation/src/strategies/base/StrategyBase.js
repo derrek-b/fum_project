@@ -214,8 +214,10 @@ export default class StrategyBase {
         return retryRpcCall(() => vaultContract.estimateGas.collect(targets, calldatas), 'estimateGas.collect');
       case 'burn':
         return retryRpcCall(() => vaultContract.estimateGas.burn(targets, calldatas), 'estimateGas.burn');
+      case 'incentive':
+        return retryRpcCall(() => vaultContract.estimateGas.incentive(targets, calldatas, values), 'estimateGas.incentive');
       default:
-        throw new UnrecoverableError(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+        throw new UnrecoverableError(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn, incentive`);
     }
   }
 
@@ -247,8 +249,10 @@ export default class StrategyBase {
         return vaultContract.collect(targets, calldatas);
       case 'burn':
         return vaultContract.burn(targets, calldatas);
+      case 'incentive':
+        return vaultContract.incentive(targets, calldatas, values);
       default:
-        throw new UnrecoverableError(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn`);
+        throw new UnrecoverableError(`Invalid transaction type: ${type}. Must be one of: swap, approval, mint, addliq, subliq, collect, burn, incentive`);
     }
   }
 
