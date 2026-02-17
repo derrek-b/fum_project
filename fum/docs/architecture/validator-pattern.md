@@ -1,4 +1,4 @@
-<!-- Source: contracts/validators/*, contracts/interfaces/ISwapValidator.sol, contracts/interfaces/ILiquidityValidator.sol -->
+<!-- Source: contracts/validators/*, contracts/interfaces/ISwapValidator.sol, contracts/interfaces/ILiquidityValidator.sol, contracts/interfaces/IIncentiveValidator.sol -->
 # Validator Pattern
 
 Deep-dive into the calldata validation system that secures vault operations. Every swap, mint, and liquidity operation passes through a validator that parses raw calldata and enforces recipient restrictions before the vault executes the call.
@@ -25,11 +25,11 @@ User/Executor calls vault.swap(targets, data, values)
   └── vault executes: target.call{value: values[i]}(data[i])
 ```
 
-Same flow for liquidity operations (`mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `burn`) using `liquidityValidators[target]`.
+Same flow for liquidity operations (`mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `burn`) using `liquidityValidators[target]`, and for incentive operations (`incentive`) using `incentiveValidators[target]`.
 
 ---
 
-## Two Validator Interfaces
+## Three Validator Interfaces
 
 **ISwapValidator** — Single method for swap routers:
 ```solidity
@@ -49,7 +49,14 @@ interface ILiquidityValidator {
 }
 ```
 
-**Why the split:** Swap routers and position managers are different contracts with different validation needs. A DEX might have one router for swaps and a separate position manager for liquidity — each gets its own validator type registered independently in VaultFactory.
+**IIncentiveValidator** — Single method for incentive reward contracts:
+```solidity
+interface IIncentiveValidator {
+    function validateIncentive(bytes calldata data, address vault) external view;
+}
+```
+
+**Why the split:** Swap routers, position managers, and incentive contracts are different targets with different validation needs. A DEX might have one router for swaps, a separate position manager for liquidity, and a separate distributor for incentive claims — each gets its own validator type registered independently in VaultFactory.
 
 ---
 
@@ -62,6 +69,7 @@ interface ILiquidityValidator {
 | UniswapV3PositionValidator | ILiquidityValidator | V3 NonfungiblePositionManager | Medium — multicall unwrapping, assembly |
 | UniswapV4PositionValidator | ILiquidityValidator | V4 PositionManager | High — nested ABI decoding, 7 assembly ops |
 | TJPositionValidator | ILiquidityValidator | TJPositionManager | Low — first param check |
+| MerklIncentiveValidator | IIncentiveValidator | Merkl Distributor | Low — selector + user check |
 
 ---
 
@@ -308,6 +316,26 @@ require(calldataVault == vault, "TJPositionValidator: vault mismatch");
 ```
 
 Why this works: TJPositionManager's internal logic already enforces that operations can only affect positions owned by the calling vault. The validator just ensures the vault address in calldata matches the actual calling vault.
+
+---
+
+## MerklIncentiveValidator
+
+**Source:** `contracts/validators/MerklIncentiveValidator.sol`
+**Implements:** IIncentiveValidator
+
+Validates calls to the Merkl Distributor's `claim(address user, address[] tokens, uint256[] amounts, bytes32[][] proofs)` function.
+
+### Validation
+
+| Check | Detail |
+|---|---|
+| Selector | Must be `0xa0165082` (`claim`) |
+| User | First parameter (`data[4:36]`) must equal the vault address |
+
+**Why both checks:** The selector ensures only `claim()` can be called (not arbitrary functions on the Distributor). The user check ensures rewards are claimed to the vault, not to an attacker address.
+
+See [docs/decisions/incentive-validator-design.md](../../../docs/decisions/incentive-validator-design.md) for the design rationale behind creating a separate validator interface for incentives.
 
 ---
 

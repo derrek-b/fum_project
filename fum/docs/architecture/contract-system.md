@@ -18,6 +18,7 @@ How all smart contracts relate, their execution flows, and the factory-validator
 | UniswapV4PositionValidator | Validates V4 PositionManager ops | One per chain | — |
 | TJPositionValidator | Validates TJPositionManager ops | One per chain | — |
 | TJSwapValidator | Validates Trader Joe LBRouter swaps | One per chain | — |
+| MerklIncentiveValidator | Validates Merkl Distributor claim() calls | One per chain | — |
 
 ---
 
@@ -30,6 +31,7 @@ How all smart contracts relate, their execution flows, and the factory-validator
                           ├─────────────────┤
                           │ swapValidators   │──── router addr → ISwapValidator
                           │ liquidityValid.  │──── posMgr addr → ILiquidityValidator
+                          │ incentiveValid.  │──── target addr → IIncentiveValidator
                           │ userVaults[]     │
                           │ vaultInfo{}      │
                           │ allVaults[]      │
@@ -74,18 +76,20 @@ How all smart contracts relate, their execution flows, and the factory-validator
 
 ### Validator Registries
 
-Two mappings that define the extensibility mechanism:
+Three mappings that define the extensibility mechanism:
 
 ```solidity
-mapping(address => ISwapValidator) public swapValidators;        // router → validator
-mapping(address => ILiquidityValidator) public liquidityValidators; // posMgr → validator
+mapping(address => ISwapValidator) public swapValidators;            // router → validator
+mapping(address => ILiquidityValidator) public liquidityValidators;   // posMgr → validator
+mapping(address => IIncentiveValidator) public incentiveValidators;   // target → validator
 ```
 
 **Registration (onlyOwner):**
 - `setSwapValidator(address router, ISwapValidator validator)` — Maps a DEX router to its swap validator
 - `setLiquidityValidator(address positionManager, ILiquidityValidator validator)` — Maps a position manager to its liquidity validator
+- `setIncentiveValidator(address target, IIncentiveValidator validator)` — Maps an incentive contract (e.g., Merkl Distributor) to its validator
 
-**Validation dispatch:** When a vault calls `factory.validateSwap(router, data, vault)`, the factory looks up `swapValidators[router]` and delegates. Reverts if no validator registered.
+**Validation dispatch:** When a vault calls `factory.validateSwap(router, data, vault)`, the factory looks up `swapValidators[router]` and delegates. Same pattern for `validateIncentive(target, data, vault)`. Reverts if no validator registered.
 
 ### Vault Tracking
 
@@ -104,7 +108,7 @@ struct VaultInfo {
 
 **Functions:** `createVault(name)`, `updateVaultName(vault, name)`, `getVaults(user)`, `getVaultInfo(vault)`, `getVaultCount(user)`, `getTotalVaultCount()`, `isVault(vault) → (bool, address owner)`
 
-**Events:** `VaultCreated(user, vault, name, userVaultCount)`, `VaultNameUpdated(vault, name)`, `SwapValidatorUpdated(router, validator)`, `LiquidityValidatorUpdated(positionManager, validator)`
+**Events:** `VaultCreated(user, vault, name, userVaultCount)`, `VaultNameUpdated(vault, name)`, `SwapValidatorUpdated(router, validator)`, `LiquidityValidatorUpdated(positionManager, validator)`, `IncentiveValidatorUpdated(target, validator)`
 
 ---
 
@@ -143,6 +147,7 @@ Same pattern for `mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `b
 | `decreaseLiquidity(targets, data)` | onlyAuthorized | `factory.validateDecreaseLiquidity` | No |
 | `collect(targets, data)` | onlyAuthorized | `factory.validateCollect` | No |
 | `burn(targets, data)` | onlyAuthorized | `factory.validateBurn` | No |
+| `incentive(targets, data, values)` | onlyAuthorized | `factory.validateIncentive` per target | Yes |
 | `withdrawTokens(token, amount)` | onlyAuthorized | None (sends to owner) | — |
 | `withdrawETH(amount)` | onlyAuthorized | None (sends to owner) | — |
 | `unwrapAndWithdrawETH(weth, amount)` | onlyAuthorized | None (sends to owner) | — |
@@ -309,7 +314,8 @@ Unlike V3/V4 which have built-in fee tracking, TJ fees are calculated from reser
 |---|---|---|
 | ISwapValidator | UniversalRouterValidator, TJSwapValidator | `validateSwap(data, vault)` |
 | ILiquidityValidator | UniswapV3PositionValidator, UniswapV4PositionValidator, TJPositionValidator | `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn` |
-| IVaultFactory | VaultFactory | `validateSwap`, `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn` |
+| IIncentiveValidator | MerklIncentiveValidator | `validateIncentive(data, vault)` |
+| IVaultFactory | VaultFactory | `validateSwap`, `validateMint`, `validateIncreaseLiquidity`, `validateDecreaseLiquidity`, `validateCollect`, `validateBurn`, `validateIncentive` |
 | ILBPair | (external Trader Joe) | `getTokenX/Y`, `getBinStep`, `balanceOf`, `getBin`, `totalSupply`, `approveForAll` |
 | ILBRouter | (external Trader Joe) | `addLiquidity(LiquidityParameters)`, `removeLiquidity(...)` |
 
@@ -321,7 +327,7 @@ Setting up on a new chain:
 
 1. Deploy `VaultFactory(deployer, permit2Address)`
 2. Deploy `BabyStepsStrategy()`
-3. Deploy all 5 validators
+3. Deploy all 6 validators
 4. Deploy `TJPositionManager(lbRouterAddress)` (if Trader Joe supported)
 5. Register swap validators:
    - `factory.setSwapValidator(universalRouterAddress, universalRouterValidator)`
@@ -330,7 +336,9 @@ Setting up on a new chain:
    - `factory.setLiquidityValidator(v3PositionManager, v3PositionValidator)`
    - `factory.setLiquidityValidator(v4PositionManager, v4PositionValidator)`
    - `factory.setLiquidityValidator(tjPositionManager, tjPositionValidator)`
-7. Update fum_library with deployed addresses
+7. Register incentive validators:
+   - `factory.setIncentiveValidator(merklDistributorAddress, merklIncentiveValidator)`
+8. Update fum_library with deployed addresses
 8. Run `npm run pack` in fum_library to distribute
 
 ---

@@ -54,6 +54,7 @@ Master orchestrator. Distributes contracts from `fum/contracts/` to all sibling 
 - `UniswapV4PositionValidator`
 - `TJPositionValidator`
 - `TJSwapValidator`
+- `MerklIncentiveValidator`
 
 **TESTING_ONLY_CONTRACTS** (synced to fum_testing only, not extracted):
 - `StrategyBase`
@@ -104,7 +105,8 @@ Uses **solc directly** (not Hardhat) to compile contracts and extract ABIs. This
   'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator',
   'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator',
   'validators/TJPositionValidator.sol': 'TJPositionValidator',
-  'validators/TJSwapValidator.sol': 'TJSwapValidator'
+  'validators/TJSwapValidator.sol': 'TJSwapValidator',
+  'validators/MerklIncentiveValidator.sol': 'MerklIncentiveValidator'
 }
 ```
 
@@ -144,7 +146,7 @@ Reads compiled artifacts from fum_testing and outputs raw hex `.bin` files.
 **Input:** `fum_testing/artifacts/contracts/{ContractName}.sol/{ContractName}.json`
 **Output:** `fum/bytecode/{ContractName}.bin` (hex string, no `0x` prefix)
 
-**Extracted contracts:** All CORE_CONTRACTS + VALIDATOR_CONTRACTS (9 total)
+**Extracted contracts:** All CORE_CONTRACTS + VALIDATOR_CONTRACTS (10 total)
 
 **Prerequisite:** fum_testing must be compiled first (Step 2 of the sync pipeline handles this).
 
