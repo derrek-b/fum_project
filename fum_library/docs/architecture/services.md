@@ -1,9 +1,9 @@
-<!-- Source: src/services/coingecko.js, src/services/theGraph.js, src/services/blockExplorer.js -->
+<!-- Source: src/services/coingecko.js, src/services/theGraph.js, src/services/blockExplorer.js, src/services/merkl.js -->
 # Services Architecture
 
 ## Overview
 
-The services module integrates with external APIs: CoinGecko for token prices, The Graph for subgraph queries, and block explorers (Arbiscan) for internal transaction data. Each service follows a configure-then-use pattern — call the service's `configure*()` function (or `initFumLibrary()`) at startup to set API keys.
+The services module integrates with external APIs: CoinGecko for token prices, The Graph for subgraph queries, block explorers (Arbiscan) for internal transaction data, and Merkl for incentive campaign detection and reward claiming. Most services follow a configure-then-use pattern — call the service's `configure*()` function (or `initFumLibrary()`) at startup to set API keys. Merkl requires no configuration.
 
 ## CoinGecko Service
 
@@ -215,6 +215,61 @@ Filters out failed internal transactions (`isError !== '0'`) and zero-value tran
 
 - `getBlockExplorerConfig()` — Returns current config (for testing)
 - `resetBlockExplorerConfig()` — Resets to defaults (for testing)
+
+---
+
+## Merkl Service
+
+**Source:** `src/services/merkl.js`
+
+Queries the Merkl API for incentive campaign detection (which pools have active reward programs) and reward claiming (Merkle proofs for the Distributor contract). No configuration needed — no API key required.
+
+See [docs/platform-knowledge/merkl-incentives.md](../../../docs/platform-knowledge/merkl-incentives.md) for API endpoint details, response shapes, and field-level gotchas.
+
+### fetchPoolIncentives(chainId, poolId)
+
+Check if a Uniswap V4 pool has active Merkl incentive campaigns.
+
+```javascript
+import { fetchPoolIncentives } from 'fum_library/services/merkl';
+
+const result = await fetchPoolIncentives(42161, '0xab05003a...');
+// Returns: { active: true, programs: [{ rewardToken, rewardTokenSymbol, endTimestamp }] }
+// Or:      { active: false, programs: [] }
+```
+
+**Behavior:**
+1. Validates inputs (chainId and poolId required)
+2. Checks in-memory cache (5-minute TTL, keyed by `chainId:poolId`)
+3. Queries Merkl opportunities endpoint filtered for UNISWAP_V4
+4. Matches by `identifier` field (case-insensitive bytes32 comparison)
+5. Filters to active campaigns only (endTimestamp > now)
+6. On failure: throws with context message
+
+### fetchClaimData(chainId, userAddress)
+
+Fetch Merkle proofs and amounts for unclaimed rewards.
+
+```javascript
+import { fetchClaimData } from 'fum_library/services/merkl';
+
+const result = await fetchClaimData(42161, '0xVault...');
+// Returns: { user, tokens: ['0x...'], amounts: ['500000...'], proofs: [['0x...']] }
+// Or:      null (nothing to claim)
+```
+
+**Behavior:**
+1. Validates inputs (chainId and userAddress required)
+2. Queries Merkl rewards endpoint (`/v4/users/{address}/rewards?chainId={id}`)
+3. Filters to rewards where `pending !== '0'`
+4. Returns cumulative `amount` (not just pending) — the Distributor contract tracks what's been claimed internally
+5. Returns `null` if nothing to claim
+6. Not cached — reward data changes with each Merkle root update
+7. On failure: throws with context message
+
+### clearIncentiveCache()
+
+Clears the pool incentive cache. Useful for testing.
 
 ---
 

@@ -123,10 +123,10 @@ These have safe default implementations (return `{ active: false }` or `[]`). Ov
 
 | Method | Default | Description |
 |---|---|---|
-| `getPoolIncentives(poolAddress, provider)` | `{ active: false, programs: [] }` | Check for active reward programs |
+| `getPoolIncentives(poolAddress, poolData, provider)` | `{ active: false, programs: [] }` | Check for active reward programs |
 | `getIncentivePreCloseTransactions(position, incentives, provider)` | `[]` | Transactions needed before closing (e.g., unstake NFT) |
 | `getIncentivePostCreateTransactions(positionId, incentives, provider)` | `[]` | Transactions needed after creating (e.g., stake NFT) |
-| `getIncentiveClaimTransactions(vaultAddress, poolAddress, provider)` | `[]` | Transactions to claim accrued rewards |
+| `getIncentiveClaimTransactions(vaultAddress, poolAddress, poolData, provider)` | `[]` | Transactions to claim accrued rewards |
 
 Incentive lifecycle varies by platform:
 - **Custody-transfer** (V3, PancakeSwap): NFT must be staked/unstaked — use pre-close and post-create methods
