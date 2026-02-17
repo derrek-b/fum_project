@@ -45,8 +45,8 @@ contracts/
 ├── BabyStepsStrategy.sol     # Conservative range-based automation
 ├── ParrisIslandStrategy.sol  # Advanced adaptive strategy (in development)
 ├── TJPositionManager.sol     # Trader Joe V2.2 bin position management (ERC1155)
-├── interfaces/               # IVaultFactory, ILBPair, ILBRouter, ISwapValidator, ILiquidityValidator
-└── validators/               # UniversalRouterValidator, UniswapV3/V4PositionValidator, TJPositionValidator, TJSwapValidator
+├── interfaces/               # IVaultFactory, ILBPair, ILBRouter, ISwapValidator, ILiquidityValidator, IIncentiveValidator
+└── validators/               # UniversalRouterValidator, UniswapV3/V4PositionValidator, TJPositionValidator, TJSwapValidator, MerklIncentiveValidator
 
 scripts/
 ├── sync-contracts-to-ecosystem.js  # Master contract distribution (source of truth)

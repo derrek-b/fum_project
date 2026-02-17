@@ -505,6 +505,51 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
+     * @notice Executes incentive operations (claim rewards, stake/unstake) via registered validators
+     * @param targets Array of incentive contract addresses to call (e.g., Merkl Distributor)
+     * @param data Array of calldata to send to each target
+     * @param values Array of ETH values to send with each call
+     * @return results Array of success flags for each operation
+     */
+    function incentive(
+        address[] calldata targets,
+        bytes[] calldata data,
+        uint256[] calldata values
+    )
+        external
+        onlyAuthorized
+        nonReentrant
+        returns (bool[] memory results)
+    {
+        require(targets.length == data.length, "PositionVault: length mismatch");
+        require(values.length == targets.length, "PositionVault: values length mismatch");
+        require(targets.length > 0, "PositionVault: empty batch");
+
+        // Validate vault has sufficient ETH balance
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < values.length; i++) {
+            totalValue += values[i];
+        }
+        require(address(this).balance >= totalValue, "PositionVault: insufficient ETH balance");
+
+        results = new bool[](targets.length);
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            // Validate via factory (reverts if no validator or validation fails)
+            IVaultFactory(factory).validateIncentive(targets[i], data[i], address(this));
+
+            // Execute with value
+            (bool success, ) = targets[i].call{value: values[i]}(data[i]);
+            results[i] = success;
+
+            emit TransactionExecuted(targets[i], data[i], success, "incentive");
+            require(success, "PositionVault: incentive operation failed");
+        }
+
+        return results;
+    }
+
+    /**
      * @notice Withdraws a position NFT from the vault to the owner
      * @param nftContract Address of the NFT contract
      * @param tokenId ID of the NFT token

@@ -29,7 +29,8 @@ const VALIDATOR_CONTRACTS = [
   'UniswapV3PositionValidator',
   'UniswapV4PositionValidator',
   'TJPositionValidator',
-  'TJSwapValidator'
+  'TJSwapValidator',
+  'MerklIncentiveValidator'
 ];
 
 // Additional contracts synced to fum_testing with --sync-only flag (for testing but not distributed)

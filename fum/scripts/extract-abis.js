@@ -23,7 +23,8 @@ const contractMapping = {
   'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator',
   'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator',
   'validators/TJPositionValidator.sol': 'TJPositionValidator',
-  'validators/TJSwapValidator.sol': 'TJSwapValidator'
+  'validators/TJSwapValidator.sol': 'TJSwapValidator',
+  'validators/MerklIncentiveValidator.sol': 'MerklIncentiveValidator'
 };
 
 // List of contracts to extract ABIs from

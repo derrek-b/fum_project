@@ -27,7 +27,8 @@ const VALIDATORS_TO_EXTRACT = [
   'UniswapV3PositionValidator',
   'UniswapV4PositionValidator',
   'TJPositionValidator',
-  'TJSwapValidator'
+  'TJSwapValidator',
+  'MerklIncentiveValidator'
 ];
 
 // Debug logging

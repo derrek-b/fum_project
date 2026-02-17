@@ -56,4 +56,12 @@ interface IVaultFactory {
      * @param vault The vault address (for recipient validation)
      */
     function validateBurn(address positionManager, bytes calldata data, address vault) external view;
+
+    /**
+     * @notice Validates incentive calldata via the registered incentive validator
+     * @param target The incentive contract address being called (e.g., Merkl Distributor)
+     * @param data The calldata being sent to the incentive contract
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateIncentive(address target, bytes calldata data, address vault) external view;
 }
