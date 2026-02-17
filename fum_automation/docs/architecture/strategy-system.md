@@ -50,7 +50,7 @@ constructor(dependencies) {
 
 | Method | Description |
 |---|---|
-| `executeBatchTransactions(vault, transactions, operationType, type)` | Execute tx batch through vault contract. Types: `swap`, `approval`, `mint`, `addliq`, `subliq`, `collect`, `burn`. Returns `{ receipt, gasEstimated }`. |
+| `executeBatchTransactions(vault, transactions, operationType, type)` | Execute tx batch through vault contract. Types: `swap`, `approval`, `mint`, `addliq`, `subliq`, `collect`, `burn`, `incentive`. Returns `{ receipt, gasEstimated }`. |
 | `isWrapUnwrapPair(tokenIn, tokenOut)` | Check if tokens are native <-> wrapped native. Returns `{ isWrap, isUnwrap, isWrapOrUnwrap }`. |
 | `executeWrap(vault, amount)` | Wrap native to wrapped native (ETH→WETH, AVAX→WAVAX). Emits `NativeWrapped`. |
 | `executeUnwrap(vault, amount)` | Unwrap wrapped native to native. Emits `NativeUnwrapped`. |
@@ -85,7 +85,7 @@ Conservative single-position strategy. `type = 'bob'`, `name = 'Baby Steps Strat
 - Loads strategy config via `getStrategyDetails('bob')` from fum_library
 - Tracks emergency exit baseline per vault (`emergencyExitBaseline` object)
 - Tracks swap count since last fee check per vault (`swapCountSinceLastFeeCheck` object)
-- On `initializeVault`: selects best pool, detects incentive programs, captures emergency baseline, creates initial position
+- On `initializeVault`: selects best pool, captures emergency baseline, creates initial position
 - On `handleSwapEvent`: evaluates position state, decides whether to rebalance, collect fees, or take no action
 
 ### Strategy Parameters
