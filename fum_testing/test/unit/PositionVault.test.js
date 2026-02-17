@@ -2819,6 +2819,114 @@ describe("PositionVault - 2.0.0", function() {
       });
     });
 
+    describe("Incentive Function", function() {
+      // Function selector for claim(address,address[],uint256[],bytes32[][])
+      const CLAIM_SELECTOR = "0xa0165082";
+
+      let merklIncentiveValidator;
+      let merklDistributorAddress;
+
+      // Helper to encode Merkl claim calldata
+      function encodeClaimCalldata(user, tokens, amounts, proofs) {
+        const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+        const encoded = abiCoder.encode(
+          ["address", "address[]", "uint256[]", "bytes32[][]"],
+          [user, tokens, amounts, proofs]
+        );
+        return CLAIM_SELECTOR + encoded.slice(2);
+      }
+
+      beforeEach(async function() {
+        // Deploy MerklIncentiveValidator
+        const MerklIncentiveValidator = await ethers.getContractFactory("MerklIncentiveValidator");
+        merklIncentiveValidator = await MerklIncentiveValidator.deploy();
+        await merklIncentiveValidator.waitForDeployment();
+
+        // Use user2's address as mock "Merkl Distributor" target (EOA accepts calls)
+        merklDistributorAddress = user2.address;
+
+        // Register incentive validator on the factory
+        await factory.setIncentiveValidator(
+          merklDistributorAddress,
+          await merklIncentiveValidator.getAddress()
+        );
+      });
+
+      describe("Authorization", function() {
+        it("should allow owner to call incentive and emit TransactionExecuted with incentive type", async function() {
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+
+          await expect(vault.incentive([merklDistributorAddress], [calldata], [0n]))
+            .to.emit(vault, "TransactionExecuted")
+            .withArgs(merklDistributorAddress, calldata, true, "incentive");
+        });
+
+        it("should allow executor to call incentive", async function() {
+          await vault.setExecutor(executorWallet.address);
+
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+
+          await expect(vault.connect(executorWallet).incentive([merklDistributorAddress], [calldata], [0n]))
+            .to.emit(vault, "TransactionExecuted")
+            .withArgs(merklDistributorAddress, calldata, true, "incentive");
+        });
+
+        it("should reject unauthorized caller", async function() {
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+
+          await expect(vault.connect(user1).incentive([merklDistributorAddress], [calldata], [0n]))
+            .to.be.revertedWith("PositionVault: caller is not authorized");
+        });
+      });
+
+      describe("Validation", function() {
+        it("should reject unregistered incentive target", async function() {
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+          const unregisteredTarget = user1.address; // not registered
+
+          await expect(vault.incentive([unregisteredTarget], [calldata], [0n]))
+            .to.be.revertedWith("VaultFactory: no validator for incentive target");
+        });
+
+        it("should reject claim where user is not the vault (validator rejects)", async function() {
+          const calldata = encodeClaimCalldata(
+            user1.address,  // attacker's address, not the vault
+            [user1.address],
+            [1000n],
+            [[ethers.keccak256("0x01")]]
+          );
+
+          await expect(vault.incentive([merklDistributorAddress], [calldata], [0n]))
+            .to.be.revertedWith("MerklIncentiveValidator: claim user must be vault");
+        });
+
+        it("should reject empty batch", async function() {
+          await expect(vault.incentive([], [], []))
+            .to.be.revertedWith("PositionVault: empty batch");
+        });
+
+        it("should reject length mismatch (targets vs data)", async function() {
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+
+          await expect(vault.incentive([merklDistributorAddress, merklDistributorAddress], [calldata], [0n, 0n]))
+            .to.be.revertedWith("PositionVault: length mismatch");
+        });
+
+        it("should reject length mismatch (targets vs values)", async function() {
+          const vaultAddress = await vault.getAddress();
+          const calldata = encodeClaimCalldata(vaultAddress, [], [], []);
+
+          await expect(vault.incentive([merklDistributorAddress], [calldata], [0n, 0n]))
+            .to.be.revertedWith("PositionVault: values length mismatch");
+        });
+      });
+    });
+
     describe("Execute function (owner only)", function() {
       it("should allow owner to call execute for arbitrary calls and emit TransactionExecuted with any type", async function() {
         const tokenAddress = await token.getAddress();

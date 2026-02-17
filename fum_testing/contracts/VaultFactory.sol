@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "./PositionVault.sol";
 import "./interfaces/ISwapValidator.sol";
 import "./interfaces/ILiquidityValidator.sol";
+import "./interfaces/IIncentiveValidator.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
@@ -20,6 +21,7 @@ contract VaultFactory is Ownable {
     // Validator registries - shared by all vaults created by this factory
     mapping(address => ISwapValidator) public swapValidators;
     mapping(address => ILiquidityValidator) public liquidityValidators;
+    mapping(address => IIncentiveValidator) public incentiveValidators;
 
     // Mapping of user address to their vault addresses
     mapping(address => address[]) public userVaults;
@@ -41,6 +43,7 @@ contract VaultFactory is Ownable {
     event VaultNameUpdated(address indexed vault, string name);
     event SwapValidatorUpdated(address indexed router, address indexed validator);
     event LiquidityValidatorUpdated(address indexed positionManager, address indexed validator);
+    event IncentiveValidatorUpdated(address indexed target, address indexed validator);
 
     /**
      * @notice Constructor
@@ -75,6 +78,16 @@ contract VaultFactory is Ownable {
     function setLiquidityValidator(address positionManager, ILiquidityValidator validator) external onlyOwner {
         liquidityValidators[positionManager] = validator;
         emit LiquidityValidatorUpdated(positionManager, address(validator));
+    }
+
+    /**
+     * @notice Sets or updates an incentive contract's validator
+     * @param target The incentive contract address (e.g., Merkl Distributor)
+     * @param validator The validator contract (address(0) to remove)
+     */
+    function setIncentiveValidator(address target, IIncentiveValidator validator) external onlyOwner {
+        incentiveValidators[target] = validator;
+        emit IncentiveValidatorUpdated(target, address(validator));
     }
 
     // ============ Validation Functions (called by vaults) ============
@@ -149,6 +162,18 @@ contract VaultFactory is Ownable {
         ILiquidityValidator validator = liquidityValidators[positionManager];
         require(address(validator) != address(0), "VaultFactory: no validator for position manager");
         validator.validateBurn(data, vault);
+    }
+
+    /**
+     * @notice Validates incentive calldata via the registered validator
+     * @param target The incentive contract address being called
+     * @param data The calldata being sent to the incentive contract
+     * @param vault The vault address (for recipient validation)
+     */
+    function validateIncentive(address target, bytes calldata data, address vault) external view {
+        IIncentiveValidator validator = incentiveValidators[target];
+        require(address(validator) != address(0), "VaultFactory: no validator for incentive target");
+        validator.validateIncentive(data, vault);
     }
 
     // ============ Vault Creation ============

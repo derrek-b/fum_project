@@ -320,6 +320,80 @@ describe("VaultFactory - 2.0.0", function() {
     });
   });
 
+  describe("Incentive Validator Registry", function() {
+    it("should allow owner to set incentive validator and emit IncentiveValidatorUpdated", async function() {
+      const targetAddress = user1.address;
+      const validatorAddress = user2.address;
+
+      await expect(factory.setIncentiveValidator(targetAddress, validatorAddress))
+        .to.emit(factory, "IncentiveValidatorUpdated")
+        .withArgs(targetAddress, validatorAddress);
+
+      expect(await factory.incentiveValidators(targetAddress)).to.equal(validatorAddress);
+    });
+
+    it("should allow owner to remove incentive validator by setting to zero", async function() {
+      const targetAddress = user1.address;
+      const validatorAddress = user2.address;
+
+      // Set first, then remove
+      await factory.setIncentiveValidator(targetAddress, validatorAddress);
+      await factory.setIncentiveValidator(targetAddress, ethers.ZeroAddress);
+      expect(await factory.incentiveValidators(targetAddress)).to.equal(ethers.ZeroAddress);
+    });
+
+    it("should reject non-owner setting incentive validator", async function() {
+      await expect(
+        factory.connect(user1).setIncentiveValidator(user2.address, user2.address)
+      ).to.be.revertedWithCustomError(factory, "OwnableUnauthorizedAccount");
+    });
+
+    it("should validate incentive via registered validator", async function() {
+      // Deploy a real MerklIncentiveValidator
+      const MerklIncentiveValidator = await ethers.getContractFactory("MerklIncentiveValidator");
+      const incentiveValidator = await MerklIncentiveValidator.deploy();
+      await incentiveValidator.waitForDeployment();
+
+      const targetAddress = user1.address; // mock Merkl Distributor
+      await factory.setIncentiveValidator(targetAddress, await incentiveValidator.getAddress());
+
+      // Create a vault to use as the vault param
+      const tx = await factory.connect(user1).createVault("Incentive Test Vault");
+      const receipt = await tx.wait();
+      const vaultAddress = receipt.logs.find(
+        log => log.fragment && log.fragment.name === 'VaultCreated'
+      ).args[1];
+
+      // Encode valid claim calldata with vault as user
+      const CLAIM_SELECTOR = "0xa0165082";
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const encoded = abiCoder.encode(
+        ["address", "address[]", "uint256[]", "bytes32[][]"],
+        [vaultAddress, [], [], []]
+      );
+      const claimCalldata = CLAIM_SELECTOR + encoded.slice(2);
+
+      // Should not revert
+      await expect(factory.validateIncentive(targetAddress, claimCalldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should reject incentive validation with no registered validator", async function() {
+      const unknownTarget = user2.address;
+      const mockCalldata = "0x1234567890";
+
+      // Create a vault
+      const tx = await factory.connect(user1).createVault("Test Vault");
+      const receipt = await tx.wait();
+      const vaultAddress = receipt.logs.find(
+        log => log.fragment && log.fragment.name === 'VaultCreated'
+      ).args[1];
+
+      await expect(
+        factory.validateIncentive(unknownTarget, mockCalldata, vaultAddress)
+      ).to.be.revertedWith("VaultFactory: no validator for incentive target");
+    });
+  });
+
   describe("Version", function() {
     it("should return the correct version", async function() {
       expect(await factory.getVersion()).to.equal("2.0.0");
