@@ -7,10 +7,9 @@ import "../interfaces/ILiquidityValidator.sol";
  * @title TJPositionValidator
  * @notice Validates calldata for TJPositionManager operations
  * @dev Called by VaultFactory before PositionVault executes calls to TJPositionManager.
- *      Only validateMint is functional; others revert with "not yet implemented".
  *
  *      Validation ensures:
- *      - The function selector matches createPosition
+ *      - The function selector matches the expected operation
  *      - The vault address in calldata matches the actual calling vault
  */
 contract TJPositionValidator is ILiquidityValidator {
@@ -32,9 +31,9 @@ contract TJPositionValidator is ILiquidityValidator {
         require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    // addToPosition(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
+    // addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
     bytes4 constant internal ADD_TO_POSITION_SELECTOR = bytes4(keccak256(
-        "addToPosition(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"
+        "addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"
     ));
 
     function validateIncreaseLiquidity(bytes calldata data, address vault) external pure override {
@@ -45,19 +44,19 @@ contract TJPositionValidator is ILiquidityValidator {
         require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    // collectFees(address,uint256)
+    // collectFees(address,uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal COLLECT_FEES_SELECTOR = bytes4(keccak256(
-        "collectFees(address,uint256)"
+        "collectFees(address,uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    // decreaseLiquidity(address,uint256,uint256,uint256,uint256,uint256)
+    // decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal DECREASE_LIQUIDITY_SELECTOR = bytes4(keccak256(
-        "decreaseLiquidity(address,uint256,uint256,uint256,uint256,uint256)"
+        "decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    // removePosition(address,uint256,uint256,uint256,uint256) — 5-param (no percentage)
+    // removePosition(address,uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal REMOVE_POSITION_SELECTOR = bytes4(keccak256(
-        "removePosition(address,uint256,uint256,uint256,uint256)"
+        "removePosition(address,uint256,uint256[],uint256,uint256,uint256)"
     ));
 
     function validateDecreaseLiquidity(bytes calldata data, address vault) external pure override {

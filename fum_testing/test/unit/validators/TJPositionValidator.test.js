@@ -89,12 +89,12 @@ describe("TJPositionValidator", function() {
   describe("validateIncreaseLiquidity", function() {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-    function encodeAddToPosition(vault, positionId, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
+    function encodeAddToPosition(vault, positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
       const iface = new ethers.Interface([
-        "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+        "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
       ]);
       return iface.encodeFunctionData("addToPosition", [
-        vault, positionId, amountX, amountY, amountXMin, amountYMin,
+        vault, positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin,
         activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl
       ]);
     }
@@ -102,6 +102,7 @@ describe("TJPositionValidator", function() {
     it("should accept addToPosition calldata with correct vault", async function() {
       const calldata = encodeAddToPosition(
         vaultAddress, 1,
+        [0, 0, 0], [0, 0, 0],
         ethers.parseEther("1"), ethers.parseEther("1000"),
         0, 0,
         8388608, 5,
@@ -117,6 +118,7 @@ describe("TJPositionValidator", function() {
     it("should reject addToPosition calldata with wrong vault", async function() {
       const calldata = encodeAddToPosition(
         otherAddress, 1, // wrong vault
+        [0, 0, 0], [0, 0, 0],
         ethers.parseEther("1"), ethers.parseEther("1000"),
         0, 0,
         8388608, 5,
@@ -153,42 +155,42 @@ describe("TJPositionValidator", function() {
   describe("validateDecreaseLiquidity", function() {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-    function encodeRemovePosition(vault, positionId, amountXMin, amountYMin, dl) {
+    function encodeRemovePosition(vault, positionId, feeShares, amountXMin, amountYMin, dl) {
       const iface = new ethers.Interface([
-        "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       return iface.encodeFunctionData("removePosition", [
-        vault, positionId, amountXMin, amountYMin, dl
+        vault, positionId, feeShares, amountXMin, amountYMin, dl
       ]);
     }
 
-    function encodeDecreaseLiquidity(vault, positionId, percentage, amountXMin, amountYMin, dl) {
+    function encodeDecreaseLiquidity(vault, positionId, percentage, feeShares, amountXMin, amountYMin, dl) {
       const iface = new ethers.Interface([
-        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       return iface.encodeFunctionData("decreaseLiquidity", [
-        vault, positionId, percentage, amountXMin, amountYMin, dl
+        vault, positionId, percentage, feeShares, amountXMin, amountYMin, dl
       ]);
     }
 
     it("should allow removePosition with correct vault", async function() {
-      const calldata = encodeRemovePosition(vaultAddress, 1, 0, 0, deadline);
+      const calldata = encodeRemovePosition(vaultAddress, 1, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
     });
 
     it("should allow decreaseLiquidity with correct vault", async function() {
-      const calldata = encodeDecreaseLiquidity(vaultAddress, 1, 50, 0, 0, deadline);
+      const calldata = encodeDecreaseLiquidity(vaultAddress, 1, 50, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
     });
 
     it("should reject removePosition with wrong vault in calldata", async function() {
-      const calldata = encodeRemovePosition(otherAddress, 1, 0, 0, deadline);
+      const calldata = encodeRemovePosition(otherAddress, 1, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress))
         .to.be.revertedWith("TJPositionValidator: vault mismatch");
     });
 
     it("should reject decreaseLiquidity with wrong vault in calldata", async function() {
-      const calldata = encodeDecreaseLiquidity(otherAddress, 1, 50, 0, 0, deadline);
+      const calldata = encodeDecreaseLiquidity(otherAddress, 1, 50, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress))
         .to.be.revertedWith("TJPositionValidator: vault mismatch");
     });
@@ -212,27 +214,29 @@ describe("TJPositionValidator", function() {
 
     it("should accept various valid percentage values via decreaseLiquidity", async function() {
       for (const pct of [1, 50, 100]) {
-        const calldata = encodeDecreaseLiquidity(vaultAddress, 1, pct, 0, 0, deadline);
+        const calldata = encodeDecreaseLiquidity(vaultAddress, 1, pct, [0, 0, 0], 0, 0, deadline);
         await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
       }
     });
   });
 
   describe("validateCollect", function() {
-    function encodeCollectFees(vault, positionId) {
+    const deadline = Math.floor(Date.now() / 1000) + 3600;
+
+    function encodeCollectFees(vault, positionId, feeShares, amountXMin, amountYMin, dl) {
       const iface = new ethers.Interface([
-        "function collectFees(address vault, uint256 positionId)"
+        "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
-      return iface.encodeFunctionData("collectFees", [vault, positionId]);
+      return iface.encodeFunctionData("collectFees", [vault, positionId, feeShares, amountXMin, amountYMin, dl]);
     }
 
     it("should allow collectFees with correct vault", async function() {
-      const calldata = encodeCollectFees(vaultAddress, 1);
+      const calldata = encodeCollectFees(vaultAddress, 1, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateCollect(calldata, vaultAddress)).to.not.be.reverted;
     });
 
     it("should reject collectFees with wrong vault", async function() {
-      const calldata = encodeCollectFees(otherAddress, 1);
+      const calldata = encodeCollectFees(otherAddress, 1, [0, 0, 0], 0, 0, deadline);
       await expect(validator.validateCollect(calldata, vaultAddress))
         .to.be.revertedWith("TJPositionValidator: vault mismatch");
     });
