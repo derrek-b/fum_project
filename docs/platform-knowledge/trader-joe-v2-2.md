@@ -32,19 +32,60 @@ Native AVAX uses `AddressZero` in token paths, not the wrapped address. The help
 - Wrapped (WAVAX) → actual token address
 - Everything else → actual token address
 
-## Fee Calculation (TJPositionManager)
+## Fee Model: Auto-Compounding (V2.2)
 
-Fees are represented as extra LB tokens beyond the principal deposited:
-- **principalLb** = `originalShare * supply / reserve` (your proportion of the bin at deposit time)
-- **feeLb** = `liquidityMinted - principalLb` (the growth since deposit)
+LB V2.2 **auto-compounds** swap fees into bin reserves. There is no `pendingFees()`, no `collectFees()`, and no per-user fee tracking on the LBPair contract. The only fee function is `collectProtocolFees()` (for the protocol recipient, not LPs).
 
-### X-side / Y-side Fallback
+Users extract fees by burning LB tokens — they get their proportional share of reserves, which is principal + accumulated fees combined. There is no way to separate "fee tokens" from "principal tokens" on-chain at the LBPair level.
 
-The fee calculation tries X-side (reserveX) first. If that yields 0 fee tokens (which happens when fees accrued only on the Y token), it falls back to Y-side calculation. This is important for:
-- One-sided bins (below active = Y-only, above active = X-only)
-- Active bins where round-trip swaps generated fees asymmetrically on only one token
+**V2.0 had a debt-based model** (`accTokenXPerShare`, `_cacheFees`, `pendingFees`) that was **removed in V2.1/V2.2**. The C4 audit at trust-security.xyz describes V2.0, not V2.2 — don't use it as a reference for fee behavior.
 
-Previously this was an `else if` which meant Y-side fees in the active bin were missed when X-side had reserves but no fee growth. Fixed to try X first, then check Y if X gave zero.
+### Constant-Sum Separation
+
+Each LB bin is a constant-sum market. The liquidity formula:
+
+```
+L = price × amountX + amountY
+```
+
+Key property: when a swap converts X→Y through a bin, X decreases and Y increases, but **L stays constant** (minus fees). Only fees increase L. Therefore:
+
+```
+feeL = currentL - previousL
+```
+
+This cleanly isolates fees from composition changes, regardless of how much X/Y ratio shifted.
+
+### No Public Subgraph
+
+LB V2.2 has **no public subgraph** for per-user fee data. The LFJ API (`api.lfj.dev`) requires an API key (application via Google form / Discord). The LiquidityHelperContract (see below) is the only dependency-free option.
+
+## LiquidityHelperContract (LFJ Periphery)
+
+Deployed by LFJ at `0xA5c68C9E55Dde3505e60c4B5eAe411e2977dfB35` on Avalanche. Uses the constant-sum formula to separate fees from composition changes. All functions are **view-only** (no gas for off-chain calls).
+
+ABI is imported from `@traderjoe-xyz/sdk-v2` as `LiquidityHelperV2ABI`.
+
+### Key Functions
+
+**`getAmountsAndFeesEarnedOf(lbPair, user, ids[], previousX[], previousY[])`**
+→ `(uint256[] amountsX, uint256[] amountsY, uint256[] feesX, uint256[] feesY)`
+
+Used by: `generateAddLiquidityData()` to get `previousFeesX/Y` for fee-aware baseline calculation on addToPosition.
+
+**`getLiquiditiesForAmounts(lbPair, ids[], amountsX[], amountsY[])`**
+→ `(uint256[] liquidities)`
+
+Converts stored X/Y baselines into liquidity values. Input to `getFeeSharesAndFeesEarnedOf`.
+
+**`getFeeSharesAndFeesEarnedOf(lbPair, user, ids[], previousLiquidities[])`**
+→ `(uint256[] feeShares, uint256[] feesX, uint256[] feesY)`
+
+The main fee function. `feeShares` are the exact LB token amounts to burn per bin for fee collection. Two-step call pattern: `getLiquiditiesForAmounts` first, then this.
+
+### ERC1155 Per-Position Isolation
+
+A single address holding LB tokens from multiple positions gets a combined `balanceOf` — per-position fee attribution is impossible. We use EIP-1167 minimal proxies (one per position) so each proxy's `balanceOf` reflects only that position's tokens. The LiquidityHelperContract queries the proxy address as `user`.
 
 ## Position Creation vs. Uniswap
 
@@ -53,8 +94,8 @@ Previously this was an `else if` which meant Y-side fees in the active bin were 
 | Position token | ERC721 NFT | ERC1155 (multiple bin IDs) |
 | Range | tickLower / tickUpper | lowerBinId / upperBinId |
 | Liquidity | Single value | Per-bin array |
-| Fee tracking | Built into protocol | Manual via originalShareX/Y baselines |
-| Position manager | NonfungiblePositionManager | TJPositionManager (custom contract) |
+| Fee tracking | Built into protocol | Off-chain via LiquidityHelperContract + on-chain baselines (previousX/Y) |
+| Position manager | NonfungiblePositionManager | TJPositionManager (custom, with per-position proxies) |
 
 ## Swap Events
 
@@ -72,5 +113,6 @@ Swap(address sender, address to, uint24 id, bytes32 amountsIn, bytes32 amountsOu
 3. Bins not ticks — absolute bin IDs, not relative offsets
 4. Paths are arrays — binSteps and versions are per-hop
 5. Native tokens become AddressZero in paths
-6. Fee calculation has X→Y fallback — don't assume X-side always has fees
-7. Per-bin tracking — fee baselines and liquidity are arrays, not single values
+6. Per-bin tracking — fee baselines and liquidity are arrays, not single values
+7. **`LBPair__ZeroAmount(uint24)`** — `LBPair.burn` reverts on *any* zero amount in the burn array (selector `0x6996a925`). A 21-bin position with fees in 1 bin has 20 zero feeShares — must filter to non-zero entries before calling `removeLiquidity`.
+8. **Hardhat Avalanche fork** — `eth_call` against the fork block fails with "No known hardfork for execution on historical block". Fix: mine a local block with `evm_mine` after starting the node (or deploy contracts, which mines blocks). The `chains: { 43114: { hardforkHistory: { cancun: 0 } } }` config alone is not sufficient.
