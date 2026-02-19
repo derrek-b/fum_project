@@ -44,7 +44,8 @@ contracts/
 ├── StrategyBase.sol          # Abstract base for strategies
 ├── BabyStepsStrategy.sol     # Conservative range-based automation
 ├── ParrisIslandStrategy.sol  # Advanced adaptive strategy (in development)
-├── TJPositionManager.sol     # Trader Joe V2.2 bin position management (ERC1155)
+├── TJPositionManager.sol     # Trader Joe V2.2 bin position management (proxy-per-position)
+├── TJPositionProxy.sol       # EIP-1167 minimal proxy — holds ERC1155 LB tokens per position
 ├── interfaces/               # IVaultFactory, ILBPair, ILBRouter, ISwapValidator, ILiquidityValidator, IIncentiveValidator
 └── validators/               # UniversalRouterValidator, UniswapV3/V4PositionValidator, TJPositionValidator, TJSwapValidator, MerklIncentiveValidator
 

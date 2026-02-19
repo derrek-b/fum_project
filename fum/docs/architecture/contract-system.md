@@ -1,4 +1,4 @@
-<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/ParrisIslandStrategy.sol, contracts/TJPositionManager.sol, contracts/interfaces/* -->
+<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/ParrisIslandStrategy.sol, contracts/TJPositionManager.sol, contracts/TJPositionProxy.sol, contracts/interfaces/* -->
 # Contract System
 
 How all smart contracts relate, their execution flows, and the factory-validator-strategy architecture that enables secure, extensible DeFi vault management.
@@ -12,7 +12,8 @@ How all smart contracts relate, their execution flows, and the factory-validator
 | StrategyBase | Abstract base for automation strategies | Never deployed directly | — |
 | BabyStepsStrategy | Conservative range-based strategy | One per chain | 2.0.0 |
 | ParrisIslandStrategy | Advanced adaptive strategy (in development) | One per chain | 0.4.0 |
-| TJPositionManager | Manages Trader Joe V2.2 bin positions | One per chain | — |
+| TJPositionManager | Manages Trader Joe V2.2 bin positions (proxy-per-position) | One per chain | — |
+| TJPositionProxy | EIP-1167 minimal proxy holding ERC1155 LB tokens | One per position (cloned) | — |
 | UniversalRouterValidator | Validates Uniswap Universal Router swaps | One per chain | — |
 | UniswapV3PositionValidator | Validates V3 NonfungiblePositionManager ops | One per chain | — |
 | UniswapV4PositionValidator | Validates V4 PositionManager ops | One per chain | — |
@@ -250,13 +251,17 @@ User calls strategy.authorizeVault(vaultAddress)
 
 ---
 
-## TJPositionManager
+## TJPositionManager + TJPositionProxy
 
-**Source:** `contracts/TJPositionManager.sol`
+**Sources:** `contracts/TJPositionManager.sol`, `contracts/TJPositionProxy.sol`
 
-Wraps Trader Joe V2.2 Liquidity Book (ERC1155-based) positions into a managed system with auto-incrementing IDs. Exists because LB positions are fungible ERC1155 tokens across bins — unlike V3/V4 NFTs, there's no built-in position tracking.
+Wraps Trader Joe V2.2 Liquidity Book (ERC1155-based) positions into a managed system with auto-incrementing IDs. Each position gets an EIP-1167 minimal proxy that holds its ERC1155 LB tokens — this isolation enables per-position fee attribution via the LiquidityHelperContract.
 
-**Constructor:** `constructor(address _lbRouter)` — LB Router address (immutable)
+**Constructor:** `constructor(address _lbRouter, address _proxyImplementation)`
+- `_lbRouter` — LB Router address (immutable)
+- `_proxyImplementation` — TJPositionProxy implementation address (immutable, cloned per position)
+
+**TJPositionProxy** is a minimal contract: `initialize(address _manager)` + `execute(address to, bytes data)` (onlyManager). The manager clones it per position and routes all LB token operations through it.
 
 ### Position Struct
 
@@ -266,11 +271,12 @@ struct Position {
     address lbPair;             // LB Pair contract
     address tokenX;             // First token
     address tokenY;             // Second token
+    address proxy;              // EIP-1167 proxy holding LB tokens
     uint16 binStep;             // Bin step (e.g., 25 = 0.25%)
     uint256[] depositIds;       // Bin IDs with liquidity
     uint256[] liquidityMinted;  // LB tokens per bin
-    uint256[] originalShareX;   // Baseline X reserves per bin
-    uint256[] originalShareY;   // Baseline Y reserves per bin
+    uint256[] previousX;        // Fee baseline X amounts per bin
+    uint256[] previousY;        // Fee baseline Y amounts per bin
     uint256 createdAt;          // Creation timestamp
     bool active;                // Position active flag
 }
@@ -285,26 +291,25 @@ vault.mint(targets=[tjPositionManager], data, values)
   │     └── TJPositionValidator checks first param == vault
   │
   └── tjPositionManager.createPosition(vault, lbPair, ...)
-        ├── transferFrom vault → self (tokenX, tokenY)
-        ├── approve LBRouter for tokens
-        ├── lbRouter.addLiquidity(to=self, refundTo=vault)
-        ├── store Position with depositIds, liquidityMinted
-        ├── snapshot originalShareX/Y baselines
+        ├── deploy proxy via Clones.clone(proxyImplementation)
+        ├── proxy.initialize(address(this))
+        ├── transferFrom vault → manager → proxy (tokenX, tokenY)
+        ├── via proxy: approve LBRouter, addLiquidity(to=proxy, refundTo=vault)
+        ├── store Position with proxy, depositIds, liquidityMinted, previousX/Y
+        ├── via proxy: reset approvals, sweep leftover tokens to vault
         └── emit PositionCreated
 ```
 
-**Key difference from V3/V4:** TJPositionManager pulls tokens from vault via `transferFrom`, approves LBRouter itself, and calls `addLiquidity` with `to=self` (manager holds the LB tokens) and `refundTo=vault` (excess tokens return to vault).
+**Key difference from V3/V4:** Each position's LB tokens are held by a dedicated proxy (not the manager), enabling per-position `balanceOf` queries for fee math. Tokens flow: vault → manager → proxy → LBRouter.
 
-### Reserve-Based Fee Accounting
+### Off-Chain Fee Math
 
-Unlike V3/V4 which have built-in fee tracking, TJ fees are calculated from reserve changes:
+All fee computation happens off-chain via LFJ's LiquidityHelperContract (view calls). The contract stores baselines (`previousX/Y`) and executes burns. See `docs/platform-knowledge/trader-joe-v2-2.md` for constant-sum separation math and helper contract details.
 
-1. **On creation:** Snapshot `originalShareX/Y[i] = liquidityMinted[i] * reserves[i] / totalSupply[i]`
-2. **On fee collection:** `accruedFees = currentShare - originalShare`, burn fee-equivalent LP tokens, reset baselines
-3. **On increase:** Snapshot accrued fees before adding, update baselines preserving fees
-4. **On decrease:** Collect fees first, then remove liquidity, update remaining baselines
+- **Fee collection/removal**: Accept `feeShares[]` computed off-chain, burn fee LB tokens via proxy. Zero-amount entries are filtered by `_filterNonZero()` before calling `removeLiquidity` (LBPair reverts on zero amounts).
+- **Add to position**: Accept `previousFeesX/Y[]` and adjust baselines. Fees stay compounding until explicitly collected.
 
-**Functions:** `createPosition(...)`, `addToPosition(...)`, `collectFees(vault, positionId)`, `decreaseLiquidity(vault, positionId, percentage, ...)`, `removePosition(vault, positionId, ...)`, `getPosition(id)`, `getPositionsByVault(vault)`, `getAccruedFees(positionId)`
+**Functions:** `createPosition(...)`, `addToPosition(...)`, `collectFees(vault, positionId, feeShares[], amountXMin, amountYMin, deadline)`, `decreaseLiquidity(vault, positionId, percentage, feeShares[], amountXMin, amountYMin, deadline)`, `removePosition(vault, positionId, feeShares[], amountXMin, amountYMin, deadline)`, `getPosition(id)`, `getPositionsByVault(vault)`
 
 ---
 
@@ -328,7 +333,8 @@ Setting up on a new chain:
 1. Deploy `VaultFactory(deployer, permit2Address)`
 2. Deploy `BabyStepsStrategy()`
 3. Deploy all 6 validators
-4. Deploy `TJPositionManager(lbRouterAddress)` (if Trader Joe supported)
+4. Deploy `TJPositionProxy()` (implementation contract)
+4b. Deploy `TJPositionManager(lbRouterAddress, tjPositionProxyAddress)` (if Trader Joe supported)
 5. Register swap validators:
    - `factory.setSwapValidator(universalRouterAddress, universalRouterValidator)`
    - `factory.setSwapValidator(lbRouterAddress, tjSwapValidator)`

@@ -243,9 +243,14 @@ const lbPair = await MockLBPair.deploy(
 const MockLBRouter = await ethers.getContractFactory("MockLBRouter");
 const lbRouter = await MockLBRouter.deploy();
 
-// Deploy TJPositionManager and TJPositionValidator
+// Deploy TJPositionProxy (implementation) + TJPositionManager
+const TJPositionProxy = await ethers.getContractFactory("TJPositionProxy");
+const proxyImpl = await TJPositionProxy.deploy();
+
 const TJPositionManager = await ethers.getContractFactory("TJPositionManager");
-const positionManager = await TJPositionManager.deploy(await lbRouter.getAddress());
+const positionManager = await TJPositionManager.deploy(
+  await lbRouter.getAddress(), await proxyImpl.getAddress()
+);
 
 const TJPositionValidator = await ethers.getContractFactory("TJPositionValidator");
 const tjValidator = await TJPositionValidator.deploy();
@@ -382,6 +387,12 @@ encodeModifyLiquidities(actions, params, deadline)  — Top-level entry point
 ```
 encodeCreatePosition(vault, lbPair, amountX, amountY, amountXMin, amountYMin,
                      activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, deadline)
+encodeAddToPosition(vault, positionId, previousFeesX, previousFeesY, amountX, amountY,
+                    amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds,
+                    distributionX, distributionY, deadline)
+encodeCollectFees(vault, positionId, feeShares, amountXMin, amountYMin, deadline)
+encodeDecreaseLiquidity(vault, positionId, percentage, feeShares, amountXMin, amountYMin, deadline)
+encodeRemovePosition(vault, positionId, feeShares, amountXMin, amountYMin, deadline)
 ```
 
 ### Trader Joe Swap (TJSwapValidator.test.js)

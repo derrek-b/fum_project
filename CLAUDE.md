@@ -73,7 +73,8 @@ cd fum_testing && npx hardhat node       # Start local node
 - **VaultFactory** — Deploys and tracks PositionVault instances. Manages three validator registries (swap, liquidity, incentive).
 - **BabyStepsStrategy** — Conservative range-based automation strategy with configurable parameters.
 - **ParrisIslandStrategy** — Advanced adaptive strategy with dynamic range adjustments (in development).
-- **TJPositionManager** — Manages Trader Joe V2.2 liquidity bin positions (ERC1155-based).
+- **TJPositionManager** — Manages Trader Joe V2.2 liquidity bin positions via per-position EIP-1167 proxies. Off-chain fee math via LiquidityHelperContract.
+- **TJPositionProxy** — Minimal proxy (EIP-1167) cloned per Trader Joe position. Holds ERC1155 LB tokens for per-position fee attribution.
 - **MerklIncentiveValidator** — Validates Merkl Distributor `claim()` calls (selector + user == vault).
 - **StrategyBase** — Abstract base contract for strategy implementations.
 

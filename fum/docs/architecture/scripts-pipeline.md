@@ -47,6 +47,7 @@ Master orchestrator. Distributes contracts from `fum/contracts/` to all sibling 
 - `VaultFactory`
 - `PositionVault`
 - `TJPositionManager`
+- `TJPositionProxy`
 
 **VALIDATOR_CONTRACTS** (synced to fum_testing, bytecode extracted):
 - `UniversalRouterValidator`
@@ -101,6 +102,7 @@ Uses **solc directly** (not Hardhat) to compile contracts and extract ABIs. This
   'PositionVault.sol': 'PositionVault',
   'VaultFactory.sol': 'VaultFactory',
   'TJPositionManager.sol': 'TJPositionManager',
+  'TJPositionProxy.sol': 'TJPositionProxy',
   'validators/UniversalRouterValidator.sol': 'UniversalRouterValidator',
   'validators/UniswapV3PositionValidator.sol': 'UniswapV3PositionValidator',
   'validators/UniswapV4PositionValidator.sol': 'UniswapV4PositionValidator',
@@ -146,7 +148,7 @@ Reads compiled artifacts from fum_testing and outputs raw hex `.bin` files.
 **Input:** `fum_testing/artifacts/contracts/{ContractName}.sol/{ContractName}.json`
 **Output:** `fum/bytecode/{ContractName}.bin` (hex string, no `0x` prefix)
 
-**Extracted contracts:** All CORE_CONTRACTS + VALIDATOR_CONTRACTS (10 total)
+**Extracted contracts:** All CORE_CONTRACTS + VALIDATOR_CONTRACTS (11 total)
 
 **Prerequisite:** fum_testing must be compiled first (Step 2 of the sync pipeline handles this).
 

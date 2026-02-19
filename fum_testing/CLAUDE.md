@@ -33,6 +33,7 @@ test/unit/
 ├── BabyStepsStrategy.test.js          # Conservative strategy logic
 ├── ParrisIslandStrategy.test.js       # Advanced adaptive strategy
 ├── TJPositionManager.test.js          # Trader Joe V2.2 bin position management
+├── TJPositionProxy.test.js            # Proxy initialization, execution, and access control
 └── validators/
     ├── UniversalRouterValidator.test.js   # Swap calldata validation
     ├── UniswapV3PositionValidator.test.js # V3 mint/liquidity validation

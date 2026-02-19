@@ -301,12 +301,12 @@ Simplest validator pattern — all TJPositionManager functions take `address vau
 
 ### Selectors
 
-| Operation | Function Validated | Selector |
+| Operation | Function Validated | Selector Source Signature |
 |---|---|---|
-| `validateMint` | `createPosition(address vault, ...)` | `CREATE_POSITION_SELECTOR` |
-| `validateIncreaseLiquidity` | `addToPosition(address vault, ...)` | `ADD_TO_POSITION_SELECTOR` |
-| `validateDecreaseLiquidity` | `removePosition(address vault, ...)` OR `decreaseLiquidity(address vault, ...)` | Both accepted |
-| `validateCollect` | `collectFees(address vault, uint256)` | `COLLECT_FEES_SELECTOR` |
+| `validateMint` | `createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)` | `CREATE_POSITION_SELECTOR` |
+| `validateIncreaseLiquidity` | `addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)` | `ADD_TO_POSITION_SELECTOR` |
+| `validateDecreaseLiquidity` | `removePosition(address,uint256,uint256[],uint256,uint256,uint256)` OR `decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)` | Both accepted |
+| `validateCollect` | `collectFees(address,uint256,uint256[],uint256,uint256,uint256)` | `COLLECT_FEES_SELECTOR` |
 | `validateBurn` | — | Reverts "not yet implemented" |
 
 **All validation is identical:**
