@@ -93,6 +93,7 @@ const chains = {
         lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
         lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
         positionManagerAddress: "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",  // Populated after deployment
+        liquidityHelperAddress: "0xA5c68C9E55Dde3505e60c4B5eAe411e2977dfB35",
       },
     },
   },
@@ -117,7 +118,8 @@ const chains = {
         lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
         lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
         lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
-        positionManagerAddress: "0xe80a4962191410D6D07be8655c36F57D05d7034e",  // Populated per test run after TJPositionManager deployment
+        positionManagerAddress: "0xCBd482597a26c0255a5F38B3360bE2015D628187",  // Populated per test run after TJPositionManager deployment
+        liquidityHelperAddress: "0xA5c68C9E55Dde3505e60c4B5eAe411e2977dfB35",
       },
     },
   },

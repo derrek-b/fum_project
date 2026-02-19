@@ -267,8 +267,14 @@ export async function deployFUMContracts(deployer, config = {}) {
     } else {
       // Avalanche fork - deploy Trader Joe contracts
       const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_2');
+
+      // Deploy TJPositionProxy implementation (cloned per position)
+      contracts.tjPositionProxy = await deployContract(deployer, 'TJPositionProxy');
+
+      // Deploy TJPositionManager with router + proxy implementation
       contracts.tjPositionManager = await deployContract(deployer, 'TJPositionManager', [
-        tjAddresses.lbRouterAddress
+        tjAddresses.lbRouterAddress,
+        contracts.tjPositionProxy.address
       ]);
       contracts.tjPositionValidator = await deployContract(deployer, 'TJPositionValidator');
       contracts.tjSwapValidator = await deployContract(deployer, 'TJSwapValidator');
@@ -405,6 +411,7 @@ function mapContractName(contractName) {
     'UniversalRouterValidator': 'UniversalRouterValidator',
     'UniswapV3PositionValidator': 'UniswapV3PositionValidator',
     'UniswapV4PositionValidator': 'UniswapV4PositionValidator',
+    'TJPositionProxy': 'TJPositionProxy',
     'TJPositionManager': 'TJPositionManager',
     'TJPositionValidator': 'TJPositionValidator',
     'TJSwapValidator': 'TJSwapValidator',

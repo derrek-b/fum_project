@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-02-16T22:21:18.615Z
+Generated on: 2026-02-19T22:29:41.797Z
 
 ## Table of Contents
 
@@ -526,11 +526,7 @@ FUM Library - Main Entry Point
 
 **Path:** `src/services/merkl.js`
 
-**Imports:**
-- from `fum_library/services/merkl`
-
 **Exports:**
-- `configureMerkl` (function)
 - `clearIncentiveCache` (function)
 
 ---

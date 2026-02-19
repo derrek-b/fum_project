@@ -2525,7 +2525,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const position = result.positions[positionKeys[0]];
         const expectedFields = [
-          'id', 'pool', 'lowerBinId', 'upperBinId',
+          'id', 'pool', 'proxy', 'lowerBinId', 'upperBinId',
           'depositIds', 'liquidityMinted', 'active', 'createdAt', 'lastUpdated'
         ];
         expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
@@ -2537,6 +2537,7 @@ describe('TraderJoeV2_2Adapter', () => {
         for (const position of Object.values(result.positions)) {
           expect(typeof position.id).toBe('string');
           expect(typeof position.pool).toBe('string');
+          expect(typeof position.proxy).toBe('string');
           expect(typeof position.lowerBinId).toBe('number');
           expect(typeof position.upperBinId).toBe('number');
           expect(Array.isArray(position.depositIds)).toBe(true);
@@ -2689,7 +2690,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const pos = result.position;
 
         const expectedFields = [
-          'id', 'pool', 'lowerBinId', 'upperBinId',
+          'id', 'pool', 'proxy', 'lowerBinId', 'upperBinId',
           'depositIds', 'liquidityMinted', 'active', 'createdAt', 'lastUpdated'
         ];
         expect(Object.keys(pos).sort()).toEqual(expectedFields.sort());
@@ -2702,6 +2703,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         expect(typeof pos.id).toBe('string');
         expect(typeof pos.pool).toBe('string');
+        expect(typeof pos.proxy).toBe('string');
         expect(typeof pos.lowerBinId).toBe('number');
         expect(typeof pos.upperBinId).toBe('number');
         expect(Array.isArray(pos.depositIds)).toBe(true);
@@ -3040,7 +3042,7 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(resultFromString.fees1).toBe(resultFromNumber.fees1);
       }, 30000);
 
-      it('should return exactly 7 fields', async () => {
+      it('should return exactly 8 fields', async () => {
         if (!positionId) return;
 
         const result = await adapter.getAccruedFeesUSD(
@@ -3049,8 +3051,9 @@ describe('TraderJoeV2_2Adapter', () => {
           env.provider
         );
 
-        const expectedKeys = ['totalUSD', 'token0Fees', 'token1Fees', 'token0USD', 'token1USD', 'fees0', 'fees1'];
+        const expectedKeys = ['totalUSD', 'token0Fees', 'token1Fees', 'token0USD', 'token1USD', 'fees0', 'fees1', 'feeShares'];
         expect(Object.keys(result).sort()).toEqual(expectedKeys.sort());
+        expect(Array.isArray(result.feeShares)).toBe(true);
       }, 30000);
     });
   });
@@ -3163,14 +3166,14 @@ describe('TraderJoeV2_2Adapter', () => {
   });
 
   describe('generateRemoveLiquidityData', () => {
-    // ABI for decoding removePosition calldata (new 5-param, no percentage)
+    // ABI for decoding removePosition calldata (6-param with feeShares, no percentage)
     const removePositionIface = new ethers.utils.Interface([
-      "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
-    // ABI for decoding decreaseLiquidity calldata (6-param with percentage)
+    // ABI for decoding decreaseLiquidity calldata (7-param with percentage and feeShares)
     const decreaseLiquidityIface = new ethers.utils.Interface([
-      "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
     // Shared state for E2E tests — position created in nested beforeAll
@@ -3414,6 +3417,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
         expect(decoded.vault).toBe(testVault.address);
         expect(decoded.positionId.toString()).toBe(onChainPosition.id);
+        expect(Array.isArray(decoded.feeShares)).toBe(true);
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       }, 30000);
 
@@ -3432,6 +3436,7 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(decoded.vault).toBe(testVault.address);
         expect(decoded.positionId.toString()).toBe(onChainPosition.id);
         expect(decoded.percentage.toNumber()).toBe(50);
+        expect(Array.isArray(decoded.feeShares)).toBe(true);
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       }, 30000);
 
@@ -3501,6 +3506,7 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(q).toHaveProperty('amountY');
         expect(q).toHaveProperty('amountXMin');
         expect(q).toHaveProperty('amountYMin');
+        expect(q).toHaveProperty('feeShares');
         expect(q).toHaveProperty('deadline');
         expect(q).toHaveProperty('depositIds');
         expect(q).toHaveProperty('liquidityMinted');
@@ -3508,6 +3514,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         expect(q.positionId).toBe(onChainPosition.id);
         expect(q.percentage).toBe(100);
+        expect(Array.isArray(q.feeShares)).toBe(true);
         expect(Array.isArray(q.depositIds)).toBe(true);
         expect(Array.isArray(q.liquidityMinted)).toBe(true);
         expect(Array.isArray(q.amountsToRemove)).toBe(true);
@@ -4232,9 +4239,9 @@ describe('TraderJoeV2_2Adapter', () => {
       decimals: 6,
     };
 
-    // ABI for decoding addToPosition calldata
+    // ABI for decoding addToPosition calldata (14 params with previousFeesX/previousFeesY)
     const addToPositionIface = new ethers.utils.Interface([
-      "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
     ]);
 
     describe('Input Validation', () => {
@@ -4391,285 +4398,6 @@ describe('TraderJoeV2_2Adapter', () => {
         adapterNoPM.addresses.positionManagerAddress = '';
         await expect(adapterNoPM.generateAddLiquidityData(validParams()))
           .rejects.toThrow('No position manager address found');
-      });
-    });
-
-    describe('Success Cases', () => {
-      it('should generate valid calldata for existing position', async () => {
-        // Discover a real pool
-        let poolResult, poolData, positionRange;
-        try {
-          poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
-          poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
-        } catch (error) {
-          if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
-            console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping');
-            return;
-          }
-          throw error;
-        }
-
-        const result = await adapter.generateAddLiquidityData({
-          position: { id: '999', ...positionRange },
-          token0Amount: ethers.utils.parseEther('1').toString(),
-          token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        // Verify return structure
-        expect(result).toHaveProperty('to');
-        expect(result).toHaveProperty('data');
-        expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('quote');
-
-        // Verify 'to' is the position manager
-        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
-
-        // Verify value is zero
-        expect(result.value).toBe('0x00');
-
-        // Verify calldata can be decoded
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-        expect(decoded.vault).toBe('0x0000000000000000000000000000000000000001');
-        expect(decoded.positionId.toString()).toBe('999');
-        expect(decoded.activeIdDesired.toNumber()).toBe(poolData.activeId);
-      }, 60000);
-
-      it('should sort tokens to TJ canonical order (tokenX = lower address)', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
-
-        // Pass USDC as token0 (higher address) and WETH as token1 (lower address)
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '2000000000', // USDC amount
-          token1Amount: '1000000000000000000', // WETH amount
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: USDC,
-          token1Data: WETH,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-
-        // tokensSwapped should be true (USDC > WETH, so inputs were swapped)
-        expect(result.quote.tokensSwapped).toBe(true);
-
-        // amountX should be the WETH amount (lower address = tokenX)
-        expect(decoded.amountX.toString()).toBe('1000000000000000000');
-        // amountY should be the USDC amount (higher address = tokenY)
-        expect(decoded.amountY.toString()).toBe('2000000000');
-      });
-
-      it('should not swap when tokens are already in canonical order', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '1000000000000000000', // WETH
-          token1Amount: '2000000000', // USDC
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        expect(result.quote.tokensSwapped).toBe(false);
-
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-        expect(decoded.amountX.toString()).toBe('1000000000000000000'); // WETH
-        expect(decoded.amountY.toString()).toBe('2000000000'); // USDC
-      });
-
-      it('should apply slippage correctly to min amounts', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '10000',
-          token1Amount: '20000',
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 10, // 10% slippage
-          deadlineMinutes: 10,
-        });
-
-        // 10% slippage: min = amount * 90% = amount * 9000 / 10000
-        expect(result.quote.amountXMin).toBe('9000');
-        expect(result.quote.amountYMin).toBe('18000');
-      });
-
-      it('should include deltaIds and distributions from SDK in quote', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '1', lowerBinId: 8388605, upperBinId: 8388611 };
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '1000000000000000000',
-          token1Amount: '2000000000',
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        expect(Array.isArray(result.quote.deltaIds)).toBe(true);
-        expect(Array.isArray(result.quote.distributionX)).toBe(true);
-        expect(Array.isArray(result.quote.distributionY)).toBe(true);
-
-        // Number of bins should match the range
-        const expectedBins = position.upperBinId - position.lowerBinId + 1;
-        expect(result.quote.deltaIds.length).toBe(expectedBins);
-        expect(result.quote.distributionX.length).toBe(expectedBins);
-        expect(result.quote.distributionY.length).toBe(expectedBins);
-
-        // deltaIds should be relative to activeId
-        expect(result.quote.deltaIds[0]).toBe(-3); // 8388605 - 8388608
-        expect(result.quote.deltaIds[result.quote.deltaIds.length - 1]).toBe(3); // 8388611 - 8388608
-
-        // Verify distributions are present in calldata too
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-        expect(decoded.deltaIds.length).toBe(expectedBins);
-        expect(decoded.distributionX.length).toBe(expectedBins);
-        expect(decoded.distributionY.length).toBe(expectedBins);
-      });
-
-      it('should encode all 12 addToPosition parameters correctly', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '42', lowerBinId: 8388605, upperBinId: 8388611 };
-        const vaultAddress = '0x0000000000000000000000000000000000000001';
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '1000000000000000000',
-          token1Amount: '2000000000',
-          provider: env.provider,
-          walletAddress: vaultAddress,
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-
-        // 1. vault
-        expect(decoded.vault).toBe(vaultAddress);
-        // 2. positionId (key difference from createPosition)
-        expect(decoded.positionId.toString()).toBe('42');
-        // 3. amountX (WETH = lower address = tokenX)
-        expect(decoded.amountX.toString()).toBe('1000000000000000000');
-        // 4. amountY (USDC = higher address = tokenY)
-        expect(decoded.amountY.toString()).toBe('2000000000');
-        // 5. amountXMin (95% of amountX with 5% slippage)
-        expect(decoded.amountXMin.toString()).toBe('950000000000000000');
-        // 6. amountYMin (95% of amountY)
-        expect(decoded.amountYMin.toString()).toBe('1900000000');
-        // 7. activeIdDesired
-        expect(decoded.activeIdDesired.toNumber()).toBe(8388608);
-        // 8. idSlippage (should be > 0 for 5% slippage)
-        expect(decoded.idSlippage.toNumber()).toBeGreaterThan(0);
-        // 9-11. deltaIds, distributionX, distributionY
-        expect(decoded.deltaIds.length).toBe(7);
-        // 12. deadline (should be in the future)
-        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
-      });
-
-      it('should include positionId in quote', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20,
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '777', lowerBinId: 8388500, upperBinId: 8388700 };
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '1000000000000000000',
-          token1Amount: '2000000000',
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        expect(result.quote.positionId).toBe('777');
-        expect(result.quote.lbPair).toBe(poolData.address);
-        expect(result.quote.binStep).toBe(poolData.binStep);
-        expect(result.quote.activeId).toBe(poolData.activeId);
-      });
-
-      it('should compute idSlippage correctly for known values', async () => {
-        const poolData = {
-          activeId: 8388608,
-          binStep: 20, // 0.20% per bin
-          address: '0x0000000000000000000000000000000000000002',
-        };
-        const position = { id: '1', lowerBinId: 8388500, upperBinId: 8388700 };
-
-        const result = await adapter.generateAddLiquidityData({
-          position,
-          token0Amount: '1000000000000000000',
-          token1Amount: '2000000000',
-          provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
-          poolData,
-          token0Data: WETH,
-          token1Data: USDC,
-          slippageTolerance: 5,
-          deadlineMinutes: 10,
-        });
-
-        // Formula: floor(log(1 + 0.05) / log(1 + 20/10000))
-        // = floor(log(1.05) / log(1.002))
-        // = floor(0.04879 / 0.001998) = floor(24.42) = 24
-        const expected = Math.floor(Math.log(1.05) / Math.log(1.002));
-        expect(result.quote.idSlippage).toBe(expected);
       });
     });
 
@@ -4883,6 +4611,245 @@ describe('TraderJoeV2_2Adapter', () => {
 
         console.log(`  Full lifecycle: create → add → remove complete for position ${newPosId}`);
       }, 180000);
+
+      // --- Calldata encoding tests (ported from Success Cases, using real position ID) ---
+
+      it('should generate valid calldata for existing position', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+
+        const result = await adapter.generateAddLiquidityData({
+          position: { id: e2ePositionId.toString(), ...e2ePosition },
+          token0Amount: ethers.utils.parseEther('1').toString(),
+          token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result).toHaveProperty('to');
+        expect(result).toHaveProperty('data');
+        expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.value).toBe('0x00');
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.vault).toBe('0x0000000000000000000000000000000000000001');
+        expect(decoded.positionId.toString()).toBe(e2ePositionId.toString());
+        expect(decoded.activeIdDesired.toNumber()).toBe(e2ePoolData.activeId);
+      }, 60000);
+
+      it('should sort tokens to TJ canonical order (tokenX = lower address)', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
+
+        // Pass USDC as token0 (higher address) and WETH as token1 (lower address)
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '2000000000', // USDC amount
+          token1Amount: '1000000000000000000', // WETH amount
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: USDC,
+          token1Data: WETH,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+
+        // tokensSwapped should be true (USDC > WETH, so inputs were swapped)
+        expect(result.quote.tokensSwapped).toBe(true);
+
+        // amountX should be the WETH amount (lower address = tokenX)
+        expect(decoded.amountX.toString()).toBe('1000000000000000000');
+        // amountY should be the USDC amount (higher address = tokenY)
+        expect(decoded.amountY.toString()).toBe('2000000000');
+      }, 60000);
+
+      it('should not swap when tokens are already in canonical order', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000', // WETH
+          token1Amount: '2000000000', // USDC
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.quote.tokensSwapped).toBe(false);
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.amountX.toString()).toBe('1000000000000000000'); // WETH
+        expect(decoded.amountY.toString()).toBe('2000000000'); // USDC
+      }, 60000);
+
+      it('should apply slippage correctly to min amounts', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '10000',
+          token1Amount: '20000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 10, // 10% slippage
+          deadlineMinutes: 10,
+        });
+
+        // 10% slippage: min = amount * 90% = amount * 9000 / 10000
+        expect(result.quote.amountXMin).toBe('9000');
+        expect(result.quote.amountYMin).toBe('18000');
+      }, 60000);
+
+      it('should include deltaIds and distributions from SDK in quote', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        // Use custom bin range centered on activeId for predictable deltaIds
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePoolData.activeId - 3, upperBinId: e2ePoolData.activeId + 3 };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(Array.isArray(result.quote.deltaIds)).toBe(true);
+        expect(Array.isArray(result.quote.distributionX)).toBe(true);
+        expect(Array.isArray(result.quote.distributionY)).toBe(true);
+
+        // Number of bins should match the range
+        const expectedBins = 7; // activeId-3 to activeId+3
+        expect(result.quote.deltaIds.length).toBe(expectedBins);
+        expect(result.quote.distributionX.length).toBe(expectedBins);
+        expect(result.quote.distributionY.length).toBe(expectedBins);
+
+        // deltaIds should be relative to activeId
+        expect(result.quote.deltaIds[0]).toBe(-3);
+        expect(result.quote.deltaIds[result.quote.deltaIds.length - 1]).toBe(3);
+
+        // Verify distributions are present in calldata too
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.deltaIds.length).toBe(expectedBins);
+        expect(decoded.distributionX.length).toBe(expectedBins);
+        expect(decoded.distributionY.length).toBe(expectedBins);
+      }, 60000);
+
+      it('should encode all 14 addToPosition parameters correctly', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        // Use custom bin range centered on activeId for predictable deltaIds
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePoolData.activeId - 3, upperBinId: e2ePoolData.activeId + 3 };
+        const vaultAddress = '0x0000000000000000000000000000000000000001';
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: vaultAddress,
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+
+        // 1. vault
+        expect(decoded.vault).toBe(vaultAddress);
+        // 2. positionId
+        expect(decoded.positionId.toString()).toBe(e2ePositionId.toString());
+        // 3. previousFeesX (fee-aware baseline)
+        expect(Array.isArray(decoded.previousFeesX)).toBe(true);
+        // 4. previousFeesY
+        expect(Array.isArray(decoded.previousFeesY)).toBe(true);
+        // 5. amountX (WETH = lower address = tokenX)
+        expect(decoded.amountX.toString()).toBe('1000000000000000000');
+        // 6. amountY (USDC = higher address = tokenY)
+        expect(decoded.amountY.toString()).toBe('2000000000');
+        // 7. amountXMin (95% of amountX with 5% slippage)
+        expect(decoded.amountXMin.toString()).toBe('950000000000000000');
+        // 8. amountYMin (95% of amountY)
+        expect(decoded.amountYMin.toString()).toBe('1900000000');
+        // 9. activeIdDesired
+        expect(decoded.activeIdDesired.toNumber()).toBe(e2ePoolData.activeId);
+        // 10. idSlippage (should be > 0 for 5% slippage)
+        expect(decoded.idSlippage.toNumber()).toBeGreaterThan(0);
+        // 11-13. deltaIds, distributionX, distributionY
+        expect(decoded.deltaIds.length).toBe(7);
+        // 14. deadline (should be in the future)
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      }, 60000);
+
+      it('should include positionId and previousFees in quote', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        expect(result.quote.positionId).toBe(e2ePositionId.toString());
+        expect(result.quote.lbPair).toBe(e2ePoolData.address);
+        expect(result.quote.binStep).toBe(e2ePoolData.binStep);
+        expect(result.quote.activeId).toBe(e2ePoolData.activeId);
+        expect(Array.isArray(result.quote.previousFeesX)).toBe(true);
+        expect(Array.isArray(result.quote.previousFeesY)).toBe(true);
+      }, 60000);
+
+      it('should compute idSlippage correctly for known values', async () => {
+        if (!e2ePosition || !e2ePoolData) return;
+        const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
+
+        const result = await adapter.generateAddLiquidityData({
+          position,
+          token0Amount: '1000000000000000000',
+          token1Amount: '2000000000',
+          provider: env.provider,
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          poolData: e2ePoolData,
+          token0Data: WETH,
+          token1Data: USDC,
+          slippageTolerance: 5,
+          deadlineMinutes: 10,
+        });
+
+        // Formula: floor(log(1 + slippage) / log(1 + binStep/10000))
+        const expected = Math.floor(Math.log(1.05) / Math.log(1 + e2ePoolData.binStep / 10000));
+        expect(result.quote.idSlippage).toBe(expected);
+      }, 60000);
     });
   });
 
@@ -5510,15 +5477,15 @@ describe('TraderJoeV2_2Adapter', () => {
   });
 
   describe('parseIncreaseLiquidityReceipt', () => {
-    // Helper: encode a PositionCreated event log
-    function createPositionCreatedLog(positionId, vault, lbPair, depositIds, liquidityMinted, amountXAdded, amountYAdded) {
+    // Helper: encode a PositionCreated event log (with proxy param)
+    function createPositionCreatedLog(positionId, vault, lbPair, proxy, depositIds, liquidityMinted, amountXAdded, amountYAdded) {
       const iface = new ethers.utils.Interface([
-        'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+        'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, address proxy, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
       ]);
       const topic0 = iface.getEventTopic('PositionCreated');
       const data = ethers.utils.defaultAbiCoder.encode(
-        ['uint256[]', 'uint256[]', 'uint256', 'uint256'],
-        [depositIds, liquidityMinted, amountXAdded, amountYAdded]
+        ['address', 'uint256[]', 'uint256[]', 'uint256', 'uint256'],
+        [proxy, depositIds, liquidityMinted, amountXAdded, amountYAdded]
       );
       return {
         address: lbPair,
@@ -5591,12 +5558,15 @@ describe('TraderJoeV2_2Adapter', () => {
       });
     });
 
+    const PROXY_ADDR = '0x4444444444444444444444444444444444444444';
+
     describe('PositionCreated parsing', () => {
       it('should parse PositionCreated event from a new position', () => {
         const log = createPositionCreatedLog(
           1,
           VAULT_ADDR,
           LB_PAIR_ADDR,
+          PROXY_ADDR,
           [8388607, 8388608, 8388609],
           [1000, 2000, 1000],
           ethers.utils.parseEther('1'),
@@ -5643,6 +5613,7 @@ describe('TraderJoeV2_2Adapter', () => {
           1,
           VAULT_ADDR,
           LB_PAIR_ADDR,
+          PROXY_ADDR,
           [8388607, 8388608, 8388609],
           [1000, 2000, 1000],
           ethers.utils.parseEther('1'),
@@ -5773,45 +5744,85 @@ describe('TraderJoeV2_2Adapter', () => {
     });
 
     describe('Happy path', () => {
-      it('should return { to, data, value } with correct structure', async () => {
+      it('should return { to, data, value, quote } with feeData provided', async () => {
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
           walletAddress: '0x0000000000000000000000000000000000000001',
+          feeData: {
+            feeShares: ['100', '200', '300'],
+            fees0: '1000000000000000',
+            fees1: '500000',
+          },
         });
 
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
+        expect(result).toHaveProperty('quote');
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
         expect(result.value).toBe('0x00');
       });
 
-      it('should encode collectFees selector with correct params', async () => {
+      it('should encode new collectFees selector with feeShares, mins, deadline', async () => {
         const walletAddress = '0x0000000000000000000000000000000000000001';
+        const feeShares = ['100', '200', '300'];
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
           walletAddress,
+          feeData: { feeShares, fees0: '1000000000000000', fees1: '500000' },
+          slippageTolerance: 0.5,
+          deadlineMinutes: 20,
         });
 
         const iface = new ethers.utils.Interface([
-          "function collectFees(address vault, uint256 positionId)"
+          "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const decoded = iface.decodeFunctionData('collectFees', result.data);
         expect(decoded.vault).toBe(walletAddress);
         expect(decoded.positionId.toString()).toBe('42');
+        expect(decoded.feeShares.length).toBe(3);
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       });
 
-      it('should accept position.id = 0', async () => {
+      it('should accept position.id = 0 with feeData', async () => {
         const result = await adapter.generateClaimFeesData({
           position: { id: 0 },
           walletAddress: '0x0000000000000000000000000000000000000001',
+          feeData: { feeShares: ['100'], fees0: '1000', fees1: '500' },
         });
 
         const iface = new ethers.utils.Interface([
-          "function collectFees(address vault, uint256 positionId)"
+          "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const decoded = iface.decodeFunctionData('collectFees', result.data);
         expect(decoded.positionId.toString()).toBe('0');
+      });
+
+      it('should return null when all feeShares are zero', async () => {
+        const result = await adapter.generateClaimFeesData({
+          position: { id: '42' },
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          feeData: { feeShares: ['0', '0', '0'], fees0: '0', fees1: '0' },
+        });
+        expect(result).toBeNull();
+      });
+
+      it('should throw when neither feeData nor provider is given', async () => {
+        await expect(adapter.generateClaimFeesData({
+          position: { id: '42' },
+          walletAddress: '0x0000000000000000000000000000000000000001',
+        })).rejects.toThrow('provider is required when feeData is not provided');
+      });
+
+      it('should include feeShares, amountXMin, amountYMin in quote', async () => {
+        const result = await adapter.generateClaimFeesData({
+          position: { id: '42' },
+          walletAddress: '0x0000000000000000000000000000000000000001',
+          feeData: { feeShares: ['100', '200'], fees0: '1000000', fees1: '500' },
+        });
+        expect(result.quote).toHaveProperty('feeShares');
+        expect(result.quote).toHaveProperty('amountXMin');
+        expect(result.quote).toHaveProperty('amountYMin');
       });
     });
   });

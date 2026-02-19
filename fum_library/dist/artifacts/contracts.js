@@ -711,7 +711,7 @@
     ],
     "addresses": {
       "1337": "0x6C942D6B9f70F37368505d1D2c5687A1A2992A32",
-      "1338": "0x636279C6135f2F50eFDFF6650A38Defb3437AC42",
+      "1338": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -2229,10 +2229,36 @@
             "internalType": "address",
             "name": "_lbRouter",
             "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "_proxyImplementation",
+            "type": "address"
           }
         ],
         "stateMutability": "nonpayable",
         "type": "constructor"
+      },
+      {
+        "inputs": [],
+        "name": "FailedDeployment",
+        "type": "error"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "balance",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "needed",
+            "type": "uint256"
+          }
+        ],
+        "name": "InsufficientBalance",
+        "type": "error"
       },
       {
         "inputs": [],
@@ -2306,6 +2332,12 @@
             "indexed": true,
             "internalType": "address",
             "name": "lbPair",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "address",
+            "name": "proxy",
             "type": "address"
           },
           {
@@ -2429,6 +2461,16 @@
             "type": "uint256"
           },
           {
+            "internalType": "uint256[]",
+            "name": "previousFeesX",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "previousFeesY",
+            "type": "uint256[]"
+          },
+          {
             "internalType": "uint256",
             "name": "amountX",
             "type": "uint256"
@@ -2505,6 +2547,26 @@
           {
             "internalType": "uint256",
             "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "feeShares",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
             "type": "uint256"
           }
         ],
@@ -2616,6 +2678,11 @@
             "type": "uint256"
           },
           {
+            "internalType": "uint256[]",
+            "name": "feeShares",
+            "type": "uint256[]"
+          },
+          {
             "internalType": "uint256",
             "name": "amountXMin",
             "type": "uint256"
@@ -2655,30 +2722,6 @@
             "type": "uint256"
           }
         ],
-        "name": "getAccruedFees",
-        "outputs": [
-          {
-            "internalType": "uint256[]",
-            "name": "feesX",
-            "type": "uint256[]"
-          },
-          {
-            "internalType": "uint256[]",
-            "name": "feesY",
-            "type": "uint256[]"
-          }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
-            "internalType": "uint256",
-            "name": "positionId",
-            "type": "uint256"
-          }
-        ],
         "name": "getPosition",
         "outputs": [
           {
@@ -2704,6 +2747,11 @@
                 "type": "address"
               },
               {
+                "internalType": "address",
+                "name": "proxy",
+                "type": "address"
+              },
+              {
                 "internalType": "uint16",
                 "name": "binStep",
                 "type": "uint16"
@@ -2720,12 +2768,12 @@
               },
               {
                 "internalType": "uint256[]",
-                "name": "originalShareX",
+                "name": "previousX",
                 "type": "uint256[]"
               },
               {
                 "internalType": "uint256[]",
-                "name": "originalShareY",
+                "name": "previousY",
                 "type": "uint256[]"
               },
               {
@@ -2788,6 +2836,126 @@
       {
         "inputs": [],
         "name": "lbRouter",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "proxyImplementation",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "feeShares",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountXMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountYMin",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "name": "removePosition",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "amountX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountY",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      }
+    ],
+    "addresses": {
+      "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e",
+      "1338": "0xCBd482597a26c0255a5F38B3360bE2015D628187"
+    }
+  },
+  "TJPositionProxy": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "execute",
+        "outputs": [
+          {
+            "internalType": "bytes",
+            "name": "result",
+            "type": "bytes"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_manager",
+            "type": "address"
+          }
+        ],
+        "name": "initialize",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "manager",
         "outputs": [
           {
             "internalType": "address",
@@ -2879,50 +3047,6 @@
       {
         "inputs": [
           {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "positionId",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "amountXMin",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "amountYMin",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "deadline",
-            "type": "uint256"
-          }
-        ],
-        "name": "removePosition",
-        "outputs": [
-          {
-            "internalType": "uint256",
-            "name": "amountX",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "amountY",
-            "type": "uint256"
-          }
-        ],
-        "stateMutability": "nonpayable",
-        "type": "function"
-      },
-      {
-        "inputs": [
-          {
             "internalType": "bytes4",
             "name": "interfaceId",
             "type": "bytes4"
@@ -2940,10 +3064,7 @@
         "type": "function"
       }
     ],
-    "addresses": {
-      "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e",
-      "1338": "0xe80a4962191410D6D07be8655c36F57D05d7034e"
-    }
+    "addresses": {}
   },
   "UniversalRouterValidator": {
     "abi": [
@@ -3253,7 +3374,7 @@
     ],
     "addresses": {
       "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17",
-      "1338": "0xCBd482597a26c0255a5F38B3360bE2015D628187"
+      "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
     }
   },
   "TJSwapValidator": {
@@ -3278,7 +3399,7 @@
       }
     ],
     "addresses": {
-      "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
+      "1338": "0xC89EEc2129aBAC411BB422482f184CD252C7721f"
     }
   },
   "MerklIncentiveValidator": {

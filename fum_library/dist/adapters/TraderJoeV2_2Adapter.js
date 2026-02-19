@@ -22,7 +22,9 @@ import {
   LBQuoterV21ABI,
   LBFactoryV21ABI,
   LB_FACTORY_V21_ADDRESS,
-  getUniformDistributionFromBinRange
+  LiquidityHelperV2ABI,
+  getUniformDistributionFromBinRange,
+  Bin,
 } from "@traderjoe-xyz/sdk-v2";
 
 const ERC20ABI = ERC20ARTIFACT.abi;
@@ -384,6 +386,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         position: {
           id: String(tokenId),
           pool: poolAddress,
+          proxy: positionData.proxy,
           lowerBinId: Math.min(...depositIds),
           upperBinId: Math.max(...depositIds),
           depositIds,
@@ -430,35 +433,26 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       throw new Error('provider is required');
     }
 
-    // Create position manager contract instance
-    const positionManager = new ethers.Contract(
-      this.addresses.positionManagerAddress,
-      contractData.TJPositionManager.abi,
-      provider
-    );
+    // Fetch position on-chain data (baselines, proxy, token addresses)
+    const posData = await this._getPositionOnChainData(position.id, provider);
 
-    // Fetch accrued fees and position data in parallel
-    // getAccruedFees returns per-bin fee arrays (feesX[], feesY[])
-    // getPosition returns struct with tokenX/tokenY addresses for decimal lookup
-    const [feeData, positionData] = await Promise.all([
-      positionManager.getAccruedFees(position.id),
-      positionManager.getPosition(position.id),
-    ]);
+    // Compute feeShares and earned fees via LiquidityHelperV2
+    const feeResult = await this._computeFeeShares(posData, provider);
 
     // Sum per-bin fees using BigInt for precision
     let totalFeesX = BigInt(0);
     let totalFeesY = BigInt(0);
 
-    for (const feeX of feeData.feesX) {
-      totalFeesX += BigInt(feeX.toString());
+    for (const feeX of feeResult.feesX) {
+      totalFeesX += BigInt(feeX);
     }
-    for (const feeY of feeData.feesY) {
-      totalFeesY += BigInt(feeY.toString());
+    for (const feeY of feeResult.feesY) {
+      totalFeesY += BigInt(feeY);
     }
 
     // Look up token decimals (tokenX = lower address = token0)
-    const tokenXData = getTokenByAddress(positionData.tokenX, this.chainId);
-    const tokenYData = getTokenByAddress(positionData.tokenY, this.chainId);
+    const tokenXData = getTokenByAddress(posData.tokenX, this.chainId);
+    const tokenYData = getTokenByAddress(posData.tokenY, this.chainId);
 
     // Format fees (divide by 10^decimals)
     const token0Fees = Number(totalFeesX) / Math.pow(10, tokenXData.decimals);
@@ -477,11 +471,15 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       token1USD,
       fees0: totalFeesX.toString(),
       fees1: totalFeesY.toString(),
+      feeShares: feeResult.feeShares,
     };
   }
 
   async generateClaimFeesData(params) {
-    const { position, walletAddress } = params;
+    const {
+      position, walletAddress, provider, feeData,
+      slippageTolerance = 0.5, deadlineMinutes = 20
+    } = params;
 
     if (!position || typeof position !== 'object') throw new Error("Position parameter is required");
     if (position.id === null || position.id === undefined) throw new Error("Position id is required");
@@ -489,14 +487,53 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     try { ethers.utils.getAddress(walletAddress); } catch { throw new Error(`Invalid wallet address: ${walletAddress}`); }
     if (!this.addresses?.positionManagerAddress) throw new Error("No position manager address configured");
 
+    // Get feeShares: from threaded feeData (strategy path) or compute fresh (frontend path)
+    let feeShares, feesX, feesY;
+    if (feeData && feeData.feeShares) {
+      feeShares = feeData.feeShares;
+      feesX = feeData.fees0 ? [feeData.fees0] : null;
+      feesY = feeData.fees1 ? [feeData.fees1] : null;
+    } else {
+      if (!provider) throw new Error("provider is required when feeData is not provided");
+      const posData = await this._getPositionOnChainData(position.id, provider);
+      const computed = await this._computeFeeShares(posData, provider);
+      feeShares = computed.feeShares;
+      feesX = computed.feesX;
+      feesY = computed.feesY;
+    }
+
+    // Early return null if all feeShares are zero (nothing to collect)
+    const allZero = feeShares.every(fs => fs === '0');
+    if (allZero) {
+      return null;
+    }
+
+    // Compute slippage minimums from fee amounts
+    const slippageBps = BigInt(Math.round(slippageTolerance * 100));
+    let totalFeesX = BigInt(0);
+    let totalFeesY = BigInt(0);
+    if (feesX) {
+      for (const fx of feesX) totalFeesX += BigInt(fx);
+    }
+    if (feesY) {
+      for (const fy of feesY) totalFeesY += BigInt(fy);
+    }
+    const amountXMin = (totalFeesX * (10000n - slippageBps) / 10000n).toString();
+    const amountYMin = (totalFeesY * (10000n - slippageBps) / 10000n).toString();
+
+    const deadline = this._createDeadline(deadlineMinutes);
+
     const iface = new ethers.utils.Interface([
-      "function collectFees(address vault, uint256 positionId)"
+      "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
     return {
       to: this.addresses.positionManagerAddress,
-      data: iface.encodeFunctionData("collectFees", [walletAddress, position.id]),
+      data: iface.encodeFunctionData("collectFees", [
+        walletAddress, position.id, feeShares, amountXMin, amountYMin, deadline
+      ]),
       value: '0x00',
+      quote: { feeShares, feesX, feesY, amountXMin, amountYMin },
     };
   }
 
@@ -820,7 +857,14 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     const amountXStr = amountX.toString();
     const amountYStr = amountY.toString();
 
-    // --- Apply slippage to compute mins ---
+    // --- Compute feeShares via LiquidityHelperV2 ---
+    const posData = await this._getPositionOnChainData(position.id, provider);
+    const { feeShares } = await this._computeFeeShares(posData, provider);
+
+    // --- Apply slippage to principal only ---
+    // Fees are deterministic (based on feeShares passed in) and not susceptible to
+    // sandwich attacks. Including fees in the minimum risks reverts from rounding
+    // differences between off-chain helper and on-chain contract math.
     const slippageBps = BigInt(Math.round(slippageTolerance * 100));
     const amountXMin = (BigInt(amountXStr) * (10000n - slippageBps) / 10000n).toString();
     const amountYMin = (BigInt(amountYStr) * (10000n - slippageBps) / 10000n).toString();
@@ -833,17 +877,17 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
 
     if (percentage === 100) {
       const iface = new ethers.utils.Interface([
-        "function removePosition(address vault, uint256 positionId, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       calldata = iface.encodeFunctionData("removePosition", [
-        walletAddress, position.id, amountXMin, amountYMin, deadline
+        walletAddress, position.id, feeShares, amountXMin, amountYMin, deadline
       ]);
     } else {
       const iface = new ethers.utils.Interface([
-        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       calldata = iface.encodeFunctionData("decreaseLiquidity", [
-        walletAddress, position.id, percentage, amountXMin, amountYMin, deadline
+        walletAddress, position.id, percentage, feeShares, amountXMin, amountYMin, deadline
       ]);
     }
 
@@ -858,6 +902,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         amountY: amountYStr,
         amountXMin,
         amountYMin,
+        feeShares,
         deadline,
         depositIds: position.depositIds,
         liquidityMinted: position.liquidityMinted,
@@ -1024,10 +1069,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     const amountYMin = (BigInt(amountY) * slipMul / 10000n).toString();
 
     // --- Compute idSlippage from price slippage ---
-    const priceSlippage = slippageTolerance / 100;
-    const idSlippage = Math.floor(
-      Math.log(1 + priceSlippage) / Math.log(1 + poolData.binStep / 1e4)
-    );
+    const idSlippage = Bin.getIdSlippageFromPriceSlippage(slippageTolerance / 100, poolData.binStep);
 
     // --- Generate bin distribution using SDK ---
     const { deltaIds, distributionX, distributionY } =
@@ -1036,14 +1078,27 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     // --- Compute deadline ---
     const deadline = this._createDeadline(deadlineMinutes);
 
+    // --- Fetch current fees for previousFeesX/previousFeesY ---
+    const posData = await this._getPositionOnChainData(position.id, provider);
+    const helper = new ethers.Contract(
+      this.addresses.liquidityHelperAddress, LiquidityHelperV2ABI, provider
+    );
+    const feesResult = await helper.getAmountsAndFeesEarnedOf(
+      posData.lbPair, posData.proxy, posData.depositIds, posData.previousX, posData.previousY
+    );
+    const previousFeesX = feesResult.feesX.map(f => f.toString());
+    const previousFeesY = feesResult.feesY.map(f => f.toString());
+
     // --- Encode addToPosition calldata ---
     const iface = new ethers.utils.Interface([
-      "function addToPosition(address vault, uint256 positionId, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
     ]);
 
     const calldata = iface.encodeFunctionData("addToPosition", [
       walletAddress,
       position.id,
+      previousFeesX,
+      previousFeesY,
       amountX,
       amountY,
       amountXMin,
@@ -1066,6 +1121,8 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         amountY,
         amountXMin,
         amountYMin,
+        previousFeesX,
+        previousFeesY,
         deltaIds,
         distributionX: distributionX.map(d => d.toString()),
         distributionY: distributionY.map(d => d.toString()),
@@ -1402,11 +1459,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     const amountYMin = (BigInt(amountY) * slipMul / 10000n).toString();
 
     // --- Compute idSlippage from price slippage ---
-    // Formula from TJ SDK Bin.getIdSlippageFromPriceSlippage (not exported, so inline)
-    const priceSlippage = slippageTolerance / 100;
-    const idSlippage = Math.floor(
-      Math.log(1 + priceSlippage) / Math.log(1 + poolData.binStep / 1e4)
-    );
+    const idSlippage = Bin.getIdSlippageFromPriceSlippage(slippageTolerance / 100, poolData.binStep);
 
     // --- Generate bin distribution using SDK ---
     const { deltaIds, distributionX, distributionY } =
@@ -1453,6 +1506,60 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         binStep: poolData.binStep,
         activeId: poolData.activeId
       }
+    };
+  }
+
+  /**
+   * Read position data from TJPositionManager contract
+   * @private
+   * @param {string|number} positionId - Position ID
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<Object>} Position on-chain data with string arrays
+   */
+  async _getPositionOnChainData(positionId, provider) {
+    const pm = new ethers.Contract(
+      this.addresses.positionManagerAddress, contractData.TJPositionManager.abi, provider
+    );
+    const pos = await pm.getPosition(positionId);
+    return {
+      lbPair: pos.lbPair,
+      proxy: pos.proxy,
+      tokenX: pos.tokenX,
+      tokenY: pos.tokenY,
+      depositIds: pos.depositIds.map(id => id.toString()),
+      liquidityMinted: pos.liquidityMinted.map(lm => lm.toString()),
+      previousX: pos.previousX.map(x => x.toString()),
+      previousY: pos.previousY.map(y => y.toString()),
+      active: pos.active,
+      binStep: Number(pos.binStep),
+    };
+  }
+
+  /**
+   * Compute feeShares and earned fees via LiquidityHelperV2 contract
+   * Two-step: getLiquiditiesForAmounts -> getFeeSharesAndFeesEarnedOf
+   * @private
+   * @param {Object} posData - Position on-chain data from _getPositionOnChainData
+   * @param {Object} provider - Ethers provider
+   * @returns {Promise<{feeShares: string[], feesX: string[], feesY: string[]}>}
+   */
+  async _computeFeeShares(posData, provider) {
+    const helper = new ethers.Contract(
+      this.addresses.liquidityHelperAddress, LiquidityHelperV2ABI, provider
+    );
+
+    const liquidities = await helper.getLiquiditiesForAmounts(
+      posData.lbPair, posData.depositIds, posData.previousX, posData.previousY
+    );
+
+    const result = await helper.getFeeSharesAndFeesEarnedOf(
+      posData.lbPair, posData.proxy, posData.depositIds, liquidities
+    );
+
+    return {
+      feeShares: result.feeShares.map(fs => fs.toString()),
+      feesX: result.feesX.map(f => f.toString()),
+      feesY: result.feesY.map(f => f.toString()),
     };
   }
 
@@ -1995,7 +2102,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     }
 
     const positionCreatedIface = new ethers.utils.Interface([
-      'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
+      'event PositionCreated(uint256 indexed positionId, address indexed vault, address indexed lbPair, address proxy, uint256[] depositIds, uint256[] liquidityMinted, uint256 amountXAdded, uint256 amountYAdded)'
     ]);
     const positionCreatedTopic = positionCreatedIface.getEventTopic('PositionCreated');
 

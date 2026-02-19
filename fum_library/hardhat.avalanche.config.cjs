@@ -20,6 +20,9 @@ module.exports = {
         url: `https://avax-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
       },
       hardfork: "cancun",
+      chains: {
+        43114: { hardforkHistory: { cancun: 0 } },
+      },
       accounts: {
         mnemonic: "debris coral coral sleep shed prison nation mountain fatigue prosper dose portion",
         count: 10,
