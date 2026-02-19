@@ -3,17 +3,22 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/ILBPair.sol";
 import "./interfaces/ILBRouter.sol";
 
+interface ITJPositionProxy {
+    function initialize(address _manager) external;
+    function execute(address to, bytes calldata data) external returns (bytes memory);
+}
+
 /**
  * @title TJPositionManager
- * @notice Position manager for Trader Joe V2.1 Liquidity Book positions
- * @dev Holds ERC1155 LB tokens on behalf of vaults and tracks positions with
- *      auto-incrementing IDs. Architecturally consistent with how Uniswap V3/V4
- *      position managers work.
+ * @notice Position manager for Trader Joe V2.2 Liquidity Book positions
+ * @dev Each position gets an EIP-1167 minimal proxy that holds the ERC1155 LB tokens,
+ *      enabling per-position fee attribution. Fee math is computed off-chain via
+ *      LiquidityHelperContract and passed in as feeShares/previousFees parameters.
  *
  *      This contract is called by PositionVault.mint() after validation by
  *      TJPositionValidator via VaultFactory.validateMint().
@@ -24,13 +29,14 @@ import "./interfaces/ILBRouter.sol";
  *            -> TJPositionValidator.validateMint(calldata, vault)
  *          -> TJPositionManager.createPosition() executes
  *            1. Verify msg.sender == vault param
- *            2. Pull tokens from vault via transferFrom
- *            3. Approve LBRouter, call addLiquidity(to=self, refundTo=vault)
- *            4. Record position (ID, vault, lbPair, depositIds, liquidityMinted)
- *            5. Reset approvals, refund any remaining tokens
- *            6. Emit PositionCreated event
+ *            2. Deploy proxy via Clones.clone(), initialize
+ *            3. Pull tokens from vault → manager → proxy
+ *            4. Via proxy: approve LBRouter, call addLiquidity(to=proxy, refundTo=vault)
+ *            5. Record position (ID, vault, proxy, lbPair, depositIds, liquidityMinted)
+ *            6. Via proxy: reset approvals, sweep leftover tokens to vault
+ *            7. Emit PositionCreated event
  */
-contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
+contract TJPositionManager is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct Position {
@@ -38,16 +44,18 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address lbPair;
         address tokenX;
         address tokenY;
+        address proxy;
         uint16 binStep;
         uint256[] depositIds;
         uint256[] liquidityMinted;
-        uint256[] originalShareX;
-        uint256[] originalShareY;
+        uint256[] previousX;
+        uint256[] previousY;
         uint256 createdAt;
         bool active;
     }
 
     address public immutable lbRouter;
+    address public immutable proxyImplementation;
     uint256 private _nextPositionId = 1;
     mapping(uint256 => Position) private _positions;
     mapping(address => uint256[]) private _vaultPositions;
@@ -56,6 +64,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         uint256 indexed positionId,
         address indexed vault,
         address indexed lbPair,
+        address proxy,
         uint256[] depositIds,
         uint256[] liquidityMinted,
         uint256 amountXAdded,
@@ -87,13 +96,15 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         uint256 amountY
     );
 
-    constructor(address _lbRouter) {
+    constructor(address _lbRouter, address _proxyImplementation) {
         require(_lbRouter != address(0), "TJPositionManager: zero router");
+        require(_proxyImplementation != address(0), "TJPositionManager: zero proxy impl");
         lbRouter = _lbRouter;
+        proxyImplementation = _proxyImplementation;
     }
 
     /**
-     * @notice Create a new liquidity position on a Trader Joe V2.1 LB pair
+     * @notice Create a new liquidity position on a Trader Joe V2.2 LB pair
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param lbPair The Liquidity Book pair to add liquidity to
      * @param amountX Amount of tokenX to deposit
@@ -130,15 +141,27 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address tokenY = ILBPair(lbPair).getTokenY();
         uint16 binStep = ILBPair(lbPair).getBinStep();
 
-        // Pull tokens from vault
+        // Deploy and initialize proxy
+        address proxy = Clones.clone(proxyImplementation);
+        ITJPositionProxy(proxy).initialize(address(this));
+
+        // Pull tokens from vault → manager → proxy
         IERC20(tokenX).safeTransferFrom(vault, address(this), amountX);
         IERC20(tokenY).safeTransferFrom(vault, address(this), amountY);
+        IERC20(tokenX).safeTransfer(proxy, amountX);
+        IERC20(tokenY).safeTransfer(proxy, amountY);
 
-        // Approve LBRouter for the token amounts
-        IERC20(tokenX).approve(lbRouter, amountX);
-        IERC20(tokenY).approve(lbRouter, amountY);
+        // Via proxy: approve LBRouter for token amounts
+        ITJPositionProxy(proxy).execute(
+            tokenX,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountX)
+        );
+        ITJPositionProxy(proxy).execute(
+            tokenY,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountY)
+        );
 
-        // Call addLiquidity -- LB tokens sent to this contract, refund to vault
+        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to vault)
         ILBRouter.LiquidityParameters memory params = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
@@ -152,34 +175,43 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             deltaIds: deltaIds,
             distributionX: distributionX,
             distributionY: distributionY,
-            to: address(this),
+            to: proxy,
             refundTo: vault,
             deadline: deadline
         });
 
+        bytes memory returnData = ITJPositionProxy(proxy).execute(
+            lbRouter,
+            abi.encodeWithSelector(ILBRouter.addLiquidity.selector, params)
+        );
+
         (uint256 amountXAdded, uint256 amountYAdded,,,uint256[] memory depositedIds, uint256[] memory liquidityAmounts)
-            = ILBRouter(lbRouter).addLiquidity(params);
+            = abi.decode(returnData, (uint256, uint256, uint256, uint256, uint256[], uint256[]));
 
-        // Belt-and-suspenders: refund any tokens remaining in this contract
-        uint256 balX = IERC20(tokenX).balanceOf(address(this));
-        if (balX > 0) IERC20(tokenX).safeTransfer(vault, balX);
-        uint256 balY = IERC20(tokenY).balanceOf(address(this));
-        if (balY > 0) IERC20(tokenY).safeTransfer(vault, balY);
+        // Via proxy: reset approvals
+        ITJPositionProxy(proxy).execute(
+            tokenX,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
+        );
+        ITJPositionProxy(proxy).execute(
+            tokenY,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
+        );
 
-        // Reset approvals
-        IERC20(tokenX).approve(lbRouter, 0);
-        IERC20(tokenY).approve(lbRouter, 0);
+        // Belt-and-suspenders: sweep leftover tokens from proxy to vault
+        _sweepProxyTokens(proxy, tokenX, vault);
+        _sweepProxyTokens(proxy, tokenY, vault);
 
-        // Calculate original share of reserves per bin
+        // Calculate baselines (previousX/Y)
         uint256 len = depositedIds.length;
-        uint256[] memory origShareX = new uint256[](len);
-        uint256[] memory origShareY = new uint256[](len);
+        uint256[] memory prevX = new uint256[](len);
+        uint256[] memory prevY = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
             uint256 supply = ILBPair(lbPair).totalSupply(depositedIds[i]);
             if (supply > 0) {
                 (uint128 reserveX, uint128 reserveY) = ILBPair(lbPair).getBin(uint24(depositedIds[i]));
-                origShareX[i] = liquidityAmounts[i] * uint256(reserveX) / supply;
-                origShareY[i] = liquidityAmounts[i] * uint256(reserveY) / supply;
+                prevX[i] = liquidityAmounts[i] * uint256(reserveX) / supply;
+                prevY[i] = liquidityAmounts[i] * uint256(reserveY) / supply;
             }
         }
 
@@ -190,23 +222,26 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             lbPair: lbPair,
             tokenX: tokenX,
             tokenY: tokenY,
+            proxy: proxy,
             binStep: binStep,
             depositIds: depositedIds,
             liquidityMinted: liquidityAmounts,
-            originalShareX: origShareX,
-            originalShareY: origShareY,
+            previousX: prevX,
+            previousY: prevY,
             createdAt: block.timestamp,
             active: true
         });
         _vaultPositions[vault].push(positionId);
 
-        emit PositionCreated(positionId, vault, lbPair, depositedIds, liquidityAmounts, amountXAdded, amountYAdded);
+        emit PositionCreated(positionId, vault, lbPair, proxy, depositedIds, liquidityAmounts, amountXAdded, amountYAdded);
     }
 
     /**
      * @notice Add liquidity to an existing position
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to add liquidity to
+     * @param previousFeesX Known per-bin fee amounts for tokenX (from LiquidityHelperContract)
+     * @param previousFeesY Known per-bin fee amounts for tokenY (from LiquidityHelperContract)
      * @param amountX Amount of tokenX to deposit
      * @param amountY Amount of tokenY to deposit
      * @param amountXMin Minimum tokenX accepted (slippage protection)
@@ -223,6 +258,8 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
     function addToPosition(
         address vault,
         uint256 positionId,
+        uint256[] calldata previousFeesX,
+        uint256[] calldata previousFeesY,
         uint256 amountX,
         uint256 amountY,
         uint256 amountXMin,
@@ -239,22 +276,30 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         Position storage pos = _positions[positionId];
         require(pos.vault == vault, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
+        require(previousFeesX.length == pos.depositIds.length, "TJPositionManager: feesX length mismatch");
+        require(previousFeesY.length == pos.depositIds.length, "TJPositionManager: feesY length mismatch");
 
         address tokenX = pos.tokenX;
         address tokenY = pos.tokenY;
+        address proxy = pos.proxy;
 
-        // Step 1: Snapshot accrued fees before adding liquidity
-        (uint256[] memory feesX, uint256[] memory feesY) = _getAccruedFees(positionId);
-
-        // Pull tokens from vault
+        // Pull tokens from vault → manager → proxy
         IERC20(tokenX).safeTransferFrom(vault, address(this), amountX);
         IERC20(tokenY).safeTransferFrom(vault, address(this), amountY);
+        IERC20(tokenX).safeTransfer(proxy, amountX);
+        IERC20(tokenY).safeTransfer(proxy, amountY);
 
-        // Approve LBRouter for the token amounts
-        IERC20(tokenX).approve(lbRouter, amountX);
-        IERC20(tokenY).approve(lbRouter, amountY);
+        // Via proxy: approve LBRouter
+        ITJPositionProxy(proxy).execute(
+            tokenX,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountX)
+        );
+        ITJPositionProxy(proxy).execute(
+            tokenY,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountY)
+        );
 
-        // Call addLiquidity -- LB tokens sent to this contract, refund to vault
+        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to vault)
         ILBRouter.LiquidityParameters memory params = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
@@ -268,17 +313,22 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             deltaIds: deltaIds,
             distributionX: distributionX,
             distributionY: distributionY,
-            to: address(this),
+            to: proxy,
             refundTo: vault,
             deadline: deadline
         });
 
+        bytes memory returnData = ITJPositionProxy(proxy).execute(
+            lbRouter,
+            abi.encodeWithSelector(ILBRouter.addLiquidity.selector, params)
+        );
+
         uint256[] memory depositedIds;
         uint256[] memory liquidityAmounts;
-        (amountXAdded, amountYAdded,,, depositedIds, liquidityAmounts)
-            = ILBRouter(lbRouter).addLiquidity(params);
+        (amountXAdded, amountYAdded,,,depositedIds, liquidityAmounts)
+            = abi.decode(returnData, (uint256, uint256, uint256, uint256, uint256[], uint256[]));
 
-        // Step 2: Update liquidityMinted — reject any bins not already in the position
+        // Update liquidityMinted — reject any bins not already in the position
         for (uint256 i = 0; i < depositedIds.length; i++) {
             bool found = false;
             for (uint256 j = 0; j < pos.depositIds.length; j++) {
@@ -291,27 +341,31 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             require(found, "TJPositionManager: bin not in position");
         }
 
-        // Step 3: Get new current shares and reset baselines preserving accrued fees
+        // Fee-aware baseline reset: previousX[i] = currentX - previousFeesX[i]
         for (uint256 i = 0; i < pos.depositIds.length; i++) {
             uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
             if (supply > 0) {
                 (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
-                uint256 newCurrentShareX = pos.liquidityMinted[i] * uint256(rX) / supply;
-                uint256 newCurrentShareY = pos.liquidityMinted[i] * uint256(rY) / supply;
-                pos.originalShareX[i] = newCurrentShareX - feesX[i];
-                pos.originalShareY[i] = newCurrentShareY - feesY[i];
+                uint256 currentX = pos.liquidityMinted[i] * uint256(rX) / supply;
+                uint256 currentY = pos.liquidityMinted[i] * uint256(rY) / supply;
+                pos.previousX[i] = currentX - previousFeesX[i];
+                pos.previousY[i] = currentY - previousFeesY[i];
             }
         }
 
-        // Belt-and-suspenders: refund any tokens remaining in this contract
-        uint256 balX = IERC20(tokenX).balanceOf(address(this));
-        if (balX > 0) IERC20(tokenX).safeTransfer(vault, balX);
-        uint256 balY = IERC20(tokenY).balanceOf(address(this));
-        if (balY > 0) IERC20(tokenY).safeTransfer(vault, balY);
+        // Via proxy: reset approvals
+        ITJPositionProxy(proxy).execute(
+            tokenX,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
+        );
+        ITJPositionProxy(proxy).execute(
+            tokenY,
+            abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
+        );
 
-        // Reset approvals
-        IERC20(tokenX).approve(lbRouter, 0);
-        IERC20(tokenY).approve(lbRouter, 0);
+        // Belt-and-suspenders: sweep leftover tokens from proxy to vault
+        _sweepProxyTokens(proxy, tokenX, vault);
+        _sweepProxyTokens(proxy, tokenY, vault);
 
         emit PositionIncreased(positionId, vault, pos.lbPair, amountXAdded, amountYAdded);
     }
@@ -320,19 +374,27 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
      * @notice Collect accrued fees from a position
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to collect fees from
+     * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
+     * @param amountXMin Minimum tokenX to receive (slippage protection)
+     * @param amountYMin Minimum tokenY to receive (slippage protection)
+     * @param deadline Transaction deadline timestamp
      * @return amountX Amount of tokenX fees collected
      * @return amountY Amount of tokenY fees collected
      */
     function collectFees(
         address vault,
-        uint256 positionId
+        uint256 positionId,
+        uint256[] calldata feeShares,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
         require(vault == msg.sender, "TJPositionManager: vault must be caller");
         Position storage pos = _positions[positionId];
         require(pos.vault == vault, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
-        (amountX, amountY) = _collectFees(positionId);
+        (amountX, amountY) = _burnFeesViaProxy(positionId, feeShares, amountXMin, amountYMin, deadline);
     }
 
     /**
@@ -340,8 +402,9 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to remove liquidity from
      * @param percentage Percentage of baseline liquidity to remove (1-100)
-     * @param amountXMin Minimum tokenX to receive (slippage protection)
-     * @param amountYMin Minimum tokenY to receive (slippage protection)
+     * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
+     * @param amountXMin Minimum tokenX to receive (slippage protection, covers fees + principal)
+     * @param amountYMin Minimum tokenY to receive (slippage protection, covers fees + principal)
      * @param deadline Transaction deadline timestamp
      * @return amountX Amount of tokenX received (principal only)
      * @return amountY Amount of tokenY received (principal only)
@@ -350,6 +413,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         address vault,
         uint256 positionId,
         uint256 percentage,
+        uint256[] calldata feeShares,
         uint256 amountXMin,
         uint256 amountYMin,
         uint256 deadline
@@ -360,15 +424,16 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         require(pos.active, "TJPositionManager: position not active");
         require(percentage > 0 && percentage <= 100, "TJPositionManager: invalid percentage");
 
-        (amountX, amountY) = _decreaseLiquidity(positionId, percentage, amountXMin, amountYMin, deadline);
+        (amountX, amountY) = _decreaseLiquidityWithFees(positionId, percentage, feeShares, amountXMin, amountYMin, deadline);
     }
 
     /**
      * @notice Remove a position entirely (100% removal with fee collection)
      * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to remove
-     * @param amountXMin Minimum tokenX to receive (slippage protection)
-     * @param amountYMin Minimum tokenY to receive (slippage protection)
+     * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
+     * @param amountXMin Minimum tokenX to receive (slippage protection, covers fees + principal)
+     * @param amountYMin Minimum tokenY to receive (slippage protection, covers fees + principal)
      * @param deadline Transaction deadline timestamp
      * @return amountX Amount of tokenX received (principal only)
      * @return amountY Amount of tokenY received (principal only)
@@ -376,6 +441,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
     function removePosition(
         address vault,
         uint256 positionId,
+        uint256[] calldata feeShares,
         uint256 amountXMin,
         uint256 amountYMin,
         uint256 deadline
@@ -385,7 +451,7 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         require(pos.vault == vault, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
-        (amountX, amountY) = _decreaseLiquidity(positionId, 100, amountXMin, amountYMin, deadline);
+        (amountX, amountY) = _decreaseLiquidityWithFees(positionId, 100, feeShares, amountXMin, amountYMin, deadline);
     }
 
     /**
@@ -415,186 +481,162 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
         return _vaultPositions[vault].length;
     }
 
-    /**
-     * @notice Get accrued fees for a position using reserve-based accounting
-     * @dev Compares current reserve share (liquidityMinted * reserve / totalSupply)
-     *      against originalShare baselines to calculate per-bin fee accrual.
-     * @param positionId The position ID to query
-     * @return feesX Per-bin accrued tokenX fees
-     * @return feesY Per-bin accrued tokenY fees
-     */
-    function getAccruedFees(uint256 positionId)
-        external
-        view
-        returns (uint256[] memory feesX, uint256[] memory feesY)
-    {
-        return _getAccruedFees(positionId);
-    }
-
     // ── Internal helpers ──────────────────────────────────────────────
 
-    function _getAccruedFees(uint256 positionId)
-        internal
-        view
-        returns (uint256[] memory feesX, uint256[] memory feesY)
-    {
+    /**
+     * @dev Burns fee LB tokens via the position's proxy. No-op if all feeShares are zero.
+     * @param positionId The position to collect fees from
+     * @param feeShares Per-bin LB token amounts to burn
+     * @param amountXMin Minimum tokenX to receive
+     * @param amountYMin Minimum tokenY to receive
+     * @param deadline Transaction deadline timestamp
+     * @return feeAmountX Total tokenX fees collected
+     * @return feeAmountY Total tokenY fees collected
+     */
+    function _burnFeesViaProxy(
+        uint256 positionId,
+        uint256[] calldata feeShares,
+        uint256 amountXMin,
+        uint256 amountYMin,
+        uint256 deadline
+    ) internal returns (uint256 feeAmountX, uint256 feeAmountY) {
         Position storage pos = _positions[positionId];
-        require(pos.active, "TJPositionManager: position not active");
+        require(feeShares.length == pos.depositIds.length, "TJPositionManager: feeShares length mismatch");
 
-        uint256 len = pos.depositIds.length;
-        feesX = new uint256[](len);
-        feesY = new uint256[](len);
-
-        for (uint256 i = 0; i < len; i++) {
-            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
-            if (supply > 0) {
-                (uint128 reserveX, uint128 reserveY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
-                uint256 currentShareX = pos.liquidityMinted[i] * uint256(reserveX) / supply;
-                uint256 currentShareY = pos.liquidityMinted[i] * uint256(reserveY) / supply;
-
-                if (currentShareX > pos.originalShareX[i]) {
-                    feesX[i] = currentShareX - pos.originalShareX[i];
-                }
-                if (currentShareY > pos.originalShareY[i]) {
-                    feesY[i] = currentShareY - pos.originalShareY[i];
-                }
-            }
-        }
-    }
-
-    function _collectFees(uint256 positionId) internal returns (uint256 feeAmountX, uint256 feeAmountY) {
-        Position storage pos = _positions[positionId];
-
-        (uint256[] memory feesX, uint256[] memory feesY) = _getAccruedFees(positionId);
-
-        // Convert per-bin token fees to LB tokens to burn
-        uint256 len = pos.depositIds.length;
-        uint256[] memory burnIds = new uint256[](len);
-        uint256[] memory burnAmounts = new uint256[](len);
-        uint256 count = 0;
-
-        for (uint256 i = 0; i < len; i++) {
-            if (feesX[i] == 0 && feesY[i] == 0) continue;
-
-            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
-            if (supply == 0) continue;
-
-            (uint128 reserveX, uint128 reserveY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
-
-            // Calculate LB tokens that represent the fee value:
-            // principalLb = originalShare * supply / reserve
-            // feeLb = liquidityMinted - principalLb
-            // Try X-side first; if it yields 0 (fees only on Y), fall back to Y-side.
-            // Active bins have both reserves, so both branches may apply.
-            uint256 feeLbTokens;
-            if (uint256(reserveX) > 0) {
-                uint256 principalLb = pos.originalShareX[i] * supply / uint256(reserveX);
-                feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
-            }
-            if (feeLbTokens == 0 && uint256(reserveY) > 0) {
-                uint256 principalLb = pos.originalShareY[i] * supply / uint256(reserveY);
-                feeLbTokens = pos.liquidityMinted[i] > principalLb ? pos.liquidityMinted[i] - principalLb : 0;
-            }
-
-            if (feeLbTokens > 0) {
-                burnIds[count] = pos.depositIds[i];
-                burnAmounts[count] = feeLbTokens;
-                count++;
-            }
-        }
-
-        // No fees accrued — skip router call entirely
-        if (count == 0) {
+        // Filter to non-zero entries only (LBPair reverts on zero amounts)
+        uint256[] memory allIds = pos.depositIds;
+        (uint256[] memory filteredIds, uint256[] memory filteredShares) = _filterNonZero(allIds, feeShares);
+        if (filteredIds.length == 0) {
             return (0, 0);
         }
 
-        // Trim to actual count
-        uint256[] memory trimmedIds = new uint256[](count);
-        uint256[] memory trimmedAmounts = new uint256[](count);
-        for (uint256 i = 0; i < count; i++) {
-            trimmedIds[i] = burnIds[i];
-            trimmedAmounts[i] = burnAmounts[i];
-        }
+        address proxy = pos.proxy;
 
-        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
-
-        (feeAmountX, feeAmountY) = ILBRouter(lbRouter).removeLiquidity(
-            pos.tokenX,
-            pos.tokenY,
-            pos.binStep,
-            0,
-            0,
-            trimmedIds,
-            trimmedAmounts,
-            pos.vault,
-            block.timestamp
+        // Via proxy: approveForAll
+        ITJPositionProxy(proxy).execute(
+            pos.lbPair,
+            abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, true)
         );
 
-        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
+        // Via proxy: removeLiquidity (fee burn, tokens to vault)
+        bytes memory returnData = ITJPositionProxy(proxy).execute(
+            lbRouter,
+            abi.encodeWithSelector(
+                ILBRouter.removeLiquidity.selector,
+                pos.tokenX,
+                pos.tokenY,
+                pos.binStep,
+                amountXMin,
+                amountYMin,
+                filteredIds,
+                filteredShares,
+                pos.vault,
+                deadline
+            )
+        );
 
-        // Update state: reduce liquidityMinted and reset originalShare baselines
-        for (uint256 i = 0; i < count; i++) {
-            for (uint256 j = 0; j < pos.depositIds.length; j++) {
-                if (pos.depositIds[j] == trimmedIds[i]) {
-                    pos.liquidityMinted[j] -= trimmedAmounts[i];
+        (feeAmountX, feeAmountY) = abi.decode(returnData, (uint256, uint256));
 
-                    // Reset baseline to current share (fees now extracted)
-                    uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[j]);
-                    if (supply > 0) {
-                        (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[j]));
-                        pos.originalShareX[j] = pos.liquidityMinted[j] * uint256(rX) / supply;
-                        pos.originalShareY[j] = pos.liquidityMinted[j] * uint256(rY) / supply;
-                    } else {
-                        pos.originalShareX[j] = 0;
-                        pos.originalShareY[j] = 0;
-                    }
-                    break;
-                }
+        // Via proxy: revoke approval
+        ITJPositionProxy(proxy).execute(
+            pos.lbPair,
+            abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, false)
+        );
+
+        // Update state: reduce liquidityMinted and reset baselines
+        for (uint256 i = 0; i < pos.depositIds.length; i++) {
+            pos.liquidityMinted[i] -= feeShares[i];
+
+            uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
+            if (supply > 0) {
+                (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
+                pos.previousX[i] = pos.liquidityMinted[i] * uint256(rX) / supply;
+                pos.previousY[i] = pos.liquidityMinted[i] * uint256(rY) / supply;
+            } else {
+                pos.previousX[i] = 0;
+                pos.previousY[i] = 0;
             }
         }
 
         emit FeesCollected(positionId, pos.vault, pos.lbPair, feeAmountX, feeAmountY);
     }
 
-    function _decreaseLiquidity(
+    /**
+     * @dev Two-step liquidity removal: fee burn (Step A) then principal burn (Step B).
+     *      Combined slippage check across both burns.
+     * @param positionId The position to decrease
+     * @param percentage Percentage of principal to remove (1-100)
+     * @param feeShares Per-bin LB token amounts to burn for fees
+     * @param amountXMin Minimum total tokenX (fees + principal) to receive
+     * @param amountYMin Minimum total tokenY (fees + principal) to receive
+     * @param deadline Transaction deadline timestamp
+     * @return principalAmountX Total tokenX from principal burn
+     * @return principalAmountY Total tokenY from principal burn
+     */
+    function _decreaseLiquidityWithFees(
         uint256 positionId,
         uint256 percentage,
+        uint256[] calldata feeShares,
         uint256 amountXMin,
         uint256 amountYMin,
         uint256 deadline
-    ) internal returns (uint256 amountX, uint256 amountY) {
+    ) internal returns (uint256 principalAmountX, uint256 principalAmountY) {
         Position storage pos = _positions[positionId];
 
-        // Step 1: Collect fees first
-        _collectFees(positionId);
+        // Step A: Fee burn (pass 0,0 for per-step mins, check combined at end)
+        (uint256 feeAmountX, uint256 feeAmountY) = _burnFeesViaProxy(positionId, feeShares, 0, 0, deadline);
 
-        // Step 2: Build amounts from baseline
+        // Step B: Principal burn
         uint256 len = pos.depositIds.length;
-        uint256[] memory ids = new uint256[](len);
-        uint256[] memory amounts = new uint256[](len);
+        uint256[] memory principalBurn = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
-            ids[i] = pos.depositIds[i];
-            amounts[i] = pos.liquidityMinted[i] * percentage / 100;
+            principalBurn[i] = pos.liquidityMinted[i] * percentage / 100;
         }
 
-        // Step 3: Remove principal via router
-        ILBPair(pos.lbPair).approveForAll(lbRouter, true);
+        // Filter to non-zero entries (LBPair reverts on zero amounts)
+        uint256[] memory allIds = pos.depositIds;
+        (uint256[] memory filteredIds, uint256[] memory filteredBurn) = _filterNonZero(allIds, principalBurn);
 
-        (amountX, amountY) = ILBRouter(lbRouter).removeLiquidity(
-            pos.tokenX,
-            pos.tokenY,
-            pos.binStep,
-            amountXMin,
-            amountYMin,
-            ids,
-            amounts,
-            pos.vault,
-            deadline
-        );
+        if (filteredIds.length > 0) {
+            address proxy = pos.proxy;
 
-        ILBPair(pos.lbPair).approveForAll(lbRouter, false);
+            // Via proxy: approveForAll
+            ITJPositionProxy(proxy).execute(
+                pos.lbPair,
+                abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, true)
+            );
 
-        // Step 4: Update state — cache for event since full removal deletes struct
+            // Via proxy: removeLiquidity (principal burn, tokens to vault)
+            bytes memory returnData = ITJPositionProxy(proxy).execute(
+                lbRouter,
+                abi.encodeWithSelector(
+                    ILBRouter.removeLiquidity.selector,
+                    pos.tokenX,
+                    pos.tokenY,
+                    pos.binStep,
+                    0,
+                    0,
+                    filteredIds,
+                    filteredBurn,
+                    pos.vault,
+                    deadline
+                )
+            );
+
+            (principalAmountX, principalAmountY) = abi.decode(returnData, (uint256, uint256));
+
+            // Via proxy: revoke approval
+            ITJPositionProxy(proxy).execute(
+                pos.lbPair,
+                abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, false)
+            );
+        }
+
+        // Combined slippage check
+        require(feeAmountX + principalAmountX >= amountXMin, "TJPositionManager: insufficient amountX");
+        require(feeAmountY + principalAmountY >= amountYMin, "TJPositionManager: insufficient amountY");
+
+        // Update state — cache for event since full removal deletes struct
         address posVault = pos.vault;
         address posLbPair = pos.lbPair;
 
@@ -602,21 +644,67 @@ contract TJPositionManager is ERC1155Holder, ReentrancyGuard {
             delete _positions[positionId];
         } else {
             for (uint256 i = 0; i < len; i++) {
-                pos.liquidityMinted[i] -= amounts[i];
+                pos.liquidityMinted[i] -= principalBurn[i];
 
-                // Reset baseline to current share of reduced position
                 uint256 supply = ILBPair(pos.lbPair).totalSupply(pos.depositIds[i]);
                 if (supply > 0) {
                     (uint128 rX, uint128 rY) = ILBPair(pos.lbPair).getBin(uint24(pos.depositIds[i]));
-                    pos.originalShareX[i] = pos.liquidityMinted[i] * uint256(rX) / supply;
-                    pos.originalShareY[i] = pos.liquidityMinted[i] * uint256(rY) / supply;
+                    pos.previousX[i] = pos.liquidityMinted[i] * uint256(rX) / supply;
+                    pos.previousY[i] = pos.liquidityMinted[i] * uint256(rY) / supply;
                 } else {
-                    pos.originalShareX[i] = 0;
-                    pos.originalShareY[i] = 0;
+                    pos.previousX[i] = 0;
+                    pos.previousY[i] = 0;
                 }
             }
         }
 
-        emit PositionRemoved(positionId, posVault, posLbPair, percentage, amountX, amountY);
+        emit PositionRemoved(positionId, posVault, posLbPair, percentage, principalAmountX, principalAmountY);
+    }
+
+    /**
+     * @dev Sweep leftover ERC20 tokens from proxy to vault.
+     *      Uses proxy.execute() to call balanceOf then transfer if non-zero.
+     * @param proxy The proxy address to sweep from
+     * @param token The ERC20 token to sweep
+     * @param vault The vault to receive swept tokens
+     */
+    function _sweepProxyTokens(address proxy, address token, address vault) internal {
+        bytes memory balData = ITJPositionProxy(proxy).execute(
+            token,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, proxy)
+        );
+        uint256 balance = abi.decode(balData, (uint256));
+        if (balance > 0) {
+            ITJPositionProxy(proxy).execute(
+                token,
+                abi.encodeWithSelector(IERC20.transfer.selector, vault, balance)
+            );
+        }
+    }
+
+    /**
+     * @dev Filter parallel arrays to only include entries where amounts[i] > 0.
+     *      LBPair.burn reverts on zero amounts (LBPair__ZeroAmount), so we must
+     *      exclude zero-amount bins before calling removeLiquidity.
+     */
+    function _filterNonZero(
+        uint256[] memory ids,
+        uint256[] memory amounts
+    ) internal pure returns (uint256[] memory, uint256[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            if (amounts[i] > 0) count++;
+        }
+        uint256[] memory filteredIds = new uint256[](count);
+        uint256[] memory filteredAmounts = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            if (amounts[i] > 0) {
+                filteredIds[idx] = ids[i];
+                filteredAmounts[idx] = amounts[i];
+                idx++;
+            }
+        }
+        return (filteredIds, filteredAmounts);
     }
 }

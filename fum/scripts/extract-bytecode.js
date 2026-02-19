@@ -18,7 +18,8 @@ const CONTRACTS_TO_EXTRACT = [
   'VaultFactory',
   'PositionVault',
   'BabyStepsStrategy',
-  'TJPositionManager'
+  'TJPositionManager',
+  'TJPositionProxy'
 ];
 
 // Validators to extract (in validators/ subdirectory)

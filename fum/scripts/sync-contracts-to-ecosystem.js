@@ -20,7 +20,8 @@ const CORE_CONTRACTS = [
   'BabyStepsStrategy',
   'VaultFactory',
   'PositionVault',
-  'TJPositionManager'
+  'TJPositionManager',
+  'TJPositionProxy'
 ];
 
 // Validator contracts (from validators/ subdirectory)
