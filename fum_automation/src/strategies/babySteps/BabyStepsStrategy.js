@@ -372,11 +372,11 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     if (swapCount >= FEE_CHECK_INTERVAL) {
       try {
-        const feeCollectionNeeded = await this.checkFeesToCollect(vault, position, adapter);
+        const { shouldCollect, feeData } = await this.checkFeesToCollect(vault, position, adapter);
 
-        if (feeCollectionNeeded) {
+        if (shouldCollect) {
           this.log(`💰 Executing fee collection for vault ${vault.address}`);
-          await this.collectFees(vault, position);
+          await this.collectFees(vault, position, feeData);
           await this.vaultDataService.refreshTokens(vault.address);
           this.log(`Refreshed token balances for ${vault.address}`);
           this.swapCountSinceLastFeeCheck[vault.address] = 0;  // Reset after successful collection
@@ -447,26 +447,25 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @param {Object} vault - Vault data
    * @param {Object} position - Position to check
    * @param {Object} adapter - Platform adapter
-   * @returns {Promise<boolean>} Whether fee collection is needed
+   * @returns {Promise<{shouldCollect: boolean, feeData: Object|null}>}
    */
   async checkFeesToCollect(vault, position, adapter) {
     // Check if fee reinvestment is enabled
     if (!vault.strategy.parameters.feeReinvestment) {
       this.log(`Fee reinvestment disabled for vault ${vault.address}`);
-      return false;
+      return { shouldCollect: false, feeData: null };
     }
 
     const reinvestmentTrigger = vault.strategy.parameters.reinvestmentTrigger;
     if (!reinvestmentTrigger || reinvestmentTrigger === 0) {
       this.log(`No reinvestment trigger set for vault ${vault.address}`);
-      return false;
+      return { shouldCollect: false, feeData: null };
     }
 
     // Get pool metadata for token symbols
     const poolMetadata = this.poolData[position.pool];
     if (!poolMetadata) {
-      this.log(`No pool metadata found for ${position.pool}`);
-      return false;
+      throw new Error(`Missing pool metadata for position ${position.id} (pool: ${position.pool})`);
     }
 
     const token0Symbol = poolMetadata.token0Symbol;
@@ -484,7 +483,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     if (token0Price === 0 && token1Price === 0) {
       this.log(`⚠️ No price data available for fee calculation (CoinGecko may be unavailable)`);
-      return false;
+      return { shouldCollect: false, feeData: null };
     }
 
     // Use platform-agnostic adapter method (handles all internal data fetching)
@@ -503,7 +502,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     const shouldCollect = fees.totalUSD >= reinvestmentTrigger;
     this.log(`Should collect fees: ${shouldCollect}`);
 
-    return shouldCollect;
+    return { shouldCollect, feeData: fees };
   }
 
   /**
@@ -514,9 +513,10 @@ export default class BabyStepsStrategy extends StrategyBase {
    *
    * @param {Object} vault - Vault data
    * @param {Object} position - Position to collect fees from
+   * @param {Object} feeData - Fee data from checkFeesToCollect (opaque to strategy, adapter extracts what it needs)
    * @returns {Promise<Object>} Collection results
    */
-  async collectFees(vault, position) {
+  async collectFees(vault, position, feeData) {
     const positionId = position.id;
 
     // Get pool metadata
@@ -543,25 +543,8 @@ export default class BabyStepsStrategy extends StrategyBase {
     const token1IsNative = token1Data.isNative === true;
     const hasNativeToken = token0IsNative || token1IsNative;
 
-    // Pre-calculate fees before collection
-    // - Required for native tokens (V4 ETH transfers don't emit events)
-    // - Serves as fallback if receipt parsing fails
-    // If this fails, abort collection (fees stay in position, retry next cycle)
-    let expectedFeesResult;
-    try {
-      expectedFeesResult = await retryRpcCall(
-        () => adapter.getAccruedFeesUSD(
-          position,  // Pass full position object with fee growth fields
-          { token0: 0, token1: 0 },  // prices not needed, we use raw fees0/fees1
-          this.provider
-        ),
-        'getAccruedFeesUSD',
-        { log: (msg) => this.log(msg) }
-      );
-    } catch (error) {
-      this.log(`⚠️ COLLECTION_ABORTED: Position ${positionId} - pre-calculation failed, will retry next cycle`);
-      throw error;
-    }
+    // Use fee data from checkFeesToCollect (avoids redundant RPC calls)
+    const expectedFeesResult = feeData;
 
     this.log(`Generating claim fees transaction for position ${positionId}`);
 
@@ -577,7 +560,8 @@ export default class BabyStepsStrategy extends StrategyBase {
         token1Decimals: token1Data.decimals,
         token0IsNative,
         token1IsNative,
-        poolData: poolMetadata
+        poolData: poolMetadata,
+        feeData,
       }),
       'generateClaimFeesData',
       { log: (msg) => this.log(msg) }

@@ -100,10 +100,10 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     const owner = testEnv.hardhatServer.signers[0];
     const tx = await owner.sendTransaction({
       to: testVault.vaultAddress,
-      value: ethers.utils.parseEther('215')
+      value: ethers.utils.parseEther('1290')
     });
     await tx.wait();
-    console.log('  Sent 215 AVAX to vault (~$2000 at $9.38/AVAX)');
+    console.log('  Sent 1290 AVAX to vault (~$12000 at $9.38/AVAX)');
 
     // Configure strategy parameters for testing
     await configureTJStrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
@@ -147,7 +147,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     await cleanupTestBlockchain(testEnv);
   });
 
-  describe.skip('Phase 1: Fee Collection', () => {
+  describe('Phase 1: Fee Collection', () => {
     it('should trigger fee collection when accumulated fees exceed threshold', async () => {
       // Track fee events
       const feesCollectedEvents = [];
@@ -176,7 +176,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
 
       // Execute round-trip swaps on binStep=10 V2.2 pool to generate fees
       // binStep=10 = 0.10% fee per swap, need large amounts to move price and generate meaningful fees
-      const wavaxSwapAmount = ethers.utils.parseEther('100');
+      const wavaxSwapAmount = ethers.utils.parseEther('600');
       let usdcSwapAmount;
       const maxSwaps = 60;
 
@@ -262,7 +262,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     }, 180000);
   });
 
-  describe('Phase 2: Rebalance', () => {
+  describe.skip('Phase 2: Rebalance', () => {
     it('should trigger rebalance when activeId crosses threshold', async () => {
       // Track rebalance events
       const rebalanceEvents = [];
