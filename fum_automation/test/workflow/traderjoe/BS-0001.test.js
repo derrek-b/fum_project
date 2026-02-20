@@ -18,13 +18,6 @@ import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTraderJoeTestVault } from '../../helpers/traderjoe-vault-setup.js';
 import { configureTJStrategyParameters } from '../../helpers/traderjoe-swap-utils.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // USD₮0 is the library key for USDT (Tether) on Avalanche
 const USDT = 'USD₮0';
 
@@ -53,15 +46,6 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition with Non-
   let newPositionCreatedEvents = [];
 
   beforeAll(async () => {
-    // Clean up any old vault data from previous test runs
-    const dataDir = path.join(__dirname, '../../../data/vaults');
-    try {
-      await fs.rm(dataDir, { recursive: true, force: true });
-      await fs.mkdir(dataDir, { recursive: true });
-    } catch (error) {
-      // Ignore errors if directory doesn't exist
-    }
-
     // Setup blockchain environment (Avalanche fork via FORK_CHAIN=avalanche)
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;

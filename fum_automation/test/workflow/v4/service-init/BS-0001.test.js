@@ -15,13 +15,6 @@ import { ethers } from 'ethers';
 import AutomationService from '../../../../src/core/AutomationService.js';
 import { setupV4TestBlockchain, cleanupV4TestBlockchain } from '../../../helpers/v4-hardhat-setup.js';
 import { setupV4TestVault } from '../../../helpers/v4-vault-setup.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('V4 WETH Cross-Version Swap Workflow', () => {
   let testEnv;
   let testVault;
@@ -47,15 +40,6 @@ describe('V4 WETH Cross-Version Swap Workflow', () => {
   let newPositionCreatedEvents = [];
 
   beforeAll(async () => {
-    // Clean up any old vault data from previous test runs
-    const dataDir = path.join(__dirname, '../../../../data/vaults');
-    try {
-      await fs.rm(dataDir, { recursive: true, force: true });
-      await fs.mkdir(dataDir, { recursive: true });
-    } catch (error) {
-      // Ignore errors if directory doesn't exist
-    }
-
     // Setup V4 blockchain environment (uses V4 Hardhat instance on port 8547)
     testEnv = await setupV4TestBlockchain();
     testConfig = testEnv.testConfig;

@@ -5,7 +5,7 @@
  * - Bin-based liquidity (lowerBinId, upperBinId instead of ticks)
  * - Token ordering via sortTokens() (tokenX = lower address)
  * - LBRouter for swaps
- * - TJPositionManager for position creation
+ * - Through-vault position creation via TJPositionManager (proxy-per-position architecture)
  */
 
 import { ethers } from 'ethers';
@@ -299,6 +299,14 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
         lowerBinId = activeId - 21;
         break;
 
+      case 'shifted': {
+        const shiftSpacing = positionConfig.binRange.spacing || 10;
+        const offset = positionConfig.binRange.offset || 5;
+        lowerBinId = activeId + offset - shiftSpacing;
+        upperBinId = activeId + offset + shiftSpacing;
+        break;
+      }
+
       case 'custom':
         lowerBinId = positionConfig.binRange.lowerBinId;
         upperBinId = positionConfig.binRange.upperBinId;
@@ -320,26 +328,32 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     const token0Amount = tokenBalances[sortedSymbol0]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
     const token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
 
-    // Approve TJPositionManager for both tokens
-    const positionManagerAddress = traderjoeV2_2.positionManagerAddress;
-    if (!positionManagerAddress) {
-      throw new Error('TJPositionManager address not configured. Deploy TJPositionManager first.');
+    // Transfer position tokens from owner to vault
+    if (token0Amount.gt(0) && tokenContracts[sortedSymbol0]) {
+      await (await tokenContracts[sortedSymbol0].transfer(vaultAddress, token0Amount)).wait();
+    }
+    if (token1Amount.gt(0) && tokenContracts[sortedSymbol1]) {
+      await (await tokenContracts[sortedSymbol1].transfer(vaultAddress, token1Amount)).wait();
     }
 
-    if (tokenContracts[sortedSymbol0]) {
-      await (await tokenContracts[sortedSymbol0].approve(positionManagerAddress, token0Amount)).wait();
-    }
-    if (tokenContracts[sortedSymbol1]) {
-      await (await tokenContracts[sortedSymbol1].approve(positionManagerAddress, token1Amount)).wait();
+    // Vault approves TJPositionManager for position tokens
+    const tokenAddresses = [sortedToken0.address, sortedToken1.address];
+    const approvalTxs = await adapter.getRequiredApprovals('liquidity', vaultAddress, tokenAddresses, hardhat.provider);
+    if (approvalTxs.length > 0) {
+      const approveTx = await testVault.approve(
+        approvalTxs.map(t => t.to),
+        approvalTxs.map(t => t.data)
+      );
+      await approveTx.wait();
     }
 
-    // Generate create position data via adapter
+    // Generate create position data with vault as position owner
     const createPositionParams = {
       position: { lowerBinId, upperBinId },
       token0Amount: token0Amount.toString(),
       token1Amount: token1Amount.toString(),
       provider: hardhat.provider,
-      walletAddress: owner.address,
+      walletAddress: vaultAddress,
       poolData: {
         ...poolData,
         address: lbPairAddress
@@ -352,16 +366,16 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
 
     const createPositionData = await adapter.generateCreatePositionData(createPositionParams);
 
-    // Execute position creation
-    const mintTx = await owner.sendTransaction({
-      to: createPositionData.to,
-      data: createPositionData.data,
-      value: createPositionData.value
-    });
+    // Execute position creation through vault
+    const mintTx = await testVault.mint(
+      [createPositionData.to],
+      [createPositionData.data],
+      [createPositionData.value]
+    );
     const mintReceipt = await mintTx.wait();
 
     // Parse receipt to get tokenId from PositionCreated event
-    const POSITION_CREATED_TOPIC = ethers.utils.id('PositionCreated(uint256,address,address,uint256[],uint256[],uint256,uint256)');
+    const POSITION_CREATED_TOPIC = ethers.utils.id('PositionCreated(uint256,address,address,address,uint256[],uint256[],uint256,uint256)');
     const positionCreatedLog = mintReceipt.logs.find(log => log.topics[0] === POSITION_CREATED_TOPIC);
 
     if (!positionCreatedLog) {
@@ -369,15 +383,7 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
     }
 
     const tokenId = ethers.BigNumber.from(positionCreatedLog.topics[1]).toString();
-    console.log(`    Created position NFT with ID: ${tokenId}`);
-
-    // Transfer position NFT to vault
-    const TJ_POSITION_MANAGER_ABI = [
-      'function safeTransferFrom(address from, address to, uint256 tokenId) external'
-    ];
-    const positionManager = new ethers.Contract(positionManagerAddress, TJ_POSITION_MANAGER_ABI, owner);
-    await (await positionManager.safeTransferFrom(owner.address, vaultAddress, tokenId)).wait();
-    console.log(`    Position transferred to vault`);
+    console.log(`    Created position with ID: ${tokenId}`);
 
     // Store position info
     createdPositions.set(tokenId, {

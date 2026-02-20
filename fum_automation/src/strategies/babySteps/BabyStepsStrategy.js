@@ -328,9 +328,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // STEP 4: Check if rebalance needed - if needed, execute immediately and return
-    // Use 0.5% threshold = using 99% of range before triggering rebalance
-    const REBALANCE_EDGE_THRESHOLD = 0.005;
-
     const rangeStatus = await adapter.evaluatePositionRange(
       position,
       null,  // provider not needed when swapData provided
@@ -341,20 +338,6 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     if (!rangeStatus.inRange) {
       this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position is out of range`);
-      await this.rebalancePosition(vault, position);
-      this.swapCountSinceLastFeeCheck[vault.address] = 0;
-      return;
-    }
-
-    if (rangeStatus.centeredness < REBALANCE_EDGE_THRESHOLD) {
-      this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position too close to lower edge (${(rangeStatus.centeredness * 100).toFixed(2)}% < ${REBALANCE_EDGE_THRESHOLD * 100}% threshold)`);
-      await this.rebalancePosition(vault, position);
-      this.swapCountSinceLastFeeCheck[vault.address] = 0;
-      return;
-    }
-
-    if (rangeStatus.centeredness > (1 - REBALANCE_EDGE_THRESHOLD)) {
-      this.log(`🔄 REBALANCE NEEDED for vault ${vault.address}: Position too close to upper edge (${(rangeStatus.centeredness * 100).toFixed(2)}% > ${(1 - REBALANCE_EDGE_THRESHOLD) * 100}% threshold)`);
       await this.rebalancePosition(vault, position);
       this.swapCountSinceLastFeeCheck[vault.address] = 0;
       return;
@@ -938,15 +921,10 @@ export default class BabyStepsStrategy extends StrategyBase {
         { log: (msg) => this.log(msg) }
       );
 
-      // 6. Check range alignment result - position must be in range and not too close to edge
-      const EDGE_THRESHOLD = 0.05; // 5% from either edge
-
+      // 6. Check range alignment result - position must be in range
       if (!rangeStatus.inRange) {
         const positionBounds = adapter.extractPositionBounds(position);
         this.log(`Position ${positionId} out of range: current=${rangeStatus.current}, range=${positionBounds.lower}-${positionBounds.upper}`);
-        nonAlignedPositions[positionId] = position;
-      } else if (rangeStatus.centeredness < EDGE_THRESHOLD || rangeStatus.centeredness > (1 - EDGE_THRESHOLD)) {
-        this.log(`Position ${positionId} too close to edge: centeredness=${rangeStatus.centeredness.toFixed(4)}, threshold=${EDGE_THRESHOLD}`);
         nonAlignedPositions[positionId] = position;
       } else {
         this.log(`Position ${positionId} aligned: ${token0Symbol}/${token1Symbol} on ${positionPlatform}, centeredness=${rangeStatus.centeredness.toFixed(4)}`);
@@ -1837,6 +1815,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         token0Amount: finalToken0Balance.toString(),
         token1Amount: finalToken1Balance.toString(),
         provider: this.provider,
+        walletAddress: vault.address,
         poolData: freshPoolData,
         token0Data,
         token1Data,
@@ -2496,42 +2475,32 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
-    // Verify deficits are covered or tolerate small deficits
+    // Log remaining deficits (informational — position will be created with available balances)
     if (remainingToken0Deficit > 0n || remainingToken1Deficit > 0n) {
-      // Validate prices before calculating USD values (fail fast)
-      if (!token0Price || !token1Price || !Number.isFinite(token0Price) || !Number.isFinite(token1Price)) {
-        throw new UnrecoverableError(
-          `Cannot calculate deficit tolerance: Missing prices for ${token0Data.symbol}=${token0Price}, ${token1Data.symbol}=${token1Price}`
-        );
-      }
-
-      // Calculate deficit percentage AND USD value
       const token0DeficitPct = Number(remainingToken0Deficit) / Number(requiredToken0) * 100;
       const token1DeficitPct = Number(remainingToken1Deficit) / Number(requiredToken1) * 100;
 
-      const token0DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken0Deficit, token0Data.decimals)) * token0Price;
-      const token1DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken1Deficit, token1Data.decimals)) * token1Price;
-      const totalDeficitUSD = token0DeficitUSD + token1DeficitUSD;
+      // Calculate USD values if prices are available
+      if (token0Price && token1Price && Number.isFinite(token0Price) && Number.isFinite(token1Price)) {
+        const token0DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken0Deficit, token0Data.decimals)) * token0Price;
+        const token1DeficitUSD = parseFloat(ethers.utils.formatUnits(remainingToken1Deficit, token1Data.decimals)) * token1Price;
+        const totalDeficitUSD = token0DeficitUSD + token1DeficitUSD;
 
-      this.log(`⚠️ Remaining deficits after swap attempts:`);
-      this.log(`   ${token0Data.symbol}: ${remainingToken0Deficit} (${token0DeficitPct.toFixed(2)}% of target, $${token0DeficitUSD.toFixed(2)})`);
-      this.log(`   ${token1Data.symbol}: ${remainingToken1Deficit} (${token1DeficitPct.toFixed(2)}% of target, $${token1DeficitUSD.toFixed(2)})`);
-      this.log(`   Total deficit: $${totalDeficitUSD.toFixed(2)}, Skipped dust: $${totalSkippedDustUSD.toFixed(2)}`);
+        this.log(`⚠️ Remaining deficits after swap attempts:`);
+        this.log(`   ${token0Data.symbol}: ${remainingToken0Deficit} (${token0DeficitPct.toFixed(2)}% of target, $${token0DeficitUSD.toFixed(2)})`);
+        this.log(`   ${token1Data.symbol}: ${remainingToken1Deficit} (${token1DeficitPct.toFixed(2)}% of target, $${token1DeficitUSD.toFixed(2)})`);
+        this.log(`   Total deficit: $${totalDeficitUSD.toFixed(2)}, Skipped dust: $${totalSkippedDustUSD.toFixed(2)}`);
 
-      // Calculate acceptable deficit threshold
-      // 0.5% tolerance for EXACT_INPUT fallbacks + skipped dust value
-      const targetUSD = parseFloat(ethers.utils.formatUnits(requiredToken0, token0Data.decimals)) * token0Price +
-                        parseFloat(ethers.utils.formatUnits(requiredToken1, token1Data.decimals)) * token1Price;
-      const percentageTolerance = targetUSD * 0.005; // 0.5%
-      const acceptableDeficitUSD = percentageTolerance + totalSkippedDustUSD;
-
-      if (totalDeficitUSD <= acceptableDeficitUSD) {
-        this.log(`   ✅ Deficit $${totalDeficitUSD.toFixed(2)} within tolerance $${acceptableDeficitUSD.toFixed(2)} (0.5% + skipped dust)`);
+        // Warn on unusually large deficits (>2%) — may indicate swap issues
+        const targetUSD = parseFloat(ethers.utils.formatUnits(requiredToken0, token0Data.decimals)) * token0Price +
+                          parseFloat(ethers.utils.formatUnits(requiredToken1, token1Data.decimals)) * token1Price;
+        if (totalDeficitUSD > targetUSD * 0.02) {
+          this.log(`   ⚠️ Large deficit: $${totalDeficitUSD.toFixed(2)} is ${(totalDeficitUSD / targetUSD * 100).toFixed(1)}% of target $${targetUSD.toFixed(2)}`);
+        }
       } else {
-        throw new UnrecoverableError(
-          `Unable to cover deficits: ${token0Data.symbol}=$${token0DeficitUSD.toFixed(2)}, ${token1Data.symbol}=$${token1DeficitUSD.toFixed(2)} ` +
-          `(total: $${totalDeficitUSD.toFixed(2)} exceeds acceptable: $${acceptableDeficitUSD.toFixed(2)})`
-        );
+        this.log(`⚠️ Remaining deficits after swap attempts:`);
+        this.log(`   ${token0Data.symbol}: ${remainingToken0Deficit} (${token0DeficitPct.toFixed(2)}% of target)`);
+        this.log(`   ${token1Data.symbol}: ${remainingToken1Deficit} (${token1DeficitPct.toFixed(2)}% of target)`);
       }
     }
 

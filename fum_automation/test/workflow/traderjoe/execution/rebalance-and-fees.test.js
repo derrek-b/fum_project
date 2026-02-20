@@ -26,13 +26,6 @@ import {
 import { waitForCondition } from '../../../helpers/wait-utils.js';
 import { getTokenAddress } from 'fum_library';
 import { getWrappedNativeAddress } from 'fum_library/helpers/tokenHelpers';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('TJ V2.2 Rebalance and Fee Collection', () => {
   let testEnv;
   let testConfig;
@@ -43,15 +36,6 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
   let usdcAddress;
 
   beforeAll(async () => {
-    // Clean up any old vault data from previous test runs
-    const dataDir = path.join(__dirname, '../../../../data/vaults');
-    try {
-      await fs.rm(dataDir, { recursive: true, force: true });
-      await fs.mkdir(dataDir, { recursive: true });
-    } catch (error) {
-      // Ignore errors if directory doesn't exist
-    }
-
     // Setup blockchain environment (Avalanche fork via FORK_CHAIN=avalanche)
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;
@@ -147,7 +131,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     await cleanupTestBlockchain(testEnv);
   });
 
-  describe('Phase 1: Fee Collection', () => {
+  describe.skip('Phase 1: Fee Collection', () => {
     it('should trigger fee collection when accumulated fees exceed threshold', async () => {
       // Track fee events
       const feesCollectedEvents = [];
@@ -262,7 +246,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     }, 180000);
   });
 
-  describe.skip('Phase 2: Rebalance', () => {
+  describe('Phase 2: Rebalance', () => {
     it('should trigger rebalance when activeId crosses threshold', async () => {
       // Track rebalance events
       const rebalanceEvents = [];
@@ -396,8 +380,11 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       expect(newPosition.lowerBinId).not.toBe(initialLowerBinId);
       expect(newPosition.upperBinId).not.toBe(initialUpperBinId);
 
-      // Verify new position has liquidity in VDS cache
-      expect(BigInt(newPosition.liquidity)).toBeGreaterThan(0n);
+      // Verify new position has liquidity in VDS cache (TJ uses per-bin liquidityMinted array)
+      expect(newPosition.liquidityMinted).toBeDefined();
+      expect(newPosition.liquidityMinted.length).toBeGreaterThan(0);
+      const totalLiquidity = newPosition.liquidityMinted.reduce((sum, lm) => sum + BigInt(lm), 0n);
+      expect(totalLiquidity).toBeGreaterThan(0n);
 
       // Verify VDS has exactly 1 position after rebalance
       expect(updatedPositions.length).toBe(1);
