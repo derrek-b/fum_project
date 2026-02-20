@@ -11,12 +11,6 @@ import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Mock the getPoolTVLAverage function for test environment
 vi.mock('fum_library', async () => {
@@ -32,35 +26,14 @@ describe('VaultAuthRevoked Workflow', () => {
   let testConfig;
   let service;
   let testVault;
-  const testBlacklistPath = path.join(__dirname, '../../../data/.test-vault-auth-revoke-blacklist.json');
-  const testDataDir = path.join(__dirname, '../../../data/vaults');
-
   // Event capture
   let vaultAuthRevokedEvent = null;
   let vaultOffboardedEvent = null;
 
   beforeAll(async () => {
-    // Clean up old data
-    try {
-      await fs.rm(testDataDir, { recursive: true, force: true });
-      await fs.mkdir(testDataDir, { recursive: true });
-    } catch (error) {
-      // Directory may not exist
-    }
-
     // 1. Setup blockchain
     testEnv = await setupTestBlockchain();
-    testConfig = {
-      ...testEnv.testConfig,
-      blacklistFilePath: testBlacklistPath
-    };
-
-    // Clean up test blacklist file
-    try {
-      await fs.unlink(testBlacklistPath);
-    } catch (e) {
-      // File doesn't exist, that's fine
-    }
+    testConfig = testEnv.testConfig;
 
     // 2. Create vault FIRST (with executor set) - different from grant test!
     console.log('Creating test vault with executor set...');
@@ -134,13 +107,6 @@ describe('VaultAuthRevoked Workflow', () => {
       }
     }
     await cleanupTestBlockchain(testEnv);
-
-    // Clean up test files
-    try {
-      await fs.unlink(testBlacklistPath);
-    } catch (e) {
-      // File doesn't exist, that's fine
-    }
   });
 
   it('should emit VaultAuthRevoked when executor is removed', async () => {

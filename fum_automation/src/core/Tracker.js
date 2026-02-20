@@ -92,7 +92,19 @@ export default class Tracker {
           const metadata = JSON.parse(data);
           this.vaultMetadata.set(vaultAddress, metadata);
         } catch (error) {
-          console.error(`Failed to load metadata for vault ${vaultAddress}:`, error.message);
+          if (error.code === 'ENOENT') {
+            console.warn(`[Tracker] Vault directory exists but metadata.json is missing for ${vaultAddress} — historical tracking data has been lost`);
+            this.trackingFailures.set(vaultAddress, {
+              vaultAddress,
+              failedAt: Date.now(),
+              lastAttempt: Date.now(),
+              attempts: 1,
+              error: 'metadata.json missing — historical tracking data lost',
+              eventType: 'metadata_load'
+            });
+          } else {
+            console.error(`Failed to load metadata for vault ${vaultAddress}:`, error.message);
+          }
         }
       }
 

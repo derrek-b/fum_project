@@ -329,6 +329,7 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
       wsUrl: testConfig.wsUrl,
       blacklistFilePath: blacklistPath,
       trackingDataDir: trackingDir,
+      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
       ssePort,
       debug: true,
       retryIntervalMs: 999999999  // Disabled - we'll call manually

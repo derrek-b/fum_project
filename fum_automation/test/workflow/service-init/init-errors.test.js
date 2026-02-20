@@ -71,6 +71,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3091,
         debug: true
       });
@@ -93,6 +94,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3092,
         debug: true
       });
@@ -122,6 +124,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3093,
         debug: true
       });
@@ -143,6 +146,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3094,
         debug: true
       });
@@ -202,6 +206,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(sharedTempDir, 'vaults1'),
+        trackingFailuresFilePath: path.join(sharedTempDir, 'trackingFailures1.json'),
         ssePort: 3098,
         debug: true
       });
@@ -262,6 +267,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(sharedTempDir, 'vaults2'),
+        trackingFailuresFilePath: path.join(sharedTempDir, 'trackingFailures2.json'),
         ssePort: 3099,
         debug: true
       });
@@ -296,6 +302,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3095,
         debug: true
       });
@@ -323,6 +330,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3096,
         debug: true
       });
@@ -348,6 +356,7 @@ describe('Service Initialization Error Scenarios', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3097,
         debug: true
       });

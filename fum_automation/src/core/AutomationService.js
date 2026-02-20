@@ -6,6 +6,7 @@
 
 import { ethers } from 'ethers';
 import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
+import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
 import { UnrecoverableError } from '../utils/errors.js';
 
@@ -32,6 +33,7 @@ class AutomationService {
    * @param {number} [config.ssePort=3001] - SSE server port
    * @param {string} [config.blacklistFilePath='./data/blacklist.json'] - Path to blacklist file
    * @param {string} [config.trackingDataDir='./data/vaults'] - Directory for vault tracking data
+   * @param {string} [config.trackingFailuresFilePath='./data/trackingFailures.json'] - Path to tracking failures file
    */
   constructor(config) {
     // Validate required config
@@ -47,6 +49,7 @@ class AutomationService {
     this.ssePort = config.ssePort || 3001;
     this.blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
     this.trackingDataDir = config.trackingDataDir || './data/vaults';
+    this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
 
     // Service state
     this.isRunning = false;
@@ -82,6 +85,7 @@ class AutomationService {
 
     this.tracker = new Tracker({
       dataDir: this.trackingDataDir,
+      trackingFailuresFilePath: this.trackingFailuresFilePath,
       eventManager: this.eventManager,
       chainId: this.chainId,
       debug: this.debug
@@ -397,7 +401,14 @@ class AutomationService {
       throw new Error(`Provider chain ID (${network.chainId}) does not match config (${this.chainId})`);
     }
 
-    this.log(`Connected to chain ${network.chainId} (${network.name})`);
+    let chainName = network.name;
+    try {
+      const chainConfig = getChainConfig(network.chainId);
+      chainName = chainConfig.name;
+    } catch {
+      // Chain not in our config — fall back to ethers' network name
+    }
+    this.log(`Connected to chain ${network.chainId} (${chainName})`);
 
     // Start heartbeat monitoring
     this.startHeartbeat();

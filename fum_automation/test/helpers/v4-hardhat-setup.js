@@ -12,17 +12,16 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { loadSharedState, saveSharedState } from '../shared-state.js';
+import { clearTestData } from './hardhat-setup.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Empty blacklist template for cleanup
+ * Empty blacklist template for cleanup.
+ * Must match the flat { address: info } format that AutomationService.saveBlacklist() writes.
  */
-const EMPTY_BLACKLIST = {
-  version: "1.0",
-  blacklisted: {}
-};
+const EMPTY_BLACKLIST = {};
 
 /**
  * Connect to the shared Hardhat instance and revert to base snapshot
@@ -122,17 +121,12 @@ async function connectToV4SharedHardhat() {
  * @returns {Promise<Object>} Test environment with server, contracts, signers, and config
  */
 export async function setupV4TestBlockchain(options = {}) {
+  // Clean stale data from prior runs (crash recovery)
+  await clearTestData();
+  await clearBlacklist();
+
   // Connect to shared V4 Hardhat instance (ignores port option)
   const shared = await connectToV4SharedHardhat();
-
-  // Clean tracking data directory before starting test
-  const trackingDataDir = path.join(__dirname, '../../data/vaults');
-  try {
-    await fs.rm(trackingDataDir, { recursive: true, force: true });
-    await fs.mkdir(trackingDataDir, { recursive: true });
-  } catch (error) {
-    // Directory might not exist, that's OK
-  }
 
   // Load contract ABIs directly from fum_library artifacts
   const contractsModule = await import('fum_library/artifacts/contracts');
@@ -219,4 +213,5 @@ export async function cleanupV4TestBlockchain(testEnv) {
   }
 
   await clearBlacklist();
+  await clearTestData();
 }

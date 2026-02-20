@@ -17,12 +17,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Empty blacklist template for cleanup
+ * Empty blacklist template for cleanup.
+ * Must match the flat { address: info } format that AutomationService.saveBlacklist() writes.
  */
-const EMPTY_BLACKLIST = {
-  version: "1.0",
-  blacklisted: {}
-};
+const EMPTY_BLACKLIST = {};
 
 /**
  * Connect to the shared Hardhat instance and revert to base snapshot
@@ -142,17 +140,12 @@ async function connectToSharedHardhat() {
  * @returns {Promise<Object>} Test environment with server, contracts, signers, and config
  */
 export async function setupTestBlockchain(options = {}) {
+  // Clean stale data from prior runs (crash recovery)
+  await clearTestData();
+  await clearBlacklist();
+
   // Connect to shared Hardhat instance (ignores port option)
   const shared = await connectToSharedHardhat();
-
-  // Clean tracking data directory before starting test
-  const trackingDataDir = path.join(__dirname, '../../data/vaults');
-  try {
-    await fs.rm(trackingDataDir, { recursive: true, force: true });
-    await fs.mkdir(trackingDataDir, { recursive: true });
-  } catch (error) {
-    // Directory might not exist, that's OK
-  }
 
   // Load contract ABIs directly from fum_library artifacts (bypasses test mocks)
   const contractsModule = await import('fum_library/artifacts/contracts');
@@ -235,8 +228,30 @@ export async function clearBlacklist() {
 }
 
 /**
+ * Clear test data files (vault data + tracking failures)
+ * Called during teardown to ensure clean state for next test
+ */
+export async function clearTestData() {
+  const vaultsDir = path.join(__dirname, '../../data/vaults');
+  const trackingFailuresPath = path.join(__dirname, '../../data/trackingFailures.json');
+
+  try {
+    await fs.rm(vaultsDir, { recursive: true, force: true });
+    await fs.mkdir(vaultsDir, { recursive: true });
+  } catch (err) {
+    // Directory might not exist, that's OK
+  }
+
+  try {
+    await fs.writeFile(trackingFailuresPath, '{}');
+  } catch (err) {
+    // File might not exist or directory missing, that's OK
+  }
+}
+
+/**
  * Clean up test blockchain environment
- * Cleans up WebSocket and resets blacklist files
+ * Cleans up WebSocket, resets blacklist, and clears test data
  * Does NOT stop Hardhat (it's shared)
  *
  * @param {Object} testEnv - Test environment from setupTestBlockchain()
@@ -248,4 +263,7 @@ export async function cleanupTestBlockchain(testEnv) {
 
   // Clear blacklist files for next test run
   await clearBlacklist();
+
+  // Clear vault data and tracking failures
+  await clearTestData();
 }

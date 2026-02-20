@@ -145,6 +145,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       wsUrl: testConfig.wsUrl,
       blacklistFilePath: blacklistPath,
       trackingDataDir: trackingDir,
+      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
       ssePort,
       debug: true,
       retryIntervalMs: 999999999  // Effectively disabled - we'll call manually
@@ -499,6 +500,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       wsUrl: testConfig.wsUrl,
       blacklistFilePath: blacklistPath,
       trackingDataDir: trackingDir,
+      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
       ssePort,
       debug: true,
       retryIntervalMs: 999999999

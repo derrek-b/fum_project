@@ -130,6 +130,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       wsUrl: testConfig.wsUrl,
       blacklistFilePath: blacklistPath,
       trackingDataDir: trackingDir,
+      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
       ssePort,
       debug: true,
       retryIntervalMs: 999999999  // Effectively disabled - we'll call manually

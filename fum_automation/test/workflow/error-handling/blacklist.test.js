@@ -123,6 +123,7 @@ describe('Blacklist Management', () => {
       wsUrl: testConfig.wsUrl,
       blacklistFilePath: blacklistPath,
       trackingDataDir: trackingDir,
+      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
       ssePort,
       debug: true,
       retryIntervalMs: 999999999,  // Effectively disabled - we'll call manually
@@ -556,6 +557,7 @@ describe('Blacklist Management', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,  // Same file!
         trackingDataDir: path.join(tempDir, 'vaults2'),
+        trackingFailuresFilePath: path.join(tempDir, 'trackingFailures2.json'),
         ssePort: 3311,
         debug: true,
         retryIntervalMs: 999999999

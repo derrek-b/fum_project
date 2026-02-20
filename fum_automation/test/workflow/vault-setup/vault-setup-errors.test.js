@@ -87,6 +87,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
         wsUrl: testConfig.wsUrl,
         blacklistFilePath: blacklistPath,
         trackingDataDir: path.join(dir, 'vaults'),
+        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
         ssePort: 3100,
         debug: true
       });

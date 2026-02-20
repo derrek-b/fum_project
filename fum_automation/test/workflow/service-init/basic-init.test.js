@@ -9,18 +9,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
-import path from 'path';
 import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architecture)', () => {
   let testEnv;
   let testConfig;
   let service;
-  const testBlacklistPath = path.join(__dirname, '../../../data/.test-0vaults-blacklist.json');
 
   // Event capture
   let serviceStartedEvent = null;
@@ -29,16 +23,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
 
   beforeAll(async () => {
     testEnv = await setupTestBlockchain();
-    testConfig = {
-      ...testEnv.testConfig,
-      blacklistFilePath: testBlacklistPath
-    };
-    // Clean up test blacklist file
-    try {
-      await fs.unlink(testBlacklistPath);
-    } catch (e) {
-      // File doesn't exist, that's fine
-    }
+    testConfig = testEnv.testConfig;
   });
 
   afterAll(async () => {
@@ -46,12 +31,6 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       await service.stop();
     }
     await cleanupTestBlockchain(testEnv);
-    // Clean up test blacklist file
-    try {
-      await fs.unlink(testBlacklistPath);
-    } catch (e) {
-      // File doesn't exist, that's fine
-    }
   });
 
   describe('Constructor Validation', () => {
@@ -483,7 +462,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
     });
 
     it('should persist blacklist to disk', async () => {
-      const fileContents = await fs.readFile(testBlacklistPath, 'utf-8');
+      const fileContents = await fs.readFile(testConfig.blacklistFilePath, 'utf-8');
       const savedBlacklist = JSON.parse(fileContents);
       expect(Object.keys(savedBlacklist).length).toBe(2);
     });

@@ -9,13 +9,6 @@ import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('AutomationService Initialization - 1 Vault (New Architecture)', () => {
   let testEnv;
   let testVault;
@@ -44,15 +37,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   let assetValuesFetchedEvents = [];
 
   beforeAll(async () => {
-    // Clean up any old vault data from previous test runs
-    const dataDir = path.join(__dirname, '../../../data/vaults');
-    try {
-      await fs.rm(dataDir, { recursive: true, force: true });
-      await fs.mkdir(dataDir, { recursive: true });
-    } catch (error) {
-      // Ignore errors if directory doesn't exist
-    }
-
     // Setup blockchain environment (uses shared Hardhat instance)
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;
