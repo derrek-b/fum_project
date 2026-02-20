@@ -157,10 +157,10 @@ async function validateDeterministicAddresses(actualAddresses, chainId) {
  */
 async function updateChainsConfig(chainId, platformId, key, value) {
   const files = [SRC_CHAINS_FILE, DIST_CHAINS_FILE];
+  let anyFileUpdated = false;
 
   for (const filePath of files) {
     if (!fs.existsSync(filePath)) {
-      console.warn(`Chains file not found at ${filePath}`);
       continue;
     }
 
@@ -176,9 +176,14 @@ async function updateChainsConfig(chainId, platformId, key, value) {
       content = content.replace(pattern, `$1"${value}"`);
       fs.writeFileSync(filePath, content);
       console.log(`  Updated ${key} in ${platformId} for chain ${chainId} in ${path.basename(filePath)}: ${value}`);
+      anyFileUpdated = true;
     } else {
       console.warn(`  Could not find ${key} in ${platformId} for chain ${chainId} in ${path.basename(filePath)}`);
     }
+  }
+
+  if (!anyFileUpdated) {
+    console.warn(`No chains config file found (checked src/ and dist/) — could not update ${key} for chain ${chainId}`);
   }
 }
 
