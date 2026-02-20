@@ -85,8 +85,10 @@ Conservative single-position strategy. `type = 'bob'`, `name = 'Baby Steps Strat
 - Loads strategy config via `getStrategyDetails('bob')` from fum_library
 - Tracks emergency exit baseline per vault (`emergencyExitBaseline` object)
 - Tracks swap count since last fee check per vault (`swapCountSinceLastFeeCheck` object)
-- On `initializeVault`: selects best pool, captures emergency baseline, creates initial position
-- On `handleSwapEvent`: evaluates position state, decides whether to rebalance, collect fees, or take no action
+- On `initializeVault`: selects best pool, evaluates existing positions (keeps most centered up to `maxPositions`, demotes rest), closes non-aligned positions, prepares tokens, adds liquidity or creates new position, captures emergency baseline
+- On `handleSwapEvent`: evaluates position state, decides whether to rebalance (out-of-range only), collect fees, or take no action
+- Position evaluation uses `inRange` only — no edge-threshold triggers. Positions near range edges are left alone until they go out of range.
+- Token preparation for deficit coverage logs warnings on remaining deficits but proceeds with available balances rather than throwing.
 
 ### Strategy Parameters
 

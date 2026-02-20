@@ -56,7 +56,7 @@ AutomationService creates all components in its constructor:
 
 1. **EventManager** — created first, receives dependencies via setters (`setPoolData`, `setAdapters`, `setVaultDataService`) after `initialize()`
 2. **VaultDataService** — receives EventManager in constructor, gets provider/chainId/tokens/adapters/poolData via setters during `initialize()`
-3. **Tracker** — receives `{ dataDir, eventManager, chainId, debug }`, subscribes to events automatically
+3. **Tracker** — receives `{ dataDir, trackingFailuresFilePath, eventManager, chainId, debug }`, subscribes to events automatically
 4. **SSEBroadcaster** — receives EventManager + callback functions for data access
 5. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
 

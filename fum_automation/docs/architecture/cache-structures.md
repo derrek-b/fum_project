@@ -403,6 +403,7 @@ const DECAY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours - clear history if no t
 this.ssePort = config.ssePort || 3001;
 this.blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
 this.trackingDataDir = config.trackingDataDir || './data/vaults';
+this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
 this.heartbeatIntervalMs = 30000; // 30 seconds
 ```
 

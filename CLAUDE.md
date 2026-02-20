@@ -52,11 +52,12 @@ cd fum_library && npm test         # Vitest unit tests
 
 ### fum_automation
 ```bash
-cd fum_automation && npm run start       # Start automation service
-cd fum_automation && npm test            # All tests
-cd fum_automation && npm run test:v3     # Uniswap V3 workflow tests
-cd fum_automation && npm run test:v4     # Uniswap V4 workflow tests
-cd fum_automation && npm run test:tj     # Trader Joe workflow tests
+cd fum_automation && npm run start           # Start automation service
+cd fum_automation && npm test                # All tests
+cd fum_automation && npm run test:v3:run-all # Uniswap V3 workflow tests
+cd fum_automation && npm run test:v4:run-all # Uniswap V4 workflow tests
+cd fum_automation && npm run test:tj:run-all # All Trader Joe workflow tests
+cd fum_automation && npm run test:tj         # Run specific TJ test (FORK_CHAIN=avalanche vitest run <path>)
 ```
 
 ### fum_testing
