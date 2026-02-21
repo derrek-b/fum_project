@@ -63,8 +63,7 @@ function loadConfig() {
     wsUrl: process.env.WS_URL,
     executorAddress: wallet.address,
     debug: process.env.DEBUG === 'true',
-    blacklistFilePath: process.env.BLACKLIST_PATH,
-    trackingDataDir: process.env.TRACKING_DATA_DIR,
+    dataDir: process.env.DATA_DIR,
     ssePort: parseInt(process.env.SSE_PORT),
     retryIntervalMs: parseInt(process.env.RETRY_INTERVAL_MS),
     maxFailureDurationMs: parseInt(process.env.MAX_FAILURE_DURATION_MS)
@@ -111,8 +110,7 @@ async function main() {
     console.log(`  Executor: ${config.executorAddress}`);
     console.log(`  Debug: ${config.debug}`);
     console.log(`  SSE Port: ${config.ssePort}`);
-    console.log(`  Blacklist Path: ${config.blacklistFilePath}`);
-    console.log(`  Tracking Dir: ${config.trackingDataDir}`);
+    console.log(`  Data Dir: ${config.dataDir || './data (default)'}`);
     console.log(`  Retry Interval: ${config.retryIntervalMs}ms (${config.retryIntervalMs / 1000}s)`);
     console.log(`  Max Failure Duration: ${config.maxFailureDurationMs}ms (${config.maxFailureDurationMs / (1000 * 60 * 60)}h)\n`);
 
@@ -137,8 +135,7 @@ async function main() {
       automationServiceAddress: config.executorAddress,
       chainId: config.chainId,
       wsUrl: config.wsUrl,
-      blacklistFilePath: config.blacklistFilePath,
-      trackingDataDir: config.trackingDataDir,
+      dataDir: config.dataDir,
       ssePort: config.ssePort,
       retryIntervalMs: config.retryIntervalMs,
       maxFailureDurationMs: config.maxFailureDurationMs,

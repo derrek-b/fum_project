@@ -463,7 +463,7 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
     });
 
     it('should persist blacklist to disk', async () => {
-      const fileContents = await fs.readFile(testConfig.blacklistFilePath, 'utf-8');
+      const fileContents = await fs.readFile(service.blacklistFilePath, 'utf-8');
       const savedBlacklist = JSON.parse(fileContents);
       expect(Object.keys(savedBlacklist).length).toBe(2);
     });

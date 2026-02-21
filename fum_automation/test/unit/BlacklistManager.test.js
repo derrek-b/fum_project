@@ -55,9 +55,8 @@ describe('Blacklist Management', () => {
 
   describe('loadBlacklist', () => {
     it('should throw when directory does not exist', async () => {
-      const nonExistentPath = path.join(tempDir, 'nonexistent', 'blacklist.json');
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: nonExistentPath
+        dataDir: path.join(tempDir, 'nonexistent')
       }));
 
       // loadBlacklist is private, but we can test via start() catching the error
@@ -68,7 +67,7 @@ describe('Blacklist Management', () => {
     it('should create empty file when file missing (ENOENT)', async () => {
       // Directory exists (tempDir) but file doesn't
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       await service.loadBlacklist();
@@ -90,7 +89,7 @@ describe('Blacklist Management', () => {
       await fs.writeFile(blacklistPath, 'not valid json {{{', 'utf-8');
 
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       await expect(service.loadBlacklist()).rejects.toThrow();
@@ -113,7 +112,7 @@ describe('Blacklist Management', () => {
       await fs.writeFile(blacklistPath, JSON.stringify(existingData), 'utf-8');
 
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       await service.loadBlacklist();
@@ -127,7 +126,7 @@ describe('Blacklist Management', () => {
   describe('saveBlacklist', () => {
     it('should write blacklist to file', async () => {
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       // Add some data to the in-memory blacklist
@@ -147,9 +146,8 @@ describe('Blacklist Management', () => {
     });
 
     it('should throw on write error (directory missing)', async () => {
-      const badPath = path.join(tempDir, 'nonexistent', 'blacklist.json');
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: badPath
+        dataDir: path.join(tempDir, 'nonexistent')
       }));
 
       await expect(service.saveBlacklist()).rejects.toThrow();
@@ -159,7 +157,7 @@ describe('Blacklist Management', () => {
   describe('blacklistVault', () => {
     it('should add vault to blacklist and persist', async () => {
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       const vaultAddress = '0x3333333333333333333333333333333333333333';
@@ -176,9 +174,8 @@ describe('Blacklist Management', () => {
     });
 
     it('should call handleFatalError on save failure', async () => {
-      const badPath = path.join(tempDir, 'nonexistent', 'blacklist.json');
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: badPath
+        dataDir: path.join(tempDir, 'nonexistent')
       }));
 
       // Mock handleFatalError to prevent process.exit(1) from killing the test runner
@@ -204,7 +201,7 @@ describe('Blacklist Management', () => {
       await fs.writeFile(blacklistPath, JSON.stringify(initialData), 'utf-8');
 
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       // Load existing blacklist
@@ -225,7 +222,7 @@ describe('Blacklist Management', () => {
 
     it('should call handleFatalError on save failure', async () => {
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       // Add a vault to blacklist (in memory only for this test)
@@ -249,7 +246,7 @@ describe('Blacklist Management', () => {
 
     it('should not save if vault was not blacklisted', async () => {
       service = new AutomationService(createServiceConfig({
-        blacklistFilePath: blacklistPath
+        dataDir: tempDir
       }));
 
       // Create initial blacklist file so we can check it wasn't modified

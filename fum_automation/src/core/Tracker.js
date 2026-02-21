@@ -24,7 +24,7 @@ export default class Tracker {
    * @param {Object} config.eventManager - EventManager instance
    * @param {number} config.chainId - Chain ID for the network
    * @param {boolean} [config.debug=false] - Enable debug logging
-   * @param {string} [config.trackingFailuresFilePath='./data/trackingFailures.json'] - Path to tracking failures file
+   * @param {string} config.trackingFailuresFilePath - Path to tracking failures file
    */
   constructor(config) {
     if (!config.dataDir) {
@@ -41,7 +41,10 @@ export default class Tracker {
     this.eventManager = config.eventManager;
     this.chainId = config.chainId;
     this.debug = config.debug || false;
-    this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
+    if (!config.trackingFailuresFilePath) {
+      throw new Error('trackingFailuresFilePath is required in Tracker configuration');
+    }
+    this.trackingFailuresFilePath = config.trackingFailuresFilePath;
 
     this.vaultMetadata = new Map();
     this.trackingFailures = new Map();

@@ -127,22 +127,18 @@ describe('Config Update Success Cases', () => {
    */
   const createTestService = async (ssePort) => {
     const dir = await createTempDir();
-    const blacklistPath = path.join(dir, 'blacklist.json');
-    const trackingDir = path.join(dir, 'vaults');
 
     service = new AutomationService({
       automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
-      blacklistFilePath: blacklistPath,
-      trackingDataDir: trackingDir,
-      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+      dataDir: dir,
       ssePort,
       debug: true,
       retryIntervalMs: 999999999  // Effectively disabled
     });
 
-    return { service, dir, blacklistPath, trackingDir };
+    return { service, dir, blacklistPath: service.blacklistFilePath, trackingDir: service.trackingDataDir };
   };
 
   /**

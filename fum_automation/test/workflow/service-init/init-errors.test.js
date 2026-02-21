@@ -62,16 +62,13 @@ describe('Service Initialization Error Scenarios', () => {
   describe('Provider Errors', () => {
     it('should fail when chain ID mismatches config', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       // Configure with wrong chain ID (Hardhat is 1337, we'll say 1)
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1, // Wrong! Hardhat is 1337
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3091,
         debug: true
       });
@@ -86,15 +83,12 @@ describe('Service Initialization Error Scenarios', () => {
   describe('Strategy Contract Errors', () => {
     it('should fail when strategy contract not deployed', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3092,
         debug: true
       });
@@ -113,18 +107,14 @@ describe('Service Initialization Error Scenarios', () => {
   });
 
   describe('Blacklist Directory Errors', () => {
-    it('should fail when blacklist directory does not exist', async () => {
+    it('should fail when data directory does not exist', async () => {
       const dir = await createTempDir();
-      // Point to a non-existent subdirectory
-      const blacklistPath = path.join(dir, 'nonexistent', 'subdir', 'blacklist.json');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: path.join(dir, 'nonexistent', 'subdir'),
         ssePort: 3093,
         debug: true
       });
@@ -135,18 +125,15 @@ describe('Service Initialization Error Scenarios', () => {
 
     it('should fail when blacklist file contains invalid JSON', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       // Create corrupt blacklist file
-      await fs.writeFile(blacklistPath, '{ invalid json {{{{', 'utf-8');
+      await fs.writeFile(path.join(dir, 'blacklist.json'), '{ invalid json {{{{', 'utf-8');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3094,
         debug: true
       });
@@ -194,7 +181,8 @@ describe('Service Initialization Error Scenarios', () => {
     });
 
     it('should track failed vault and emit VaultSetupFailed event', async () => {
-      const blacklistPath = path.join(sharedTempDir, 'blacklist1.json');
+      const dataDir1 = path.join(sharedTempDir, 'data1');
+      await fs.mkdir(dataDir1, { recursive: true });
 
       // Set invalid strategy address to cause REAL failure (no mocking)
       const invalidStrategyAddress = '0x0000000000000000000000000000000000000001';
@@ -204,9 +192,7 @@ describe('Service Initialization Error Scenarios', () => {
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(sharedTempDir, 'vaults1'),
-        trackingFailuresFilePath: path.join(sharedTempDir, 'trackingFailures1.json'),
+        dataDir: dataDir1,
         ssePort: 3098,
         debug: true
       });
@@ -249,7 +235,8 @@ describe('Service Initialization Error Scenarios', () => {
     });
 
     it('should skip blacklisted vaults during discovery', async () => {
-      const blacklistPath = path.join(sharedTempDir, 'blacklist2.json');
+      const dataDir2 = path.join(sharedTempDir, 'data2');
+      await fs.mkdir(dataDir2, { recursive: true });
 
       // Pre-populate blacklist with the shared vault
       const blacklistData = {
@@ -259,15 +246,13 @@ describe('Service Initialization Error Scenarios', () => {
           reason: 'Test blacklist'
         }
       };
-      await fs.writeFile(blacklistPath, JSON.stringify(blacklistData), 'utf-8');
+      await fs.writeFile(path.join(dataDir2, 'blacklist.json'), JSON.stringify(blacklistData), 'utf-8');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(sharedTempDir, 'vaults2'),
-        trackingFailuresFilePath: path.join(sharedTempDir, 'trackingFailures2.json'),
+        dataDir: dataDir2,
         ssePort: 3099,
         debug: true
       });
@@ -294,15 +279,12 @@ describe('Service Initialization Error Scenarios', () => {
   describe('Forced Stop Cleanup', () => {
     it('should cleanup provider on stop(true) after partial init', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3095,
         debug: true
       });
@@ -322,15 +304,12 @@ describe('Service Initialization Error Scenarios', () => {
 
     it('should not error when stopping service that never started', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3096,
         debug: true
       });
@@ -348,15 +327,12 @@ describe('Service Initialization Error Scenarios', () => {
 
     it('should not error when force stopping service that never started', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       service = new AutomationService({
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3097,
         debug: true
       });

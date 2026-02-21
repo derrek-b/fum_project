@@ -114,23 +114,19 @@ describe('Blacklist Management', () => {
    */
   const createTestService = async (ssePort, overrides = {}) => {
     const dir = await createTempDir();
-    const blacklistPath = path.join(dir, 'blacklist.json');
-    const trackingDir = path.join(dir, 'vaults');
 
     service = new AutomationService({
       automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
-      blacklistFilePath: blacklistPath,
-      trackingDataDir: trackingDir,
-      trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+      dataDir: dir,
       ssePort,
       debug: true,
       retryIntervalMs: 999999999,  // Effectively disabled - we'll call manually
       ...overrides
     });
 
-    return { service, dir, blacklistPath, trackingDir };
+    return { service, dir, blacklistPath: service.blacklistFilePath, trackingDir: service.trackingDataDir };
   };
 
   /**
@@ -555,9 +551,7 @@ describe('Blacklist Management', () => {
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,  // Same file!
-        trackingDataDir: path.join(tempDir, 'vaults2'),
-        trackingFailuresFilePath: path.join(tempDir, 'trackingFailures2.json'),
+        dataDir: tempDir,  // Same dir — blacklist persists!
         ssePort: 3311,
         debug: true,
         retryIntervalMs: 999999999

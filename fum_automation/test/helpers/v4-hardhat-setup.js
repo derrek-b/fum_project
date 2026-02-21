@@ -161,8 +161,7 @@ export async function setupV4TestBlockchain(options = {}) {
     wsUrl: `ws://localhost:${shared.port}`,
     debug: true,
     envPath: path.join(__dirname, '../.env.test'),
-    blacklistFilePath: path.join(__dirname, '../../data/.vault-blacklist.json'),
-    trackingDataDir: path.join(__dirname, '../../data/vaults'),
+    dataDir: path.join(__dirname, '../../data'),
     ssePort: 3091,  // Different from V3 (3090) to avoid conflicts
     retryIntervalMs: 5000,
     maxFailureDurationMs: 60000
@@ -191,8 +190,8 @@ export async function setupV4TestBlockchain(options = {}) {
  */
 export async function clearBlacklist() {
   const blacklistPaths = [
-    path.join(__dirname, '../../data/.vault-blacklist.json'),
-    path.join(__dirname, '../data/.vault-blacklist.json')
+    path.join(__dirname, '../../data/blacklist.json'),
+    path.join(__dirname, '../data/blacklist.json')
   ];
 
   for (const blacklistPath of blacklistPaths) {

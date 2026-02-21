@@ -401,9 +401,10 @@ const DECAY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours - clear history if no t
 ### Service Configuration
 ```javascript
 this.ssePort = config.ssePort || 3001;
-this.blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
-this.trackingDataDir = config.trackingDataDir || './data/vaults';
-this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
+this.dataDir = path.resolve(config.dataDir || './data');
+this.blacklistFilePath = path.join(this.dataDir, 'blacklist.json');        // derived
+this.trackingDataDir = path.join(this.dataDir, 'vaults');                  // derived
+this.trackingFailuresFilePath = path.join(this.dataDir, 'trackingFailures.json'); // derived
 this.heartbeatIntervalMs = 30000; // 30 seconds
 ```
 

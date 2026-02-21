@@ -4,6 +4,7 @@
  * @since 2.0.0
  */
 
+import path from 'path';
 import { ethers } from 'ethers';
 import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
@@ -31,9 +32,7 @@ class AutomationService {
    * @param {number} [config.retryIntervalMs=300000] - Retry interval for failed vaults (5 minutes)
    * @param {number} [config.maxFailureDurationMs=3600000] - Max failure duration before blacklist (1 hour)
    * @param {number} [config.ssePort=3001] - SSE server port
-   * @param {string} [config.blacklistFilePath='./data/blacklist.json'] - Path to blacklist file
-   * @param {string} [config.trackingDataDir='./data/vaults'] - Directory for vault tracking data
-   * @param {string} [config.trackingFailuresFilePath='./data/trackingFailures.json'] - Path to tracking failures file
+   * @param {string} [config.dataDir='./data'] - Base directory for all data files (blacklist, vault tracking, tracking failures)
    */
   constructor(config) {
     // Validate required config
@@ -47,9 +46,10 @@ class AutomationService {
     this.retryIntervalMs = config.retryIntervalMs || 300000;
     this.maxFailureDurationMs = config.maxFailureDurationMs || 3600000;
     this.ssePort = config.ssePort || 3001;
-    this.blacklistFilePath = config.blacklistFilePath || './data/blacklist.json';
-    this.trackingDataDir = config.trackingDataDir || './data/vaults';
-    this.trackingFailuresFilePath = config.trackingFailuresFilePath || './data/trackingFailures.json';
+    this.dataDir = path.resolve(config.dataDir || './data');
+    this.blacklistFilePath = path.join(this.dataDir, 'blacklist.json');
+    this.trackingDataDir = path.join(this.dataDir, 'vaults');
+    this.trackingFailuresFilePath = path.join(this.dataDir, 'trackingFailures.json');
 
     // Service state
     this.isRunning = false;

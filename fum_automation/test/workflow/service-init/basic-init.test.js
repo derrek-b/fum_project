@@ -462,7 +462,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
     });
 
     it('should persist blacklist to disk', async () => {
-      const fileContents = await fs.readFile(testConfig.blacklistFilePath, 'utf-8');
+      const fileContents = await fs.readFile(service.blacklistFilePath, 'utf-8');
       const savedBlacklist = JSON.parse(fileContents);
       expect(Object.keys(savedBlacklist).length).toBe(2);
     });

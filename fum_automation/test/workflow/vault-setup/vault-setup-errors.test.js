@@ -61,7 +61,6 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
   describe('Strategy Initialization Errors', () => {
     it('should fail when strategy is not registered', async () => {
       const dir = await createTempDir();
-      const blacklistPath = path.join(dir, 'blacklist.json');
 
       // Create a vault with an unknown strategy ID
       const testVault = await setupTestVault(
@@ -85,9 +84,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
         automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
-        blacklistFilePath: blacklistPath,
-        trackingDataDir: path.join(dir, 'vaults'),
-        trackingFailuresFilePath: path.join(dir, 'trackingFailures.json'),
+        dataDir: dir,
         ssePort: 3100,
         debug: true
       });
