@@ -9,7 +9,7 @@ Vault performance monitoring, ROI calculation, and transaction history tracking.
 
 ```javascript
 new Tracker({
-  dataDir,                    // string, required — base directory for vault data
+  vaultDataDir,               // string, required — directory for per-vault tracking data
   eventManager,               // EventManager, required — for event subscriptions
   chainId,                    // number, required
   debug,                      // boolean, default false

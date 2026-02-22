@@ -164,7 +164,7 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
       expect(service.tracker.vaultMetadata).toBeInstanceOf(Map);
       expect(service.tracker.vaultMetadata.size).toBe(0);
       expect(service.tracker.eventManager).toBe(service.eventManager);
-      expect(service.tracker.dataDir).toContain('vaults');
+      expect(service.tracker.vaultDataDir).toContain('vaults');
       expect(service.tracker.debug).toBe(testConfig.debug);
     });
 

@@ -162,7 +162,7 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
       expect(service.tracker.vaultMetadata).toBeInstanceOf(Map);
       expect(service.tracker.vaultMetadata.size).toBe(0);
       expect(service.tracker.eventManager).toBe(service.eventManager);
-      expect(service.tracker.dataDir).toContain('vaults');
+      expect(service.tracker.vaultDataDir).toContain('vaults');
       expect(service.tracker.debug).toBe(testConfig.debug);
     });
 

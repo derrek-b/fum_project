@@ -84,7 +84,7 @@ class AutomationService {
     this.vaultDataService = new VaultDataService(this.eventManager);
 
     this.tracker = new Tracker({
-      dataDir: this.trackingDataDir,
+      vaultDataDir: this.trackingDataDir,
       trackingFailuresFilePath: this.trackingFailuresFilePath,
       eventManager: this.eventManager,
       chainId: this.chainId,

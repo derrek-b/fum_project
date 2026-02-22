@@ -20,15 +20,15 @@ export default class Tracker {
   /**
    * Constructor for Tracker
    * @param {Object} config - Configuration object
-   * @param {string} config.dataDir - Base directory for vault data
+   * @param {string} config.vaultDataDir - Directory for per-vault tracking data
    * @param {Object} config.eventManager - EventManager instance
    * @param {number} config.chainId - Chain ID for the network
    * @param {boolean} [config.debug=false] - Enable debug logging
    * @param {string} config.trackingFailuresFilePath - Path to tracking failures file
    */
   constructor(config) {
-    if (!config.dataDir) {
-      throw new Error('dataDir is required in Tracker configuration');
+    if (!config.vaultDataDir) {
+      throw new Error('vaultDataDir is required in Tracker configuration');
     }
     if (!config.eventManager) {
       throw new Error('eventManager is required in Tracker configuration');
@@ -37,7 +37,7 @@ export default class Tracker {
       throw new Error('chainId is required in Tracker configuration');
     }
 
-    this.dataDir = path.resolve(config.dataDir);
+    this.vaultDataDir = path.resolve(config.vaultDataDir);
     this.eventManager = config.eventManager;
     this.chainId = config.chainId;
     this.debug = config.debug || false;
@@ -57,7 +57,7 @@ export default class Tracker {
   async initialize() {
     this.log('Initializing Tracker...');
 
-    await this.ensureDirectoryExists(this.dataDir);
+    await this.ensureDirectoryExists(this.vaultDataDir);
     await this.loadAllVaultMetadata();
     await this.loadTrackingFailures();
     this.setupEventListeners();
@@ -83,12 +83,12 @@ export default class Tracker {
    */
   async loadAllVaultMetadata() {
     try {
-      const entries = await fs.readdir(this.dataDir, { withFileTypes: true });
+      const entries = await fs.readdir(this.vaultDataDir, { withFileTypes: true });
       const vaultDirs = entries.filter(entry => entry.isDirectory() && entry.name.startsWith('0x'));
 
       for (const vaultDir of vaultDirs) {
         const vaultAddress = vaultDir.name;
-        const metadataPath = path.join(this.dataDir, vaultAddress, 'metadata.json');
+        const metadataPath = path.join(this.vaultDataDir, vaultAddress, 'metadata.json');
 
         try {
           const data = await fs.readFile(metadataPath, 'utf-8');
@@ -1100,7 +1100,7 @@ export default class Tracker {
    */
   async getVaultDirectory(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-    const vaultDir = path.join(this.dataDir, normalizedAddress);
+    const vaultDir = path.join(this.vaultDataDir, normalizedAddress);
     await this.ensureDirectoryExists(vaultDir);
     return vaultDir;
   }
@@ -1158,7 +1158,7 @@ export default class Tracker {
    */
   async getTransactions(vaultAddress, startTime = 0, endTime = Date.now()) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-    const vaultDir = path.join(this.dataDir, normalizedAddress);
+    const vaultDir = path.join(this.vaultDataDir, normalizedAddress);
     const transactionsPath = path.join(vaultDir, 'transactions.jsonl');
 
     try {
