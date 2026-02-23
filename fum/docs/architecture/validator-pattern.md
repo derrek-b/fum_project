@@ -68,7 +68,7 @@ interface IIncentiveValidator {
 | TJSwapValidator | ISwapValidator | Trader Joe LBRouter | Low — selector + offset |
 | UniswapV3PositionValidator | ILiquidityValidator | V3 NonfungiblePositionManager | Medium — multicall unwrapping, assembly |
 | UniswapV4PositionValidator | ILiquidityValidator | V4 PositionManager | High — nested ABI decoding, 7 assembly ops |
-| TJPositionValidator | ILiquidityValidator | TJPositionManager | Low — first param check |
+| TJPositionValidator | ILiquidityValidator | TJPositionManager | Low — selector-only (createPosition also checks vault param) |
 | MerklIncentiveValidator | IIncentiveValidator | Merkl Distributor | Low — selector + user check |
 
 ---
@@ -297,25 +297,32 @@ Adds 32 (Solidity memory length word) + offset to get absolute memory position.
 **Source:** `contracts/validators/TJPositionValidator.sol`
 **Implements:** ILiquidityValidator
 
-Simplest validator pattern — all TJPositionManager functions take `address vault` as the first parameter, and the validator just checks it matches.
+Two-tier validation: `createPosition` gets a vault param check (no existing position to look up), while the other 4 operations use selector-only validation since TJPositionManager enforces `pos.vault == msg.sender` internally.
 
 ### Selectors
 
-| Operation | Function Validated | Selector Source Signature |
+| Operation | Function Validated | Validation |
 |---|---|---|
-| `validateMint` | `createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)` | `CREATE_POSITION_SELECTOR` |
-| `validateIncreaseLiquidity` | `addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)` | `ADD_TO_POSITION_SELECTOR` |
-| `validateDecreaseLiquidity` | `removePosition(address,uint256,uint256[],uint256,uint256,uint256)` OR `decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)` | Both accepted |
-| `validateCollect` | `collectFees(address,uint256,uint256[],uint256,uint256,uint256)` | `COLLECT_FEES_SELECTOR` |
+| `validateMint` | `createPosition(address,address,uint256,...,uint256)` | Selector + vault param check (`data[4:36]`) |
+| `validateIncreaseLiquidity` | `addToPosition(uint256,uint256[],...,uint256)` | Selector only |
+| `validateDecreaseLiquidity` | `removePosition(uint256,uint256[],...,uint256)` OR `decreaseLiquidity(uint256,uint256,...,uint256)` | Selector only (both accepted) |
+| `validateCollect` | `collectFees(uint256,uint256[],...,uint256)` | Selector only |
 | `validateBurn` | — | Reverts "not yet implemented" |
 
-**All validation is identical:**
+**createPosition** (the only function with a vault param):
 ```solidity
 address calldataVault = abi.decode(data[4:36], (address));
 require(calldataVault == vault, "TJPositionValidator: vault mismatch");
 ```
 
-Why this works: TJPositionManager's internal logic already enforces that operations can only affect positions owned by the calling vault. The validator just ensures the vault address in calldata matches the actual calling vault.
+**All other operations** (selector-only):
+```solidity
+require(data.length >= 4, "TJPositionValidator: invalid data");
+bytes4 selector = bytes4(data[:4]);
+require(selector == EXPECTED_SELECTOR, "TJPositionValidator: not <functionName>");
+```
+
+Why selector-only is secure for existing positions: TJPositionManager stores `pos.vault` at creation and enforces `require(pos.vault == msg.sender)` on every operation. Since `msg.sender` is unforgeable and `pos.vault` is trusted on-chain state, there's no calldata the executor could craft to operate on another vault's position.
 
 ---
 

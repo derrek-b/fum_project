@@ -1,4 +1,4 @@
-<!-- Source: fum/contracts/TJPositionManager.sol, fum/contracts/TJPositionProxy.sol, fum_library/src/adapters/TraderJoeV2_2Adapter.js, fum_automation/src/strategies/babySteps/BabyStepsStrategy.js -->
+<!-- Source: fum/contracts/TJPositionManager.sol, fum/contracts/TJPositionProxy.sol, fum/contracts/validators/TJPositionValidator.sol, fum_library/src/adapters/TraderJoeV2_2Adapter.js, fum_automation/src/strategies/babySteps/BabyStepsStrategy.js -->
 # Trader Joe V2.2 Proxy Refactor — Decisions
 
 ## Status: Complete

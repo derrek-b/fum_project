@@ -1,4 +1,4 @@
-<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/ParrisIslandStrategy.sol, contracts/TJPositionManager.sol, contracts/TJPositionProxy.sol, contracts/interfaces/* -->
+<!-- Source: contracts/PositionVault.sol, contracts/VaultFactory.sol, contracts/StrategyBase.sol, contracts/BabyStepsStrategy.sol, contracts/ParrisIslandStrategy.sol, contracts/TJPositionManager.sol, contracts/TJPositionProxy.sol, contracts/interfaces/*, contracts/validators/* -->
 # Contract System
 
 How all smart contracts relate, their execution flows, and the factory-validator-strategy architecture that enables secure, extensible DeFi vault management.
@@ -288,7 +288,7 @@ struct Position {
 vault.mint(targets=[tjPositionManager], data, values)
   │
   ├── factory.validateMint(tjPositionManager, data, vault)
-  │     └── TJPositionValidator checks first param == vault
+  │     └── TJPositionValidator checks selector + vault param (createPosition only)
   │
   └── tjPositionManager.createPosition(vault, lbPair, ...)
         ├── deploy proxy via Clones.clone(proxyImplementation)
