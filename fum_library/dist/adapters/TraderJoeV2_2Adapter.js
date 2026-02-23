@@ -477,14 +477,12 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
 
   async generateClaimFeesData(params) {
     const {
-      position, walletAddress, provider, feeData,
+      position, provider, feeData,
       slippageTolerance = 0.5, deadlineMinutes = 20
     } = params;
 
     if (!position || typeof position !== 'object') throw new Error("Position parameter is required");
     if (position.id === null || position.id === undefined) throw new Error("Position id is required");
-    if (!walletAddress) throw new Error("walletAddress is required");
-    try { ethers.utils.getAddress(walletAddress); } catch { throw new Error(`Invalid wallet address: ${walletAddress}`); }
     if (!this.addresses?.positionManagerAddress) throw new Error("No position manager address configured");
 
     // Get feeShares: from threaded feeData (strategy path) or compute fresh (frontend path)
@@ -524,13 +522,13 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     const deadline = this._createDeadline(deadlineMinutes);
 
     const iface = new ethers.utils.Interface([
-      "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function collectFees(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
     return {
       to: this.addresses.positionManagerAddress,
       data: iface.encodeFunctionData("collectFees", [
-        walletAddress, position.id, feeShares, amountXMin, amountYMin, deadline
+        position.id, feeShares, amountXMin, amountYMin, deadline
       ]),
       value: '0x00',
       quote: { feeShares, feesX, feesY, amountXMin, amountYMin },
@@ -729,7 +727,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       position,
       percentage,
       provider,
-      walletAddress,
       slippageTolerance,
       deadlineMinutes
     } = params;
@@ -780,19 +777,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     // --- Provider validation ---
     if (!provider) {
       throw new Error("Provider is required");
-    }
-
-    // --- Wallet address validation ---
-    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
-      throw new Error("Wallet address is required");
-    }
-    if (typeof walletAddress !== 'string') {
-      throw new Error("Wallet address must be a string");
-    }
-    try {
-      ethers.utils.getAddress(walletAddress);
-    } catch (error) {
-      throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
     // --- Slippage validation ---
@@ -877,17 +861,17 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
 
     if (percentage === 100) {
       const iface = new ethers.utils.Interface([
-        "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       calldata = iface.encodeFunctionData("removePosition", [
-        walletAddress, position.id, feeShares, amountXMin, amountYMin, deadline
+        position.id, feeShares, amountXMin, amountYMin, deadline
       ]);
     } else {
       const iface = new ethers.utils.Interface([
-        "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function decreaseLiquidity(uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
       calldata = iface.encodeFunctionData("decreaseLiquidity", [
-        walletAddress, position.id, percentage, feeShares, amountXMin, amountYMin, deadline
+        position.id, percentage, feeShares, amountXMin, amountYMin, deadline
       ]);
     }
 
@@ -917,7 +901,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       token0Amount,
       token1Amount,
       provider,
-      walletAddress,
       poolData,
       token0Data,
       token1Data,
@@ -979,18 +962,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
 
     if (!provider) {
       throw new Error("Provider is required");
-    }
-
-    if (walletAddress === null || walletAddress === undefined || walletAddress === '') {
-      throw new Error("Wallet address is required");
-    }
-    if (typeof walletAddress !== 'string') {
-      throw new Error("Wallet address must be a string");
-    }
-    try {
-      ethers.utils.getAddress(walletAddress);
-    } catch (error) {
-      throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
     if (poolData === null || poolData === undefined) {
@@ -1091,11 +1062,10 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
 
     // --- Encode addToPosition calldata ---
     const iface = new ethers.utils.Interface([
-      "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      "function addToPosition(uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
     ]);
 
     const calldata = iface.encodeFunctionData("addToPosition", [
-      walletAddress,
       position.id,
       previousFeesX,
       previousFeesY,

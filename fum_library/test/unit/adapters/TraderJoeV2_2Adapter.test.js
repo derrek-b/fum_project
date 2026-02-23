@@ -3166,14 +3166,14 @@ describe('TraderJoeV2_2Adapter', () => {
   });
 
   describe('generateRemoveLiquidityData', () => {
-    // ABI for decoding removePosition calldata (6-param with feeShares, no percentage)
+    // ABI for decoding removePosition calldata (5-param with feeShares, no percentage)
     const removePositionIface = new ethers.utils.Interface([
-      "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
-    // ABI for decoding decreaseLiquidity calldata (7-param with percentage and feeShares)
+    // ABI for decoding decreaseLiquidity calldata (6-param with percentage and feeShares)
     const decreaseLiquidityIface = new ethers.utils.Interface([
-      "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      "function decreaseLiquidity(uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
     ]);
 
     // Shared state for E2E tests — position created in nested beforeAll
@@ -3289,22 +3289,6 @@ describe('TraderJoeV2_2Adapter', () => {
           .rejects.toThrow('Percentage must be an integer');
       });
 
-      // --- Wallet address validation ---
-      it('should throw if walletAddress is null', async () => {
-        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: null }))
-          .rejects.toThrow('Wallet address is required');
-      });
-
-      it('should throw if walletAddress is empty', async () => {
-        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: '' }))
-          .rejects.toThrow('Wallet address is required');
-      });
-
-      it('should throw if walletAddress is invalid', async () => {
-        await expect(adapter.generateRemoveLiquidityData({ ...validParams(), walletAddress: 'invalid' }))
-          .rejects.toThrow('Invalid wallet address');
-      });
-
       // --- Slippage validation ---
       it('should throw if slippageTolerance is null', async () => {
         await expect(adapter.generateRemoveLiquidityData({ ...validParams(), slippageTolerance: null }))
@@ -3415,7 +3399,6 @@ describe('TraderJoeV2_2Adapter', () => {
         });
 
         const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
-        expect(decoded.vault).toBe(testVault.address);
         expect(decoded.positionId.toString()).toBe(onChainPosition.id);
         expect(Array.isArray(decoded.feeShares)).toBe(true);
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
@@ -3433,7 +3416,6 @@ describe('TraderJoeV2_2Adapter', () => {
         });
 
         const decoded = decreaseLiquidityIface.decodeFunctionData('decreaseLiquidity', result.data);
-        expect(decoded.vault).toBe(testVault.address);
         expect(decoded.positionId.toString()).toBe(onChainPosition.id);
         expect(decoded.percentage.toNumber()).toBe(50);
         expect(Array.isArray(decoded.feeShares)).toBe(true);
@@ -4239,9 +4221,9 @@ describe('TraderJoeV2_2Adapter', () => {
       decimals: 6,
     };
 
-    // ABI for decoding addToPosition calldata (14 params with previousFeesX/previousFeesY)
+    // ABI for decoding addToPosition calldata (13 params with previousFeesX/previousFeesY)
     const addToPositionIface = new ethers.utils.Interface([
-      "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      "function addToPosition(uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
     ]);
 
     describe('Input Validation', () => {
@@ -4256,7 +4238,6 @@ describe('TraderJoeV2_2Adapter', () => {
         token0Amount: '1000000000000000000',
         token1Amount: '1000000000',
         provider: env.provider,
-        walletAddress: '0x0000000000000000000000000000000000000001',
         poolData: { activeId: 8388608, binStep: 20, address: '0x0000000000000000000000000000000000000002' },
         token0Data: WETH,
         token1Data: USDC,
@@ -4335,17 +4316,6 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should throw if provider is missing', async () => {
         await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), provider: null }))
           .rejects.toThrow('Provider is required');
-      });
-
-      // --- Wallet address validation ---
-      it('should throw if walletAddress is empty', async () => {
-        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), walletAddress: '' }))
-          .rejects.toThrow('Wallet address is required');
-      });
-
-      it('should throw if walletAddress is invalid', async () => {
-        await expect(adapterWithPM.generateAddLiquidityData({ ...validParams(), walletAddress: 'invalid' }))
-          .rejects.toThrow('Invalid wallet address');
       });
 
       // --- Pool data validation ---
@@ -4490,7 +4460,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: wavaxAmount.toString(),
           token1Amount: usdcAmount.toString(),
           provider: env.provider,
-          walletAddress: vaultAddress,
           poolData: e2ePoolData,
           token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
@@ -4566,7 +4535,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: addWavaxAmount.toString(),
           token1Amount: addUsdcAmount.toString(),
           provider: env.provider,
-          walletAddress: vaultAddress,
           poolData: e2ePoolData,
           token0Data: { address: wavaxAddress, symbol: 'WAVAX', decimals: 18 },
           token1Data: { address: usdcAddress, symbol: 'USDC', decimals: 6 },
@@ -4622,7 +4590,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: ethers.utils.parseEther('1').toString(),
           token1Amount: ethers.utils.parseUnits('2000', 6).toString(),
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4638,7 +4605,6 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result.value).toBe('0x00');
 
         const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-        expect(decoded.vault).toBe('0x0000000000000000000000000000000000000001');
         expect(decoded.positionId.toString()).toBe(e2ePositionId.toString());
         expect(decoded.activeIdDesired.toNumber()).toBe(e2ePoolData.activeId);
       }, 60000);
@@ -4653,7 +4619,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '2000000000', // USDC amount
           token1Amount: '1000000000000000000', // WETH amount
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: USDC,
           token1Data: WETH,
@@ -4681,7 +4646,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '1000000000000000000', // WETH
           token1Amount: '2000000000', // USDC
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4705,7 +4669,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '10000',
           token1Amount: '20000',
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4728,7 +4691,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '1000000000000000000',
           token1Amount: '2000000000',
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4757,18 +4719,16 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(decoded.distributionY.length).toBe(expectedBins);
       }, 60000);
 
-      it('should encode all 14 addToPosition parameters correctly', async () => {
+      it('should encode all 13 addToPosition parameters correctly', async () => {
         if (!e2ePosition || !e2ePoolData) return;
         // Use custom bin range centered on activeId for predictable deltaIds
         const position = { id: e2ePositionId.toString(), lowerBinId: e2ePoolData.activeId - 3, upperBinId: e2ePoolData.activeId + 3 };
-        const vaultAddress = '0x0000000000000000000000000000000000000001';
 
         const result = await adapter.generateAddLiquidityData({
           position,
           token0Amount: '1000000000000000000',
           token1Amount: '2000000000',
           provider: env.provider,
-          walletAddress: vaultAddress,
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4778,29 +4738,27 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
 
-        // 1. vault
-        expect(decoded.vault).toBe(vaultAddress);
-        // 2. positionId
+        // 1. positionId
         expect(decoded.positionId.toString()).toBe(e2ePositionId.toString());
-        // 3. previousFeesX (fee-aware baseline)
+        // 2. previousFeesX (fee-aware baseline)
         expect(Array.isArray(decoded.previousFeesX)).toBe(true);
-        // 4. previousFeesY
+        // 3. previousFeesY
         expect(Array.isArray(decoded.previousFeesY)).toBe(true);
-        // 5. amountX (WETH = lower address = tokenX)
+        // 4. amountX (WETH = lower address = tokenX)
         expect(decoded.amountX.toString()).toBe('1000000000000000000');
-        // 6. amountY (USDC = higher address = tokenY)
+        // 5. amountY (USDC = higher address = tokenY)
         expect(decoded.amountY.toString()).toBe('2000000000');
-        // 7. amountXMin (95% of amountX with 5% slippage)
+        // 6. amountXMin (95% of amountX with 5% slippage)
         expect(decoded.amountXMin.toString()).toBe('950000000000000000');
-        // 8. amountYMin (95% of amountY)
+        // 7. amountYMin (95% of amountY)
         expect(decoded.amountYMin.toString()).toBe('1900000000');
-        // 9. activeIdDesired
+        // 8. activeIdDesired
         expect(decoded.activeIdDesired.toNumber()).toBe(e2ePoolData.activeId);
-        // 10. idSlippage (should be > 0 for 5% slippage)
+        // 9. idSlippage (should be > 0 for 5% slippage)
         expect(decoded.idSlippage.toNumber()).toBeGreaterThan(0);
-        // 11-13. deltaIds, distributionX, distributionY
+        // 10-12. deltaIds, distributionX, distributionY
         expect(decoded.deltaIds.length).toBe(7);
-        // 14. deadline (should be in the future)
+        // 13. deadline (should be in the future)
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       }, 60000);
 
@@ -4813,7 +4771,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '1000000000000000000',
           token1Amount: '2000000000',
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -4838,7 +4795,6 @@ describe('TraderJoeV2_2Adapter', () => {
           token0Amount: '1000000000000000000',
           token1Amount: '2000000000',
           provider: env.provider,
-          walletAddress: '0x0000000000000000000000000000000000000001',
           poolData: e2ePoolData,
           token0Data: WETH,
           token1Data: USDC,
@@ -5725,16 +5681,6 @@ describe('TraderJoeV2_2Adapter', () => {
           .rejects.toThrow('Position id is required');
       });
 
-      it('should throw for missing walletAddress', async () => {
-        await expect(adapter.generateClaimFeesData({ position: { id: '1' }, walletAddress: '' }))
-          .rejects.toThrow('walletAddress is required');
-      });
-
-      it('should throw for invalid walletAddress', async () => {
-        await expect(adapter.generateClaimFeesData({ position: { id: '1' }, walletAddress: 'invalid' }))
-          .rejects.toThrow('Invalid wallet address');
-      });
-
       it('should throw if positionManagerAddress is not configured', async () => {
         const adapterNoPM = new TraderJoeV2_2Adapter(env.chainId, env.provider);
         adapterNoPM.addresses.positionManagerAddress = '';
@@ -5764,21 +5710,19 @@ describe('TraderJoeV2_2Adapter', () => {
       });
 
       it('should encode new collectFees selector with feeShares, mins, deadline', async () => {
-        const walletAddress = '0x0000000000000000000000000000000000000001';
         const feeShares = ['100', '200', '300'];
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
-          walletAddress,
+          walletAddress: '0x0000000000000000000000000000000000000001',
           feeData: { feeShares, fees0: '1000000000000000', fees1: '500000' },
           slippageTolerance: 0.5,
           deadlineMinutes: 20,
         });
 
         const iface = new ethers.utils.Interface([
-          "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function collectFees(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const decoded = iface.decodeFunctionData('collectFees', result.data);
-        expect(decoded.vault).toBe(walletAddress);
         expect(decoded.positionId.toString()).toBe('42');
         expect(decoded.feeShares.length).toBe(3);
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
@@ -5792,7 +5736,7 @@ describe('TraderJoeV2_2Adapter', () => {
         });
 
         const iface = new ethers.utils.Interface([
-          "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function collectFees(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const decoded = iface.decodeFunctionData('collectFees', result.data);
         expect(decoded.positionId.toString()).toBe('0');

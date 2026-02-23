@@ -2451,11 +2451,6 @@
       {
         "inputs": [
           {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          },
-          {
             "internalType": "uint256",
             "name": "positionId",
             "type": "uint256"
@@ -2539,11 +2534,6 @@
       },
       {
         "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          },
           {
             "internalType": "uint256",
             "name": "positionId",
@@ -2662,11 +2652,6 @@
       },
       {
         "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          },
           {
             "internalType": "uint256",
             "name": "positionId",
@@ -2861,11 +2846,6 @@
       },
       {
         "inputs": [
-          {
-            "internalType": "address",
-            "name": "vault",
-            "type": "address"
-          },
           {
             "internalType": "uint256",
             "name": "positionId",
@@ -3308,7 +3288,7 @@
           },
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "",
             "type": "address"
           }
         ],
@@ -3326,7 +3306,7 @@
           },
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "",
             "type": "address"
           }
         ],
@@ -3344,7 +3324,7 @@
           },
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "",
             "type": "address"
           }
         ],
