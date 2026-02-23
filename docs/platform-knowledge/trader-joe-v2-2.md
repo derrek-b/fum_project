@@ -106,6 +106,18 @@ Swap(address sender, address to, uint24 id, bytes32 amountsIn, bytes32 amountsOu
 - Amounts are **packed bytes32**: upper 128 bits = tokenX amount, lower 128 bits = tokenY amount
 - Emitted from LBPair contracts (one per pool, like Uniswap V3 — not singleton like V4)
 
+## Through-Vault Position Creation
+
+TJ positions **must be created through the vault contract** (`vault.mint()`), not via a direct signer transaction. TJPositionManager records `pos.vault = msg.sender` at creation time — if the signer creates the position directly, the signer becomes the owner, and the vault can never operate on it (all subsequent calls check `pos.vault == msg.sender`).
+
+Test setup flow:
+1. Transfer position tokens from owner to vault
+2. Vault approves TJPositionManager (via `vault.approve()`)
+3. Generate create position data with `walletAddress: vaultAddress`
+4. Execute via `vault.mint([to], [data], [value])`
+
+This differs from Uniswap V3/V4 where positions are ERC721 NFTs that can be transferred after creation. TJ's proxy-per-position architecture binds ownership at creation — there's no `safeTransferFrom` on TJPositionManager.
+
 ## Gotcha Summary
 
 1. Version 3 = V2.2 (counterintuitive naming)
