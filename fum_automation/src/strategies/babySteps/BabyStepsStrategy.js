@@ -1815,7 +1815,6 @@ export default class BabyStepsStrategy extends StrategyBase {
         token0Amount: finalToken0Balance.toString(),
         token1Amount: finalToken1Balance.toString(),
         provider: this.provider,
-        walletAddress: vault.address,
         poolData: freshPoolData,
         token0Data,
         token1Data,
