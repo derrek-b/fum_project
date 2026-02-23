@@ -20,13 +20,18 @@ interface ITJPositionProxy {
  *      enabling per-position fee attribution. Fee math is computed off-chain via
  *      LiquidityHelperContract and passed in as feeShares/previousFees parameters.
  *
- *      This contract is called by PositionVault.mint() after validation by
- *      TJPositionValidator via VaultFactory.validateMint().
+ *      This contract is called by PositionVault after validation by
+ *      TJPositionValidator via VaultFactory.
  *
- *      Flow:
+ *      Auth model:
+ *      - createPosition: takes vault as param (no existing position), checks vault == msg.sender
+ *      - addToPosition, collectFees, decreaseLiquidity, removePosition: no vault param,
+ *        checks pos.vault == msg.sender (ownership from stored position state)
+ *
+ *      Flow (createPosition):
  *        Vault.mint(target=TJPositionManager, data=createPosition(...))
  *          -> VaultFactory.validateMint(TJPositionManager, calldata, vault)
- *            -> TJPositionValidator.validateMint(calldata, vault)
+ *            -> TJPositionValidator.validateMint(calldata, vault) [selector + vault check]
  *          -> TJPositionManager.createPosition() executes
  *            1. Verify msg.sender == vault param
  *            2. Deploy proxy via Clones.clone(), initialize
@@ -238,7 +243,6 @@ contract TJPositionManager is ReentrancyGuard {
 
     /**
      * @notice Add liquidity to an existing position
-     * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to add liquidity to
      * @param previousFeesX Known per-bin fee amounts for tokenX (from LiquidityHelperContract)
      * @param previousFeesY Known per-bin fee amounts for tokenY (from LiquidityHelperContract)
@@ -256,7 +260,6 @@ contract TJPositionManager is ReentrancyGuard {
      * @return amountYAdded Amount of tokenY actually added
      */
     function addToPosition(
-        address vault,
         uint256 positionId,
         uint256[] calldata previousFeesX,
         uint256[] calldata previousFeesY,
@@ -271,10 +274,8 @@ contract TJPositionManager is ReentrancyGuard {
         uint256[] calldata distributionY,
         uint256 deadline
     ) external nonReentrant returns (uint256 amountXAdded, uint256 amountYAdded) {
-        require(vault == msg.sender, "TJPositionManager: vault must be caller");
-
         Position storage pos = _positions[positionId];
-        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
         require(previousFeesX.length == pos.depositIds.length, "TJPositionManager: feesX length mismatch");
         require(previousFeesY.length == pos.depositIds.length, "TJPositionManager: feesY length mismatch");
@@ -284,8 +285,8 @@ contract TJPositionManager is ReentrancyGuard {
         address proxy = pos.proxy;
 
         // Pull tokens from vault → manager → proxy
-        IERC20(tokenX).safeTransferFrom(vault, address(this), amountX);
-        IERC20(tokenY).safeTransferFrom(vault, address(this), amountY);
+        IERC20(tokenX).safeTransferFrom(msg.sender, address(this), amountX);
+        IERC20(tokenY).safeTransferFrom(msg.sender, address(this), amountY);
         IERC20(tokenX).safeTransfer(proxy, amountX);
         IERC20(tokenY).safeTransfer(proxy, amountY);
 
@@ -314,7 +315,7 @@ contract TJPositionManager is ReentrancyGuard {
             distributionX: distributionX,
             distributionY: distributionY,
             to: proxy,
-            refundTo: vault,
+            refundTo: msg.sender,
             deadline: deadline
         });
 
@@ -364,15 +365,14 @@ contract TJPositionManager is ReentrancyGuard {
         );
 
         // Belt-and-suspenders: sweep leftover tokens from proxy to vault
-        _sweepProxyTokens(proxy, tokenX, vault);
-        _sweepProxyTokens(proxy, tokenY, vault);
+        _sweepProxyTokens(proxy, tokenX, msg.sender);
+        _sweepProxyTokens(proxy, tokenY, msg.sender);
 
-        emit PositionIncreased(positionId, vault, pos.lbPair, amountXAdded, amountYAdded);
+        emit PositionIncreased(positionId, msg.sender, pos.lbPair, amountXAdded, amountYAdded);
     }
 
     /**
      * @notice Collect accrued fees from a position
-     * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to collect fees from
      * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
      * @param amountXMin Minimum tokenX to receive (slippage protection)
@@ -382,16 +382,14 @@ contract TJPositionManager is ReentrancyGuard {
      * @return amountY Amount of tokenY fees collected
      */
     function collectFees(
-        address vault,
         uint256 positionId,
         uint256[] calldata feeShares,
         uint256 amountXMin,
         uint256 amountYMin,
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
-        require(vault == msg.sender, "TJPositionManager: vault must be caller");
         Position storage pos = _positions[positionId];
-        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
         (amountX, amountY) = _burnFeesViaProxy(positionId, feeShares, amountXMin, amountYMin, deadline);
@@ -399,7 +397,6 @@ contract TJPositionManager is ReentrancyGuard {
 
     /**
      * @notice Decrease liquidity from an existing position (partial or full)
-     * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to remove liquidity from
      * @param percentage Percentage of baseline liquidity to remove (1-100)
      * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
@@ -410,7 +407,6 @@ contract TJPositionManager is ReentrancyGuard {
      * @return amountY Amount of tokenY received (principal only)
      */
     function decreaseLiquidity(
-        address vault,
         uint256 positionId,
         uint256 percentage,
         uint256[] calldata feeShares,
@@ -418,9 +414,8 @@ contract TJPositionManager is ReentrancyGuard {
         uint256 amountYMin,
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
-        require(vault == msg.sender, "TJPositionManager: vault must be caller");
         Position storage pos = _positions[positionId];
-        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
         require(percentage > 0 && percentage <= 100, "TJPositionManager: invalid percentage");
 
@@ -429,7 +424,6 @@ contract TJPositionManager is ReentrancyGuard {
 
     /**
      * @notice Remove a position entirely (100% removal with fee collection)
-     * @param vault Must equal msg.sender; validator checks this in calldata
      * @param positionId The position to remove
      * @param feeShares Per-bin LB token amounts to burn for fee collection (from LiquidityHelperContract)
      * @param amountXMin Minimum tokenX to receive (slippage protection, covers fees + principal)
@@ -439,16 +433,14 @@ contract TJPositionManager is ReentrancyGuard {
      * @return amountY Amount of tokenY received (principal only)
      */
     function removePosition(
-        address vault,
         uint256 positionId,
         uint256[] calldata feeShares,
         uint256 amountXMin,
         uint256 amountYMin,
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
-        require(vault == msg.sender, "TJPositionManager: vault must be caller");
         Position storage pos = _positions[positionId];
-        require(pos.vault == vault, "TJPositionManager: not position owner");
+        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
         (amountX, amountY) = _decreaseLiquidityWithFees(positionId, 100, feeShares, amountXMin, amountYMin, deadline);

@@ -8,9 +8,10 @@ import "../interfaces/ILiquidityValidator.sol";
  * @notice Validates calldata for TJPositionManager operations
  * @dev Called by VaultFactory before PositionVault executes calls to TJPositionManager.
  *
- *      Validation ensures:
- *      - The function selector matches the expected operation
- *      - The vault address in calldata matches the actual calling vault
+ *      Validation model:
+ *      - validateMint (createPosition): selector check + vault address in calldata must match caller
+ *      - All other operations: selector-only check. Ownership is enforced by TJPositionManager
+ *        itself via require(pos.vault == msg.sender), using stored on-chain state.
  */
 contract TJPositionValidator is ILiquidityValidator {
     // createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
@@ -31,51 +32,48 @@ contract TJPositionValidator is ILiquidityValidator {
         require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    // addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
+    // addToPosition(uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
     bytes4 constant internal ADD_TO_POSITION_SELECTOR = bytes4(keccak256(
-        "addToPosition(address,uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"
+        "addToPosition(uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"
     ));
 
-    function validateIncreaseLiquidity(bytes calldata data, address vault) external pure override {
-        require(data.length >= 36, "TJPositionValidator: invalid data");
+    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    function validateIncreaseLiquidity(bytes calldata data, address) external pure override {
+        require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
         require(selector == ADD_TO_POSITION_SELECTOR, "TJPositionValidator: not addToPosition");
-        address calldataVault = abi.decode(data[4:36], (address));
-        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    // collectFees(address,uint256,uint256[],uint256,uint256,uint256)
+    // collectFees(uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal COLLECT_FEES_SELECTOR = bytes4(keccak256(
-        "collectFees(address,uint256,uint256[],uint256,uint256,uint256)"
+        "collectFees(uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    // decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)
+    // decreaseLiquidity(uint256,uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal DECREASE_LIQUIDITY_SELECTOR = bytes4(keccak256(
-        "decreaseLiquidity(address,uint256,uint256,uint256[],uint256,uint256,uint256)"
+        "decreaseLiquidity(uint256,uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    // removePosition(address,uint256,uint256[],uint256,uint256,uint256)
+    // removePosition(uint256,uint256[],uint256,uint256,uint256)
     bytes4 constant internal REMOVE_POSITION_SELECTOR = bytes4(keccak256(
-        "removePosition(address,uint256,uint256[],uint256,uint256,uint256)"
+        "removePosition(uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    function validateDecreaseLiquidity(bytes calldata data, address vault) external pure override {
-        require(data.length >= 36, "TJPositionValidator: invalid data");
+    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    function validateDecreaseLiquidity(bytes calldata data, address) external pure override {
+        require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
         require(
             selector == REMOVE_POSITION_SELECTOR || selector == DECREASE_LIQUIDITY_SELECTOR,
             "TJPositionValidator: not removePosition or decreaseLiquidity"
         );
-        address calldataVault = abi.decode(data[4:36], (address));
-        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
-    function validateCollect(bytes calldata data, address vault) external pure override {
-        require(data.length >= 36, "TJPositionValidator: invalid data");
+    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    function validateCollect(bytes calldata data, address) external pure override {
+        require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
         require(selector == COLLECT_FEES_SELECTOR, "TJPositionValidator: not collectFees");
-        address calldataVault = abi.decode(data[4:36], (address));
-        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
     }
 
     function validateBurn(bytes calldata, address) external pure override {

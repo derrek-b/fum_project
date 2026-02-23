@@ -521,23 +521,23 @@ describe("TJPositionManager", function() {
   describe("addToPosition via vault.increaseLiquidity()", function() {
 
     // Helper to encode addToPosition calldata (new signature with previousFeesX/Y)
-    function encodeAddToPosition(vaultAddr, positionId, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
+    function encodeAddToPosition(positionId, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
       const iface = new ethers.Interface([
-        "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+        "function addToPosition(uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
       ]);
       return iface.encodeFunctionData("addToPosition", [
-        vaultAddr, positionId, [0, 0, 0], [0, 0, 0], amountX, amountY, amountXMin, amountYMin,
+        positionId, [0, 0, 0], [0, 0, 0], amountX, amountY, amountXMin, amountYMin,
         activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl
       ]);
     }
 
     // Helper variant that accepts explicit previousFees arrays
-    function encodeAddToPositionWithFees(vaultAddr, positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
+    function encodeAddToPositionWithFees(positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl) {
       const iface = new ethers.Interface([
-        "function addToPosition(address vault, uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+        "function addToPosition(uint256 positionId, uint256[] previousFeesX, uint256[] previousFeesY, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
       ]);
       return iface.encodeFunctionData("addToPosition", [
-        vaultAddr, positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin,
+        positionId, previousFeesX, previousFeesY, amountX, amountY, amountXMin, amountYMin,
         activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, dl
       ]);
     }
@@ -595,7 +595,7 @@ describe("TJPositionManager", function() {
 
         // Default mock returns same 3 bins: [8388607, 8388608, 8388609] with [1000, 2000, 1000]
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -629,7 +629,7 @@ describe("TJPositionManager", function() {
         );
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -658,7 +658,7 @@ describe("TJPositionManager", function() {
         );
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -680,7 +680,7 @@ describe("TJPositionManager", function() {
         const lbPairAddr = await mockLBPair.getAddress();
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -707,7 +707,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("2"), 2000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -739,7 +739,7 @@ describe("TJPositionManager", function() {
         const beforeY = await tokenY.balanceOf(vaultAddr);
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -765,7 +765,7 @@ describe("TJPositionManager", function() {
         const routerAddr = await mockLBRouter.getAddress();
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -790,7 +790,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -818,10 +818,10 @@ describe("TJPositionManager", function() {
 
         // Remove 50% (new signature with feeShares)
         const removeIface = new ethers.Interface([
-          "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function decreaseLiquidity(uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("decreaseLiquidity", [
-          vaultAddr, positionId, 50, [0, 0, 0], 0, 0, deadline
+          positionId, 50, [0, 0, 0], 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
@@ -833,7 +833,7 @@ describe("TJPositionManager", function() {
 
         // Add back with same bins (default mock returns [1000, 2000, 1000])
         const addCalldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -854,33 +854,12 @@ describe("TJPositionManager", function() {
     });
 
     describe("validation and security", function() {
-      it("should revert if vault mismatch in calldata", async function() {
-        const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
-
-        const calldata = encodeAddToPosition(
-          user1.address, // wrong vault
-          positionId,
-          ethers.parseEther("1"), 1000n * 10n ** 6n,
-          0, 0,
-          8388608, 5,
-          [-1, 0, 1],
-          [0, ethers.parseEther("0.5"), ethers.parseEther("0.5")],
-          [ethers.parseEther("0.5"), ethers.parseEther("0.5"), 0],
-          deadline
-        );
-
-        await expect(
-          vault.increaseLiquidity([pmAddr], [calldata], [0n])
-        ).to.be.revertedWith("TJPositionValidator: vault mismatch");
-      });
-
       it("should revert if position doesn't exist", async function() {
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
         const calldata = encodeAddToPosition(
-          vaultAddr, 999, // non-existent
+          999, // non-existent
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -902,16 +881,16 @@ describe("TJPositionManager", function() {
 
         // Remove 100% (new signature with feeShares)
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, [0, 0, 0], 0, 0, deadline
+          positionId, [0, 0, 0], 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
         // Try to add to inactive position
         const addCalldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -932,7 +911,7 @@ describe("TJPositionManager", function() {
         // Direct call from user1 who doesn't own the position
         await expect(
           positionManager.connect(user1).addToPosition(
-            user1.address, positionId,
+            positionId,
             [0, 0, 0], [0, 0, 0],
             ethers.parseEther("1"), 1000n * 10n ** 6n,
             0, 0,
@@ -953,7 +932,7 @@ describe("TJPositionManager", function() {
         await mockLBRouter.setShouldFail(true);
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -983,7 +962,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         const calldata = encodeAddToPositionWithFees(
-          vaultAddr, positionId,
+          positionId,
           [0, 0], [0, 0, 0], // feesX has 2 elements, depositIds has 3
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
@@ -1005,7 +984,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         const calldata = encodeAddToPositionWithFees(
-          vaultAddr, positionId,
+          positionId,
           [0, 0, 0], [0, 0], // feesY has 2 elements, depositIds has 3
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
@@ -1030,7 +1009,7 @@ describe("TJPositionManager", function() {
 
         // Default mock: same 3 bins [1000, 2000, 1000]
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -1059,7 +1038,7 @@ describe("TJPositionManager", function() {
 
         // Add to position
         const addCalldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -1076,10 +1055,10 @@ describe("TJPositionManager", function() {
 
         // Remove 100% (new signature with feeShares)
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, [0, 0, 0], 0, 0, deadline
+          positionId, [0, 0, 0], 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
@@ -1105,7 +1084,7 @@ describe("TJPositionManager", function() {
         );
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -1133,7 +1112,7 @@ describe("TJPositionManager", function() {
         );
 
         const calldata = encodeAddToPosition(
-          vaultAddr, positionId,
+          positionId,
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
           8388608, 5,
@@ -1179,7 +1158,7 @@ describe("TJPositionManager", function() {
         // currentX for bin 8388608: 4000*5000/10000 = 2000
         // With previousFeesX=[0,100,100] → previousX[1] = 2000 - 100 = 1900
         const calldata = encodeAddToPositionWithFees(
-          vaultAddr, positionId,
+          positionId,
           [0, 100, 100], [100, 100, 0], // non-zero previousFees
           ethers.parseEther("1"), 1000n * 10n ** 6n,
           0, 0,
@@ -1209,20 +1188,20 @@ describe("TJPositionManager", function() {
   describe("removePosition via vault.decreaseLiquidity()", function() {
 
     // Helper to encode removePosition (100%) or decreaseLiquidity (partial) calldata
-    function encodeRemovePosition(vaultAddr, positionId, percentage, feeShares, amountXMin, amountYMin, dl) {
+    function encodeRemovePosition(positionId, percentage, feeShares, amountXMin, amountYMin, dl) {
       if (percentage === 100) {
         const iface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         return iface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, feeShares, amountXMin, amountYMin, dl
+          positionId, feeShares, amountXMin, amountYMin, dl
         ]);
       } else {
         const iface = new ethers.Interface([
-          "function decreaseLiquidity(address vault, uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function decreaseLiquidity(uint256 positionId, uint256 percentage, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         return iface.encodeFunctionData("decreaseLiquidity", [
-          vaultAddr, positionId, percentage, feeShares, amountXMin, amountYMin, dl
+          positionId, percentage, feeShares, amountXMin, amountYMin, dl
         ]);
       }
     }
@@ -1268,7 +1247,7 @@ describe("TJPositionManager", function() {
       const vaultAddr = await vault.getAddress();
       const pmAddr = await positionManager.getAddress();
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       // Struct should be fully deleted (all fields zeroed)
@@ -1291,7 +1270,7 @@ describe("TJPositionManager", function() {
       const posBefore = await positionManager.getPosition(positionId);
       const origLiquidity = posBefore.liquidityMinted.map(lm => lm);
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 50, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 50, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       const posAfter = await positionManager.getPosition(positionId);
@@ -1321,7 +1300,7 @@ describe("TJPositionManager", function() {
       const vaultAddr = await vault.getAddress();
       const pmAddr = await positionManager.getAddress();
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
 
       await expect(vault.decreaseLiquidity([pmAddr], [calldata]))
         .to.emit(positionManager, "PositionRemoved");
@@ -1335,7 +1314,7 @@ describe("TJPositionManager", function() {
       // Set mock return values so the combined slippage check passes
       await mockLBRouter.setRemoveReturnValues(ethers.parseEther("0.5"), 500n * 10n ** 6n);
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 500, 600, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 500, 600, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       // Verify router received correct params
@@ -1356,7 +1335,7 @@ describe("TJPositionManager", function() {
 
       // Mock returns liquidityMinted = [1000, 2000, 1000]
       // 100% -> amounts = [1000, 2000, 1000]
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       // Verify amounts passed to router
@@ -1372,7 +1351,7 @@ describe("TJPositionManager", function() {
 
       // Mock returns liquidityMinted = [1000, 2000, 1000]
       // 50% -> amounts = [500, 1000, 500]
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 50, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 50, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       expect(await mockLBRouter.lastRemoveAmounts(0)).to.equal(500);
@@ -1385,7 +1364,7 @@ describe("TJPositionManager", function() {
       const vaultAddr = await vault.getAddress();
       const pmAddr = await positionManager.getAddress();
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       // Mock depositIds = [8388607, 8388608, 8388609]
@@ -1405,7 +1384,7 @@ describe("TJPositionManager", function() {
       const beforeX = await tokenX.balanceOf(vaultAddr);
       const beforeY = await tokenY.balanceOf(vaultAddr);
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       const afterX = await tokenX.balanceOf(vaultAddr);
@@ -1426,7 +1405,7 @@ describe("TJPositionManager", function() {
       const posBefore = await positionManager.getPosition(positionId);
       const proxyAddr = posBefore.proxy;
 
-      const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+      const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
       await vault.decreaseLiquidity([pmAddr], [calldata]);
 
       // After removal, approval on proxy should be reset to false
@@ -1448,7 +1427,7 @@ describe("TJPositionManager", function() {
 
       await expect(
         positionManager.connect(vaultSigner).removePosition(
-          vaultAddr, positionId, [0, 0, 0],
+          positionId, [0, 0, 0],
           ethers.parseEther("100"), // amountXMin way too high
           ethers.parseEther("100"), // amountYMin way too high
           deadline
@@ -1459,17 +1438,6 @@ describe("TJPositionManager", function() {
     });
 
     describe("validation and security", function() {
-      it("should reject when vault param does not match msg.sender", async function() {
-        const positionId = await createTestPosition();
-        const pmAddr = await positionManager.getAddress();
-
-        const calldata = encodeRemovePosition(user1.address, positionId, 100, [0, 0, 0], 0, 0, deadline);
-
-        await expect(
-          vault.decreaseLiquidity([pmAddr], [calldata])
-        ).to.be.revertedWith("TJPositionValidator: vault mismatch");
-      });
-
       it("should reject when position is not owned by vault", async function() {
         // Create position from our vault
         const positionId = await createTestPosition();
@@ -1477,7 +1445,7 @@ describe("TJPositionManager", function() {
         // Try to remove from a different vault (user1 directly calling)
         await expect(
           positionManager.connect(user1).removePosition(
-            user1.address, positionId, [0, 0, 0], 0, 0, deadline
+            positionId, [0, 0, 0], 0, 0, deadline
           )
         ).to.be.revertedWith("TJPositionManager: not position owner");
       });
@@ -1488,11 +1456,11 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         // Remove 100% first
-        const calldata1 = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+        const calldata1 = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
         await vault.decreaseLiquidity([pmAddr], [calldata1]);
 
         // Try to remove again - should fail
-        const calldata2 = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+        const calldata2 = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
         await expect(
           vault.decreaseLiquidity([pmAddr], [calldata2])
         ).to.be.reverted;
@@ -1503,7 +1471,7 @@ describe("TJPositionManager", function() {
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 0, [0, 0, 0], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 0, [0, 0, 0], 0, 0, deadline);
         await expect(
           vault.decreaseLiquidity([pmAddr], [calldata])
         ).to.be.reverted;
@@ -1514,7 +1482,7 @@ describe("TJPositionManager", function() {
         const vaultAddr = await vault.getAddress();
         const pmAddr = await positionManager.getAddress();
 
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 101, [0, 0, 0], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 101, [0, 0, 0], 0, 0, deadline);
         await expect(
           vault.decreaseLiquidity([pmAddr], [calldata])
         ).to.be.reverted;
@@ -1527,7 +1495,7 @@ describe("TJPositionManager", function() {
 
         await mockLBRouter.setShouldFailRemove(true);
 
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
         await expect(
           vault.decreaseLiquidity([pmAddr], [calldata])
         ).to.be.reverted;
@@ -1550,7 +1518,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         // Remove 50%
-        const calldata1 = encodeRemovePosition(vaultAddr, positionId, 50, [0, 0, 0], 0, 0, deadline);
+        const calldata1 = encodeRemovePosition(positionId, 50, [0, 0, 0], 0, 0, deadline);
         await vault.decreaseLiquidity([pmAddr], [calldata1]);
 
         let pos = await positionManager.getPosition(positionId);
@@ -1558,7 +1526,7 @@ describe("TJPositionManager", function() {
         expect(pos.liquidityMinted[0]).to.equal(500); // 1000 / 2
 
         // Remove remaining 100% of what's left
-        const calldata2 = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+        const calldata2 = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
         await vault.decreaseLiquidity([pmAddr], [calldata2]);
 
         // Struct should be fully deleted
@@ -1579,7 +1547,7 @@ describe("TJPositionManager", function() {
 
         // Remove 25% three times
         for (let i = 0; i < 3; i++) {
-          const calldata = encodeRemovePosition(vaultAddr, positionId, 25, [0, 0, 0], 0, 0, deadline);
+          const calldata = encodeRemovePosition(positionId, 25, [0, 0, 0], 0, 0, deadline);
           await vault.decreaseLiquidity([pmAddr], [calldata]);
         }
 
@@ -1615,7 +1583,7 @@ describe("TJPositionManager", function() {
         );
 
         // Pass non-zero feeShares
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [91, 182, 91], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 100, [91, 182, 91], 0, 0, deadline);
         const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
         const receipt = await tx.wait();
 
@@ -1657,7 +1625,7 @@ describe("TJPositionManager", function() {
         // After fee burn: lm = [1000-91, 2000-182, 1000-91] = [909, 1818, 909]
         // Then 50% principal: remove [909*50/100, 1818*50/100, 909*50/100] = [454, 909, 454]
         // Final: [909-454, 1818-909, 909-454] = [455, 909, 455]
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 50, [91, 182, 91], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 50, [91, 182, 91], 0, 0, deadline);
         const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
         const receipt = await tx.wait();
 
@@ -1692,7 +1660,7 @@ describe("TJPositionManager", function() {
         );
 
         // Pass [0,0,0] feeShares — no fee burn
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [0, 0, 0], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 100, [0, 0, 0], 0, 0, deadline);
         const tx = await vault.decreaseLiquidity([pmAddr], [calldata]);
         const receipt = await tx.wait();
 
@@ -1724,7 +1692,7 @@ describe("TJPositionManager", function() {
         );
 
         // Pass non-zero feeShares
-        const calldata = encodeRemovePosition(vaultAddr, positionId, 100, [91, 182, 91], 0, 0, deadline);
+        const calldata = encodeRemovePosition(positionId, 100, [91, 182, 91], 0, 0, deadline);
         await vault.decreaseLiquidity([pmAddr], [calldata]);
 
         // Two removeLiquidity calls: fee collection + principal removal
@@ -1771,29 +1739,20 @@ describe("TJPositionManager", function() {
       return posIds[posIds.length - 1];
     }
 
-    function encodeCollectFees(vaultAddr, positionId, feeShares, amountXMin, amountYMin, dl) {
+    function encodeCollectFees(positionId, feeShares, amountXMin, amountYMin, dl) {
       const iface = new ethers.Interface([
-        "function collectFees(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+        "function collectFees(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
       ]);
-      return iface.encodeFunctionData("collectFees", [vaultAddr, positionId, feeShares, amountXMin, amountYMin, dl]);
+      return iface.encodeFunctionData("collectFees", [positionId, feeShares, amountXMin, amountYMin, dl]);
     }
 
     describe("validation", function() {
-      it("should revert if vault is not msg.sender", async function() {
+      it("should revert if caller is not position owner", async function() {
         const positionId = await createTestPosition();
 
-        // Call directly (not through vault) — msg.sender != vault param
+        // Direct call from user1 who doesn't own the position
         await expect(
-          positionManager.collectFees(await vault.getAddress(), positionId, [0, 0, 0], 0, 0, deadline)
-        ).to.be.revertedWith("TJPositionManager: vault must be caller");
-      });
-
-      it("should revert for position not owned by vault", async function() {
-        const positionId = await createTestPosition();
-
-        // Use a different address as vault param (matching msg.sender but not position owner)
-        await expect(
-          positionManager.connect(user1).collectFees(user1.address, positionId, [0, 0, 0], 0, 0, deadline)
+          positionManager.connect(user1).collectFees(positionId, [0, 0, 0], 0, 0, deadline)
         ).to.be.revertedWith("TJPositionManager: not position owner");
       });
 
@@ -1804,14 +1763,14 @@ describe("TJPositionManager", function() {
 
         // Remove position first (new signature with feeShares)
         const removeIface = new ethers.Interface([
-          "function removePosition(address vault, uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+          "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
         ]);
         const removeCalldata = removeIface.encodeFunctionData("removePosition", [
-          vaultAddr, positionId, [0, 0, 0], 0, 0, deadline
+          positionId, [0, 0, 0], 0, 0, deadline
         ]);
         await vault.decreaseLiquidity([pmAddr], [removeCalldata]);
 
-        const collectCalldata = encodeCollectFees(vaultAddr, positionId, [0, 0, 0], 0, 0, deadline);
+        const collectCalldata = encodeCollectFees(positionId, [0, 0, 0], 0, 0, deadline);
         await expect(
           vault.collect([pmAddr], [collectCalldata])
         ).to.be.reverted;
@@ -1829,7 +1788,7 @@ describe("TJPositionManager", function() {
         // feeShares has 2 elements, depositIds has 3
         await expect(
           positionManager.connect(vaultSigner).collectFees(
-            vaultAddr, positionId, [0, 0], 0, 0, deadline
+            positionId, [0, 0], 0, 0, deadline
           )
         ).to.be.revertedWith("TJPositionManager: feeShares length mismatch");
 
@@ -1844,7 +1803,7 @@ describe("TJPositionManager", function() {
         const pmAddr = await positionManager.getAddress();
 
         // Pass [0,0,0] feeShares — no-op (early return)
-        const collectCalldata = encodeCollectFees(vaultAddr, positionId, [0, 0, 0], 0, 0, deadline);
+        const collectCalldata = encodeCollectFees(positionId, [0, 0, 0], 0, 0, deadline);
         const tx = await vault.collect([pmAddr], [collectCalldata]);
         const receipt = await tx.wait();
 
@@ -1872,7 +1831,7 @@ describe("TJPositionManager", function() {
         );
 
         // Pass non-zero feeShares
-        const collectCalldata = encodeCollectFees(vaultAddr, positionId, [50, 100, 50], 0, 0, deadline);
+        const collectCalldata = encodeCollectFees(positionId, [50, 100, 50], 0, 0, deadline);
         const tx = await vault.collect([pmAddr], [collectCalldata]);
         const receipt = await tx.wait();
 
@@ -1905,7 +1864,7 @@ describe("TJPositionManager", function() {
         );
 
         // feeShares = [50, 100, 50] — burns these amounts from each bin
-        const collectCalldata = encodeCollectFees(vaultAddr, positionId, [50, 100, 50], 0, 0, deadline);
+        const collectCalldata = encodeCollectFees(positionId, [50, 100, 50], 0, 0, deadline);
         await vault.collect([pmAddr], [collectCalldata]);
 
         // liquidityMinted should have decreased by exactly feeShares
@@ -1928,7 +1887,7 @@ describe("TJPositionManager", function() {
         );
 
         // Collect fees with feeShares [50, 100, 50]
-        const collectCalldata = encodeCollectFees(vaultAddr, positionId, [50, 100, 50], 0, 0, deadline);
+        const collectCalldata = encodeCollectFees(positionId, [50, 100, 50], 0, 0, deadline);
         await vault.collect([pmAddr], [collectCalldata]);
 
         const posAfter = await positionManager.getPosition(positionId);
