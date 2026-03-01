@@ -1096,7 +1096,7 @@ class AutomationService {
     }
 
     // 3. Unlock vault if locked
-    if (this.vaultLocks[vaultAddress.toLowerCase()]) {
+    if (this.vaultLocks[ethers.utils.getAddress(vaultAddress)]) {
       this.unlockVault(vaultAddress);
     }
 
