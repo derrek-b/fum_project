@@ -145,6 +145,30 @@ async function main() {
   console.log(`New vault created at: ${vaultAddress}`);
   console.log(`Vault name: ${vaultName}`);
 
+  // === Authorize automation executor ===
+  // Read executorIndex assigned at vault creation (Phase 1: 5th return from getVaultInfo)
+  const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
+  const executorIndex = vaultInfo[4];
+  console.log(`Vault assigned executorIndex: ${executorIndex}`);
+
+  // Derive executor address from mnemonic + index
+  // WARNING: Dev-only mnemonic — must match AUTOMATION_MNEMONIC in fum_automation/.env.local
+  const DEV_MNEMONIC = 'pumpkin ghost mammal enrich toss laptop travel main again clever edit orchard';
+  const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
+  const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
+  console.log(`Derived executor address: ${executorAddress}`);
+
+  // Authorize executor via payable setExecutor — forwards msg.value as initial gas funding
+  const vault = new ethers.Contract(vaultAddress, positionVaultABI, signer);
+  const executorFunding = ethers.utils.parseEther("10");
+  console.log(`\nAuthorizing executor and funding with ${ethers.utils.formatEther(executorFunding)} ETH...`);
+  const setExecutorTx = await vault.setExecutor(executorAddress, { value: executorFunding });
+  await setExecutorTx.wait();
+
+  // Verify
+  const executorBalance = await provider.getBalance(executorAddress);
+  console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
+
   // Define token addresses for Arbitrum that will be needed later
   const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
   const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum

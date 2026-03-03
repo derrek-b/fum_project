@@ -498,17 +498,6 @@ async function main() {
   const ethBalance = await provider.getBalance(wallet.address);
   console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
 
-  // Fund the automation executor address with ETH for gas
-  const AUTOMATION_EXECUTOR = '0xabA472B2EA519490EE10E643A422D578a507197A';
-  console.log(`\nFunding automation executor ${AUTOMATION_EXECUTOR} with 10 ETH...`);
-  const fundTx = await wallet.sendTransaction({
-    to: AUTOMATION_EXECUTOR,
-    value: ethers.utils.parseEther('10')
-  });
-  await fundTx.wait();
-  const executorBalance = await provider.getBalance(AUTOMATION_EXECUTOR);
-  console.log(`Automation executor funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
-
   // =====================================================
   // COMMENTED OUT: Vault lookup - not needed for basic token funding
   // =====================================================

@@ -58,6 +58,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     event ExecutorChanged(address indexed executor, bool indexed isAuthorized);
     event TargetTokensUpdated(string[] tokens);
     event TargetPlatformsUpdated(string[] platforms);
+    event ExecutorFunded(address indexed executor, uint256 amount);
 
     /**
      * @notice Constructor
@@ -191,21 +192,56 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
     }
 
     /**
-     * @notice Authorizes an executor
+     * @notice Authorizes an executor and optionally funds it with ETH
      * @param _executor Address of the executor
+     * @dev Payable — msg.value is forwarded to the executor for initial gas funding.
+     *      On first activation (address(0) → non-zero), registers vault as active in factory.
+     *      Executor-to-executor changes skip the factory call (vault already active).
      */
-    function setExecutor(address _executor) external onlyOwner {
+    function setExecutor(address _executor) external payable onlyOwner {
         require(_executor != address(0), "PositionVault: zero executor address");
+        bool wasInactive = (executor == address(0));
         executor = _executor;
+        if (msg.value > 0) {
+            (bool sent, ) = _executor.call{value: msg.value}("");
+            require(sent, "PositionVault: executor funding failed");
+        }
+        if (wasInactive) {
+            IVaultFactory(factory).registerActiveVault(address(this));
+        }
         emit ExecutorChanged(_executor, true);
     }
 
     /**
-     * @notice De-authorises an executor
+     * @notice De-authorises the executor and deregisters from active vault registry
+     * @dev Saves old executor address for event emission before clearing.
+     *      Only calls deregisterActiveVault if there was an active executor —
+     *      allows calling removeExecutor when executor is already address(0) (no-op).
      */
     function removeExecutor() external onlyOwner {
-        emit ExecutorChanged(executor, false);
+        address oldExecutor = executor;
         executor = address(0);
+        if (oldExecutor != address(0)) {
+            IVaultFactory(factory).deregisterActiveVault(address(this));
+        }
+        emit ExecutorChanged(oldExecutor, false);
+    }
+
+    /**
+     * @notice Transfers native ETH from vault to executor for gas funding
+     * @param amount Amount of ETH to transfer to executor
+     * @dev Only callable by owner or executor (onlyAuthorized). Used by VaultHealth
+     *      for automated gas top-ups. Guards against sending to address(0) when
+     *      no executor is set — without this check, an owner call when executor == address(0)
+     *      would pass onlyAuthorized (owner path) and burn ETH to the zero address.
+     */
+    function fundExecutor(uint256 amount) external onlyAuthorized nonReentrant {
+        require(executor != address(0), "PositionVault: no executor set");
+        require(amount > 0, "PositionVault: zero amount");
+        require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");
+        (bool success, ) = executor.call{value: amount}("");
+        require(success, "PositionVault: executor funding failed");
+        emit ExecutorFunded(executor, amount);
     }
 
     /**

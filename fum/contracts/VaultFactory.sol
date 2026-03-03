@@ -32,11 +32,19 @@ contract VaultFactory is Ownable {
         string name;
         uint256 creationTime;
         uint256 creationBlock;
+        uint256 executorIndex;
     }
     mapping(address => VaultInfo) public vaultInfo;
 
     // Global registry of all vaults
     address[] public allVaults;
+
+    // Per-vault signer index — monotonic counter, assigned at vault creation
+    uint256 public nextExecutorIndex;
+
+    // Active vault registry — tracks only vaults with executors set
+    address[] public activeVaults;
+    mapping(address => uint256) private activeVaultIndex; // 1-indexed (0 = not active)
 
     // Events
     event VaultCreated(address indexed user, address indexed vault, string name, uint256 userVaultCount);
@@ -196,13 +204,15 @@ contract VaultFactory is Ownable {
         // Register vault in mappings
         userVaults[msg.sender].push(vault);
 
-        // Store vault info
+        // Store vault info with executor index
         vaultInfo[vault] = VaultInfo({
             owner: msg.sender,
             name: name,
             creationTime: block.timestamp,
-            creationBlock: block.number
+            creationBlock: block.number,
+            executorIndex: nextExecutorIndex
         });
+        nextExecutorIndex++;
 
         // Add to global registry
         allVaults.push(vault);
@@ -248,10 +258,11 @@ contract VaultFactory is Ownable {
         address owner,
         string memory name,
         uint256 creationTime,
-        uint256 creationBlock
+        uint256 creationBlock,
+        uint256 executorIndex
     ) {
         VaultInfo memory info = vaultInfo[vault];
-        return (info.owner, info.name, info.creationTime, info.creationBlock);
+        return (info.owner, info.name, info.creationTime, info.creationBlock, info.executorIndex);
     }
 
     /**
@@ -281,6 +292,61 @@ contract VaultFactory is Ownable {
         owner = vaultInfo[vault].owner;
         _isVault = owner != address(0);
         return (_isVault, owner);
+    }
+
+    // ============ Active Vault Registry ============
+
+    /**
+     * @notice Registers a vault as active (called by vault on first setExecutor)
+     * @param vault Address of the vault to register
+     * @dev Only callable by factory-created vaults. Access control:
+     *      - vaultInfo[vault].owner != address(0) ensures it's a factory-created vault
+     *      - msg.sender == vault ensures only the vault itself can register
+     *      - activeVaultIndex[vault] == 0 prevents duplicate registration
+     */
+    function registerActiveVault(address vault) external {
+        require(vaultInfo[vault].owner != address(0), "VaultFactory: not a vault");
+        require(msg.sender == vault, "VaultFactory: caller is not vault");
+        require(activeVaultIndex[vault] == 0, "VaultFactory: already active");
+
+        activeVaults.push(vault);
+        activeVaultIndex[vault] = activeVaults.length; // 1-indexed
+    }
+
+    /**
+     * @notice Deregisters a vault from active registry (called by vault on removeExecutor)
+     * @param vault Address of the vault to deregister
+     * @dev Swap-and-pop for O(1) removal. Only callable by the vault itself.
+     */
+    function deregisterActiveVault(address vault) external {
+        require(msg.sender == vault, "VaultFactory: caller is not vault");
+        uint256 index = activeVaultIndex[vault];
+        require(index != 0, "VaultFactory: not active");
+
+        uint256 lastIndex = activeVaults.length;
+        if (index != lastIndex) {
+            address lastVault = activeVaults[lastIndex - 1];
+            activeVaults[index - 1] = lastVault;
+            activeVaultIndex[lastVault] = index;
+        }
+        activeVaults.pop();
+        activeVaultIndex[vault] = 0;
+    }
+
+    /**
+     * @notice Returns all active vault addresses
+     * @return Array of active vault addresses
+     */
+    function getActiveVaults() external view returns (address[] memory) {
+        return activeVaults;
+    }
+
+    /**
+     * @notice Returns the number of active vaults
+     * @return Number of active vaults
+     */
+    function getActiveVaultCount() external view returns (uint256) {
+        return activeVaults.length;
     }
 
     function getVersion() external pure returns (string memory) {
