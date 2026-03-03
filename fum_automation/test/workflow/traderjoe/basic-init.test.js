@@ -36,31 +36,40 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
   });
 
   describe('Constructor Validation', () => {
-    it('should throw error for missing automationServiceAddress', () => {
-      expect(() => new AutomationService({
-        chainId: 1338,
-        wsUrl: 'ws://localhost:8546'
-      })).toThrow('automationServiceAddress is required');
+    it('should throw error for missing AUTOMATION_MNEMONIC', () => {
+      const original = process.env.AUTOMATION_MNEMONIC;
+      try {
+        delete process.env.AUTOMATION_MNEMONIC;
+        expect(() => new AutomationService({
+          chainId: 1338,
+          wsUrl: 'ws://localhost:8546'
+        })).toThrow('AUTOMATION_MNEMONIC environment variable is required');
+      } finally {
+        process.env.AUTOMATION_MNEMONIC = original;
+      }
     });
 
-    it('should throw error for invalid automationServiceAddress', () => {
-      expect(() => new AutomationService({
-        automationServiceAddress: 'not-an-address',
-        chainId: 1338,
-        wsUrl: 'ws://localhost:8546'
-      })).toThrow('automationServiceAddress must be a valid Ethereum address');
+    it('should throw error for invalid AUTOMATION_MNEMONIC', () => {
+      const original = process.env.AUTOMATION_MNEMONIC;
+      try {
+        process.env.AUTOMATION_MNEMONIC = 'not a valid mnemonic';
+        expect(() => new AutomationService({
+          chainId: 1338,
+          wsUrl: 'ws://localhost:8546'
+        })).toThrow('Invalid AUTOMATION_MNEMONIC');
+      } finally {
+        process.env.AUTOMATION_MNEMONIC = original;
+      }
     });
 
     it('should throw error for missing chainId', () => {
       expect(() => new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         wsUrl: 'ws://localhost:8546'
       })).toThrow('chainId is required');
     });
 
     it('should throw error for invalid chainId', () => {
       expect(() => new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: -1,
         wsUrl: 'ws://localhost:8546'
       })).toThrow('chainId must be a positive number');
@@ -68,14 +77,12 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
 
     it('should throw error for missing wsUrl', () => {
       expect(() => new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1338
       })).toThrow('wsUrl is required');
     });
 
     it('should throw error for invalid wsUrl', () => {
       expect(() => new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1338,
         wsUrl: 'http://localhost:8546'
       })).toThrow('wsUrl must be a valid WebSocket URL');
@@ -83,7 +90,6 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
 
     it('should use default values for optional config', () => {
       const svc = new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1338,
         wsUrl: 'ws://localhost:8546'
       });
@@ -96,7 +102,6 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
 
     it('should update poolData when PoolDataFetched event is emitted', () => {
       const svc = new AutomationService({
-        automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
         chainId: 1338,
         wsUrl: 'ws://localhost:8546'
       });
@@ -120,7 +125,8 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
     it('should create service with correct configuration', () => {
       service = new AutomationService(testConfig);
 
-      expect(service.automationServiceAddress).toBe(testConfig.automationServiceAddress);
+      expect(service.hdNode).toBeDefined();
+      expect(service.hdNode.fingerprint).toBeDefined();
       expect(service.chainId).toBe(testConfig.chainId);
       expect(service.wsUrl).toBe(testConfig.wsUrl);
       expect(service.debug).toBe(testConfig.debug);
@@ -166,6 +172,17 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
       expect(service.tracker.eventManager).toBe(service.eventManager);
       expect(service.tracker.vaultDataDir).toContain('vaults');
       expect(service.tracker.debug).toBe(testConfig.debug);
+    });
+
+    it('should initialize VaultHealth correctly', () => {
+      expect(service.vaultHealth).toBeDefined();
+      expect(service.vaultHealth.managedVaults).toBeInstanceOf(Set);
+      expect(service.vaultHealth.managedVaults.size).toBe(0);
+      expect(service.vaultHealth.holdbacks).toBeInstanceOf(Map);
+      expect(service.vaultHealth.holdbacks.size).toBe(0);
+      expect(service.vaultHealth.fundingRequired).toBeInstanceOf(Map);
+      expect(service.vaultHealth.fundingRequired.size).toBe(0);
+      expect(service.vaultHealth.balanceCheckIntervalMs).toBe(0);
     });
 
     it('should initialize SSEBroadcaster correctly', () => {
@@ -228,7 +245,6 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
       expect(service.isRunning).toBe(true);
       expect(serviceStartedEvent).toBeDefined();
       expect(serviceStartedEvent.chainId).toBe(testConfig.chainId);
-      expect(serviceStartedEvent.automationServiceAddress).toBe(testConfig.automationServiceAddress);
       expect(serviceStartedEvent.adaptersLoaded).toBeGreaterThan(0);
       expect(serviceStartedEvent.tokensLoaded).toBeGreaterThan(0);
       expect(serviceStartedEvent.timestamp).toBeGreaterThan(0);
@@ -308,7 +324,10 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
       expect(bobStrategy.tokens).toBe(service.tokens);
       expect(bobStrategy.serviceConfig).toBeDefined();
       expect(bobStrategy.serviceConfig.chainId).toBe(service.chainId);
-      expect(bobStrategy.serviceConfig.automationServiceAddress).toBe(service.automationServiceAddress);
+    });
+
+    it('should have VaultHealth balance check interval disabled (post-start)', () => {
+      expect(service.vaultHealth.balanceCheckInterval).toBe(null);
     });
 
     it('should register Tracker event handlers', () => {

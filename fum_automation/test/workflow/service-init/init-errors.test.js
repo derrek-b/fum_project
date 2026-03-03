@@ -65,7 +65,6 @@ describe('Service Initialization Error Scenarios', () => {
 
       // Configure with wrong chain ID (Hardhat is 1337, we'll say 1)
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1, // Wrong! Hardhat is 1337
         wsUrl: testConfig.wsUrl,
         dataDir: dir,
@@ -85,7 +84,6 @@ describe('Service Initialization Error Scenarios', () => {
       const dir = await createTempDir();
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,
@@ -111,7 +109,6 @@ describe('Service Initialization Error Scenarios', () => {
       const dir = await createTempDir();
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: path.join(dir, 'nonexistent', 'subdir'),
@@ -130,7 +127,6 @@ describe('Service Initialization Error Scenarios', () => {
       await fs.writeFile(path.join(dir, 'blacklist.json'), '{ invalid json {{{{', 'utf-8');
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,
@@ -155,7 +151,6 @@ describe('Service Initialization Error Scenarios', () => {
         testEnv.deployedContracts,
         {
           vaultName: 'Vault Setup Error Test',
-          automationServiceAddress: testConfig.automationServiceAddress,
           wrapEthAmount: '1',
           swapTokens: [],
           positions: [],
@@ -189,7 +184,6 @@ describe('Service Initialization Error Scenarios', () => {
       await sharedVault.vault.setStrategy(invalidStrategyAddress);
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dataDir1,
@@ -249,7 +243,6 @@ describe('Service Initialization Error Scenarios', () => {
       await fs.writeFile(path.join(dataDir2, 'blacklist.json'), JSON.stringify(blacklistData), 'utf-8');
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dataDir2,
@@ -281,7 +274,6 @@ describe('Service Initialization Error Scenarios', () => {
       const dir = await createTempDir();
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,
@@ -306,7 +298,6 @@ describe('Service Initialization Error Scenarios', () => {
       const dir = await createTempDir();
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,
@@ -329,7 +320,6 @@ describe('Service Initialization Error Scenarios', () => {
       const dir = await createTempDir();
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,

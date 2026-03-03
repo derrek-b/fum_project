@@ -68,7 +68,6 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'TJ V2.2 Rebalance & Fee Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeAmount: '0',
         swapTokens: [],
         positions: [],

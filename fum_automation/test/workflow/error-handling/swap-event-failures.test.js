@@ -59,7 +59,6 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Swap Handler Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -138,7 +137,6 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,
@@ -444,7 +442,6 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       testEnv.deployedContracts,
       {
         vaultName,
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '2' }
@@ -489,7 +486,6 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,

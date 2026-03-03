@@ -56,7 +56,6 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition Workflow'
       testEnv.deployedContracts,
       {
         vaultName: '0AP/0NP - TJ createNewPosition Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeAmount: '0',       // Don't wrap any AVAX in setup
         swapTokens: [],          // No token swaps
         positions: [],           // NO positions - key for triggering createNewPosition

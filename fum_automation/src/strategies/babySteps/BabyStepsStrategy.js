@@ -1433,7 +1433,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Execute withdrawals
     const wrappedNativeAddress = getWrappedNativeAddress(this.chainId);
     const vaultContract = getVaultContract(vault.address, this.provider);
-    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const signer = this.getVaultSigner(vault);
     const vaultWithSigner = vaultContract.connect(signer);
 
     const distributions = [];
@@ -1563,8 +1563,12 @@ export default class BabyStepsStrategy extends StrategyBase {
     const vaultRelativeMinimum = totalValue * 0.01; // 1% of vault value
     const minDeployment = Math.max(chainMinimum, vaultRelativeMinimum);
 
-    // Deploy all available tokens if above minimum threshold
-    const availableDeployment = tokenValue > minDeployment ? tokenValue : 0;
+    // Subtract holdback for executor gas funding (VaultHealth Phase 6)
+    const holdbackAmount = this.vaultHealth.getHoldbackAmount(vault.address);
+    const deployableValue = tokenValue - holdbackAmount;
+
+    // Deploy available tokens (minus holdback) if above minimum threshold
+    const availableDeployment = deployableValue > minDeployment ? deployableValue : 0;
 
     // Emit deployment metrics
     this.eventManager.emit('DeploymentCalculated', {
@@ -1572,6 +1576,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       totalVaultValue: totalValue,
       positionValue: positionValue,
       tokenValue: tokenValue,
+      holdbackAmount: holdbackAmount,
       currentUtilization: currentUtilization,
       availableDeployment: availableDeployment,
       minDeployment: minDeployment,
@@ -1581,7 +1586,9 @@ export default class BabyStepsStrategy extends StrategyBase {
       strategyId: vault.strategy.strategyId,
       log: {
         level: 'info',
-        message: `Vault value: $${totalValue.toFixed(2)}, Utilization: ${(currentUtilization * 100).toFixed(1)}%, Available: $${availableDeployment.toFixed(2)} (min: $${minDeployment.toFixed(2)})`,
+        message: holdbackAmount > 0
+          ? `Vault value: $${totalValue.toFixed(2)}, Utilization: ${(currentUtilization * 100).toFixed(1)}%, Available: $${availableDeployment.toFixed(2)} (min: $${minDeployment.toFixed(2)}, holdback: $${holdbackAmount.toFixed(2)})`
+          : `Vault value: $${totalValue.toFixed(2)}, Utilization: ${(currentUtilization * 100).toFixed(1)}%, Available: $${availableDeployment.toFixed(2)} (min: $${minDeployment.toFixed(2)})`,
         includeData: false
       }
     });
@@ -1799,16 +1806,20 @@ export default class BabyStepsStrategy extends StrategyBase {
       ...freshPoolState
     };
 
-    // Step 9: Get final token balances to pass to adapter
-    const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
-    const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+    // Step 9: Get final token balances and apply holdback deduction
+    let finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
+    let finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+
+    ({ token0Balance: finalToken0Balance, token1Balance: finalToken1Balance } =
+      this.applyHoldbackDeduction(vault, token0Data, token1Data, finalToken0Balance, finalToken1Balance, token0Price, token1Price));
+
     const maxSlippage = vault.strategy.parameters.maxSlippage;
 
     this.log(`🔄 Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
     // Step 10: Execute increaseLiquidity transaction
     // 10a. Generate add liquidity transaction data
-    // Pass full balances - adapter applies slippage internally and uses balances as max amounts
+    // Pass holdback-deducted balances - adapter applies slippage internally
     const addLiquidityData = await retryRpcCall(
       () => adapter.generateAddLiquidityData({
         position,
@@ -1880,7 +1891,10 @@ export default class BabyStepsStrategy extends StrategyBase {
       'getPositionById'
     );
     await this.vaultDataService.updatePosition(vault.address, updatedPosition, updatedPoolData);
-    await this.vaultDataService.refreshTokens(vault.address);
+    // COMMENTED OUT: VaultHealth now refreshes tokens at the top of attemptTopUp.
+    // Strategy mid-flow refreshes (initializeVault:193, rebalancePosition:765, handleSwapEvent:363)
+    // handle strategy's own freshness needs. This end-of-function refresh was only for VaultHealth.
+    // await this.vaultDataService.refreshTokens(vault.address);
   }
 
   /**
@@ -1962,6 +1976,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     // Step 5: Calculate target amounts based on ratio and total vault value
     // Use totalVaultValue (includes non-aligned tokens that will be swapped)
+    // Holdback deduction happens later at the mint boundary (Step 10)
     const totalValue = assetValues.totalVaultValue;
     const targetToken0ValueUSD = totalValue * token0Share;
     const targetToken1ValueUSD = totalValue * token1Share;
@@ -2110,16 +2125,20 @@ export default class BabyStepsStrategy extends StrategyBase {
       vault.strategy.parameters.targetRangeLower
     );
 
-    // Step 10: Get final token balances to pass to adapter
-    const finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
-    const finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+    // Step 10: Get final token balances and apply holdback deduction
+    let finalToken0Balance = BigInt(vault.tokens[token0Data.symbol]);
+    let finalToken1Balance = BigInt(vault.tokens[token1Data.symbol]);
+
+    ({ token0Balance: finalToken0Balance, token1Balance: finalToken1Balance } =
+      this.applyHoldbackDeduction(vault, token0Data, token1Data, finalToken0Balance, finalToken1Balance, token0Price, token1Price));
+
     const maxSlippage = vault.strategy.parameters.maxSlippage;
 
     this.log(`Token balances for position: ${token0Data.symbol}=${ethers.utils.formatUnits(finalToken0Balance, token0Data.decimals)}, ${token1Data.symbol}=${ethers.utils.formatUnits(finalToken1Balance, token1Data.decimals)}`);
 
     // Step 11: Execute mint transaction
     // 11a. Generate CREATE position data with fresh pool data
-    // Pass full balances - adapter applies slippage internally and uses balances as max amounts
+    // Pass holdback-deducted balances - adapter applies slippage internally
     const createPositionData = await retryRpcCall(
       () => adapter.generateCreatePositionData({
         position,
@@ -2201,7 +2220,10 @@ export default class BabyStepsStrategy extends StrategyBase {
     this.emergencyExitBaseline[vault.address] = currentPool;
     this.log(`Set emergency exit baseline ${JSON.stringify(currentPool)} for vault ${vault.address} (new position)`);
     await this.vaultDataService.updatePosition(vault.address, newPosition, newPoolData);
-    await this.vaultDataService.refreshTokens(vault.address);
+    // COMMENTED OUT: VaultHealth now refreshes tokens at the top of attemptTopUp.
+    // Strategy mid-flow refreshes (initializeVault:193, rebalancePosition:765, handleSwapEvent:363)
+    // handle strategy's own freshness needs. This end-of-function refresh was only for VaultHealth.
+    // await this.vaultDataService.refreshTokens(vault.address);
 
   }
 
@@ -2554,7 +2576,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Generate swap transactions - adapter handles platform-specific auth
-    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const signer = this.getVaultSigner(vault);
     const swapOptions = {
       signer,
       recipient: vault.address,

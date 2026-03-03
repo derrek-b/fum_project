@@ -6,15 +6,17 @@
 
 import path from 'path';
 import { ethers } from 'ethers';
-import { getAdaptersForChain, getAllTokens, getContract, getAuthorizedVaults } from 'fum_library';
+import { getAdaptersForChain, getAllTokens, getContract, getActiveVaults, getVaultExecutorIndex, getVaultContract } from 'fum_library';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
-import { UnrecoverableError } from '../utils/errors.js';
+import { UnrecoverableError, InsufficientGasError } from '../utils/errors.js';
+import { patchProviderFeeData } from '../utils/patchProviderFeeData.js';
 
 import EventManager from './EventManager.js';
 import VaultDataService from './VaultDataService.js';
 import SSEBroadcaster from './SSEBroadcaster.js';
 import Tracker from './Tracker.js';
+import VaultHealth from './VaultHealth.js';
 import { BabyStepsStrategy } from '../strategies/index.js';
 
 /**
@@ -25,7 +27,6 @@ class AutomationService {
   /**
    * Creates a new AutomationService instance
    * @param {Object} config - Service configuration
-   * @param {string} config.automationServiceAddress - Address of the automation service wallet
    * @param {number} config.chainId - Chain ID for the network
    * @param {string} config.wsUrl - WebSocket RPC URL
    * @param {boolean} [config.debug=false] - Enable debug logging
@@ -33,13 +34,24 @@ class AutomationService {
    * @param {number} [config.maxFailureDurationMs=3600000] - Max failure duration before blacklist (1 hour)
    * @param {number} [config.ssePort=3001] - SSE server port
    * @param {string} [config.dataDir='./data'] - Base directory for all data files (blacklist, vault tracking, tracking failures)
+   * @param {number} [config.vaultHealthIntervalMs=300000] - VaultHealth balance check interval (0 disables)
    */
   constructor(config) {
     // Validate required config
     this.validateConfig(config);
 
+    // Cache HDNode from mnemonic (single PBKDF2, ~10-50ms)
+    const mnemonic = process.env.AUTOMATION_MNEMONIC;
+    if (!mnemonic) {
+      throw new Error('AUTOMATION_MNEMONIC environment variable is required');
+    }
+    try {
+      this.hdNode = ethers.utils.HDNode.fromMnemonic(mnemonic);
+    } catch (error) {
+      throw new Error(`Invalid AUTOMATION_MNEMONIC: ${error.message}`);
+    }
+
     // Store configuration
-    this.automationServiceAddress = config.automationServiceAddress;
     this.chainId = config.chainId;
     this.wsUrl = config.wsUrl;
     this.debug = config.debug || false;
@@ -91,6 +103,13 @@ class AutomationService {
       debug: this.debug
     });
 
+    this.vaultHealth = new VaultHealth({
+      eventManager: this.eventManager,
+      chainId: this.chainId,
+      debug: this.debug,
+      balanceCheckIntervalMs: config.vaultHealthIntervalMs ?? 300000
+    });
+
     this.sseBroadcaster = new SSEBroadcaster(this.eventManager, {
       port: this.ssePort,
       debug: this.debug,
@@ -100,6 +119,7 @@ class AutomationService {
       getTrackingFailures: () => this.tracker.getTrackingFailuresData(),
       getVaultMetadata: (addr) => this.tracker.getMetadata(addr),
       getVaultTransactions: (addr, start, end) => this.tracker.getTransactions(addr, start, end),
+      getFundingRequired: () => this.vaultHealth.getFundingRequiredData(),
       onCrash: (error) => this.handleFatalError(error)
     });
 
@@ -142,12 +162,6 @@ class AutomationService {
    * @private
    */
   validateConfig(config) {
-    if (!config.automationServiceAddress) {
-      throw new Error('automationServiceAddress is required');
-    }
-    if (!ethers.utils.isAddress(config.automationServiceAddress)) {
-      throw new Error('automationServiceAddress must be a valid Ethereum address');
-    }
     if (!config.chainId) {
       throw new Error('chainId is required');
     }
@@ -194,11 +208,14 @@ class AutomationService {
       // Phase 5: Discover and load authorized vaults (tracker/broadcaster ready)
       await this.loadAuthorizedVaults();
 
+      // Phase 5.5: Start VaultHealth monitoring (initial balance check, begin interval)
+      await this.vaultHealth.start();
+
       // Phase 6: Subscribe to global blockchain events (after vault loading to avoid race conditions)
       // If we subscribed before loading, a user could disable a vault mid-setup causing races
       this.eventManager.subscribeToAuthorizationEvents(
         this.provider,
-        this.automationServiceAddress,
+        this.hdNode,
         this.chainId
       );
 
@@ -219,7 +236,6 @@ class AutomationService {
 
       this.eventManager.emit('ServiceStarted', {
         chainId: this.chainId,
-        automationServiceAddress: this.automationServiceAddress,
         adaptersLoaded: this.adapters.size,
         tokensLoaded: Object.keys(this.tokens).length,
         timestamp: Date.now(),
@@ -270,6 +286,9 @@ class AutomationService {
       clearInterval(this.failedVaultRetryTimer);
       this.failedVaultRetryTimer = null;
     }
+
+    // 1.5. Stop VaultHealth monitoring
+    this.vaultHealth.stop();
 
     // 2. Stop heartbeat monitoring
     this.stopHeartbeat();
@@ -370,6 +389,17 @@ class AutomationService {
       // 8. Update strategy dependencies with runtime values
       this.updateStrategyDependencies();
 
+      // 9. Wire VaultHealth dependencies (provider, HDNode, data service, adapters, locks)
+      this.vaultHealth.setProvider(this.provider);
+      this.vaultHealth.setHdNode(this.hdNode);
+      this.vaultHealth.setVaultDataService(this.vaultDataService);
+      this.vaultHealth.setTokens(this.tokens);
+      this.vaultHealth.setAdapters(this.adapters);
+      this.vaultHealth.setLockFunctions(
+        (addr) => this.lockVault(addr),
+        (addr) => this.unlockVault(addr)
+      );
+
       this.log('AutomationService initialized successfully');
 
     } catch (error) {
@@ -386,6 +416,7 @@ class AutomationService {
     this.log(`Connecting to WebSocket: ${this.wsUrl}`);
 
     this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
+    patchProviderFeeData(this.provider, this.chainId);
 
     // Attach WebSocket event handlers for disconnect detection
     this.attachProviderEventHandlers();
@@ -515,6 +546,7 @@ class AutomationService {
 
         // Create new provider
         this.provider = new ethers.providers.WebSocketProvider(this.wsUrl);
+        patchProviderFeeData(this.provider, this.chainId);
         this.attachProviderEventHandlers();
 
         // Verify connection
@@ -525,8 +557,15 @@ class AutomationService {
 
         this.log(`Reconnected to chain ${network.chainId}`);
 
+        // Update VaultHealth provider reference
+        this.vaultHealth.setProvider(this.provider);
+
         // Re-establish all event listeners
         await this.reestablishEventListeners();
+
+        // Update all dependency provider references (strategies + VaultDataService)
+        this.vaultDataService.provider = this.provider;
+        this.updateStrategyDependencies();
 
         // Restart heartbeat
         this.startHeartbeat();
@@ -567,7 +606,7 @@ class AutomationService {
     // 1. Re-subscribe to authorization events (global)
     this.eventManager.subscribeToAuthorizationEvents(
       this.provider,
-      this.automationServiceAddress,
+      this.hdNode,
       this.chainId
     );
 
@@ -648,7 +687,7 @@ class AutomationService {
   async initializeAdapters() {
     this.log('Initializing platform adapters...');
 
-    const result = getAdaptersForChain(this.chainId, this.provider);
+    const result = getAdaptersForChain(this.chainId);
 
     if (!result.adapters || result.adapters.length === 0) {
       throw new Error(`No adapters available for chain ID ${this.chainId}`);
@@ -742,7 +781,6 @@ class AutomationService {
   updateStrategyDependencies() {
     const serviceConfig = {
       chainId: this.chainId,
-      automationServiceAddress: this.automationServiceAddress,
       wsUrl: this.wsUrl,
       debug: this.debug
     };
@@ -751,6 +789,8 @@ class AutomationService {
       strategy.provider = this.provider;
       strategy.adapters = this.adapters;
       strategy.tokens = this.tokens;
+      strategy.hdNode = this.hdNode;
+      strategy.vaultHealth = this.vaultHealth;
       strategy.serviceConfig = serviceConfig;
       this.log(`Updated dependencies for strategy: ${strategyId}`);
     }
@@ -864,12 +904,17 @@ class AutomationService {
         ).catch(err => console.error('Telegram notification error:', err));
 
       } catch (error) {
-        // trackFailedVault emits VaultFailed which is already broadcast via SSE
-        try {
-          await this.trackFailedVault(vaultAddress, error.message, 'auth_event');
-        } catch (handlerError) {
-          console.error(`[auth_event] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
-          await this.emergencyVaultCleanup(vaultAddress, `[auth_event] trackFailedVault failed: ${handlerError.message}`);
+        // InsufficientGasError: executor needs funding, not a retry/blacklist case
+        if (error.name === 'InsufficientGasError') {
+          this.vaultHealth.enterFundingRequired(vaultAddress);
+        } else {
+          // trackFailedVault emits VaultFailed which is already broadcast via SSE
+          try {
+            await this.trackFailedVault(vaultAddress, error.message, 'auth_event');
+          } catch (handlerError) {
+            console.error(`[auth_event] trackFailedVault error for ${vaultAddress}:`, handlerError.message);
+            await this.emergencyVaultCleanup(vaultAddress, `[auth_event] trackFailedVault failed: ${handlerError.message}`);
+          }
         }
       }
     });
@@ -1043,7 +1088,11 @@ class AutomationService {
           log: { level: 'info', message: `Vault ${vaultAddress} recovered from retry queue` }
         });
       } catch (error) {
-        if (this.isRecoverableError(error)) {
+        // InsufficientGasError: executor needs funding, remove from retry queue
+        if (error.name === 'InsufficientGasError') {
+          this.failedVaults.delete(vaultAddress);
+          this.vaultHealth.enterFundingRequired(vaultAddress);
+        } else if (this.isRecoverableError(error)) {
           // Recoverable: trackFailedVault updates attempt count and lastError
           try {
             await this.trackFailedVault(vaultAddress, error.message, 'retry_attempt');
@@ -1076,6 +1125,9 @@ class AutomationService {
       strategyCleanedUp: false,
       errors: []
     };
+
+    // 0. Remove from VaultHealth monitoring
+    this.vaultHealth.removeVault(vaultAddress);
 
     // 1. Strategy-specific cleanup (clears emergencyExitBaseline, position checks, etc.)
     try {
@@ -1508,25 +1560,26 @@ class AutomationService {
    * @returns {Promise<Object>} Results summary
    */
   async loadAuthorizedVaults() {
-    this.log('Discovering authorized vaults...');
+    this.log('Discovering active vaults...');
 
-    // Get all vaults that have authorized this executor
-    const authorizedVaultAddresses = await retryRpcCall(
-      () => getAuthorizedVaults(this.automationServiceAddress, this.provider),
-      'getAuthorizedVaults',
+    // Get all vaults with an active executor (Phase 1 active vault registry)
+    const activeVaultAddresses = await retryRpcCall(
+      () => getActiveVaults(this.provider),
+      'getActiveVaults',
       { log: (msg) => this.log(msg) }
     );
 
-    this.log(`Found ${authorizedVaultAddresses.length} authorized vault(s)`);
+    this.log(`Found ${activeVaultAddresses.length} active vault(s), verifying ownership...`);
 
     const results = {
-      total: authorizedVaultAddresses.length,
+      total: activeVaultAddresses.length,
       successful: [],
       failed: [],
-      skippedBlacklisted: []
+      skippedBlacklisted: [],
+      skippedNotOurs: []
     };
 
-    for (const vaultAddress of authorizedVaultAddresses) {
+    for (const vaultAddress of activeVaultAddresses) {
       // Skip blacklisted vaults
       if (this.isVaultBlacklisted(vaultAddress)) {
         this.log(`Skipping blacklisted vault: ${vaultAddress}`);
@@ -1534,12 +1587,52 @@ class AutomationService {
         continue;
       }
 
+      // Verify this vault's executor belongs to our HD tree
+      try {
+        const [executorIndex, onChainExecutor] = await Promise.all([
+          retryRpcCall(
+            () => getVaultExecutorIndex(vaultAddress, this.provider),
+            'getVaultExecutorIndex'
+          ),
+          retryRpcCall(
+            () => getVaultContract(vaultAddress, this.provider).executor(),
+            'vault.executor'
+          )
+        ]);
+
+        const derivedAddress = this.hdNode.derivePath(
+          "m/44'/60'/0'/0/" + executorIndex
+        ).address;
+
+        if (derivedAddress.toLowerCase() !== onChainExecutor.toLowerCase()) {
+          this.log(
+            `Vault ${vaultAddress} executor ${onChainExecutor} ` +
+            `does not match derived ${derivedAddress} (index ${executorIndex}) — skipping`
+          );
+          results.skippedNotOurs.push(vaultAddress);
+          continue;
+        }
+
+        this.log(`Vault ${vaultAddress} verified: executor index ${executorIndex}`);
+      } catch (error) {
+        console.error(`Failed to verify vault ${vaultAddress} ownership:`, error.message);
+        results.failed.push({ vaultAddress, error: `ownership verification: ${error.message}` });
+        continue;
+      }
+
+      // Vault is ours — set it up
       try {
         await this.setupVault(vaultAddress);
         results.successful.push(vaultAddress);
       } catch (error) {
         console.error(`Failed to setup vault ${vaultAddress}:`, error.message);
         results.failed.push({ vaultAddress, error: error.message });
+
+        // InsufficientGasError: executor needs funding, not a retry/blacklist case
+        if (error.name === 'InsufficientGasError') {
+          this.vaultHealth.enterFundingRequired(vaultAddress);
+          continue;
+        }
 
         // Check if error is recoverable - blacklist immediately for unrecoverable errors
         if (this.isRecoverableError(error)) {
@@ -1561,10 +1654,13 @@ class AutomationService {
       successful: results.successful.length,
       failed: results.failed.length,
       skippedBlacklisted: results.skippedBlacklisted.length,
+      skippedNotOurs: results.skippedNotOurs.length,
       timestamp: Date.now(),
       log: {
         level: results.failed.length > 0 ? 'warn' : 'info',
-        message: `Loaded ${results.successful.length}/${results.total} vaults (${results.failed.length} failed, ${results.skippedBlacklisted.length} blacklisted)`
+        message: `Loaded ${results.successful.length}/${results.total} vaults ` +
+          `(${results.failed.length} failed, ${results.skippedBlacklisted.length} blacklisted, ` +
+          `${results.skippedNotOurs.length} not ours)`
       }
     });
 
@@ -1644,6 +1740,9 @@ class AutomationService {
       step = 'monitoring_setup';
       this.log(`Step 4: Starting monitoring for ${normalizedAddress}`);
       await this.startMonitoringVault(vault);
+
+      // Step 5: Register with VaultHealth for executor monitoring
+      this.vaultHealth.addVault(normalizedAddress);
 
       this.eventManager.emit('VaultSetupComplete', {
         vaultAddress: normalizedAddress,
@@ -1808,8 +1907,10 @@ class AutomationService {
     } catch (error) {
       console.error(`Error processing swap event for vault ${vaultAddress}:`, error);
 
-      // Determine if error is recoverable (cache/RPC failures) vs unrecoverable
-      if (this.isRecoverableError(error)) {
+      // InsufficientGasError: executor needs funding, skip vault without retry/blacklist
+      if (error.name === 'InsufficientGasError') {
+        this.vaultHealth.enterFundingRequired(vaultAddress);
+      } else if (this.isRecoverableError(error)) {
         // Recoverable: add to retry queue for re-setup
         try {
           await this.trackFailedVault(vaultAddress, error.message, 'swap_event');
@@ -2111,14 +2212,14 @@ class AutomationService {
     return {
       isRunning: this.isRunning,
       chainId: this.chainId,
-      automationServiceAddress: this.automationServiceAddress,
       adaptersLoaded: this.adapters.size,
       tokensLoaded: Object.keys(this.tokens).length,
       poolsCached: Object.keys(this.poolData).length,
       vaultsCached: this.vaultDataService.getAllVaults().length,
       failedVaults: this.failedVaults.size,
       blacklistedVaults: this.blacklistedVaults.size,
-      sse: this.sseBroadcaster.getStatus()
+      sse: this.sseBroadcaster.getStatus(),
+      vaultHealth: this.vaultHealth.getStatus()
     };
   }
 

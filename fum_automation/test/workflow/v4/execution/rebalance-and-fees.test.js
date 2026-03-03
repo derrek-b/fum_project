@@ -55,7 +55,6 @@ describe('V4 Rebalance and Fee Collection', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'V4 Rebalance & Fee Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         nativeEthAmount: '10',
         nativeEthToVault: '20', // V4 needs significant ETH: deficit swap + position msg.value
         swapTokens: [], // No pre-swaps

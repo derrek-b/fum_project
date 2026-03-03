@@ -278,7 +278,7 @@ async function initializeStrategyDependencies(provider) {
   vaultDataService.initialize(provider, CHAIN_ID);
 
   // 3. Adapters — use real chain ID for address lookups
-  const adapterResult = getAdaptersForChain(CHAIN_ID, provider);
+  const adapterResult = getAdaptersForChain(CHAIN_ID);
   if (!adapterResult.adapters || adapterResult.adapters.length === 0) {
     throw new Error(`No adapters available for chain ID ${CHAIN_ID}`);
   }
@@ -345,15 +345,12 @@ async function initializeStrategyDependencies(provider) {
     Object.assign(poolData, data.poolData);
   });
 
-  // 7. Executor wallet from mnemonic path m/44'/60'/0'/0/1
-  const executorWallet = ethers.Wallet.fromMnemonic(MNEMONIC, "m/44'/60'/0'/0/1").connect(provider);
-  const executorAddress = executorWallet.address;
-  process.env.AUTOMATION_PRIVATE_KEY = executorWallet.privateKey;
+  // 7. Set AUTOMATION_MNEMONIC for HDNode derivation
+  process.env.AUTOMATION_MNEMONIC = MNEMONIC;
 
   // 8. Service config
   const serviceConfig = {
     chainId: CHAIN_ID,
-    automationServiceAddress: executorAddress,
     wsUrl: null,
     debug: false,
   };
@@ -377,7 +374,10 @@ async function initializeStrategyDependencies(provider) {
     sendTelegramMessage: async (msg) => console.log(`  [TELEGRAM] ${msg}`),
   });
 
-  return { strategy, vaultDataService, eventManager, vaultLocks, poolData, executorAddress };
+  // Inject HDNode for per-vault executor derivation
+  strategy.hdNode = ethers.utils.HDNode.fromMnemonic(MNEMONIC);
+
+  return { strategy, vaultDataService, eventManager, vaultLocks, poolData };
 }
 
 // ---------------------------------------------------------------------------

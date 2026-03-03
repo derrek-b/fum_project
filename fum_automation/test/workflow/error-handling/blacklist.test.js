@@ -44,7 +44,6 @@ describe('Blacklist Management', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Blacklist Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -116,7 +115,6 @@ describe('Blacklist Management', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,
@@ -548,7 +546,6 @@ describe('Blacklist Management', () => {
       // Create second service with SAME blacklist file path
       console.log('\n=== Second service: Verifying persistence ===');
       const svc2 = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: tempDir,  // Same dir — blacklist persists!

@@ -29,6 +29,11 @@ export default async function globalSetup() {
   // Load environment variables (needed for Alchemy API key)
   dotenv.config({ path: path.join(__dirname, '../.env.local') });
 
+  // Ensure test mnemonic is available (fallback if .env.local missing)
+  if (!process.env.AUTOMATION_MNEMONIC) {
+    process.env.AUTOMATION_MNEMONIC = 'pumpkin ghost mammal enrich toss laptop travel main again clever edit orchard';
+  }
+
   // Initialize fum_library with all API keys (V3 and V4 both need these)
   initFumLibrary({
     alchemyApiKey: process.env.ALCHEMY_API_KEY,

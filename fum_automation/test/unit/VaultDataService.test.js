@@ -481,6 +481,7 @@ describe('VaultDataService', () => {
     it('should update vault.tokens with fresh balances', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 }, USDC: { symbol: 'USDC', decimals: 6 } });
 
       const mockBalances = { ETH: '1000000000000000000', USDC: '1000000' };
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue(mockBalances);
@@ -501,6 +502,7 @@ describe('VaultDataService', () => {
     it('should update lastUpdated timestamp', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 } });
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
 
       const oldTimestamp = 1000;
@@ -520,6 +522,7 @@ describe('VaultDataService', () => {
     it('should NOT modify positions', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 } });
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({ ETH: '100' });
 
       const existingPositions = { '123': { id: '123', liquidity: '1000' } };
@@ -539,6 +542,7 @@ describe('VaultDataService', () => {
     it('should emit tokensRefreshing event', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 } });
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
       vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
         address: VAULT_ADDRESS_1,
@@ -557,6 +561,7 @@ describe('VaultDataService', () => {
     it('should emit tokensRefreshed event with balances', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 }, USDC: { symbol: 'USDC', decimals: 6 } });
       const mockBalances = { ETH: '100', USDC: '200' };
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue(mockBalances);
       vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
@@ -580,6 +585,7 @@ describe('VaultDataService', () => {
     it('should return true on success', async () => {
       const mockProvider = { getNetwork: vi.fn() };
       vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({ ETH: { symbol: 'ETH', decimals: 18 } });
       vaultDataService.fetchTokenBalances = vi.fn().mockResolvedValue({});
       vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
         address: VAULT_ADDRESS_1,

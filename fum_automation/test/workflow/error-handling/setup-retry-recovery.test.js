@@ -48,7 +48,6 @@ describe('Error Handling - Setup Retry Recovery', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Retry Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -123,7 +122,6 @@ describe('Error Handling - Setup Retry Recovery', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,
@@ -455,7 +453,6 @@ describe('Error Handling - Setup Retry Recovery', () => {
         testEnv.deployedContracts,
         {
           vaultName: 'AddToPosition Test Vault',
-          automationServiceAddress: testConfig.automationServiceAddress,
           wrapEthAmount: '5',
           swapTokens: [
             { from: 'WETH', to: 'USDC', amount: '1' }
@@ -789,7 +786,6 @@ describe('Error Handling - Setup Retry Recovery', () => {
 
       // Create 3 vaults for concurrent failure testing
       const vaultConfig = {
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '1' }],
         positions: [{

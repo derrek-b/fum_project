@@ -7,7 +7,9 @@ import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
 import { getChainConfig, getTokensByChain, getTokenAddress, getTokenBySymbol } from 'fum_library';
 import { getWrappedNativeAddress, getWrappedNativeSymbol, isWrappedNativeToken } from 'fum_library/helpers/tokenHelpers';
+import { getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
 import { getVaultContract } from 'fum_library/blockchain';
+import { deriveTestExecutorAddress } from './executor-utils.js';
 
 const ERC20_ABI = [
   'function balanceOf(address account) view returns (uint256)',
@@ -479,28 +481,31 @@ export async function setupTestVault(hardhat, contracts, deployedContracts, conf
   await setTargetPlatformsTx.wait();
   console.log(`    Target platforms set to: ${settings.targetPlatforms.join(', ')}`);
 
-  // Authorize our automation service as the vault's executor
-  const automationServiceAddress = config.automationServiceAddress;
-  if (!automationServiceAddress) {
-    throw new Error('automationServiceAddress must be provided in config for vault setup');
-  }
-  console.log(`    Authorizing automation service ${automationServiceAddress} as vault executor...`);
-  const setExecutorTx = await testVault.setExecutor(automationServiceAddress);
+  // Derive per-vault executor from test mnemonic + VaultFactory-assigned index
+  const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
+  const executorIndex = Number(vaultInfo.executorIndex ?? vaultInfo[4]);
+  const executorAddress = deriveTestExecutorAddress(executorIndex);
+  const fundingAmount = ethers.utils.parseEther(getMaxExecutorBalance(1337).toString());
+  console.log(`    Derived executor ${executorAddress} (index ${executorIndex}), funding ${ethers.utils.formatEther(fundingAmount)} native`);
+
+  const setExecutorTx = await testVault.setExecutor(executorAddress, { value: fundingAmount });
   const executorReceipt = await setExecutorTx.wait();
   console.log(`    setExecutor transaction confirmed in block ${executorReceipt.blockNumber} with status: ${executorReceipt.status === 1 ? 'SUCCESS' : 'FAILED'}`);
 
   // Verify authorization was set correctly
   const executor = await testVault.executor();
-  if (executor.toLowerCase() !== automationServiceAddress.toLowerCase()) {
-    throw new Error(`Authorization failed: expected ${automationServiceAddress}, got ${executor}`);
+  if (executor.toLowerCase() !== executorAddress.toLowerCase()) {
+    throw new Error(`Authorization failed: expected ${executorAddress}, got ${executor}`);
   }
-  console.log(`    Vault ${vaultAddress} is now authorized for automation service`);
+  console.log(`    Vault ${vaultAddress} is now authorized for executor ${executorAddress}`);
 
   console.log('  ✅ Configurable test vault setup complete!');
 
   return {
     vault: testVault,
     vaultAddress,
+    executorIndex,
+    executorAddress,
     positions: createdPositions,
     tokenBalances: finalTokenBalances,
     tokenContracts,

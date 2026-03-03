@@ -52,7 +52,6 @@ describe('Config Update Failures', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Config Update Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -130,7 +129,6 @@ describe('Config Update Failures', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,

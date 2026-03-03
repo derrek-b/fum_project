@@ -78,7 +78,6 @@ describe('Emergency Exit - Swap Event Trigger', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Emergency Exit Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '5' }],
         positions: [{
@@ -249,7 +248,6 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Retry Emergency Exit Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '3' }],
         positions: [{
@@ -322,7 +320,6 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,

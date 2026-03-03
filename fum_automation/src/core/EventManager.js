@@ -7,7 +7,8 @@
  */
 
 import { ethers } from 'ethers';
-import { getVaultContract } from 'fum_library';
+import { getVaultContract, getVaultExecutorIndex } from 'fum_library';
+import { retryRpcCall } from '../utils/RetryHelper.js';
 
 /**
  * Core event management system for pub/sub pattern
@@ -787,11 +788,17 @@ class EventManager {
 
   /**
    * Subscribe to authorization events (ExecutorChanged)
+   *
+   * With per-vault signers, there is no single automation service address.
+   * - Grants: verify the executor address is derivable from our HD tree
+   *   (read vault's executorIndex from VaultFactory, derive, compare)
+   * - Revocations: check if the vault is in our managed set
+   *
    * @param {Object} provider - Ethers provider
-   * @param {string} automationServiceAddress - Address of the automation service
+   * @param {Object} hdNode - Cached HDNode for address derivation
    * @param {number} chainId - Chain ID
    */
-  subscribeToAuthorizationEvents(provider, automationServiceAddress, chainId) {
+  subscribeToAuthorizationEvents(provider, hdNode, chainId) {
     this.log('Subscribing to authorization events...');
 
     const filter = {
@@ -804,21 +811,48 @@ class EventManager {
         const isAuthorized = log.topics[2].endsWith('1');
         const vaultAddress = log.address;
 
-        // Only process events for our automation service
-        if (executorAddress.toLowerCase() !== automationServiceAddress.toLowerCase()) {
-          return;
-        }
-
         if (isAuthorized) {
+          // Grant: verify this executor belongs to our HD tree
+          // Read executorIndex from VaultFactory, derive our address, compare
+          let executorIndex;
+          try {
+            executorIndex = await retryRpcCall(
+              () => getVaultExecutorIndex(vaultAddress, provider),
+              'getVaultExecutorIndex(authEvent)'
+            );
+          } catch (indexError) {
+            this.log(`Could not read executorIndex for vault ${vaultAddress}: ${indexError.message}`);
+            return;
+          }
+
+          const derivedAddress = hdNode.derivePath(
+            "m/44'/60'/0'/0/" + executorIndex
+          ).address;
+
+          if (derivedAddress.toLowerCase() !== executorAddress.toLowerCase()) {
+            this.log(
+              `ExecutorChanged grant for vault ${vaultAddress}: ` +
+              `executor ${executorAddress} is not ours (derived: ${derivedAddress}), ignoring`
+            );
+            return;
+          }
+
           this.emit('VaultAuthGranted', {
             vaultAddress,
             executorAddress,
+            executorIndex,
             log: {
               level: 'info',
               message: `New vault authorization detected: ${vaultAddress}`
             }
           });
         } else {
+          // Revocation: only process if vault is in our managed set
+          if (!this.vaultDataService || !this.vaultDataService.hasVault(vaultAddress)) {
+            this.log(`ExecutorChanged revocation for vault ${vaultAddress}: not in managed set, ignoring`);
+            return;
+          }
+
           this.emit('VaultAuthRevoked', {
             vaultAddress,
             executorAddress,
@@ -829,7 +863,7 @@ class EventManager {
           });
         }
       } catch (error) {
-        console.error('🔴 Error handling executor change event:', error);
+        console.error('Error handling executor change event:', error);
         this.emit('VaultAuthEventFailed', {
           vaultAddress: log.address,
           rawLog: log,

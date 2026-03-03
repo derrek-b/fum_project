@@ -59,7 +59,6 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition with Non-
       testEnv.deployedContracts,
       {
         vaultName: '0AP/0NP/0AT/1NT - TJ Non-Aligned Token Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeAmount: '50',           // Wrap 50 AVAX for swap chain
         swapTokens: [
           { from: 'AVAX', to: 'USDC', amount: '30', binStep: 10, version: 3 },

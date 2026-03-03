@@ -52,7 +52,6 @@ describe('V4 WETH Cross-Version Swap Workflow', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'V4 WETH Cross-Version Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthToVault: '5',        // Wraps 5 ETH→WETH, transfers to vault
         swapTokens: [],             // No token swaps during setup
         positions: [],              // NO positions - triggers createNewPosition

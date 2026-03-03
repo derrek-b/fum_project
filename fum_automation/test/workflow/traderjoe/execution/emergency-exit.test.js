@@ -68,7 +68,6 @@ describe('TJ V2.2 Emergency Exit', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'TJ V2.2 Emergency Exit Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeAmount: '0',
         swapTokens: [],
         positions: [],

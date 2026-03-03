@@ -49,7 +49,6 @@ describe('Provider Reconnection', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Reconnection Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '1' }],
         positions: [{
@@ -110,13 +109,13 @@ describe('Provider Reconnection', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,
       ssePort,
       debug: true,
-      retryIntervalMs: 999999999  // Disabled automatic retry
+      retryIntervalMs: 999999999,  // Disabled automatic retry
+      vaultHealthIntervalMs: 0
     });
 
     return { service, dir, blacklistPath: service.blacklistFilePath, trackingDir: service.trackingDataDir };
@@ -210,6 +209,15 @@ describe('Provider Reconnection', () => {
       const postReconnectListenerCount = service.eventManager.getListenerCount();
       console.log(`Post-reconnect listeners: ${postReconnectListenerCount} (was ${initialListenerCount})`);
       expect(postReconnectListenerCount).toBeGreaterThan(0);
+
+      // Verify provider references updated (Phase 7 bug fix)
+      // Before this fix, strategies and VaultDataService retained the old dead provider
+      expect(service.vaultDataService.provider).toBe(service.provider);
+      for (const [, strategy] of service.strategies) {
+        expect(strategy.provider).toBe(service.provider);
+      }
+      expect(service.vaultHealth.provider).toBe(service.provider);
+      console.log('Provider references updated after reconnection');
 
       // Verify swap events are processed post-reconnection
       console.log('Executing swap to verify listeners work...');

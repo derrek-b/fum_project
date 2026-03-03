@@ -31,9 +31,9 @@
 
 import { ethers } from 'ethers';
 import { getVaultContract } from 'fum_library';
-import { getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
+import { getNativeSymbol, getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { retryRpcCall, retryWithBackoff } from '../../utils/RetryHelper.js';
-import { UnrecoverableError } from '../../utils/errors.js';
+import { UnrecoverableError, InsufficientGasError, isInsufficientFundsError } from '../../utils/errors.js';
 
 /**
  * Abstract base class that defines the interface for vault management strategies.
@@ -85,6 +85,23 @@ export default class StrategyBase {
     }
   }
 
+  /**
+   * Derive the per-vault signer from HDNode + vault's executorIndex.
+   * Child key derivation is microseconds (HMAC-SHA512) — no caching needed.
+   *
+   * @param {Object} vault - Vault data object with executorIndex
+   * @returns {ethers.Wallet} Signer connected to current provider
+   */
+  getVaultSigner(vault) {
+    if (!this.hdNode) {
+      throw new UnrecoverableError(
+        'HDNode not initialized — updateStrategyDependencies must be called before transaction execution'
+      );
+    }
+    const childNode = this.hdNode.derivePath("m/44'/60'/0'/0/" + vault.executorIndex);
+    return new ethers.Wallet(childNode.privateKey, this.provider);
+  }
+
   // ===========================================================================
   // Transaction Execution
   // ===========================================================================
@@ -124,12 +141,8 @@ export default class StrategyBase {
     // Get vault contract for execution
     const vaultContract = getVaultContract(vault.address, this.provider);
 
-    // Create signer for transaction execution
-    const automationPrivateKey = process.env.AUTOMATION_PRIVATE_KEY;
-    if (!automationPrivateKey) {
-      throw new UnrecoverableError('AUTOMATION_PRIVATE_KEY not found in environment variables');
-    }
-    const signer = new ethers.Wallet(automationPrivateKey, this.provider);
+    // Create per-vault signer via HD derivation
+    const signer = this.getVaultSigner(vault);
     const vaultContractWithSigner = vaultContract.connect(signer);
 
     // Estimate gas before execution
@@ -144,20 +157,33 @@ export default class StrategyBase {
     }
 
     // Execute batch transaction with retry on network errors
-    const { receipt } = await retryWithBackoff(
-      async () => {
-        this.log(`Executing batch of ${targets.length} ${operationType}`);
-        const tx = await this._executeForType(vaultContractWithSigner, type, targets, calldatas, values, totalValue);
-        return { receipt: await tx.wait() };
-      },
-      {
-        maxRetries: 1,           // 2 total attempts (1 retry)
-        baseDelay: 500,          // Short delay appropriate for tx execution
-        exponential: false,      // Linear delay for tx retries
-        context: operationType,
-        logger: { log: (msg) => this.log(msg) }
+    let receipt;
+    try {
+      ({ receipt } = await retryWithBackoff(
+        async () => {
+          this.log(`Executing batch of ${targets.length} ${operationType}`);
+          const tx = await this._executeForType(vaultContractWithSigner, type, targets, calldatas, values, totalValue);
+          return { receipt: await tx.wait() };
+        },
+        {
+          maxRetries: 1,           // 2 total attempts (1 retry)
+          baseDelay: 500,          // Short delay appropriate for tx execution
+          exponential: false,      // Linear delay for tx retries
+          context: operationType,
+          logger: { log: (msg) => this.log(msg) }
+        }
+      ));
+    } catch (error) {
+      // Detect insufficient gas and wrap in InsufficientGasError for structured handling
+      if (isInsufficientFundsError(error)) {
+        throw new InsufficientGasError(
+          `Executor has insufficient gas for ${operationType}: ${error.message}`,
+          vault.address,
+          signer.address
+        );
       }
-    );
+      throw error;
+    }
 
     this.log(`Successfully executed ${targets.length} ${operationType}, tx: ${receipt.transactionHash}`);
 
@@ -309,7 +335,7 @@ export default class StrategyBase {
     const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
     const wrappedNativeAddress = this.tokens[wrappedNativeSymbol].address;
     const vaultContract = getVaultContract(vault.address, this.provider);
-    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const signer = this.getVaultSigner(vault);
     const vaultWithSigner = vaultContract.connect(signer);
 
     this.log(`Wrapping ${ethers.utils.formatEther(amount)} native to ${wrappedNativeSymbol}`);
@@ -365,7 +391,7 @@ export default class StrategyBase {
     const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
     const wrappedNativeAddress = this.tokens[wrappedNativeSymbol].address;
     const vaultContract = getVaultContract(vault.address, this.provider);
-    const signer = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY, this.provider);
+    const signer = this.getVaultSigner(vault);
     const vaultWithSigner = vaultContract.connect(signer);
 
     this.log(`Unwrapping ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to native`);
@@ -430,6 +456,62 @@ export default class StrategyBase {
         expectedSwapEvents: metadata.expectedSwapEvents
       };
     });
+  }
+
+  // ===========================================================================
+  // Holdback Deduction
+  // ===========================================================================
+
+  /**
+   * Reduce mint amounts to reserve tokens for executor top-up.
+   * Priority matches VaultHealth.attemptTopUp:
+   *   1. If one token is native or wrapped native → subtract amountNative (no conversion)
+   *   2. Else → convert holdback USD via price, subtract from highest-USD-value token
+   *
+   * @param {Object} vault - Vault data object
+   * @param {Object} token0Data - Token 0 config ({ symbol, decimals })
+   * @param {Object} token1Data - Token 1 config ({ symbol, decimals })
+   * @param {bigint} token0Balance - Current token0 balance (wei)
+   * @param {bigint} token1Balance - Current token1 balance (wei)
+   * @param {number} token0Price - Token 0 USD price
+   * @param {number} token1Price - Token 1 USD price
+   * @returns {{ token0Balance: bigint, token1Balance: bigint }}
+   */
+  applyHoldbackDeduction(vault, token0Data, token1Data, token0Balance, token1Balance, token0Price, token1Price) {
+    const holdback = this.vaultHealth.getHoldback(vault.address);
+    if (!holdback) return { token0Balance, token1Balance };
+
+    const nativeSymbol = getNativeSymbol(this.chainId);
+    const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
+    const holdbackWei = ethers.utils.parseEther(holdback.amountNative.toFixed(18)).toBigInt();
+
+    // Tier 1: native or wrapped native — subtract amountNative directly (no price conversion)
+    if (token0Data.symbol === nativeSymbol || token0Data.symbol === wrappedNativeSymbol) {
+      token0Balance = token0Balance > holdbackWei ? token0Balance - holdbackWei : 0n;
+    } else if (token1Data.symbol === nativeSymbol || token1Data.symbol === wrappedNativeSymbol) {
+      token1Balance = token1Balance > holdbackWei ? token1Balance - holdbackWei : 0n;
+    } else {
+      // Tier 2: neither token is native — deduct from highest-USD-value token
+      const token0Usd = parseFloat(ethers.utils.formatUnits(token0Balance, token0Data.decimals)) * token0Price;
+      const token1Usd = parseFloat(ethers.utils.formatUnits(token1Balance, token1Data.decimals)) * token1Price;
+
+      if (token0Usd >= token1Usd) {
+        const holdbackTokens = ethers.utils.parseUnits(
+          (holdback.amountUsd / token0Price).toFixed(token0Data.decimals),
+          token0Data.decimals
+        ).toBigInt();
+        token0Balance = token0Balance > holdbackTokens ? token0Balance - holdbackTokens : 0n;
+      } else {
+        const holdbackTokens = ethers.utils.parseUnits(
+          (holdback.amountUsd / token1Price).toFixed(token1Data.decimals),
+          token1Data.decimals
+        ).toBigInt();
+        token1Balance = token1Balance > holdbackTokens ? token1Balance - holdbackTokens : 0n;
+      }
+    }
+
+    this.log(`Holdback deduction: ${holdback.amountNative.toFixed(6)} native ($${holdback.amountUsd.toFixed(2)}) reserved for executor top-up`);
+    return { token0Balance, token1Balance };
   }
 
 }

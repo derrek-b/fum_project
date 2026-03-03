@@ -186,6 +186,14 @@ export default class Tracker {
       await this.handleVaultRetrySuccess(data);
     });
 
+    this.eventManager.subscribe('ExecutorFunded', async (data) => {
+      await this.handleExecutorFunded(data);
+    });
+
+    this.eventManager.subscribe('ExecutorTopUpFailed', async (data) => {
+      await this.handleExecutorTopUpFailed(data);
+    });
+
     this.log('Event listeners set up for vault tracking');
   }
 
@@ -252,7 +260,11 @@ export default class Tracker {
           trackingErrorCount: 0,
           feeTrackingFailureCount: 0,
           blacklistCount: priorBlacklistCount,
-          retryCount: priorRetryCount
+          retryCount: priorRetryCount,
+          executorFundingCount: 0,
+          cumulativeExecutorFundingNative: 0,
+          cumulativeExecutorFundingUSD: 0,
+          executorTopUpFailureCount: 0
         },
         failedDistributions: [],
         lastSnapshot: {
@@ -909,6 +921,106 @@ export default class Tracker {
       this.log(`Tracked retry success for vault ${normalizedAddress}`);
     } catch (err) {
       console.error(`[Tracker] 🔴 Failed to track retry success for ${vaultAddress}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Handle executor funded event — vault transferred native ETH to executor for gas
+   * @private
+   */
+  async handleExecutorFunded(data) {
+    const { vaultAddress, transactionHash, timestamp } = data;
+
+    if (!this.vaultMetadata.has(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} not tracked yet, skipping executor funded event`);
+      return;
+    }
+
+    try {
+      const { executorAddress, amount, gasUsed, effectiveGasPrice } = data;
+      const fundingAmountNative = parseFloat(amount);
+
+      this.log(`Executor funded for vault ${vaultAddress}: ${amount} native to ${executorAddress}`);
+
+      // Gas cost calculation (same pattern as handlePositionsClosed etc.)
+      const gasUsedBN = ethers.BigNumber.from(gasUsed);
+      const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
+      const gasCostWei = gasUsedBN.mul(gasPriceBN);
+      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasETH);
+
+      // Funding amount in USD (reuse gas USD conversion — same native→USD rate)
+      const fundingAmountUSD = await this.calculateGasUSD(fundingAmountNative);
+
+      await this.appendTransaction(vaultAddress, {
+        type: 'ExecutorFunded',
+        vaultAddress,
+        executorAddress,
+        amount,
+        fundingAmountUSD,
+        gasUsed,
+        effectiveGasPrice,
+        gasETH,
+        gasUSD,
+        txHash: transactionHash,
+        timestamp
+      });
+
+      const metadata = this.vaultMetadata.get(vaultAddress);
+      metadata.aggregates.executorFundingCount += 1;
+      metadata.aggregates.cumulativeExecutorFundingNative += fundingAmountNative;
+      metadata.aggregates.cumulativeExecutorFundingUSD += fundingAmountUSD;
+      metadata.aggregates.transactionCount += 1;
+      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasUSD += gasUSD;
+      metadata.metadata.lastUpdated = timestamp;
+
+      await this.saveMetadata(vaultAddress, metadata);
+    } catch (error) {
+      await this.logTrackingError(vaultAddress, {
+        eventType: 'ExecutorFunded',
+        transactionHash,
+        timestamp,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle executor top-up failure — transaction log only, no metadata array.
+   * VaultHealth's holdback state + interval retry handles re-attempts.
+   * @private
+   */
+  async handleExecutorTopUpFailed(data) {
+    const { vaultAddress, timestamp } = data;
+
+    if (!this.vaultMetadata.has(vaultAddress)) {
+      this.log(`Vault ${vaultAddress} not tracked yet, skipping top-up failure event`);
+      return;
+    }
+
+    try {
+      const { error } = data;
+      this.log(`Executor top-up failed for vault ${vaultAddress}: ${error}`);
+
+      await this.appendTransaction(vaultAddress, {
+        type: 'ExecutorTopUpFailed',
+        vaultAddress,
+        error,
+        timestamp
+      });
+
+      const metadata = this.vaultMetadata.get(vaultAddress);
+      metadata.aggregates.executorTopUpFailureCount += 1;
+      metadata.metadata.lastUpdated = timestamp;
+
+      await this.saveMetadata(vaultAddress, metadata);
+    } catch (trackError) {
+      await this.logTrackingError(vaultAddress, {
+        eventType: 'ExecutorTopUpFailed',
+        timestamp,
+        error: trackError.message
+      });
     }
   }
 

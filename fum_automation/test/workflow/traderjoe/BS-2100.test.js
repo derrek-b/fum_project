@@ -66,7 +66,6 @@ describe('AutomationService Initialization - TJ V2.2 Position Demotion + addToPo
       testEnv.deployedContracts,
       {
         vaultName: '2AP/1NP/0AT/0NT - TJ Position Demotion Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeAmount: '100',
         swapTokens: [
           { from: 'AVAX', to: 'USDC', amount: '40', binStep: 10, version: 3 },

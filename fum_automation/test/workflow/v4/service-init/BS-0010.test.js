@@ -56,7 +56,6 @@ describe('V4 AutomationService Initialization - createNewPosition Workflow', () 
       testEnv.deployedContracts,
       {
         vaultName: 'V4 0AP/0NP - createNewPosition Test',
-        automationServiceAddress: testConfig.automationServiceAddress,
         nativeEthAmount: '10',   // For reference only (owner starts with this)
         nativeEthToVault: '5',   // Actually send 5 ETH to vault
         swapTokens: [],          // No token swaps during setup

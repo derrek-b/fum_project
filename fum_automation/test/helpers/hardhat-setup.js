@@ -12,6 +12,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { loadSharedState } from '../shared-state.js';
+import { patchProviderFeeData } from '../../src/utils/patchProviderFeeData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +33,8 @@ async function connectToSharedHardhat() {
   // Create providers connecting to shared Hardhat
   const provider = new ethers.providers.JsonRpcProvider(`http://localhost:${state.port}`);
   const wsProvider = new ethers.providers.WebSocketProvider(`ws://localhost:${state.port}`);
+  patchProviderFeeData(provider, state.chainId);
+  patchProviderFeeData(wsProvider, state.chainId);
 
   // Revert to base snapshot (clean state with only contracts deployed)
   // This ensures each test file starts with the same state
@@ -170,15 +173,11 @@ export async function setupTestBlockchain(options = {}) {
     babyStepsStrategy
   };
 
-  // Use account #4 from standard Hardhat test accounts as automation service
-  const automationServiceAddress = TEST_ACCOUNTS[4].address; // 0xabA472B2EA519490EE10E643A422D578a507197A
-
   // Get chainId from shared state (1337 for Arbitrum, 1338 for Avalanche)
   const chainId = shared.chainId || 1337;
 
   // Standard test configuration for AutomationService
   const testConfig = {
-    automationServiceAddress,
     chainId,
     wsUrl: `ws://localhost:${shared.port}`,
     debug: true,
@@ -186,16 +185,9 @@ export async function setupTestBlockchain(options = {}) {
     dataDir: path.join(__dirname, '../../data'),
     ssePort: 3090, // Fixed port since shared instance
     retryIntervalMs: 5000, // 5 seconds between retries
-    maxFailureDurationMs: 60000 // 1 minute max failure duration
+    maxFailureDurationMs: 60000, // 1 minute max failure duration
+    vaultHealthIntervalMs: 0 // Disable periodic balance checks in tests
   };
-
-  // Fund the automation service account with ETH for gas costs
-  const fundingTx = await shared.deployer.sendTransaction({
-    to: automationServiceAddress,
-    value: ethers.utils.parseEther("100") // Send 100 ETH for gas costs
-  });
-  await fundingTx.wait();
-  console.log(`Funded automation service account ${automationServiceAddress} with 100 ETH`);
 
   return {
     hardhatServer: shared, // For compatibility - has stop(), takeSnapshot(), etc.

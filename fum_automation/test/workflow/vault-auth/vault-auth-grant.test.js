@@ -82,7 +82,6 @@ describe('VaultAuthGranted Workflow', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'VaultAuthGranted Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '2' }
@@ -136,8 +135,9 @@ describe('VaultAuthGranted Workflow', () => {
       testVault.vaultAddress.toLowerCase()
     );
     expect(vaultAuthGrantedEvent.executorAddress.toLowerCase()).toBe(
-      testConfig.automationServiceAddress.toLowerCase()
+      testVault.executorAddress.toLowerCase()
     );
+    expect(vaultAuthGrantedEvent.executorIndex).toBe(testVault.executorIndex);
 
     console.log('VaultAuthGranted verified:');
     console.log(`  Vault: ${vaultAuthGrantedEvent.vaultAddress}`);

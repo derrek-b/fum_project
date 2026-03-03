@@ -69,7 +69,6 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
         testEnv.deployedContracts,
         {
           vaultName: 'Unknown Strategy Test',
-          automationServiceAddress: testConfig.automationServiceAddress,
           wrapEthAmount: '1',
           swapTokens: [],
           positions: [],
@@ -81,7 +80,6 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
       );
 
       service = new AutomationService({
-        automationServiceAddress: testConfig.automationServiceAddress,
         chainId: 1337,
         wsUrl: testConfig.wsUrl,
         dataDir: dir,

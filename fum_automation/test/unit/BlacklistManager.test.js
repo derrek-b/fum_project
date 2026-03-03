@@ -16,7 +16,6 @@ describe('Blacklist Management', () => {
 
   // Create a minimal service config
   const createServiceConfig = (overrides = {}) => ({
-    automationServiceAddress: '0xabA472B2EA519490EE10E643A422D578a507197A',
     chainId: 1337,
     wsUrl: 'ws://localhost:8545',
     debug: true,

@@ -21,7 +21,7 @@ const __dirname = path.dirname(__filename);
 const REQUIRED_VARS = [
   'CHAIN_ID',
   'WS_URL',
-  'AUTOMATION_PRIVATE_KEY',
+  'AUTOMATION_MNEMONIC',
   'SSE_PORT',
   'RETRY_INTERVAL_MS',
   'MAX_FAILURE_DURATION_MS',
@@ -55,13 +55,17 @@ function loadConfig() {
     process.exit(1);
   }
 
-  // Derive executor address from private key
-  const wallet = new ethers.Wallet(process.env.AUTOMATION_PRIVATE_KEY);
+  // Validate mnemonic (HDNode creation validates BIP-39 format)
+  try {
+    ethers.utils.HDNode.fromMnemonic(process.env.AUTOMATION_MNEMONIC);
+  } catch (error) {
+    console.error(`Invalid AUTOMATION_MNEMONIC: ${error.message}`);
+    process.exit(1);
+  }
 
   return {
     chainId: parseInt(process.env.CHAIN_ID),
     wsUrl: process.env.WS_URL,
-    executorAddress: wallet.address,
     debug: process.env.DEBUG === 'true',
     dataDir: process.env.DATA_DIR,
     ssePort: parseInt(process.env.SSE_PORT),
@@ -107,7 +111,6 @@ async function main() {
     console.log("Configuration:");
     console.log(`  Chain ID: ${config.chainId}`);
     console.log(`  WebSocket URL: ${config.wsUrl}`);
-    console.log(`  Executor: ${config.executorAddress}`);
     console.log(`  Debug: ${config.debug}`);
     console.log(`  SSE Port: ${config.ssePort}`);
     console.log(`  Data Dir: ${config.dataDir || './data (default)'}`);
@@ -132,7 +135,6 @@ async function main() {
     // Create and start the automation service
     const service = new AutomationService({
       debug: config.debug,
-      automationServiceAddress: config.executorAddress,
       chainId: config.chainId,
       wsUrl: config.wsUrl,
       dataDir: config.dataDir,

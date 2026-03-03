@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
+import { getVaultContract } from 'fum_library/blockchain';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 describe('AutomationService Initialization - 1 Vault (New Architecture)', () => {
@@ -48,7 +49,6 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       testEnv.deployedContracts,
       {
         vaultName: '1AP/2NP/1AT/2NT Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '20',  // Increased to fund larger fee-generating swaps
         nativeEthAmount: '2',  // Send 2 ETH directly to vault (non-aligned, will need wrapping)
         swapTokens: [
@@ -233,6 +233,32 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(vault.targetPlatforms).toEqual(['uniswapV3']);
       expect(vault.lastUpdated).toBeDefined();
       expect(vault.lastUpdated).toBeGreaterThan(Date.now() - 60000);
+    });
+
+    it('should derive correct executor addresses from service mnemonic', async () => {
+      // Known addresses derived from the test mnemonic
+      const expectedAddresses = {
+        0: '0xdfA3e220f3a214dE67Ba2eda2B94B6FB5ccefd65',
+        1: '0xc7F416Fb1Ba54bdE6D2130f504EcfBFf6af0891A',
+        2: '0x4bcEb093F6CEC00183765D1b368F68dB16569e68',
+        3: '0x1e8AABd94F0fC32aFe09F461b6A47C71bF68a75C'
+      };
+
+      // Verify service hdNode derives the expected address for each index
+      for (const [index, expected] of Object.entries(expectedAddresses)) {
+        const derived = service.hdNode.derivePath(
+          "m/44'/60'/0'/0/" + index
+        ).address;
+        expect(derived).toBe(expected);
+      }
+
+      // Verify this vault's executor matches the on-chain value
+      const vault = service.vaultDataService.getAllVaults()[0];
+      expect(vault.executorIndex).toBe(testVault.executorIndex);
+
+      const vaultContract = getVaultContract(vault.address, testEnv.hardhatServer.provider);
+      const onChainExecutor = await vaultContract.executor();
+      expect(expectedAddresses[vault.executorIndex]).toBe(onChainExecutor);
     });
 
     it('should cache positions correctly', () => {

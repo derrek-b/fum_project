@@ -52,7 +52,6 @@ describe('V4 Emergency Exit', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'V4 Emergency Exit Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         nativeEthAmount: '10',
         nativeEthToVault: '20', // V4 needs ETH for deficit swap + position msg.value
         swapTokens: [], // No pre-swaps

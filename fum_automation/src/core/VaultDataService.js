@@ -188,6 +188,7 @@ class VaultDataService {
       const vault = this.assembleVaultData({
         address: normalizedAddress,
         owner: vaultInfo.owner,
+        executorIndex: vaultInfo.executorIndex,
         chainId: this.chainId,
         strategyAddress: strategyAddress,
         strategy: strategyData,
@@ -326,6 +327,7 @@ class VaultDataService {
     return {
       address: data.address,
       owner: data.owner,
+      executorIndex: data.executorIndex,
       chainId: data.chainId,
       strategyAddress: data.strategyAddress,
       strategy: data.strategy,

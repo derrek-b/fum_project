@@ -58,7 +58,6 @@ describe('Fee Collection Trigger', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Fee Collection Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '5' }],
         positions: [{

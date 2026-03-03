@@ -51,7 +51,6 @@ describe('Config Update Success Cases', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Config Update Success Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -129,7 +128,6 @@ describe('Config Update Success Cases', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,

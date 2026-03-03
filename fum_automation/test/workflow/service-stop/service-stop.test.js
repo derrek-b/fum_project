@@ -37,7 +37,6 @@ describe('Service Stop Workflow', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Service Stop Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         wrapEthAmount: '2',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }

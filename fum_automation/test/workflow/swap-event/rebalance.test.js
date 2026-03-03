@@ -69,7 +69,6 @@ describe('Position Rebalancing', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Rebalance Test Vault',
-        automationServiceAddress: testEnv.testConfig.automationServiceAddress,
         wrapEthAmount: '10',
         swapTokens: [{ from: 'WETH', to: 'USDC', amount: '5' }],
         positions: [{

@@ -39,7 +39,6 @@ describe('Retry Queue Cleanup', () => {
       testEnv.deployedContracts,
       {
         vaultName: 'Cleanup Test Vault',
-        automationServiceAddress: testConfig.automationServiceAddress,
         wrapEthAmount: '5',
         swapTokens: [
           { from: 'WETH', to: 'USDC', amount: '1' }
@@ -111,7 +110,6 @@ describe('Retry Queue Cleanup', () => {
     const dir = await createTempDir();
 
     service = new AutomationService({
-      automationServiceAddress: testConfig.automationServiceAddress,
       chainId: 1337,
       wsUrl: testConfig.wsUrl,
       dataDir: dir,

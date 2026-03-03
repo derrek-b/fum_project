@@ -40,6 +40,7 @@ export default class SSEBroadcaster {
     this.getFailedVaults = options.getFailedVaults || (() => ({}));
     this.getFailedRemovals = options.getFailedRemovals || (() => new Map());
     this.getTrackingFailures = options.getTrackingFailures || (() => ({}));
+    this.getFundingRequired = options.getFundingRequired || (() => ({}));
     this.getVaultMetadata = options.getVaultMetadata || (() => null);
     this.getVaultTransactions = options.getVaultTransactions || (async () => []);
     this.onCrash = options.onCrash || null;
@@ -148,6 +149,8 @@ export default class SSEBroadcaster {
       this.handleTrackingFailuresRequest(res);
     } else if (pathname === '/failed-vaults' && req.method === 'GET') {
       this.handleFailedVaultsRequest(res);
+    } else if (pathname === '/funding-required' && req.method === 'GET') {
+      this.handleFundingRequiredRequest(res);
     } else if (pathname.startsWith('/vault/') && req.method === 'GET') {
       this.handleVaultRequest(pathname, urlParts.searchParams, res);
     } else {
@@ -257,6 +260,22 @@ export default class SSEBroadcaster {
       this.log(`Error fetching failed vaults: ${error.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Failed to fetch failed vaults' }));
+    }
+  }
+
+  /**
+   * Handle funding-required request
+   * @private
+   */
+  handleFundingRequiredRequest(res) {
+    try {
+      const fundingData = this.getFundingRequired();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ fundingRequired: fundingData }));
+    } catch (error) {
+      this.log(`Error fetching funding-required data: ${error.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to fetch funding-required data' }));
     }
   }
 
