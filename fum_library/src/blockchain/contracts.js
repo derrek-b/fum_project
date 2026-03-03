@@ -258,51 +258,20 @@ export async function getUserVaults(userAddress, provider) {
 }
 
 /**
- * Gets all vaults that have authorized a specific executor address
- * @param {string} executorAddress - Address of the executor to check authorization for
+ * Gets all vaults that currently have an executor set (active vaults)
  * @param {ethers.JsonRpcProvider} provider - Ethers provider
- * @returns {Promise<string[]>} Array of vault addresses that have authorized the executor
- * @throws {Error} If executorAddress is invalid or provider is invalid
- * @since 1.0.0
+ * @returns {Promise<string[]>} Array of active vault addresses
+ * @throws {Error} If provider is invalid
+ * @since 2.0.0
  */
-export async function getAuthorizedVaults(executorAddress, provider) {
-  // Validate executor address
-  if (!executorAddress) {
-    throw new Error('Executor address parameter is required');
-  }
-  try {
-    ethers.utils.getAddress(executorAddress);
-  } catch (error) {
-    throw new Error(`Invalid executor address: ${executorAddress}`);
-  }
-
+export async function getActiveVaults(provider) {
   // Provider validation happens in getVaultFactory
   const factory = await getVaultFactory(provider);
-  
+
   try {
-    // Get total number of vaults from factory
-    const totalVaults = await factory.getTotalVaultCount();
-    const authorizedVaults = [];
-    
-    // Iterate through all vaults
-    for (let i = 0; i < totalVaults; i++) {
-      // Get vault address at index
-      const vaultAddress = await factory.allVaults(i);
-      
-      // Get vault contract instance
-      const vault = getVaultContract(vaultAddress, provider);
-      
-      // Check if executor matches
-      const executor = await vault.executor();
-      
-      if (executor.toLowerCase() === executorAddress.toLowerCase()) {
-        authorizedVaults.push(vaultAddress);
-      }
-    }
-    
-    return authorizedVaults;
+    return await factory.getActiveVaults();
   } catch (error) {
-    throw new Error(`Failed to get authorized vaults: ${error.message}`);
+    throw new Error(`Failed to get active vaults: ${error.message}`);
   }
 }
 
@@ -327,17 +296,32 @@ export async function getVaultInfo(vaultAddress, provider) {
   const factory = await getVaultFactory(provider);
 
   try {
-    const [owner, name, creationTime, creationBlock] = await factory.getVaultInfo(vaultAddress);
+    const [owner, name, creationTime, creationBlock, executorIndex] = await factory.getVaultInfo(vaultAddress);
 
     return {
       owner,
       name,
       creationTime: Number(creationTime),
-      creationBlock: Number(creationBlock)
+      creationBlock: Number(creationBlock),
+      executorIndex: Number(executorIndex)
     };
   } catch (error) {
     throw new Error(`Failed to get vault info: ${error.message}`);
   }
+}
+
+/**
+ * Gets the executor index for a specific vault
+ * Convenience function that reads only the executorIndex from VaultInfo
+ * @param {string} vaultAddress - Address of the vault
+ * @param {ethers.JsonRpcProvider} provider - Ethers provider
+ * @returns {Promise<number>} The vault's executor index
+ * @throws {Error} If vaultAddress is invalid or provider is invalid
+ * @since 2.0.0
+ */
+export async function getVaultExecutorIndex(vaultAddress, provider) {
+  const info = await getVaultInfo(vaultAddress, provider);
+  return info.executorIndex;
 }
 
 /**

@@ -805,6 +805,25 @@
         "inputs": [
           {
             "indexed": true,
+            "internalType": "address",
+            "name": "executor",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "name": "ExecutorFunded",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
             "internalType": "uint256",
             "name": "tokenId",
             "type": "uint256"
@@ -1067,6 +1086,19 @@
         "type": "function"
       },
       {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "name": "fundExecutor",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
         "inputs": [],
         "name": "getTargetPlatforms",
         "outputs": [
@@ -1300,7 +1332,7 @@
         ],
         "name": "setExecutor",
         "outputs": [],
-        "stateMutability": "nonpayable",
+        "stateMutability": "payable",
         "type": "function"
       },
       {
@@ -1668,6 +1700,25 @@
             "type": "uint256"
           }
         ],
+        "name": "activeVaults",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ],
         "name": "allVaults",
         "outputs": [
           {
@@ -1696,6 +1747,45 @@
           }
         ],
         "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "deregisterActiveVault",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getActiveVaultCount",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "getActiveVaults",
+        "outputs": [
+          {
+            "internalType": "address[]",
+            "name": "",
+            "type": "address[]"
+          }
+        ],
+        "stateMutability": "view",
         "type": "function"
       },
       {
@@ -1758,6 +1848,11 @@
           {
             "internalType": "uint256",
             "name": "creationBlock",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "executorIndex",
             "type": "uint256"
           }
         ],
@@ -1860,6 +1955,19 @@
       },
       {
         "inputs": [],
+        "name": "nextExecutorIndex",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [],
         "name": "owner",
         "outputs": [
           {
@@ -1882,6 +1990,19 @@
           }
         ],
         "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "vault",
+            "type": "address"
+          }
+        ],
+        "name": "registerActiveVault",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
       },
       {
@@ -2208,6 +2329,11 @@
           {
             "internalType": "uint256",
             "name": "creationBlock",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "executorIndex",
             "type": "uint256"
           }
         ],

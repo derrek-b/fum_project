@@ -67,9 +67,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   /**
    * Constructor
    * @param {number} chainId - Chain ID for the adapter
-   * @param {Object} provider - Ethers provider instance
    */
-  constructor(chainId, provider) {
+  constructor(chainId) {
     super(chainId, "uniswapV3", "Uniswap V3");
 
     // Cache platform addresses (getPlatformAddresses throws if not configured)
@@ -95,17 +94,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.universalRouterInterface = new ethers.utils.Interface(this.universalRouterABI);
     this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
 
-    // For test chain (1337), use real Arbitrum provider and chainId for AlphaRouter
     // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
+    // For test chain (1337), route through real Arbitrum; otherwise use the adapter's own chain
     this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
-
-    if (chainId === 1337) {
-      const arbitrumRpcUrls = getChainRpcUrls(42161);
-      const arbitrumProvider = new ethers.providers.JsonRpcProvider(arbitrumRpcUrls[0]);
-      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: arbitrumProvider });
-    } else {
-      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider });
-    }
+    const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
+    const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
+    this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
   }
 
   /**

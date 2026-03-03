@@ -16,13 +16,13 @@ export { default as TraderJoeV2_2Adapter } from './TraderJoeV2_2Adapter.js';
 export { AdapterFactory };
 
 // Export a convenience function to get all adapters for a chain
-export const getAdaptersForChain = (config, chainId, provider) => {
-  return AdapterFactory.getAdaptersForChain(config, chainId, provider);
+export const getAdaptersForChain = (chainId) => {
+  return AdapterFactory.getAdaptersForChain(chainId);
 };
 
 // Export a convenience function to get a specific adapter
-export const getAdapter = (config, platformId, provider) => {
-  return AdapterFactory.getAdapter(config, platformId, provider);
+export const getAdapter = (platformId, chainId) => {
+  return AdapterFactory.getAdapter(platformId, chainId);
 };
 
 // Export a function to get all supported platforms

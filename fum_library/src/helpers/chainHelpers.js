@@ -57,7 +57,7 @@ export function validateChainId(chainId) {
  * Get chain configuration by chain ID
  * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {Object} Chain configuration object containing name, rpcUrl, executorAddress, and platformAddresses
+ * @returns {Object} Chain configuration object containing name, rpcUrl, executorXpub, and platformAddresses
  * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
  * @throws {Error} If chain is not supported
  * @example
@@ -168,27 +168,16 @@ export function getChainRpcUrls(chainId) {
 }
 
 /**
- * Get the executor address for the specified chain
+ * Get the executor extended public key for the specified chain
  * @memberof module:helpers/chainHelpers
  * @param {number} chainId - The blockchain network ID
- * @returns {string} The executor contract address (0x-prefixed)
- * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @returns {string} The executor xpub (BIP-32 extended public key)
+ * @throws {Error} If chainId is not valid
  * @throws {Error} If chain is not supported
- * @throws {Error} If no executor address is configured for the chain
- * @example
- * // Get executor for Ethereum mainnet
- * const executor = getExecutorAddress(1);
- * // Returns: "0x742d35Cc6634C0532925a3b844Bc9e7595f7E2e1"
- *
- * @example
- * // Use in contract interaction
- * const executorAddress = getExecutorAddress(chainId);
- * if (executorAddress) {
- *   const contract = new ethers.Contract(executorAddress, executorABI, provider);
- * }
- * @since 1.0.0
+ * @throws {Error} If no executor xpub is configured for the chain
+ * @since 2.0.0
  */
-export function getExecutorAddress(chainId) {
+export function getExecutorXpub(chainId) {
   validateChainId(chainId);
 
   const config = chains[chainId];
@@ -196,11 +185,61 @@ export function getExecutorAddress(chainId) {
     throw new Error(`Chain ${chainId} is not supported`);
   }
 
-  if (!config.executorAddress || config.executorAddress === '0x0' || config.executorAddress === '') {
-    throw new Error(`No executor address configured for chain ${chainId}`);
+  if (!config.executorXpub || config.executorXpub === '') {
+    throw new Error(`No executor xpub configured for chain ${chainId}`);
   }
 
-  return config.executorAddress;
+  return config.executorXpub;
+}
+
+/**
+ * Get minimum executor balance for the specified chain (native token)
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number} Minimum executor balance in native token units
+ * @throws {Error} If chainId is not valid
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no minimum executor balance is configured for the chain
+ * @since 2.0.0
+ */
+export function getMinExecutorBalance(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (typeof config.minExecutorBalance !== 'number' || !Number.isFinite(config.minExecutorBalance) || config.minExecutorBalance <= 0) {
+    throw new Error(`No minimum executor balance configured for chain ${chainId}`);
+  }
+
+  return config.minExecutorBalance;
+}
+
+/**
+ * Get maximum executor balance (top-up target) for the specified chain (native token)
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {number} Maximum executor balance in native token units
+ * @throws {Error} If chainId is not valid
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no maximum executor balance is configured for the chain
+ * @since 2.0.0
+ */
+export function getMaxExecutorBalance(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (typeof config.maxExecutorBalance !== 'number' || !Number.isFinite(config.maxExecutorBalance) || config.maxExecutorBalance <= 0) {
+    throw new Error(`No maximum executor balance configured for chain ${chainId}`);
+  }
+
+  return config.maxExecutorBalance;
 }
 
 /**
@@ -459,4 +498,36 @@ export function getTransactionDeadlineMinutes(chainId) {
   }
 
   return config.transactionDeadlineMinutes;
+}
+
+/**
+ * Get maxPriorityFeePerGas for a specific chain (in wei per gas, as a string)
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {string} maxPriorityFeePerGas in wei per gas — pass to ethers.BigNumber.from()
+ * @throws {Error} If chainId is not valid (null, undefined, not a number, not finite, not an integer, or <= 0)
+ * @throws {Error} If chain is not supported
+ * @throws {Error} If no maxPriorityFeePerGas is configured for the chain
+ * @example
+ * // Arbitrum — sequencer ignores tips
+ * getMaxPriorityFeePerGas(42161); // "0"
+ *
+ * @example
+ * // Avalanche — near-zero tip (1000 wei/gas = 0.000001 gwei)
+ * getMaxPriorityFeePerGas(43114); // "1000"
+ * @since 2.0.0
+ */
+export function getMaxPriorityFeePerGas(chainId) {
+  validateChainId(chainId);
+
+  const config = chains[chainId];
+  if (!config) {
+    throw new Error(`Chain ${chainId} is not supported`);
+  }
+
+  if (config.maxPriorityFeePerGas === undefined || config.maxPriorityFeePerGas === null) {
+    throw new Error(`No maxPriorityFeePerGas configured for chain ${chainId}`);
+  }
+
+  return config.maxPriorityFeePerGas;
 }

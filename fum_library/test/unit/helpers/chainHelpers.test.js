@@ -10,7 +10,9 @@ import {
   getChainConfig,
   getChainName,
   getChainRpcUrls,
-  getExecutorAddress,
+  getExecutorXpub,
+  getMinExecutorBalance,
+  getMaxExecutorBalance,
   isChainSupported,
   lookupSupportedChainIds,
   getPlatformAddresses,
@@ -18,6 +20,7 @@ import {
   getMinDeploymentForGas,
   getMinSwapValue,
   getTransactionDeadlineMinutes,
+  getMaxPriorityFeePerGas,
   configureChainHelpers
 } from '../../../src/helpers/chainHelpers.js';
 
@@ -97,7 +100,9 @@ describe('Chain Helpers', () => {
         expect(typeof config).toBe('object');
         expect(config.name).toBe('Arbitrum One');
         expect(config.rpcUrls).toEqual(['https://arb-mainnet.g.alchemy.com/v2']);  // Base URL - API key appended by getChainRpcUrls()
-        expect(config.executorAddress).toBe('0x42d9df99e78ba0573b2990d6177d6eef7145c8e6');
+        expect(config.executorXpub).toBe('');
+        expect(config.minExecutorBalance).toBe(0.002);
+        expect(config.maxExecutorBalance).toBe(0.004);
         expect(config.platformAddresses).toHaveProperty('uniswapV3');
       });
 
@@ -108,7 +113,9 @@ describe('Chain Helpers', () => {
         expect(typeof config).toBe('object');
         expect(config.name).toBe('Avalanche');
         expect(config.rpcUrls).toEqual(['https://avax-mainnet.g.alchemy.com/v2']);
-        expect(config.executorAddress).toBe('0x0');
+        expect(config.executorXpub).toBe('');
+        expect(config.minExecutorBalance).toBe(0.04);
+        expect(config.maxExecutorBalance).toBe(0.08);
         expect(config.platformAddresses).toHaveProperty('traderjoeV2_2');
       });
     });
@@ -283,77 +290,131 @@ describe('Chain Helpers', () => {
     });
   });
 
-  describe('getExecutorAddress', () => {
+  describe('getExecutorXpub', () => {
     describe('Success Cases', () => {
-      it('should return correct executor address for Forked Arbitrum (chainId 1337)', () => {
-        const address = getExecutorAddress(1337);
+      it('should return correct xpub for Forked Arbitrum (chainId 1337)', () => {
+        const xpub = getExecutorXpub(1337);
 
-        expect(typeof address).toBe('string');
-        expect(address).toBe('0xabA472B2EA519490EE10E643A422D578a507197A');
+        expect(typeof xpub).toBe('string');
+        expect(xpub.startsWith('xpub')).toBe(true);
+        expect(xpub).toBe('xpub6F8xskVEWJTqZB69U3UmjGe8zwoXUefq5YCBgpyS2xf4CFEzNX4zUbxYBqZLdC96gEayShKc9f9rhgnNhSMtzADf8x4HX8Wia4AjBmqAPir');
       });
     });
 
     describe('Error Cases', () => {
       it('should throw error for unsupported chain', () => {
-        expect(() => getExecutorAddress(999999)).toThrow('Chain 999999 is not supported');
+        expect(() => getExecutorXpub(999999)).toThrow('Chain 999999 is not supported');
       });
 
-      it('should throw error for chains with 0x0 executor address', () => {
-        // Avalanche still has 0x0 (no executor deployed yet)
-        expect(() => getExecutorAddress(43114)).toThrow('No executor address configured for chain 43114');
-        // Note: Arbitrum (42161) now has a real executor address, so it doesn't throw
+      it('should throw error for chains with empty xpub', () => {
+        // Arbitrum production has empty xpub until deployment
+        expect(() => getExecutorXpub(42161)).toThrow('No executor xpub configured for chain 42161');
+        // Avalanche also not configured
+        expect(() => getExecutorXpub(43114)).toThrow('No executor xpub configured for chain 43114');
       });
 
-      it('should throw error for chains with empty string executor address', async () => {
-        // Mock chains config with empty string executor address
-        vi.doMock('../../../src/configs/chains.js', () => ({
-          default: {
-            999: {
-              name: 'Test Chain With Empty Executor',
-              rpcUrls: ['http://test.com'],
-              executorAddress: '' // Empty string
-            }
-          }
-        }));
-
-        // Reset modules to use the mocked config
-        vi.resetModules();
-        const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
-
-        expect(() => chainHelpers.getExecutorAddress(999)).toThrow('No executor address configured for chain 999');
-
-        // Restore original config
-        vi.doUnmock('../../../src/configs/chains.js');
-        vi.resetModules();
-      });
-
-      it('should throw error when no executor address property is configured', async () => {
-        // Mock chains config to include a chain without executorAddress property
+      it('should throw error when no executorXpub property is configured', async () => {
         vi.doMock('../../../src/configs/chains.js', () => ({
           default: {
             555: {
-              name: 'Test Chain Without Executor',
+              name: 'Test Chain Without Xpub',
               rpcUrls: ['http://test.com']
-              // No executorAddress property
+              // No executorXpub property
             }
           }
         }));
 
-        // Reset modules to use the mocked config
         vi.resetModules();
         const chainHelpers = await import('../../../src/helpers/chainHelpers.js');
 
-        expect(() => chainHelpers.getExecutorAddress(555)).toThrow('No executor address configured for chain 555');
+        expect(() => chainHelpers.getExecutorXpub(555)).toThrow('No executor xpub configured for chain 555');
 
-        // Restore original config
         vi.doUnmock('../../../src/configs/chains.js');
         vi.resetModules();
       });
 
       it('should validate chainId parameter', () => {
-        expect(() => getExecutorAddress(null)).toThrow('chainId parameter is required');
-        expect(() => getExecutorAddress('1')).toThrow('chainId must be a number');
-        expect(() => getExecutorAddress(0)).toThrow('chainId must be greater than 0');
+        expect(() => getExecutorXpub(null)).toThrow('chainId parameter is required');
+        expect(() => getExecutorXpub('1')).toThrow('chainId must be a number');
+        expect(() => getExecutorXpub(0)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('getMinExecutorBalance', () => {
+    describe('Success Cases', () => {
+      it('should return a positive number for valid chains', () => {
+        expect(typeof getMinExecutorBalance(42161)).toBe('number');
+        expect(getMinExecutorBalance(42161)).toBeGreaterThan(0);
+        expect(typeof getMinExecutorBalance(1337)).toBe('number');
+        expect(getMinExecutorBalance(1337)).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMinExecutorBalance(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMinExecutorBalance(null)).toThrow('chainId parameter is required');
+        expect(() => getMinExecutorBalance('1')).toThrow('chainId must be a number');
+      });
+    });
+  });
+
+  describe('getMaxExecutorBalance', () => {
+    describe('Success Cases', () => {
+      it('should return a positive number for valid chains', () => {
+        expect(typeof getMaxExecutorBalance(42161)).toBe('number');
+        expect(getMaxExecutorBalance(42161)).toBeGreaterThan(0);
+      });
+
+      it('should be greater than or equal to minExecutorBalance', () => {
+        const min = getMinExecutorBalance(42161);
+        const max = getMaxExecutorBalance(42161);
+        expect(max).toBeGreaterThanOrEqual(min);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMaxExecutorBalance(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMaxExecutorBalance(null)).toThrow('chainId parameter is required');
+        expect(() => getMaxExecutorBalance('1')).toThrow('chainId must be a number');
+      });
+    });
+  });
+
+  describe('getMaxPriorityFeePerGas', () => {
+    describe('Success Cases', () => {
+      it('should return a string for valid chains', () => {
+        expect(typeof getMaxPriorityFeePerGas(42161)).toBe('string');
+        expect(typeof getMaxPriorityFeePerGas(43114)).toBe('string');
+      });
+
+      it('should return "0" for Arbitrum (sequencer ignores tips)', () => {
+        expect(getMaxPriorityFeePerGas(42161)).toBe('0');
+        expect(getMaxPriorityFeePerGas(1337)).toBe('0');
+      });
+
+      it('should return "1000" for Avalanche (near-zero priority, 1000 wei/gas)', () => {
+        expect(getMaxPriorityFeePerGas(43114)).toBe('1000');
+        expect(getMaxPriorityFeePerGas(1338)).toBe('1000');
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for unsupported chain', () => {
+        expect(() => getMaxPriorityFeePerGas(999999)).toThrow('Chain 999999 is not supported');
+      });
+
+      it('should validate chainId parameter', () => {
+        expect(() => getMaxPriorityFeePerGas(null)).toThrow('chainId parameter is required');
+        expect(() => getMaxPriorityFeePerGas('1')).toThrow('chainId must be a number');
       });
     });
   });

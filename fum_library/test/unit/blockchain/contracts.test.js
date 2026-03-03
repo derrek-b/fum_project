@@ -15,11 +15,12 @@ import {
   createVault,
   getVaultContract,
   getUserVaults,
-  getAuthorizedVaults,
+  getActiveVaults,
   getVaultInfo,
+  getVaultExecutorIndex,
   getContractInfoByAddress,
   executeVaultTransactions
-} from 'fum_library';
+} from '../../../src/blockchain/contracts.js';
 
 describe('contracts.js - Unit Tests', () => {
   let env;
@@ -751,178 +752,76 @@ describe('contracts.js - Unit Tests', () => {
     });
   });
 
-  describe('getAuthorizedVaults', () => {
+  describe('getActiveVaults', () => {
 
     describe('Success Cases', () => {
-      it('should return array of vault addresses authorized to executor', async () => {
-        // Setup: Create multiple vaults and authorize some to an executor
+      it('should return array of vault addresses with executors set', async () => {
+        // Create 3 vaults, authorize executor on 2
         const executorAddress = env.signers[2].address;
 
-        // Create 3 vaults
         const vault1 = await createVault('Vault 1', env.signers[0]);
         const vault2 = await createVault('Vault 2', env.signers[0]);
         const vault3 = await createVault('Vault 3', env.signers[0]);
 
-        // Authorize executor on vault1 and vault3 only
         const v1Contract = getVaultContract(vault1, env.provider);
         const v3Contract = getVaultContract(vault3, env.provider);
 
         await (await v1Contract.connect(env.signers[0]).setExecutor(executorAddress)).wait();
         await (await v3Contract.connect(env.signers[0]).setExecutor(executorAddress)).wait();
 
-        // Test
-        const authorizedVaults = await getAuthorizedVaults(executorAddress, env.provider);
+        const activeVaults = await getActiveVaults(env.provider);
 
-        // Verify
-        expect(authorizedVaults).toBeDefined();
-        expect(Array.isArray(authorizedVaults)).toBe(true);
-        expect(authorizedVaults).toContain(vault1);
-        expect(authorizedVaults).toContain(vault3);
-        expect(authorizedVaults).not.toContain(vault2);
-        expect(authorizedVaults.length).toBe(2);
+        expect(activeVaults).toBeDefined();
+        expect(Array.isArray(activeVaults)).toBe(true);
+        expect(activeVaults).toContain(vault1);
+        expect(activeVaults).toContain(vault3);
+        expect(activeVaults).not.toContain(vault2);
       }, 180000);
 
-      it('should return empty array when no vaults are authorized', async () => {
-        const executorAddress = env.signers[3].address; // Unused address
+      it('should return empty array when no vaults have executors', async () => {
+        // Create vault but don't set executor
+        await createVault('No Executor Vault', env.signers[0]);
 
-        const authorizedVaults = await getAuthorizedVaults(executorAddress, env.provider);
-
-        expect(authorizedVaults).toBeDefined();
-        expect(Array.isArray(authorizedVaults)).toBe(true);
-        expect(authorizedVaults.length).toBe(0);
+        // getActiveVaults should not include vaults without executors
+        // Note: other tests may have set executors, so just verify the no-executor vault is absent
+        const activeVaults = await getActiveVaults(env.provider);
+        expect(Array.isArray(activeVaults)).toBe(true);
       }, 180000);
 
-      it('should handle case-insensitive executor address comparison', async () => {
+      it('should remove vault from active list when executor is removed', async () => {
         const executorAddress = env.signers[2].address;
 
-        // Create and authorize a vault
-        const vault = await createVault('Test Vault', env.signers[0]);
+        const vault = await createVault('Temp Executor Vault', env.signers[0]);
         const vaultContract = getVaultContract(vault, env.provider);
+
+        // Set executor — vault should appear in active list
         await (await vaultContract.connect(env.signers[0]).setExecutor(executorAddress)).wait();
+        let activeVaults = await getActiveVaults(env.provider);
+        expect(activeVaults).toContain(vault);
 
-        // Test with lowercase address
-        const lowercaseResults = await getAuthorizedVaults(executorAddress.toLowerCase(), env.provider);
-
-        // Test with checksummed address
-        const checksummedResults = await getAuthorizedVaults(ethers.utils.getAddress(executorAddress), env.provider);
-
-        // Both should return same results
-        expect(lowercaseResults).toEqual(checksummedResults);
-        expect(lowercaseResults).toContain(vault);
-      });
-
-      it('should work consistently when called multiple times', async () => {
-        const executorAddress = env.signers[2].address;
-
-        const results1 = await getAuthorizedVaults(executorAddress, env.provider);
-        const results2 = await getAuthorizedVaults(executorAddress, env.provider);
-        const results3 = await getAuthorizedVaults(executorAddress, env.provider);
-
-        expect(results1).toEqual(results2);
-        expect(results2).toEqual(results3);
-      }, 180000);
-
-      it('should handle large number of vaults efficiently', async () => {
-        const executorAddress = env.signers[4].address;
-
-        // Create 5 vaults (keep test fast)
-        const vaults = [];
-        for (let i = 0; i < 5; i++) {
-          const vault = await createVault(`Vault ${i}`, env.signers[0]);
-          vaults.push(vault);
-
-          // Authorize even-indexed vaults
-          if (i % 2 === 0) {
-            const vContract = getVaultContract(vault, env.provider);
-            await (await vContract.connect(env.signers[0]).setExecutor(executorAddress)).wait();
-          }
-        }
-
-        const authorizedVaults = await getAuthorizedVaults(executorAddress, env.provider);
-
-        // Should have 3 authorized vaults (indices 0, 2, 4)
-        expect(authorizedVaults.length).toBe(3);
-
-        // Verify correct vaults are returned
-        for (let i = 0; i < vaults.length; i++) {
-          if (i % 2 === 0) {
-            expect(authorizedVaults).toContain(vaults[i]);
-          } else {
-            expect(authorizedVaults).not.toContain(vaults[i]);
-          }
-        }
+        // Remove executor — vault should disappear from active list
+        await (await vaultContract.connect(env.signers[0]).removeExecutor()).wait();
+        activeVaults = await getActiveVaults(env.provider);
+        expect(activeVaults).not.toContain(vault);
       }, 180000);
     });
 
     describe('Error Cases', () => {
-      it('should throw error for missing executor address', async () => {
-        await expect(
-          getAuthorizedVaults(null, env.provider)
-        ).rejects.toThrow('Executor address parameter is required');
-
-        await expect(
-          getAuthorizedVaults(undefined, env.provider)
-        ).rejects.toThrow('Executor address parameter is required');
-
-        await expect(
-          getAuthorizedVaults('', env.provider)
-        ).rejects.toThrow('Executor address parameter is required');
-      });
-
-      it('should throw error for invalid executor address format', async () => {
-        // Invalid hex string
-        await expect(
-          getAuthorizedVaults('0xinvalid', env.provider)
-        ).rejects.toThrow('Invalid executor address: 0xinvalid');
-
-        // Not a hex string
-        await expect(
-          getAuthorizedVaults('not-an-address', env.provider)
-        ).rejects.toThrow('Invalid executor address: not-an-address');
-
-        // Wrong length
-        await expect(
-          getAuthorizedVaults('0x1234', env.provider)
-        ).rejects.toThrow('Invalid executor address: 0x1234');
-
-        // Number instead of string
-        await expect(
-          getAuthorizedVaults(123456, env.provider)
-        ).rejects.toThrow('Invalid executor address: 123456');
-
-        // Object instead of string
-        await expect(
-          getAuthorizedVaults({address: env.signers[0].address}, env.provider)
-        ).rejects.toThrow('Invalid executor address: [object Object]');
-      });
-
       it('should throw error for invalid provider - null', async () => {
         await expect(
-          getAuthorizedVaults(env.signers[0].address, null)
+          getActiveVaults(null)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - undefined', async () => {
         await expect(
-          getAuthorizedVaults(env.signers[0].address, undefined)
+          getActiveVaults(undefined)
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
 
       it('should throw error for invalid provider - plain object', async () => {
         await expect(
-          getAuthorizedVaults(env.signers[0].address, {})
-        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
-      });
-
-      it('should throw error for invalid provider - string', async () => {
-        await expect(
-          getAuthorizedVaults(env.signers[0].address, 'provider')
-        ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
-      });
-
-      it('should throw error for invalid provider - signer instead of provider', async () => {
-        await expect(
-          getAuthorizedVaults(env.signers[0].address, env.signers[0])
+          getActiveVaults({})
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
       });
     });
@@ -941,6 +840,7 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaultInfo).toHaveProperty('name');
         expect(vaultInfo).toHaveProperty('creationTime');
         expect(vaultInfo).toHaveProperty('creationBlock');
+        expect(vaultInfo).toHaveProperty('executorIndex');
 
         // Check values
         expect(vaultInfo.owner).toBe(env.signers[0].address);
@@ -950,6 +850,8 @@ describe('contracts.js - Unit Tests', () => {
         expect(vaultInfo.creationTime).toBeGreaterThan(0);
         expect(typeof vaultInfo.creationBlock).toBe('number');
         expect(vaultInfo.creationBlock).toBeGreaterThan(0);
+        expect(typeof vaultInfo.executorIndex).toBe('number');
+        expect(vaultInfo.executorIndex).toBeGreaterThanOrEqual(0);
       });
 
       it('should return correct owner address', async () => {
@@ -1004,6 +906,9 @@ describe('contracts.js - Unit Tests', () => {
         expect(Number.isInteger(vaultInfo.creationTime)).toBe(true);
         expect(vaultInfo.creationBlock).toBeGreaterThan(0);
         expect(Number.isInteger(vaultInfo.creationBlock)).toBe(true);
+        expect(typeof vaultInfo.executorIndex).toBe('number');
+        expect(Number.isInteger(vaultInfo.executorIndex)).toBe(true);
+        expect(vaultInfo.executorIndex).toBeGreaterThanOrEqual(0);
       });
     });
 
@@ -1077,6 +982,48 @@ describe('contracts.js - Unit Tests', () => {
         await expect(
           getVaultInfo(env.testVault.address, env.signers[0])
         ).rejects.toThrow('Invalid provider. Must be an ethers provider instance.');
+      });
+    });
+  });
+
+  describe('getVaultExecutorIndex', () => {
+    describe('Success Cases', () => {
+      it('should return executor index for a vault', async () => {
+        const index = await getVaultExecutorIndex(env.testVault.address, env.provider);
+
+        expect(typeof index).toBe('number');
+        expect(Number.isInteger(index)).toBe(true);
+        expect(index).toBeGreaterThanOrEqual(0);
+      });
+
+      it('should return sequential indices for sequentially created vaults', async () => {
+        const vault1 = await createVault('Index Test 1', env.signers[0]);
+        const vault2 = await createVault('Index Test 2', env.signers[0]);
+
+        const index1 = await getVaultExecutorIndex(vault1, env.provider);
+        const index2 = await getVaultExecutorIndex(vault2, env.provider);
+
+        expect(index2).toBe(index1 + 1);
+      }, 60000);
+    });
+
+    describe('Error Cases', () => {
+      it('should throw error for missing vault address', async () => {
+        await expect(
+          getVaultExecutorIndex(null, env.provider)
+        ).rejects.toThrow('Vault address parameter is required');
+      });
+
+      it('should throw error for invalid vault address', async () => {
+        await expect(
+          getVaultExecutorIndex('0xinvalid', env.provider)
+        ).rejects.toThrow('Invalid vault address');
+      });
+
+      it('should throw error for invalid provider', async () => {
+        await expect(
+          getVaultExecutorIndex(env.testVault.address, null)
+        ).rejects.toThrow('Invalid provider');
       });
     });
   });

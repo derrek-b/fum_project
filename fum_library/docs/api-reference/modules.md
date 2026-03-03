@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-02-23T14:15:43.420Z
+Generated on: 2026-03-02T23:43:31.098Z
 
 ## Table of Contents
 
@@ -284,7 +284,9 @@ Token configuration with addresses on multiple chains
 - `getChainConfig` (function)
 - `getChainName` (function)
 - `getChainRpcUrls` (function)
-- `getExecutorAddress` (function)
+- `getExecutorXpub` (function)
+- `getMinExecutorBalance` (function)
+- `getMaxExecutorBalance` (function)
 - `isChainSupported` (function)
 - `lookupSupportedChainIds` (function)
 - `getPlatformAddresses` (function)
@@ -292,6 +294,7 @@ Token configuration with addresses on multiple chains
 - `getMinDeploymentForGas` (function)
 - `getMinSwapValue` (function)
 - `getTransactionDeadlineMinutes` (function)
+- `getMaxPriorityFeePerGas` (function)
 
 ---
 

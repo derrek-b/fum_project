@@ -15,7 +15,10 @@ const chains = {
     },
     rpcUrls: ["https://arb-mainnet.g.alchemy.com/v2"],  // Base URL - API key appended by getChainRpcUrls()
     blockExplorerUrls: ["https://arbiscan.io"],
-    executorAddress: "0x42d9df99e78ba0573b2990d6177d6eef7145c8e6",
+    executorXpub: "",  // Populated when production mnemonic is generated
+    minExecutorBalance: 0.002,  // ETH — ~12 worst-case rebalance cycles (at 200 gwei spike)
+    maxExecutorBalance: 0.004,  // ETH — ~24 worst-case rebalance cycles
+    maxPriorityFeePerGas: "0",  // wei/gas — Arbitrum sequencer is FCFS, ignores tips entirely
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
@@ -49,7 +52,10 @@ const chains = {
     },
     rpcUrls: ["http://localhost:8545"],
     blockExplorerUrls: ["https://arbiscan.io"], // Use Arbitrum explorer since it's a fork
-    executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A",
+    executorXpub: "xpub6F8xskVEWJTqZB69U3UmjGe8zwoXUefq5YCBgpyS2xf4CFEzNX4zUbxYBqZLdC96gEayShKc9f9rhgnNhSMtzADf8x4HX8Wia4AjBmqAPir",
+    minExecutorBalance: 0.002,
+    maxExecutorBalance: 0.004,
+    maxPriorityFeePerGas: "0",  // wei/gas — Arbitrum fork, same as mainnet
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
@@ -83,7 +89,10 @@ const chains = {
     },
     rpcUrls: ["https://avax-mainnet.g.alchemy.com/v2"],
     blockExplorerUrls: ["https://snowtrace.io"],
-    executorAddress: "0x0",
+    executorXpub: "",  // Not configured yet
+    minExecutorBalance: 0.04,   // AVAX — ~13 worst-case rebalance cycles (at 565 nAVAX spike)
+    maxExecutorBalance: 0.08,   // AVAX — ~26 worst-case rebalance cycles
+    maxPriorityFeePerGas: "1000",  // wei/gas — Avalanche uses tips for ordering, but near-zero (~0.000001 gwei)
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,
@@ -108,7 +117,10 @@ const chains = {
     },
     rpcUrls: ["http://localhost:8546"],
     blockExplorerUrls: ["https://snowtrace.io"], // Use Avalanche explorer since it's a fork
-    executorAddress: "0xabA472B2EA519490EE10E643A422D578a507197A", // Same test account as 1337
+    executorXpub: "xpub6F8xskVEWJTqZB69U3UmjGe8zwoXUefq5YCBgpyS2xf4CFEzNX4zUbxYBqZLdC96gEayShKc9f9rhgnNhSMtzADf8x4HX8Wia4AjBmqAPir",
+    minExecutorBalance: 0.04,
+    maxExecutorBalance: 0.08,
+    maxPriorityFeePerGas: "1000",  // wei/gas — Avalanche fork, same as mainnet
     minDeploymentForGas: 10,
     minSwapValue: 0.10,
     transactionDeadlineMinutes: 5,

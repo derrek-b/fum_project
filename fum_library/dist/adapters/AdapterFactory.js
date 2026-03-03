@@ -34,14 +34,13 @@ export default class AdapterFactory {
    * @static
    *
    * @param {number} chainId - Chain ID
-   * @param {Object} provider - Ethers provider instance
    *
    * @returns {Object} Result object containing adapters and failures
    * @returns {Array} result.adapters - Array of successfully created platform adapter instances
    * @returns {Array} result.failures - Array of failure objects with platformId and error details
    *
    * @example
-   * const result = AdapterFactory.getAdaptersForChain(42161, provider);
+   * const result = AdapterFactory.getAdaptersForChain(42161);
    * console.log(`Found ${result.adapters.length} adapters for Arbitrum`);
    * if (result.failures.length > 0) {
    *   console.warn('Failed to create some adapters:', result.failures);
@@ -49,7 +48,7 @@ export default class AdapterFactory {
    *
    * @since 1.0.0
    */
-  static getAdaptersForChain(chainId, provider) {
+  static getAdaptersForChain(chainId) {
     const adapters = [];
     const failures = [];
 
@@ -73,7 +72,7 @@ export default class AdapterFactory {
 
       if (AdapterClass) {
         try {
-          adapters.push(new AdapterClass(chainId, provider));
+          adapters.push(new AdapterClass(chainId));
         } catch (error) {
           // Track failures so consumer can handle them appropriately
           failures.push({
@@ -97,19 +96,18 @@ export default class AdapterFactory {
    *
    * @param {string} platformId - Platform ID (e.g., 'uniswapV3')
    * @param {number} chainId - Chain ID
-   * @param {Object} provider - Ethers provider instance
    *
    * @returns {Object} Platform adapter instance
    *
    * @throws {Error} If platform ID or chainId are invalid, platform not found, or adapter creation fails
    *
    * @example
-   * const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, provider);
+   * const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
    * const poolInfo = await adapter.fetchPoolData(token0, token1, 3000, 42161, provider);
    *
    * @since 1.0.0
    */
-  static getAdapter(platformId, chainId, provider) {
+  static getAdapter(platformId, chainId) {
     // Validate platformId
     if (!platformId || typeof platformId !== 'string') {
       throw new Error("Platform ID must be a valid string");
@@ -127,7 +125,7 @@ export default class AdapterFactory {
     }
 
     try {
-      return new AdapterClass(chainId, provider);
+      return new AdapterClass(chainId);
     } catch (error) {
       throw new Error(`Failed to create ${platformId} adapter for chain ${chainId}: ${error.message}`);
     }

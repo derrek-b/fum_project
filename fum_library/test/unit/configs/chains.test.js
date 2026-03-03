@@ -19,13 +19,15 @@ function validateEthereumAddress(address) {
 }
 
 /**
- * Validate executor address (valid Ethereum address OR "0x0")
- * @param {string} address - Address to validate
- * @returns {boolean} Whether address is valid
+ * Validate executor xpub (valid BIP-32 extended public key or empty string)
+ * @param {string} xpub - Xpub to validate
+ * @returns {boolean} Whether xpub is valid
  */
-function validateExecutorAddress(address) {
-  if (typeof address !== 'string') return false;
-  return address === '0x0' || validateEthereumAddress(address);
+function validateExecutorXpub(xpub) {
+  if (typeof xpub !== 'string') return false;
+  // Empty string is valid (production chains before mnemonic generation)
+  // Non-empty must start with 'xpub' (BIP-32 extended public key)
+  return xpub === '' || xpub.startsWith('xpub');
 }
 
 /**
@@ -128,7 +130,7 @@ describe('Chain Configuration Validation', () => {
     const requiredStringProperties = ['name'];
     const requiredArrayProperties = ['rpcUrls', 'blockExplorerUrls'];
     const requiredObjectProperties = ['nativeCurrency', 'platformAddresses'];
-    const requiredExecutorProperties = ['executorAddress'];
+    const requiredExecutorProperties = ['executorXpub'];
     const requiredNumberProperties = ['minDeploymentForGas'];
     // Note: envPK and executorEnvPK can be null/undefined (environment variables)
 
@@ -170,12 +172,26 @@ describe('Chain Configuration Validation', () => {
         }
       });
 
-      // Validate executor address
+      // Validate executor xpub
       requiredExecutorProperties.forEach(prop => {
-        if (!validateExecutorAddress(chain[prop])) {
-          chainErrors.push(`Property ${prop} must be a valid Ethereum address or '0x0', got: ${chain[prop]}`);
+        if (!validateExecutorXpub(chain[prop])) {
+          chainErrors.push(`Property ${prop} must be a valid xpub or empty string, got: ${chain[prop]}`);
         }
       });
+
+      // Validate executor balance config
+      ['minExecutorBalance', 'maxExecutorBalance'].forEach(prop => {
+        if (typeof chain[prop] !== 'number' || !Number.isFinite(chain[prop]) || chain[prop] <= 0) {
+          chainErrors.push(`Property ${prop} must be a positive finite number, got: ${chain[prop]}`);
+        }
+      });
+
+      // Validate maxPriorityFeePerGas (string wei/gas value)
+      if (chain.maxPriorityFeePerGas === undefined || chain.maxPriorityFeePerGas === null) {
+        chainErrors.push(`Missing property: maxPriorityFeePerGas`);
+      } else if (typeof chain.maxPriorityFeePerGas !== 'string') {
+        chainErrors.push(`Property maxPriorityFeePerGas must be a string (wei/gas value), got: ${typeof chain.maxPriorityFeePerGas}`);
+      }
 
       // Validate required number properties
       requiredNumberProperties.forEach(prop => {

@@ -33,9 +33,8 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
   /**
    * Constructor for the Trader Joe V2.2 adapter
    * @param {number} chainId - Chain ID for the adapter
-   * @param {Object} provider - Ethers provider instance
    */
-  constructor(chainId, provider) {
+  constructor(chainId) {
     super(chainId, "traderjoeV2_2", "Trader Joe V2.2");
 
     // Cache platform addresses from chain config
