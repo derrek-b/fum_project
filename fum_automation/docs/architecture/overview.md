@@ -1,4 +1,4 @@
-<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/Tracker.js, src/core/SSEBroadcaster.js, src/strategies/*, src/utils/* -->
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/Tracker.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js, src/strategies/*, src/utils/* -->
 # Automation Service Architecture
 
 ## Overview
@@ -25,10 +25,11 @@
         │                                │
         ▼                                ▼
 ┌─ Strategy Execution ────────┐  ┌─ Supporting Services ───────────┐
-│  StrategyBase (abstract)    │  │  Tracker - tx history, ROI      │
-│  └── BabyStepsStrategy      │  │  SSEBroadcaster - frontend SSE  │
-│      (type: 'bob')          │  │  RetryHelper - backoff utilities │
-└─────────────────────────────┘  └─────────────────────────────────┘
+│  StrategyBase (abstract)    │  │  VaultHealth - executor gas mgmt │
+│  └── BabyStepsStrategy      │  │  Tracker - tx history, ROI      │
+│      (type: 'bob')          │  │  SSEBroadcaster - frontend SSE  │
+└─────────────────────────────┘  │  RetryHelper - backoff utilities │
+                                 └─────────────────────────────────┘
 ```
 
 ## Source Files
@@ -41,13 +42,15 @@ src/
 │   ├── VaultDataService.js           # Vault data management
 │   ├── EventManager.js               # Pub/sub + blockchain listeners
 │   ├── Tracker.js                    # Transaction history & performance
-│   └── SSEBroadcaster.js            # SSE streaming to frontend
+│   ├── SSEBroadcaster.js            # SSE streaming to frontend
+│   └── VaultHealth.js               # Executor gas monitoring & top-ups
 ├── strategies/
 │   ├── base/StrategyBase.js          # Abstract base class
 │   └── babySteps/BabyStepsStrategy.js # Concrete strategy
 └── utils/
     ├── RetryHelper.js                # Retry with exponential backoff
-    └── errors.js                     # UnrecoverableError
+    ├── errors.js                     # UnrecoverableError, InsufficientGasError
+    └── patchProviderFeeData.js       # Chain-specific gas fee overrides
 ```
 
 ## Dependency Injection
@@ -58,7 +61,8 @@ AutomationService creates all components in its constructor:
 2. **VaultDataService** — receives EventManager in constructor, gets provider/chainId/tokens/adapters/poolData via setters during `initialize()`
 3. **Tracker** — receives `{ vaultDataDir, trackingFailuresFilePath, eventManager, chainId, debug }`, subscribes to events automatically
 4. **SSEBroadcaster** — receives EventManager + callback functions for data access
-5. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
+5. **VaultHealth** — receives EventManager + chainId in constructor, then dependencies via setters (`setProvider`, `setHdNode`, `setVaultDataService`, `setTokens`, `setAdapters`, `setLockFunctions`) during `initialize()`
+6. **BabyStepsStrategy** — receives full dependencies object (see [Strategy System](./strategy-system.md))
 
 Strategies receive shared references to AutomationService caches (vaultLocks, poolData, tokens, adapters) — not copies. This ensures all components see the same data.
 
@@ -80,4 +84,5 @@ Strategies receive shared references to AutomationService caches (vaultLocks, po
 - [Cache Structures](./cache-structures.md) — All cached data shapes (critical reference)
 - [Strategy System](./strategy-system.md) — StrategyBase interface, BabyStepsStrategy
 - [Automation Flow](./automation-flow.md) — Event handling, vault processing flows
+- [Executor Gas Management](./executor-gas-management.md) — VaultHealth: holdback system, top-up paths, funding-required state
 - [Event Management](./event-management.md) — Pub/sub, listener lifecycle, cleanup

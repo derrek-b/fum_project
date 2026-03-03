@@ -1,4 +1,4 @@
-<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/SSEBroadcaster.js -->
+<!-- Source: src/core/AutomationService.js, src/core/VaultDataService.js, src/core/EventManager.js, src/core/SSEBroadcaster.js, src/core/VaultHealth.js -->
 # Automation Flow
 
 ## Overview
@@ -32,10 +32,11 @@ new AutomationService(config)
 ├── subscribeToStrategyParameterEvents() → monitor ParameterUpdated events
 ├── Start failed vault retry timer (retryIntervalMs interval)
 │
-├── loadAuthorizedVaults() → getAuthorizedVaults() with retry
+├── loadAuthorizedVaults() → getActiveVaults() with retry
 │   └── For each vault (skip if blacklisted):
 │       └── setupVault(vaultAddress)
 │
+├── vaultHealth.start() — initial balance check, begin monitoring interval
 ├── tracker.initialize()
 ├── sseBroadcaster.start()
 └── Emit ServiceStarted
@@ -180,6 +181,7 @@ stop(force)
 │
 ├── isShuttingDown = true
 ├── eventManager.setEnabled(false) — suppress new event processing
+├── vaultHealth.stop() — stop monitoring interval, clear state
 ├── Stop heartbeat, stop retry timer
 │
 ├── For each vault in VaultDataService:

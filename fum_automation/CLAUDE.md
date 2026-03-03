@@ -35,13 +35,15 @@ src/
 │   ├── VaultDataService.js    # Data layer: vault state, positions, token balances
 │   ├── EventManager.js        # Pub/sub for system events (FeesCollected, PositionRebalanced, etc.)
 │   ├── Tracker.js             # Transaction history and performance tracking
-│   └── SSEBroadcaster.js      # Real-time updates to frontend via Server-Sent Events
+│   ├── SSEBroadcaster.js      # Real-time updates to frontend via Server-Sent Events
+│   └── VaultHealth.js         # Executor gas monitoring and automated top-ups
 ├── strategies/
 │   ├── base/StrategyBase.js   # Abstract base: evaluation, lifecycle, fee handling
 │   └── babySteps/BabyStepsStrategy.js  # Conservative range-based automation
 └── utils/
     ├── RetryHelper.js         # RPC call retry with exponential backoff
-    └── errors.js              # Custom error types
+    ├── errors.js              # UnrecoverableError, InsufficientGasError
+    └── patchProviderFeeData.js # Chain-specific gas fee overrides
 
 test/
 ├── helpers/                   # Test setup utilities per platform (hardhat-setup, swap-utils, vault-setup)
@@ -71,6 +73,7 @@ Detailed docs in `docs/architecture/`:
 - **cache-structures.md** — Reference for all cached data in AutomationService and VaultDataService
 - **strategy-system.md** — Strategy pattern, evaluation logic, platform-specific adaptations
 - **automation-flow.md** — Event handling and orchestration flows
+- **executor-gas-management.md** — VaultHealth: holdback system, top-up paths, funding-required state
 - **event-management.md** — Event subscription, lifecycle, and cleanup
 - **[backtest/README.md](../backtest/README.md)** — Historical data collection (swap events, prices) and replay for strategy evaluation
 
