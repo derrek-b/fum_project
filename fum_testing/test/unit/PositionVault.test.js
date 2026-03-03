@@ -359,6 +359,180 @@ describe("PositionVault - 2.0.0", function() {
       await expect(vault.connect(owner).execute(targets, data))
         .to.not.be.reverted;
     });
+
+    // --- Payable setExecutor ---
+
+    it("should forward msg.value to executor on setExecutor", async function() {
+      const fundAmount = ethers.parseEther("0.01");
+      const balanceBefore = await ethers.provider.getBalance(executorWallet.address);
+
+      await vault.setExecutor(executorWallet.address, { value: fundAmount });
+
+      const balanceAfter = await ethers.provider.getBalance(executorWallet.address);
+      expect(balanceAfter - balanceBefore).to.equal(fundAmount);
+    });
+
+    it("should set executor without initial funding", async function() {
+      const tx = await vault.setExecutor(executorWallet.address);
+
+      expect(await vault.executor()).to.equal(executorWallet.address);
+      await expect(tx)
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(executorWallet.address, true);
+    });
+
+    it("should revert if ETH forwarding to executor fails", async function() {
+      // VaultFactory has no receive() — cannot accept ETH
+      const factoryAddress = await factory.getAddress();
+
+      await expect(
+        vault.setExecutor(factoryAddress, { value: ethers.parseEther("0.01") })
+      ).to.be.revertedWith("PositionVault: executor funding failed");
+    });
+
+    it("should not leave ETH in vault after successful forwarding", async function() {
+      const vaultAddress = await vault.getAddress();
+      const vaultBalanceBefore = await ethers.provider.getBalance(vaultAddress);
+
+      await vault.setExecutor(executorWallet.address, { value: ethers.parseEther("0.5") });
+
+      const vaultBalanceAfter = await ethers.provider.getBalance(vaultAddress);
+      expect(vaultBalanceAfter).to.equal(vaultBalanceBefore);
+    });
+
+    // --- Active vault registry callbacks ---
+
+    it("should register vault as active on first setExecutor", async function() {
+      const vaultAddress = await vault.getAddress();
+      expect(await factory.getActiveVaultCount()).to.equal(0);
+
+      await vault.setExecutor(executorWallet.address);
+
+      expect(await factory.getActiveVaultCount()).to.equal(1);
+      const activeVaults = await factory.getActiveVaults();
+      expect(activeVaults[0]).to.equal(vaultAddress);
+    });
+
+    it("should not re-register on executor-to-executor change", async function() {
+      await vault.setExecutor(executorWallet.address);
+      expect(await factory.getActiveVaultCount()).to.equal(1);
+
+      // Change executor — already active, no factory callback
+      await vault.setExecutor(user1.address);
+      expect(await factory.getActiveVaultCount()).to.equal(1);
+    });
+
+    it("should deregister vault on removeExecutor", async function() {
+      await vault.setExecutor(executorWallet.address);
+      expect(await factory.getActiveVaultCount()).to.equal(1);
+
+      await vault.removeExecutor();
+      expect(await factory.getActiveVaultCount()).to.equal(0);
+    });
+
+    it("should handle removeExecutor when no executor is set (no-op)", async function() {
+      // executor is already address(0) from constructor
+      const tx = await vault.removeExecutor();
+
+      expect(await vault.executor()).to.equal(ethers.ZeroAddress);
+      await expect(tx)
+        .to.emit(vault, "ExecutorChanged")
+        .withArgs(ethers.ZeroAddress, false);
+
+      // Factory not called — no deregister attempt
+      expect(await factory.getActiveVaultCount()).to.equal(0);
+    });
+
+    // --- fundExecutor ---
+
+    it("should transfer ETH from vault to executor", async function() {
+      // Setup: authorize executor and fund vault with ETH
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      const fundAmount = ethers.parseEther("0.05");
+      const executorBalanceBefore = await ethers.provider.getBalance(executorWallet.address);
+
+      // Executor calls fundExecutor (via onlyAuthorized)
+      await vault.connect(executorWallet).fundExecutor(fundAmount);
+
+      const executorBalanceAfter = await ethers.provider.getBalance(executorWallet.address);
+      // Balance increase is fundAmount minus gas cost — just verify it increased
+      expect(executorBalanceAfter).to.be.greaterThan(executorBalanceBefore);
+
+      // Verify vault ETH decreased by exact amount
+      const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+      expect(vaultBalance).to.equal(ethers.parseEther("1.0") - fundAmount);
+    });
+
+    it("should allow owner to call fundExecutor", async function() {
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      const fundAmount = ethers.parseEther("0.05");
+      const executorBalanceBefore = await ethers.provider.getBalance(executorWallet.address);
+
+      // Owner calls fundExecutor — sends ETH to executor, not to owner
+      await vault.fundExecutor(fundAmount);
+
+      const executorBalanceAfter = await ethers.provider.getBalance(executorWallet.address);
+      expect(executorBalanceAfter - executorBalanceBefore).to.equal(fundAmount);
+    });
+
+    it("should emit ExecutorFunded event", async function() {
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      const fundAmount = ethers.parseEther("0.05");
+      const tx = await vault.connect(executorWallet).fundExecutor(fundAmount);
+
+      await expect(tx)
+        .to.emit(vault, "ExecutorFunded")
+        .withArgs(executorWallet.address, fundAmount);
+    });
+
+    it("should revert fundExecutor when no executor is set", async function() {
+      // executor is address(0) from constructor — owner can pass onlyAuthorized
+      // but fundExecutor should reject to prevent sending ETH to zero address
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      await expect(
+        vault.fundExecutor(ethers.parseEther("0.05"))
+      ).to.be.revertedWith("PositionVault: no executor set");
+    });
+
+    it("should revert fundExecutor with zero amount", async function() {
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      await expect(
+        vault.connect(executorWallet).fundExecutor(0)
+      ).to.be.revertedWith("PositionVault: zero amount");
+    });
+
+    it("should revert fundExecutor with insufficient ETH balance", async function() {
+      await vault.setExecutor(executorWallet.address);
+      // Vault has 0 ETH
+
+      await expect(
+        vault.connect(executorWallet).fundExecutor(ethers.parseEther("0.05"))
+      ).to.be.revertedWith("PositionVault: insufficient ETH balance");
+    });
+
+    it("should revert fundExecutor from non-authorized address", async function() {
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther("1.0") });
+
+      await expect(
+        vault.connect(user1).fundExecutor(ethers.parseEther("0.05"))
+      ).to.be.revertedWith("PositionVault: caller is not authorized");
+    });
   });
 
   // Test for contract version

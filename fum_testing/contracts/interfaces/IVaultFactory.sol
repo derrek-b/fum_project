@@ -64,4 +64,18 @@ interface IVaultFactory {
      * @param vault The vault address (for recipient validation)
      */
     function validateIncentive(address target, bytes calldata data, address vault) external view;
+
+    /**
+     * @notice Registers vault as active in the factory's active vault registry
+     * @param vault The vault address to register
+     * @dev Called by PositionVault.setExecutor on first activation (address(0) → non-zero)
+     */
+    function registerActiveVault(address vault) external;
+
+    /**
+     * @notice Deregisters vault from the factory's active vault registry
+     * @param vault The vault address to deregister
+     * @dev Called by PositionVault.removeExecutor
+     */
+    function deregisterActiveVault(address vault) external;
 }
