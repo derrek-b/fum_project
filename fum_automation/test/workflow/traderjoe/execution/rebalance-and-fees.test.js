@@ -130,7 +130,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     await cleanupTestBlockchain(testEnv);
   });
 
-  describe.skip('Phase 1: Fee Collection', () => {
+  describe('Phase 1: Fee Collection', () => {
     it('should trigger fee collection when accumulated fees exceed threshold', async () => {
       // Track fee events
       const feesCollectedEvents = [];

@@ -19,8 +19,8 @@ const chains = {
     minExecutorBalance: 0.002,  // ETH — ~12 worst-case rebalance cycles (at 200 gwei spike)
     maxExecutorBalance: 0.004,  // ETH — ~24 worst-case rebalance cycles
     maxPriorityFeePerGas: "0",  // wei/gas — Arbitrum sequencer is FCFS, ignores tips entirely
-    minDeploymentForGas: 10,
-    minSwapValue: 0.10,
+    minDeploymentForGas: 50,
+    minSwapValue: 10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
       uniswapV3: {
@@ -56,8 +56,8 @@ const chains = {
     minExecutorBalance: 0.002,
     maxExecutorBalance: 0.004,
     maxPriorityFeePerGas: "0",  // wei/gas — Arbitrum fork, same as mainnet
-    minDeploymentForGas: 10,
-    minSwapValue: 0.10,
+    minDeploymentForGas: 50,
+    minSwapValue: 10,
     transactionDeadlineMinutes: 5,
     platformAddresses: {
       uniswapV3: {
