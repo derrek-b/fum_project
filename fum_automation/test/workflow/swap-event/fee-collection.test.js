@@ -12,6 +12,14 @@ import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardha
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
 import { setupSwapWallet, executeSwap, configureStrategyParameters } from '../../helpers/swap-utils.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
+import {
+  expectTrackerAggregates,
+  expectTrackerBaseline,
+  expectTransactionTypes,
+  getTransactionsByType,
+  expectTransactionCount,
+  expectNoTrackingFailures
+} from '../../helpers/tracker-assertions.js';
 import { ethers } from 'ethers';
 
 // Mock getPoolTVLAverage to ensure 500 bps pool is always selected
@@ -212,4 +220,71 @@ describe('Fee Collection Trigger', () => {
 
     console.log('Fee collection test passed');
   }, 180000);
+
+  describe('Tracker — standalone fee collection gas tracking', () => {
+    it('should have FeesCollected with gas data for swap_threshold source', async () => {
+      const feeTxs = await getTransactionsByType(service, testVault.vaultAddress, 'FeesCollected');
+
+      expect(feeTxs.length).toBeGreaterThanOrEqual(1);
+      const swapThresholdTx = feeTxs.find(tx => tx.source === 'swap_threshold');
+      expect(swapThresholdTx).toBeDefined();
+
+      // swap_threshold is a standalone on-chain tx — should have gas fields
+      expect(swapThresholdTx.gasUsed).toBeDefined();
+      expect(swapThresholdTx.effectiveGasPrice).toBeDefined();
+      expect(swapThresholdTx.gasEstimated).toBeDefined();
+      expect(swapThresholdTx.gasNative).toBeGreaterThan(0);
+      expect(swapThresholdTx.gasUSD).toBeGreaterThan(0);
+      expect(swapThresholdTx.txHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+    });
+
+    it('should have FeesDistributed with gas data from withdrawal txs', async () => {
+      const distTxs = await getTransactionsByType(service, testVault.vaultAddress, 'FeesDistributed');
+
+      expect(distTxs.length).toBeGreaterThanOrEqual(1);
+      const distTx = distTxs[0];
+
+      // Each distribution is a separate withdrawal tx with its own gas
+      expect(distTx.gasNative).toBeGreaterThan(0);
+      expect(distTx.gasUSD).toBeGreaterThan(0);
+
+      // Per-distribution gas fields
+      for (const dist of distTx.distributions) {
+        expect(dist.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+        expect(dist.gasUsed).toBeDefined();
+        expect(dist.effectiveGasPrice).toBeDefined();
+      }
+    });
+
+    it('should have fee aggregate consistency', () => {
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        feeCollectionCount: 1
+      });
+
+      expect(metadata.aggregates.cumulativeFeesUSD).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeFeesWithdrawnUSD).toBeGreaterThan(0);
+      // Gas aggregates should include fee collection + distribution gas
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeGasUSD).toBeGreaterThan(0);
+    });
+
+    it('should have baseline captured', () => {
+      expectTrackerBaseline(service, testVault.vaultAddress);
+    });
+
+    it('should have all expected transaction types', async () => {
+      await expectTransactionTypes(service, testVault.vaultAddress, [
+        'FeesCollected',
+        'FeesDistributed'
+      ]);
+    });
+
+    it('should have transactionCount matching actual log length', async () => {
+      await expectTransactionCount(service, testVault.vaultAddress);
+    });
+
+    it('should have no tracking failures', () => {
+      expectNoTrackingFailures(service, testVault.vaultAddress);
+    });
+  });
 });

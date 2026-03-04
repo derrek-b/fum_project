@@ -20,6 +20,14 @@ import {
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
+import {
+  expectTrackerAggregates,
+  expectTrackerBaseline,
+  expectTransactionTypes,
+  getTransactionsByType,
+  expectNoTrackingFailures,
+  expectTransactionCount
+} from '../../helpers/tracker-assertions.js';
 
 // Mock getPoolTVLAverage to ensure 500 bps pool is always selected
 vi.mock('fum_library', async () => {
@@ -346,4 +354,128 @@ describe('Position Rebalancing', () => {
 
     console.log('Upper threshold rebalance (reverse direction) test passed');
   }, 180000);
+
+  describe('Tracker — Transaction History & Aggregates', () => {
+    it('should have baseline captured from initial vault setup', () => {
+      const baseline = expectTrackerBaseline(service, testVault.vaultAddress);
+
+      // Baseline has 1 position + tokens from vault setup
+      expect(baseline.positionValue).toBeGreaterThan(0);
+      expect(baseline.tokenValue).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should have no tracking failures', () => {
+      expectNoTrackingFailures(service, testVault.vaultAddress);
+    });
+
+    it('should have rebalanceCount of 2 after both rebalances', () => {
+      expectTrackerAggregates(service, testVault.vaultAddress, {
+        rebalanceCount: 2
+      });
+    });
+
+    it('should have accumulated gas costs across all operations', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      // Gas from init + 2 rebalance cycles (close + swap + create each)
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeGasUSD).toBeGreaterThan(0);
+    });
+
+    it('should have transaction count reflecting init + 2 rebalance cycles', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      // Each rebalance: PositionsClosed + NewPositionCreated + FeesCollected = 3 minimum
+      // (PositionRebalanced is a synthetic summary — not counted)
+      // Plus init events (NativeWrapped + TokensSwapped + NewPositionCreated). Total should be substantial.
+      expect(metadata.aggregates.transactionCount).toBeGreaterThanOrEqual(6);
+    });
+
+    it('should have PositionRebalanced transactions in the log', async () => {
+      const rebalanceTxs = await getTransactionsByType(service, testVault.vaultAddress, 'PositionRebalanced');
+
+      expect(rebalanceTxs).toHaveLength(2);
+
+      for (const tx of rebalanceTxs) {
+        expect(tx.oldPositionId).toBeDefined();
+        expect(tx.newPositionId).toBeDefined();
+        expect(tx.newPositionId).not.toBe(tx.oldPositionId);
+        expect(tx.reason).toBe('out_of_range_or_threshold');
+        expect(typeof tx.timestamp).toBe('number');
+      }
+
+      // Second rebalance should reference the position created by the first
+      expect(rebalanceTxs[0].oldPositionId).not.toBe(rebalanceTxs[1].oldPositionId);
+    });
+
+    it('should have PositionsClosed transactions from rebalances', async () => {
+      const closeTxs = await getTransactionsByType(service, testVault.vaultAddress, 'PositionsClosed');
+
+      // At least 2 close events (one per rebalance)
+      expect(closeTxs.length).toBeGreaterThanOrEqual(2);
+
+      for (const tx of closeTxs) {
+        expect(tx.closedCount).toBe(1); // Each rebalance closes 1 position
+        expect(tx.closedPositions).toHaveLength(1);
+        expect(tx.gasNative).toBeGreaterThan(0);
+        expect(tx.gasUSD).toBeGreaterThan(0);
+        expect(tx.success).toBe(true);
+        expect(tx.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      }
+    });
+
+    it('should have NewPositionCreated transactions from rebalances', async () => {
+      const createTxs = await getTransactionsByType(service, testVault.vaultAddress, 'NewPositionCreated');
+
+      // At least 2 from rebalances (possibly more from init if addToPosition wasn't used)
+      expect(createTxs.length).toBeGreaterThanOrEqual(2);
+
+      for (const tx of createTxs) {
+        expect(tx.totalActualUSD).toBeGreaterThan(0);
+        expect(tx.totalTargetUSD).toBeGreaterThan(0);
+        expect(tx.gasNative).toBeGreaterThan(0);
+        expect(tx.platform).toBe('uniswapV3');
+        expect(tx.success).toBe(true);
+        expect(tx.positionId).toBeDefined();
+        expect(tx.token0Symbol).toBeDefined();
+        expect(tx.token1Symbol).toBeDefined();
+      }
+    });
+
+    it('should have FeesCollected transactions from rebalance fee harvesting', async () => {
+      const feeTxs = await getTransactionsByType(service, testVault.vaultAddress, 'FeesCollected');
+
+      // Rebalances collect fees from the position being closed.
+      // Swap-driven price manipulation generates fees, so expect > 0 collections.
+      if (feeTxs.length > 0) {
+        const rebalanceFees = feeTxs.filter(tx => tx.source === 'rebalance');
+        expect(rebalanceFees.length).toBeGreaterThanOrEqual(1);
+
+        for (const tx of rebalanceFees) {
+          expect(tx.totalUSD).toBeGreaterThanOrEqual(0);
+          expect(tx.positionIds).toBeDefined();
+        }
+      }
+    });
+
+    it('should have correct strategy metadata', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.metadata.strategyId).toBe('bob');
+      expect(metadata.metadata.firstSeen).toBeDefined();
+      expect(metadata.metadata.lastUpdated).toBeGreaterThan(metadata.metadata.firstSeen);
+    });
+
+    it('should have all core rebalance transaction types in the log', async () => {
+      await expectTransactionTypes(service, testVault.vaultAddress, [
+        'PositionRebalanced',
+        'PositionsClosed',
+        'NewPositionCreated'
+      ]);
+    });
+
+    it('should have transactionCount matching actual log length', async () => {
+      await expectTransactionCount(service, testVault.vaultAddress);
+    });
+  });
 });

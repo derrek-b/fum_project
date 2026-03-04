@@ -22,6 +22,10 @@ import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import {
+  expectTrackerAggregates,
+  getTransactionsByType
+} from '../../helpers/tracker-assertions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -230,6 +234,21 @@ describe('Blacklist Management', () => {
 
       // Verify trip history is clean (no trips recorded)
       expect(service.vaultTripHistory.has(testVault.vaultAddress)).toBe(false);
+
+      // --- Tracker assertions ---
+      // handleVaultBlacklisted creates metadata from scratch (vault never set up)
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+      expect(metadata.baseline).toBeNull();
+
+      // Transaction log: only VaultBlacklisted (no retry)
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
+      expect(blacklistTxs[0].reason).toContain('Strategy bob not found');
+
+      const retryTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultRetryQueued');
+      expect(retryTxs.length).toBe(0);
     }, 60000);
 
     // ------------------------------------------------------------------------
@@ -239,24 +258,22 @@ describe('Blacklist Management', () => {
       await createTestService(3301);
       const events = setupEventTracking(service);
 
-      // Track call count for alternating behavior
-      let getVaultCallCount = 0;
+      // Flag-based mock: initial start fails, retries succeed.
+      // Swap events fail independently (log validation), so getVault parity doesn't matter.
+      let getVaultShouldFail = true;
       const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
 
       vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
         if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
-          getVaultCallCount++;
-          console.log(`  🔧 getVault call #${getVaultCallCount} for test vault`);
-
-          // Odd calls fail (1,3,5,7,9), even calls succeed (2,4,6,8)
-          if (getVaultCallCount % 2 === 1) {
+          console.log(`  🔧 getVault for test vault, shouldFail=${getVaultShouldFail}`);
+          if (getVaultShouldFail) {
             throw new Error('RPC_ERROR: Connection refused');
           }
         }
         return realGetVault(addr, forceRefresh);
       });
 
-      // Step 1: Start service → getVault #1 fails → trip 1, enters queue
+      // Step 1: Start service → getVault fails → trip 1, enters queue
       console.log('\n=== Step 1: service.start() - expect fail (trip 1) ===');
       await service.start();
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -265,7 +282,8 @@ describe('Blacklist Management', () => {
       expect(events.vaultRetryTrip[0].tripCount).toBe(1);
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
 
-      // Step 2: Retry → getVault #2 succeeds → VaultRecovered
+      // Step 2: Retry → getVault succeeds → VaultRecovered
+      getVaultShouldFail = false;
       console.log('\n=== Step 2: retryFailedVaults() - expect success (recover) ===');
       await service.retryFailedVaults();
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -273,9 +291,9 @@ describe('Blacklist Management', () => {
       expect(events.vaultRecovered.length).toBe(1);
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
 
-      // Steps 3-8: Swap events trigger fails, retries succeed
+      // Steps 3-8: Swap events fail (log validation), retries succeed
       for (let trip = 2; trip <= 4; trip++) {
-        // Emit SwapEventDetected → getVault fails → enters queue
+        // Emit SwapEventDetected → fails → enters queue → trip N
         console.log(`\n=== Step ${trip * 2 - 1}: Emit SwapEventDetected - expect fail (trip ${trip}) ===`);
         service.eventManager.emit('SwapEventDetected', {
           vaultAddress: testVault.vaultAddress,
@@ -298,7 +316,7 @@ describe('Blacklist Management', () => {
         expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
       }
 
-      // Step 9: Final swap event → getVault #9 fails → trip 5 → BLACKLIST
+      // Step 9: Final swap event → fails → trip 5 → BLACKLIST
       console.log('\n=== Step 9: Emit SwapEventDetected - expect fail (trip 5) → BLACKLIST ===');
       service.eventManager.emit('SwapEventDetected', {
         vaultAddress: testVault.vaultAddress,
@@ -332,6 +350,35 @@ describe('Blacklist Management', () => {
 
       // Verify trip history cleaned up
       expect(service.vaultTripHistory.has(testVault.vaultAddress)).toBe(false);
+
+      // --- Tracker assertions ---
+      // handleVaultRetryQueued ran 4 times (trips 1-4 emit VaultFailed),
+      // trip 5 goes directly to VaultBlacklisted without VaultFailed
+      expectTrackerAggregates(service, testVault.vaultAddress, {
+        retryCount: 4,
+        blacklistCount: 1
+      });
+
+      // Transaction log: 4 retries (trip 5 skips VaultFailed), 4 recoveries, 1 blacklist
+      const retryQueuedTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultRetryQueued');
+      expect(retryQueuedTxs.length).toBe(4);
+
+      // VaultRetryQueued transaction fields
+      expect(retryQueuedTxs[0].error).toContain('RPC_ERROR');
+      expect(retryQueuedTxs[0].source).toBeDefined();
+      expect(typeof retryQueuedTxs[0].attempts).toBe('number');
+
+      const retrySuccessTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultRetrySuccess');
+      expect(retrySuccessTxs.length).toBe(4);
+
+      // VaultRetrySuccess transaction fields
+      for (const tx of retrySuccessTxs) {
+        expect(typeof tx.timestamp).toBe('number');
+      }
+
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
+      expect(blacklistTxs[0].reason).toContain('retry trip limit');
     }, 60000);
 
     // ------------------------------------------------------------------------
@@ -381,6 +428,19 @@ describe('Blacklist Management', () => {
       );
       expect(blacklistEvent).toBeDefined();
       console.log(`🔍 Blacklist reason: ${blacklistEvent.reason}`);
+
+      // --- Tracker assertions ---
+      // handleVaultRetryQueued ran at least once, then handleVaultBlacklisted on timeout
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+      expect(metadata.aggregates.retryCount).toBeGreaterThanOrEqual(1);
+
+      const retryTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultRetryQueued');
+      expect(retryTxs.length).toBeGreaterThanOrEqual(1);
+
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
     }, 60000);
   });
 
@@ -445,6 +505,16 @@ describe('Blacklist Management', () => {
       );
       expect(onboardEvent).toBeDefined();
       console.log(`🔍 Vault onboarded after re-auth: ${onboardEvent !== undefined}`);
+
+      // --- Tracker assertions ---
+      // Baseline capture is skipped on re-onboarding (vault already tracked from blacklist)
+      expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+
+      // VaultBlacklisted transaction recorded
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
     }, 60000);
 
     // ------------------------------------------------------------------------
@@ -494,6 +564,16 @@ describe('Blacklist Management', () => {
       );
       expect(offboardEvent).toBeDefined();
       console.log(`🔍 Vault offboarded after revocation: ${offboardEvent !== undefined}`);
+
+      // --- Tracker assertions ---
+      // Vault was blacklisted but never successfully set up
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+      expect(metadata.baseline).toBeNull();
+
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
     }, 60000);
   });
 
@@ -580,6 +660,17 @@ describe('Blacklist Management', () => {
       expect(events2.vaultBlacklisted.length).toBe(0);
       console.log(`🔍 No new VaultBlacklisted events: ${events2.vaultBlacklisted.length === 0}`);
 
+      // --- Tracker assertions: data persisted across restart ---
+      // Second service's Tracker loaded metadata from disk
+      const metadata2 = expectTrackerAggregates(svc2, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+      expect(metadata2.baseline).toBeNull();
+
+      // Transaction log also persisted
+      const blacklistTxs2 = await getTransactionsByType(svc2, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs2.length).toBe(1);
+
       console.log('Blacklist persistence test passed');
     }, 90000);
 
@@ -627,6 +718,15 @@ describe('Blacklist Management', () => {
       console.log(`  - vaultAddress: ${entry.vaultAddress}`);
       console.log(`  - blacklistedAt: ${entry.blacklistedAt} (${new Date(entry.blacklistedAt).toISOString()})`);
       console.log(`  - reason: ${entry.reason}`);
+
+      // --- Tracker assertions ---
+      expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+
+      const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
+      expect(blacklistTxs.length).toBe(1);
+      expect(blacklistTxs[0].reason).toContain('Invalid vault configuration');
 
       console.log('Blacklist file format test passed');
     }, 60000);

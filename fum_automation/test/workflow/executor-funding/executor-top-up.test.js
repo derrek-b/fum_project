@@ -22,6 +22,11 @@ import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
 import { getMinExecutorBalance, getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
+import {
+  expectTrackerAggregates,
+  getTransactionsByType,
+  expectNoTrackingFailures
+} from '../../helpers/tracker-assertions.js';
 
 // Mock getPoolTVLAverage to ensure 500 bps pool is always selected
 vi.mock('fum_library', async () => {
@@ -389,6 +394,28 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
     console.log(`  VaultUnlocked: ${vaultUnlockedEvents.length}`);
     console.log('═══ END ═══');
 
+    // --- Tracker assertions ---
+    // handleExecutorFunded tracked the funding event
+    const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {});
+    expect(metadata.aggregates.executorFundingCount).toBeGreaterThanOrEqual(1);
+    expect(metadata.aggregates.cumulativeExecutorFundingNative).toBeGreaterThan(0);
+    expect(metadata.aggregates.cumulativeExecutorFundingUSD).toBeGreaterThan(0);
+
+    // ExecutorFunded transaction with full detail
+    const fundedTxs = await getTransactionsByType(service, testVault.vaultAddress, 'ExecutorFunded');
+    expect(fundedTxs.length).toBeGreaterThanOrEqual(1);
+    expect(parseFloat(fundedTxs[0].amount)).toBeGreaterThan(0);
+    expect(fundedTxs[0].executorAddress).toBe(executorAddress);
+    expect(fundedTxs[0].fundingAmountUSD).toBeGreaterThan(0);
+    expect(fundedTxs[0].gasNative).toBeGreaterThan(0);
+    expect(fundedTxs[0].gasUSD).toBeGreaterThan(0);
+    expect(fundedTxs[0].txHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+
+    // Rebalance also tracked (exercise came via rebalance trigger)
+    expect(metadata.aggregates.rebalanceCount).toBeGreaterThanOrEqual(1);
+
+    expectNoTrackingFailures(service, testVault.vaultAddress);
+
     console.log('Unwrap path top-up test passed');
   }, 240000);
 });
@@ -650,6 +677,22 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
     const recoveredBalanceEth = parseFloat(ethers.utils.formatEther(recoveredBalance));
     expect(recoveredBalanceEth).toBeGreaterThanOrEqual(minBalance);
     console.log(`Executor balance recovered: ${recoveredBalanceEth.toFixed(6)} ETH (min: ${minBalance})`);
+
+    // --- Tracker assertions ---
+    // handleExecutorFunded tracked the ERC20→native swap funding
+    const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {});
+    expect(metadata.aggregates.executorFundingCount).toBeGreaterThanOrEqual(1);
+    expect(metadata.aggregates.cumulativeExecutorFundingNative).toBeGreaterThan(0);
+    expect(metadata.aggregates.cumulativeExecutorFundingUSD).toBeGreaterThan(0);
+
+    // ExecutorFunded transaction detail
+    const fundedTxs = await getTransactionsByType(service, testVault.vaultAddress, 'ExecutorFunded');
+    expect(fundedTxs.length).toBeGreaterThanOrEqual(1);
+    expect(parseFloat(fundedTxs[0].amount)).toBeGreaterThan(0);
+    expect(fundedTxs[0].executorAddress).toBe(executorAddress);
+    expect(fundedTxs[0].fundingAmountUSD).toBeGreaterThan(0);
+
+    expectNoTrackingFailures(service, testVault.vaultAddress);
 
     console.log('ERC20 swap path top-up test passed');
   }, 240000);

@@ -166,11 +166,11 @@ export default class Tracker {
       await this.handleAssetValuesFetched(data);
     });
 
-    this.eventManager.subscribe('ETHWrapped', async (data) => {
+    this.eventManager.subscribe('NativeWrapped', async (data) => {
       await this.handleWrapUnwrap(data, 'wrap');
     });
 
-    this.eventManager.subscribe('ETHUnwrapped', async (data) => {
+    this.eventManager.subscribe('NativeUnwrapped', async (data) => {
       await this.handleWrapUnwrap(data, 'unwrap');
     });
 
@@ -250,7 +250,7 @@ export default class Tracker {
           cumulativeFeesReinvestedUSD: 0,
           cumulativeFeesWithdrawnUSD: 0,
           cumulativeFeesWithdrawFailedUSD: 0,
-          cumulativeGasETH: 0,
+          cumulativeGasNative: 0,
           cumulativeGasUSD: 0,
           swapCount: 0,
           rebalanceCount: 0,
@@ -305,6 +305,17 @@ export default class Tracker {
       const { totalUSD } = data;
       this.log(`Fees collected for vault ${vaultAddress}: $${totalUSD.toFixed(2)}`);
 
+      // Calculate gas for standalone fee collection txs (swap_threshold)
+      let gasNative = 0;
+      let gasUSD = 0;
+      if (data.gasUsed && data.effectiveGasPrice) {
+        const gasUsedBN = ethers.BigNumber.from(data.gasUsed);
+        const gasPriceBN = ethers.BigNumber.from(data.effectiveGasPrice);
+        const gasCostWei = gasUsedBN.mul(gasPriceBN);
+        gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+        gasUSD = await this.calculateGasUSD(gasNative);
+      }
+
       await this.appendTransaction(vaultAddress, {
         type: 'FeesCollected',
         vaultAddress,
@@ -313,6 +324,11 @@ export default class Tracker {
         fees: data.fees,
         totalUSD,
         reinvestmentRatio: data.reinvestmentRatio,
+        gasUsed: data.gasUsed,
+        gasEstimated: data.gasEstimated,
+        effectiveGasPrice: data.effectiveGasPrice,
+        gasNative,
+        gasUSD,
         txHash: transactionHash,
         timestamp
       });
@@ -325,10 +341,12 @@ export default class Tracker {
       metadata.aggregates.cumulativeFeesReinvestedUSD += totalUSD * (reinvestmentRatio / 100);
       // NOTE: cumulativeFeesWithdrawnUSD updated in handleFeesDistributed on actual distribution
 
-      if (data.source === 'explicit_collection') {
+      if (data.source === 'swap_threshold') {
         metadata.aggregates.feeCollectionCount += 1;
       }
       metadata.aggregates.transactionCount += 1;
+      metadata.aggregates.cumulativeGasNative += gasNative;
+      metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
       await this.saveMetadata(vaultAddress, metadata);
@@ -359,12 +377,29 @@ export default class Tracker {
 
       this.log(`Fees distributed for vault ${vaultAddress}: $${totalDistributedUSD?.toFixed(2) || '0.00'}`);
 
+      // Sum gas across all distribution txs (one per token)
+      let gasNative = 0;
+      let gasUSD = 0;
+      for (const dist of distributions) {
+        if (dist.gasUsed && dist.effectiveGasPrice) {
+          const gasUsedBN = ethers.BigNumber.from(dist.gasUsed);
+          const gasPriceBN = ethers.BigNumber.from(dist.effectiveGasPrice);
+          const gasCostWei = gasUsedBN.mul(gasPriceBN);
+          gasNative += parseFloat(ethers.utils.formatEther(gasCostWei));
+        }
+      }
+      if (gasNative > 0) {
+        gasUSD = await this.calculateGasUSD(gasNative);
+      }
+
       await this.appendTransaction(vaultAddress, {
         type: 'FeesDistributed',
         vaultAddress,
         distributions,
         reinvestmentRatio,
         totalDistributedUSD,
+        gasNative,
+        gasUSD,
         timestamp
       });
 
@@ -372,6 +407,9 @@ export default class Tracker {
       if (totalDistributedUSD) {
         metadata.aggregates.cumulativeFeesWithdrawnUSD += totalDistributedUSD;
       }
+      metadata.aggregates.transactionCount += 1;
+      metadata.aggregates.cumulativeGasNative += gasNative;
+      metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
       await this.saveMetadata(vaultAddress, metadata);
@@ -483,21 +521,20 @@ export default class Tracker {
     if (!this.vaultMetadata.has(vaultAddress)) return;
 
     try {
-      const { oldPositionId, current, reason } = data;
+      const { oldPositionId, newPositionId, reason } = data;
       this.log(`Position rebalanced for vault ${vaultAddress}: ${reason}`);
 
       await this.appendTransaction(vaultAddress, {
         type: 'PositionRebalanced',
         vaultAddress,
         oldPositionId,
-        current,
+        newPositionId,
         reason,
         timestamp
       });
 
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.rebalanceCount += 1;
-      metadata.aggregates.transactionCount += 1;
       metadata.metadata.lastUpdated = timestamp;
 
       await this.saveMetadata(vaultAddress, metadata);
@@ -525,8 +562,8 @@ export default class Tracker {
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
       await this.appendTransaction(vaultAddress, {
         type: 'PositionsClosed',
@@ -536,7 +573,7 @@ export default class Tracker {
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         transactionHash,
         success: data.success,
@@ -545,7 +582,7 @@ export default class Tracker {
 
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
@@ -575,8 +612,8 @@ export default class Tracker {
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
       const tokenSymbols = new Set();
       for (const swap of swaps) {
@@ -642,7 +679,7 @@ export default class Tracker {
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         transactionHash,
         success: data.success,
@@ -652,7 +689,7 @@ export default class Tracker {
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.swapCount += swapCount;
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
@@ -697,7 +734,7 @@ export default class Tracker {
 
       // Append transaction
       await this.appendTransaction(vaultAddress, {
-        type: type === 'wrap' ? 'ETHWrapped' : 'ETHUnwrapped',
+        type: type === 'wrap' ? 'NativeWrapped' : 'NativeUnwrapped',
         vaultAddress,
         amount,
         amountFormatted,
@@ -705,7 +742,7 @@ export default class Tracker {
         gasUsed,
         gasEstimated,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         transactionHash,
         success,
@@ -716,14 +753,14 @@ export default class Tracker {
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.wrapUnwrapCount += 1;
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
       await this.saveMetadata(vaultAddress, metadata);
     } catch (error) {
       await this.logTrackingError(vaultAddress, {
-        eventType: type === 'wrap' ? 'ETHWrapped' : 'ETHUnwrapped',
+        eventType: type === 'wrap' ? 'NativeWrapped' : 'NativeUnwrapped',
         transactionHash,
         timestamp,
         error: error.message
@@ -757,7 +794,7 @@ export default class Tracker {
             cumulativeFeesReinvestedUSD: 0,
             cumulativeFeesWithdrawnUSD: 0,
             cumulativeFeesWithdrawFailedUSD: 0,
-            cumulativeGasETH: 0,
+            cumulativeGasNative: 0,
             cumulativeGasUSD: 0,
             swapCount: 0,
             rebalanceCount: 0,
@@ -837,7 +874,7 @@ export default class Tracker {
             cumulativeFeesReinvestedUSD: 0,
             cumulativeFeesWithdrawnUSD: 0,
             cumulativeFeesWithdrawFailedUSD: 0,
-            cumulativeGasETH: 0,
+            cumulativeGasNative: 0,
             cumulativeGasUSD: 0,
             swapCount: 0,
             rebalanceCount: 0,
@@ -946,8 +983,8 @@ export default class Tracker {
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
       // Funding amount in USD (reuse gas USD conversion — same native→USD rate)
       const fundingAmountUSD = await this.calculateGasUSD(fundingAmountNative);
@@ -960,7 +997,7 @@ export default class Tracker {
         fundingAmountUSD,
         gasUsed,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         txHash: transactionHash,
         timestamp
@@ -971,7 +1008,7 @@ export default class Tracker {
       metadata.aggregates.cumulativeExecutorFundingNative += fundingAmountNative;
       metadata.aggregates.cumulativeExecutorFundingUSD += fundingAmountUSD;
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
@@ -1039,8 +1076,8 @@ export default class Tracker {
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
       const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['2-MINUTES']);
 
@@ -1088,7 +1125,7 @@ export default class Tracker {
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         transactionHash,
         blockNumber: data.blockNumber,
@@ -1100,7 +1137,7 @@ export default class Tracker {
 
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 
@@ -1124,14 +1161,14 @@ export default class Tracker {
     if (!this.vaultMetadata.has(vaultAddress)) return;
 
     try {
-      const { quotedToken0, quotedToken1, actualToken0, actualToken1, tokenSymbols, gasUsed, effectiveGasPrice } = data;
+      const { targetToken0, targetToken1, actualToken0, actualToken1, tokenSymbols, gasUsed, effectiveGasPrice } = data;
       this.log(`Liquidity added to position for vault ${vaultAddress}`);
 
       const gasUsedBN = ethers.BigNumber.from(gasUsed);
       const gasPriceBN = ethers.BigNumber.from(effectiveGasPrice);
       const gasCostWei = gasUsedBN.mul(gasPriceBN);
-      const gasETH = parseFloat(ethers.utils.formatEther(gasCostWei));
-      const gasUSD = await this.calculateGasUSD(gasETH);
+      const gasNative = parseFloat(ethers.utils.formatEther(gasCostWei));
+      const gasUSD = await this.calculateGasUSD(gasNative);
 
       const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['2-MINUTES']);
 
@@ -1140,11 +1177,11 @@ export default class Tracker {
       try { token0Decimals = getTokenBySymbol(tokenSymbols[0]).decimals; } catch (e) { }
       try { token1Decimals = getTokenBySymbol(tokenSymbols[1]).decimals; } catch (e) { }
 
-      const quotedToken0Formatted = parseFloat(ethers.utils.formatUnits(quotedToken0, token0Decimals));
-      const quotedToken1Formatted = parseFloat(ethers.utils.formatUnits(quotedToken1, token1Decimals));
-      const quotedToken0USD = quotedToken0Formatted * (prices[tokenSymbols[0]] || 0);
-      const quotedToken1USD = quotedToken1Formatted * (prices[tokenSymbols[1]] || 0);
-      const totalQuotedUSD = quotedToken0USD + quotedToken1USD;
+      const targetToken0Formatted = parseFloat(ethers.utils.formatUnits(targetToken0, token0Decimals));
+      const targetToken1Formatted = parseFloat(ethers.utils.formatUnits(targetToken1, token1Decimals));
+      const targetToken0USD = targetToken0Formatted * (prices[tokenSymbols[0]] || 0);
+      const targetToken1USD = targetToken1Formatted * (prices[tokenSymbols[1]] || 0);
+      const totalTargetUSD = targetToken0USD + targetToken1USD;
 
       const actualToken0Formatted = parseFloat(ethers.utils.formatUnits(actualToken0, token0Decimals));
       const actualToken1Formatted = parseFloat(ethers.utils.formatUnits(actualToken1, token1Decimals));
@@ -1152,8 +1189,8 @@ export default class Tracker {
       const actualToken1USD = actualToken1Formatted * (prices[tokenSymbols[1]] || 0);
       const totalActualUSD = actualToken0USD + actualToken1USD;
 
-      const differenceUSD = totalQuotedUSD - totalActualUSD;
-      const differencePercent = totalQuotedUSD > 0 ? (differenceUSD / totalQuotedUSD) * 100 : 0;
+      const differenceUSD = totalTargetUSD - totalActualUSD;
+      const differencePercent = totalTargetUSD > 0 ? (differenceUSD / totalTargetUSD) * 100 : 0;
 
       await this.appendTransaction(vaultAddress, {
         type: 'LiquidityAddedToPosition',
@@ -1162,11 +1199,11 @@ export default class Tracker {
         poolAddress: data.poolAddress,
         token0Symbol: tokenSymbols[0],
         token1Symbol: tokenSymbols[1],
-        quotedToken0,
-        quotedToken1,
-        quotedToken0USD,
-        quotedToken1USD,
-        totalQuotedUSD,
+        targetToken0,
+        targetToken1,
+        targetToken0USD,
+        targetToken1USD,
+        totalTargetUSD,
         actualToken0,
         actualToken1,
         actualToken0USD,
@@ -1179,7 +1216,7 @@ export default class Tracker {
         gasUsed,
         gasEstimated: data.gasEstimated,
         effectiveGasPrice,
-        gasETH,
+        gasNative,
         gasUSD,
         transactionHash,
         blockNumber: data.blockNumber,
@@ -1191,7 +1228,7 @@ export default class Tracker {
 
       const metadata = this.vaultMetadata.get(vaultAddress);
       metadata.aggregates.transactionCount += 1;
-      metadata.aggregates.cumulativeGasETH += gasETH;
+      metadata.aggregates.cumulativeGasNative += gasNative;
       metadata.aggregates.cumulativeGasUSD += gasUSD;
       metadata.metadata.lastUpdated = timestamp;
 

@@ -10,6 +10,14 @@ import AutomationService from '../../../src/core/AutomationService.js';
 import { getVaultContract } from 'fum_library/blockchain';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
+import {
+  expectTrackerAggregates,
+  expectTrackerBaseline,
+  expectTransactionTypes,
+  getTransactionsByType,
+  expectNoTrackingFailures,
+  expectTransactionCount
+} from '../../helpers/tracker-assertions.js';
 describe('AutomationService Initialization - 1 Vault (New Architecture)', () => {
   let testEnv;
   let testVault;
@@ -1512,6 +1520,149 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
 
       // ETH balance should be less than initial due to gas costs
       expect(finalEthBalance).toBeLessThan(initialEthFunding);
+    });
+  });
+
+  describe('Tracker — Transaction History & Aggregates', () => {
+    it('should have baseline captured with positions and tokens', () => {
+      const baseline = expectTrackerBaseline(service, testVault.vaultAddress);
+
+      // Baseline reflects 3 pre-existing positions + token balances
+      expect(baseline.tokenValue).toBeGreaterThan(0);
+      expect(baseline.positionValue).toBeGreaterThan(0);
+      expect(baseline.value).toBe(baseline.tokenValue + baseline.positionValue);
+    });
+
+    it('should have no tracking failures', () => {
+      expectNoTrackingFailures(service, testVault.vaultAddress);
+    });
+
+    it('should have correct aggregate counts for 1212 init flow', () => {
+      // BS-1212 init flow:
+      // - Fee collection (source: 'initialization') → feeCollectionCount NOT incremented
+      // - Close 2 non-aligned positions
+      // - Wrap ETH → WETH
+      // - Deficit swaps
+      // - addToPosition on aligned position
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        feeCollectionCount: 0,  // source is 'initialization', not 'explicit_collection'
+        wrapUnwrapCount: 1,
+        rebalanceCount: 0
+      });
+
+      expect(metadata.aggregates.swapCount).toBeGreaterThanOrEqual(1);
+      // FeesCollected + PositionsClosed + NativeWrapped + TokensSwapped + LiquidityAddedToPosition = 5+
+      expect(metadata.aggregates.transactionCount).toBeGreaterThanOrEqual(5);
+    });
+
+    it('should have accumulated fees from initialization collection', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      // Fees were collected from the WBTC/WETH position during init
+      expect(metadata.aggregates.cumulativeFeesUSD).toBeGreaterThan(0);
+    });
+
+    it('should have accumulated gas costs across all operations', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeGasUSD).toBeGreaterThan(0);
+    });
+
+    it('should have all expected transaction types in the log', async () => {
+      await expectTransactionTypes(service, testVault.vaultAddress, [
+        'FeesCollected',
+        'FeesDistributed',
+        'PositionsClosed',
+        'NativeWrapped',
+        'TokensSwapped',
+        'LiquidityAddedToPosition'
+      ]);
+    });
+
+    it('should have FeesCollected transaction with initialization source', async () => {
+      const feeTxs = await getTransactionsByType(service, testVault.vaultAddress, 'FeesCollected');
+
+      expect(feeTxs).toHaveLength(1);
+      expect(feeTxs[0].source).toBe('initialization');
+      expect(feeTxs[0].totalUSD).toBeGreaterThan(0);
+      expect(feeTxs[0].positionIds).toBeDefined();
+      expect(feeTxs[0].fees.length).toBeGreaterThan(0);
+      expect(typeof feeTxs[0].reinvestmentRatio).toBe('number');
+      // Bundled with position closure — no standalone gas for fee collection
+      expect(feeTxs[0].gasNative).toBe(0);
+    });
+
+    it('should have FeesDistributed transaction with distribution details', async () => {
+      const distTxs = await getTransactionsByType(service, testVault.vaultAddress, 'FeesDistributed');
+
+      expect(distTxs).toHaveLength(1);
+      expect(distTxs[0].distributions).toBeDefined();
+      expect(distTxs[0].reinvestmentRatio).toBeDefined();
+      expect(distTxs[0].totalDistributedUSD).toBeGreaterThan(0);
+      expect(distTxs[0].distributions.length).toBeGreaterThan(0);
+    });
+
+    it('should have PositionsClosed transaction for 2 non-aligned positions', async () => {
+      const closeTxs = await getTransactionsByType(service, testVault.vaultAddress, 'PositionsClosed');
+
+      expect(closeTxs).toHaveLength(1);
+      expect(closeTxs[0].closedCount).toBe(2);
+      expect(closeTxs[0].closedPositions).toHaveLength(2);
+      expect(closeTxs[0].gasNative).toBeGreaterThan(0);
+      expect(closeTxs[0].success).toBe(true);
+      expect(closeTxs[0].gasUSD).toBeGreaterThan(0);
+      expect(closeTxs[0].transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+    });
+
+    it('should have NativeWrapped transaction for ETH→WETH wrap', async () => {
+      const wrapTxs = await getTransactionsByType(service, testVault.vaultAddress, 'NativeWrapped');
+
+      expect(wrapTxs).toHaveLength(1);
+      expect(wrapTxs[0].success).toBe(true);
+      expect(wrapTxs[0].amountUSD).toBeGreaterThan(0);
+      expect(wrapTxs[0].gasNative).toBeGreaterThan(0);
+    });
+
+    it('should have LiquidityAddedToPosition transaction with USD values', async () => {
+      const addTxs = await getTransactionsByType(service, testVault.vaultAddress, 'LiquidityAddedToPosition');
+
+      expect(addTxs).toHaveLength(1);
+
+      const addTx = addTxs[0];
+      expect(addTx.totalActualUSD).toBeGreaterThan(0);
+      expect(addTx.totalTargetUSD).toBeGreaterThan(0);
+      expect(addTx.gasNative).toBeGreaterThan(0);
+      expect(addTx.gasUSD).toBeGreaterThan(0);
+      expect(addTx.platform).toBe('uniswapV3');
+      expect(addTx.success).toBe(true);
+      expect(addTx.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(addTx.positionId).toBeDefined();
+      expect(addTx.deploymentAmount).toBeGreaterThan(0);
+      expect(typeof addTx.differencePercent).toBe('number');
+      expect(addTx.token0Symbol).toBeDefined();
+      expect(addTx.token1Symbol).toBeDefined();
+    });
+
+    it('should have correct strategy metadata', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.metadata.strategyId).toBe('bob');
+      expect(metadata.metadata.firstSeen).toBeDefined();
+      expect(metadata.metadata.lastUpdated).toBeGreaterThan(metadata.metadata.firstSeen);
+    });
+
+    it('should have fee aggregate consistency (reinvested ≤ total)', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.aggregates.cumulativeFeesReinvestedUSD).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeFeesUSD).toBeGreaterThanOrEqual(
+        metadata.aggregates.cumulativeFeesReinvestedUSD
+      );
+    });
+
+    it('should have transactionCount matching actual log length', async () => {
+      await expectTransactionCount(service, testVault.vaultAddress);
     });
   });
 });

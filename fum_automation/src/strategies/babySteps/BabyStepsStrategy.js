@@ -606,13 +606,18 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Aggregate fees (single position but using standard flow)
     const aggregatedFees = this.aggregateFeesFromPositions(feesByPosition);
 
-    // Emit FeesCollected event
+    // Emit FeesCollected event (swap_threshold is a standalone tx — include gas data)
     await this.emitFeesCollected(
       vault,
       aggregatedFees,
       'swap_threshold',
       [positionId],
-      txResult.receipt.transactionHash
+      txResult.receipt.transactionHash,
+      {
+        gasUsed: txResult.receipt.gasUsed.toString(),
+        effectiveGasPrice: txResult.receipt.effectiveGasPrice.toString(),
+        gasEstimated: txResult.gasEstimated.toString()
+      }
     );
 
     // Distribute owner's portion - wrap in try-catch as fees remain in vault on failure
@@ -778,12 +783,13 @@ export default class BabyStepsStrategy extends StrategyBase {
 
       // Step 7: Create new position centered on current price
       // Note: createNewPosition handles its own cache update via getPositionById + updatePosition
-      await this.createNewPosition(vault, availableDeployment, assetValues, targetPool);
+      const newPositionId = await this.createNewPosition(vault, availableDeployment, assetValues, targetPool);
 
       // Step 8: Emit PositionRebalanced event
       this.eventManager.emit('PositionRebalanced', {
         vaultAddress: vault.address,
         oldPositionId: position.id,
+        newPositionId,
         reason: 'out_of_range_or_threshold',
         availableDeployment,
         timestamp: Date.now(),
@@ -1248,11 +1254,15 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @param {Object} vault - Vault object
    * @param {Object} aggregatedFees - Fees keyed by token address
    *   { [address]: { amount: BigNumber, symbol, decimals, address } }
-   * @param {string} source - 'initialization' | 'rebalance' | 'explicit_collection'
+   * @param {string} source - 'initialization' | 'rebalance' | 'swap_threshold'
    * @param {string[]} positionIds - Position IDs fees were collected from
    * @param {string} transactionHash - Transaction hash
+   * @param {Object} [gasData] - Gas data for standalone fee collection txs (swap_threshold)
+   * @param {string} gasData.gasUsed - Gas units used
+   * @param {string} gasData.effectiveGasPrice - Gas price in wei
+   * @param {string} gasData.gasEstimated - Pre-tx gas estimate
    */
-  async emitFeesCollected(vault, aggregatedFees, source, positionIds, transactionHash) {
+  async emitFeesCollected(vault, aggregatedFees, source, positionIds, transactionHash, gasData) {
     if (Object.keys(aggregatedFees).length === 0) {
       return;
     }
@@ -1285,7 +1295,7 @@ export default class BabyStepsStrategy extends StrategyBase {
 
     const totalUSD = fees.reduce((sum, f) => sum + f.usd, 0);
 
-    this.eventManager.emit('FeesCollected', {
+    const eventData = {
       vaultAddress: vault.address,
       source,
       positionIds,
@@ -1298,7 +1308,15 @@ export default class BabyStepsStrategy extends StrategyBase {
         level: 'info',
         message: `Collected $${totalUSD.toFixed(2)} in fees from ${positionIds.length} position(s)`
       }
-    });
+    };
+
+    if (gasData) {
+      eventData.gasUsed = gasData.gasUsed;
+      eventData.effectiveGasPrice = gasData.effectiveGasPrice;
+      eventData.gasEstimated = gasData.gasEstimated;
+    }
+
+    this.eventManager.emit('FeesCollected', eventData);
   }
 
   /**
@@ -1465,7 +1483,9 @@ export default class BabyStepsStrategy extends StrategyBase {
           amount: tokenData.amount.toString(),
           amountFormatted: ethers.utils.formatUnits(tokenData.amount, tokenData.decimals),
           asNativeToken: isWrappedNative,
-          transactionHash: receipt.transactionHash
+          transactionHash: receipt.transactionHash,
+          gasUsed: receipt.gasUsed.toString(),
+          effectiveGasPrice: receipt.effectiveGasPrice.toString()
         });
 
         this.log(`Distributed ${ethers.utils.formatUnits(tokenData.amount, tokenData.decimals)} ${tokenData.symbol} to owner`);
@@ -1904,7 +1924,7 @@ export default class BabyStepsStrategy extends StrategyBase {
    * @param {number} availableDeployment - USD amount available to deploy
    * @param {Object} assetValues - Asset values from fetchAssetValues
    * @param {Object} targetPool - The target pool for this vault
-   * @returns {Promise<void>}
+   * @returns {Promise<string>} The new position ID (tokenId)
    */
   async createNewPosition(vault, availableDeployment, assetValues, targetPool) {
     this.log(`Creating new position with $${availableDeployment.toFixed(2)} available`);
@@ -2225,6 +2245,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // handle strategy's own freshness needs. This end-of-function refresh was only for VaultHealth.
     // await this.vaultDataService.refreshTokens(vault.address);
 
+    return receiptData.tokenId;
   }
 
   // ===========================================================================

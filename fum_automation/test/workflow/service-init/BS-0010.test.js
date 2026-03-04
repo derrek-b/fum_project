@@ -14,6 +14,14 @@ import AutomationService from '../../../src/core/AutomationService.js';
 import { getVaultContract } from 'fum_library/blockchain';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
+import {
+  expectTrackerAggregates,
+  expectTrackerBaseline,
+  expectTransactionTypes,
+  getTransactionsByType,
+  expectNoTrackingFailures,
+  expectTransactionCount
+} from '../../helpers/tracker-assertions.js';
 
 describe('AutomationService Initialization - createNewPosition Workflow', () => {
   let testEnv;
@@ -772,6 +780,124 @@ describe('AutomationService Initialization - createNewPosition Workflow', () => 
 
     it('should return correct strategy ID for vault', () => {
       expect(service.vaultDataService.getVaultStrategyId(testVault.vaultAddress)).toBe('bob');
+    });
+  });
+
+  describe('Tracker — Transaction History & Aggregates', () => {
+    it('should have baseline captured with correct values', () => {
+      const baseline = expectTrackerBaseline(service, testVault.vaultAddress);
+
+      // Baseline should reflect token-only value (no positions at capture time)
+      expect(baseline.tokenValue).toBeGreaterThan(0);
+      expect(baseline.positionValue).toBe(0);
+    });
+
+    it('should have lastSnapshot from AssetValuesFetched', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.lastSnapshot).not.toBeNull();
+      expect(metadata.lastSnapshot.value).toBeGreaterThan(0);
+      expect(typeof metadata.lastSnapshot.timestamp).toBe('number');
+    });
+
+    it('should have no tracking failures', () => {
+      expectNoTrackingFailures(service, testVault.vaultAddress);
+    });
+
+    it('should have correct aggregate counts for init flow', () => {
+      // BS-0010 init flow: wrap ETH + swap for USDC + create position
+      // = 1 wrapUnwrap + 1 swap + 1 newPosition = 3 transactions minimum
+      const metadata = expectTrackerAggregates(service, testVault.vaultAddress, {
+        wrapUnwrapCount: 1,
+        rebalanceCount: 0,
+        feeCollectionCount: 0
+      });
+
+      expect(metadata.aggregates.swapCount).toBeGreaterThanOrEqual(1);
+      expect(metadata.aggregates.transactionCount).toBeGreaterThanOrEqual(3);
+    });
+
+    it('should have accumulated gas costs in native and USD', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+      expect(metadata.aggregates.cumulativeGasUSD).toBeGreaterThan(0);
+    });
+
+    it('should have all expected transaction types in the log', async () => {
+      await expectTransactionTypes(service, testVault.vaultAddress, [
+        'NativeWrapped',
+        'TokensSwapped',
+        'NewPositionCreated'
+      ]);
+    });
+
+    it('should have ETHWrapped transaction with correct details', async () => {
+      const wrapTxs = await getTransactionsByType(service, testVault.vaultAddress, 'NativeWrapped');
+
+      expect(wrapTxs).toHaveLength(1);
+      expect(wrapTxs[0].success).toBe(true);
+      expect(wrapTxs[0].amountUSD).toBeGreaterThan(0);
+      expect(wrapTxs[0].gasNative).toBeGreaterThan(0);
+      expect(wrapTxs[0].transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(wrapTxs[0].gasUSD).toBeGreaterThan(0);
+      expect(typeof wrapTxs[0].amountFormatted).toBe('string');
+    });
+
+    it('should have TokensSwapped transaction with enriched swap details', async () => {
+      const swapTxs = await getTransactionsByType(service, testVault.vaultAddress, 'TokensSwapped');
+
+      expect(swapTxs.length).toBeGreaterThanOrEqual(1);
+
+      const swapTx = swapTxs[0];
+      expect(swapTx.swapCount).toBeGreaterThan(0);
+      expect(swapTx.swaps).toBeDefined();
+      expect(swapTx.swaps.length).toBeGreaterThan(0);
+
+      // Enriched swap should have USD values and slippage
+      const swap = swapTx.swaps[0];
+      expect(swap.tokenInSymbol).toBeDefined();
+      expect(swap.tokenOutSymbol).toBeDefined();
+      expect(typeof swap.slippagePercent).toBe('number');
+      expect(swap.actualAmountInUSD).toBeGreaterThan(0);
+      expect(swap.actualAmountOutUSD).toBeGreaterThan(0);
+      expect(swap.priceInUSD).toBeGreaterThan(0);
+      expect(swap.priceOutUSD).toBeGreaterThan(0);
+      expect(swap.quotedAmountInUSD).toBeGreaterThan(0);
+      expect(swap.quotedAmountOutUSD).toBeGreaterThan(0);
+      expect(typeof swap.isAmountIn).toBe('boolean');
+    });
+
+    it('should have NewPositionCreated transaction with USD values and gas', async () => {
+      const posTxs = await getTransactionsByType(service, testVault.vaultAddress, 'NewPositionCreated');
+
+      expect(posTxs).toHaveLength(1);
+
+      const posTx = posTxs[0];
+      expect(posTx.totalActualUSD).toBeGreaterThan(0);
+      expect(posTx.totalTargetUSD).toBeGreaterThan(0);
+      expect(posTx.gasNative).toBeGreaterThan(0);
+      expect(posTx.gasUSD).toBeGreaterThan(0);
+      expect(posTx.platform).toBe('uniswapV3');
+      expect(posTx.success).toBe(true);
+      expect(posTx.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(posTx.positionId).toBeDefined();
+      expect(posTx.deploymentAmount).toBeGreaterThan(0);
+      expect(typeof posTx.differencePercent).toBe('number');
+      expect(posTx.token0Symbol).toBeDefined();
+      expect(posTx.token1Symbol).toBeDefined();
+    });
+
+    it('should have correct strategy metadata', () => {
+      const metadata = service.tracker.getMetadata(testVault.vaultAddress);
+
+      expect(metadata.metadata.strategyId).toBe('bob');
+      expect(metadata.metadata.firstSeen).toBeDefined();
+      expect(metadata.metadata.lastUpdated).toBeGreaterThan(metadata.metadata.firstSeen);
+    });
+
+    it('should have transactionCount matching actual log length', async () => {
+      await expectTransactionCount(service, testVault.vaultAddress);
     });
   });
 });
