@@ -31,6 +31,7 @@ describe('Chain Helpers', () => {
         expect(() => validateChainId(1)).not.toThrow();
         expect(() => validateChainId(42161)).not.toThrow();
         expect(() => validateChainId(1337)).not.toThrow();
+        expect(() => validateChainId(1338)).not.toThrow();
       });
 
       it('should accept integers represented as floats (1.0, 42161.0)', () => {
@@ -216,6 +217,13 @@ describe('Chain Helpers', () => {
         expect(Array.isArray(rpcUrls)).toBe(true);
         expect(rpcUrls).toEqual(['http://localhost:8545']);
       });
+
+      it('should return static RPC URLs for local Avalanche fork (chainId 1338) without modification', () => {
+        const rpcUrls = getChainRpcUrls(1338);
+
+        expect(Array.isArray(rpcUrls)).toBe(true);
+        expect(rpcUrls).toEqual(['http://localhost:8546']);
+      });
     });
 
     describe('Error Cases', () => {
@@ -299,6 +307,14 @@ describe('Chain Helpers', () => {
         expect(xpub.startsWith('xpub')).toBe(true);
         expect(xpub).toBe('xpub6F8xskVEWJTqZB69U3UmjGe8zwoXUefq5YCBgpyS2xf4CFEzNX4zUbxYBqZLdC96gEayShKc9f9rhgnNhSMtzADf8x4HX8Wia4AjBmqAPir');
       });
+
+      it('should return correct xpub for Forked Avalanche (chainId 1338)', () => {
+        const xpub = getExecutorXpub(1338);
+
+        expect(typeof xpub).toBe('string');
+        expect(xpub.startsWith('xpub')).toBe(true);
+        expect(xpub).toBe('xpub6F8xskVEWJTqZB69U3UmjGe8zwoXUefq5YCBgpyS2xf4CFEzNX4zUbxYBqZLdC96gEayShKc9f9rhgnNhSMtzADf8x4HX8Wia4AjBmqAPir');
+      });
     });
 
     describe('Error Cases', () => {
@@ -348,6 +364,8 @@ describe('Chain Helpers', () => {
         expect(getMinExecutorBalance(42161)).toBeGreaterThan(0);
         expect(typeof getMinExecutorBalance(1337)).toBe('number');
         expect(getMinExecutorBalance(1337)).toBeGreaterThan(0);
+        expect(typeof getMinExecutorBalance(1338)).toBe('number');
+        expect(getMinExecutorBalance(1338)).toBeGreaterThan(0);
       });
     });
 
@@ -368,12 +386,18 @@ describe('Chain Helpers', () => {
       it('should return a positive number for valid chains', () => {
         expect(typeof getMaxExecutorBalance(42161)).toBe('number');
         expect(getMaxExecutorBalance(42161)).toBeGreaterThan(0);
+        expect(typeof getMaxExecutorBalance(1338)).toBe('number');
+        expect(getMaxExecutorBalance(1338)).toBeGreaterThan(0);
       });
 
       it('should be greater than or equal to minExecutorBalance', () => {
         const min = getMinExecutorBalance(42161);
         const max = getMaxExecutorBalance(42161);
         expect(max).toBeGreaterThanOrEqual(min);
+
+        const min1338 = getMinExecutorBalance(1338);
+        const max1338 = getMaxExecutorBalance(1338);
+        expect(max1338).toBeGreaterThanOrEqual(min1338);
       });
     });
 
@@ -429,6 +453,10 @@ describe('Chain Helpers', () => {
         expect(isChainSupported(43114)).toBe(true);
       });
 
+      it('should return true for Forked Avalanche (chainId 1338)', () => {
+        expect(isChainSupported(1338)).toBe(true);
+      });
+
       it('should return false for unsupported chains', () => {
         expect(isChainSupported(999999)).toBe(false);
         expect(isChainSupported(888888)).toBe(false);
@@ -455,6 +483,7 @@ describe('Chain Helpers', () => {
         expect(chainIds).toContain(42161);  // Arbitrum One
         expect(chainIds).toContain(43114);  // Avalanche
         expect(chainIds).toContain(1337);   // Forked Arbitrum
+        expect(chainIds).toContain(1338);   // Forked Avalanche
 
         chainIds.forEach(id => {
           expect(typeof id).toBe('number');
@@ -552,14 +581,17 @@ describe('Chain Helpers', () => {
         const chain42161Platforms = lookupChainPlatformIds(42161);
         const chain1337Platforms = lookupChainPlatformIds(1337);
         const chain43114Platforms = lookupChainPlatformIds(43114);
+        const chain1338Platforms = lookupChainPlatformIds(1338);
 
         expect(Array.isArray(chain42161Platforms)).toBe(true);
         expect(Array.isArray(chain1337Platforms)).toBe(true);
         expect(Array.isArray(chain43114Platforms)).toBe(true);
+        expect(Array.isArray(chain1338Platforms)).toBe(true);
 
         expect(chain42161Platforms).toContain('uniswapV3');
         expect(chain1337Platforms).toContain('uniswapV3');
         expect(chain43114Platforms).toContain('traderjoeV2_2');
+        expect(chain1338Platforms).toContain('traderjoeV2_2');
       });
 
       it('should return all configured platforms', async () => {
@@ -645,6 +677,7 @@ describe('Chain Helpers', () => {
         expect(typeof getMinDeploymentForGas(42161)).toBe('number');
         expect(typeof getMinDeploymentForGas(43114)).toBe('number');
         expect(typeof getMinDeploymentForGas(1337)).toBe('number');
+        expect(typeof getMinDeploymentForGas(1338)).toBe('number');
       });
     });
 
@@ -696,18 +729,21 @@ describe('Chain Helpers', () => {
         expect(typeof getMinSwapValue(42161)).toBe('number');
         expect(typeof getMinSwapValue(43114)).toBe('number');
         expect(typeof getMinSwapValue(1337)).toBe('number');
+        expect(typeof getMinSwapValue(1338)).toBe('number');
       });
 
       it('should return expected values for each chain', () => {
-        expect(getMinSwapValue(42161)).toBe(0.10);  // Arbitrum
-        expect(getMinSwapValue(1337)).toBe(0.10);   // Local
+        expect(getMinSwapValue(42161)).toBe(10);    // Arbitrum
+        expect(getMinSwapValue(1337)).toBe(10);     // Local Arbitrum
         expect(getMinSwapValue(43114)).toBe(0.10);  // Avalanche
+        expect(getMinSwapValue(1338)).toBe(0.10);   // Local Avalanche
       });
 
       it('should return values >= 0', () => {
         expect(getMinSwapValue(42161)).toBeGreaterThanOrEqual(0);
         expect(getMinSwapValue(43114)).toBeGreaterThanOrEqual(0);
         expect(getMinSwapValue(1337)).toBeGreaterThanOrEqual(0);
+        expect(getMinSwapValue(1338)).toBeGreaterThanOrEqual(0);
       });
     });
 
@@ -752,18 +788,21 @@ describe('Chain Helpers', () => {
         expect(typeof getTransactionDeadlineMinutes(42161)).toBe('number');
         expect(typeof getTransactionDeadlineMinutes(43114)).toBe('number');
         expect(typeof getTransactionDeadlineMinutes(1337)).toBe('number');
+        expect(typeof getTransactionDeadlineMinutes(1338)).toBe('number');
       });
 
       it('should return expected values for each chain', () => {
         expect(getTransactionDeadlineMinutes(42161)).toBe(5);   // Arbitrum - fast L2
         expect(getTransactionDeadlineMinutes(1337)).toBe(5);    // Local fork (Arbitrum)
         expect(getTransactionDeadlineMinutes(43114)).toBe(5);   // Avalanche
+        expect(getTransactionDeadlineMinutes(1338)).toBe(5);    // Local fork (Avalanche)
       });
 
       it('should return values > 0', () => {
         expect(getTransactionDeadlineMinutes(42161)).toBeGreaterThan(0);
         expect(getTransactionDeadlineMinutes(43114)).toBeGreaterThan(0);
         expect(getTransactionDeadlineMinutes(1337)).toBeGreaterThan(0);
+        expect(getTransactionDeadlineMinutes(1338)).toBeGreaterThan(0);
       });
     });
 
