@@ -212,7 +212,8 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.failedVaults.size).toBe(0);
       expect(events.vaultRecovered.length).toBe(1);
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
-      expect(getVaultCallCount).toBe(2);
+      // 3 calls: 1 fail (initial setup) + 1 succeed (retry setupVault) + 1 VaultHealth.checkExecutorBalance
+      expect(getVaultCallCount).toBe(3);
     }, 60000);
   });
 
@@ -630,7 +631,8 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
       expect(events.vaultRecovered.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
-      expect(testVaultGetVaultCallCount).toBe(3);
+      // +1 for VaultHealth.checkExecutorBalance after successful setup
+      expect(testVaultGetVaultCallCount).toBe(4);
     }, 60000);
 
     it('should recover on 3rd retry after initial setup and retries 1-2 all fail', async () => {
@@ -696,7 +698,8 @@ describe('Error Handling - Setup Retry Recovery', () => {
       // Verify recovery
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
       expect(events.vaultRecovered.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
-      expect(testVaultGetVaultCallCount).toBe(4);
+      // +1 for VaultHealth.checkExecutorBalance after successful setup
+      expect(testVaultGetVaultCallCount).toBe(5);
     }, 60000);
   });
 

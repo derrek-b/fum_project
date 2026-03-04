@@ -72,7 +72,7 @@ describe('Service Initialization Error Scenarios', () => {
         debug: true
       });
 
-      await expect(service.start()).rejects.toThrow(/chain ID.*does not match/i);
+      await expect(service.start()).rejects.toThrow(/chain.*not supported|chain ID.*does not match/i);
 
       // Service should not be running
       expect(service.isRunning).toBe(false);

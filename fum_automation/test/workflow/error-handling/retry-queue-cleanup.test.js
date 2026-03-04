@@ -533,8 +533,10 @@ describe('Retry Queue Cleanup', () => {
       await createTestService(3307);
       const events = setupEventTracking(service);
 
-      // Mock to alternate: fail, succeed, fail, succeed...
+      // Specific sequence: fail on call 1 (initial), succeed on 2 (recovery 1),
+      // succeed on 3 (recovery 2). Swap event failures come from log:{} not getVault.
       let getVaultCallCount = 0;
+      const failOnCalls = new Set([1]); // Only fail on call #1
       const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
 
       const originalInitialize = service.initialize.bind(service);
@@ -546,8 +548,7 @@ describe('Retry Queue Cleanup', () => {
             getVaultCallCount++;
             console.log(`  🔧 getVault call #${getVaultCallCount}`);
 
-            // Odd calls fail, even calls succeed
-            if (getVaultCallCount % 2 === 1) {
+            if (failOnCalls.has(getVaultCallCount)) {
               throw new Error('RPC_ERROR: Connection refused');
             }
           }

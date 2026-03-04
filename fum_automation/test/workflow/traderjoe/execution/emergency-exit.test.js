@@ -89,13 +89,14 @@ describe('TJ V2.2 Emergency Exit', () => {
     console.log('  Sent 1290 AVAX to vault (~$12000 at $9.38/AVAX)');
 
     // Configure strategy parameters for emergency exit testing:
-    // - Wide range (5%) so position stays IN RANGE while price moves past emergency threshold
-    // - 3% emergency exit trigger fires BEFORE position goes out of range
+    // - Wide range (3%) so position stays IN RANGE while price moves past emergency threshold
+    // - 1% emergency exit trigger fires BEFORE position goes out of range
+    // - TJ pools have deep liquidity, so use tight trigger (matches V3 approach)
     // - High reinvestment trigger to avoid fee collection interference
     await configureTJStrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
-      targetRangeUpper: 500,       // 5% range — must be wider than emergency trigger
-      targetRangeLower: 500,
-      emergencyExitTrigger: 300,   // 3% emergency exit trigger
+      targetRangeUpper: 300,       // 3% range — must be wider than emergency trigger
+      targetRangeLower: 300,
+      emergencyExitTrigger: 100,   // 1% emergency exit trigger
       reinvestmentTrigger: 1000,   // $10 (high to avoid interference)
       reinvestmentRatio: 5000      // 50% to owner
     });

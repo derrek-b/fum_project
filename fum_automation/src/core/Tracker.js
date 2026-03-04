@@ -774,8 +774,7 @@ export default class Tracker {
    * @private
    */
   async handleVaultBlacklisted(data) {
-    const { vaultAddress, reason } = data;
-    const timestamp = data.timestamp || Date.now();
+    const { vaultAddress, reason, timestamp } = data;
 
     try {
       const normalizedAddress = ethers.utils.getAddress(vaultAddress);
@@ -854,8 +853,7 @@ export default class Tracker {
    * @private
    */
   async handleVaultRetryQueued(data) {
-    const { vaultAddress, error, attempts, source } = data;
-    const timestamp = data.timestamp || Date.now();
+    const { vaultAddress, error, attempts, source, timestamp } = data;
 
     try {
       const normalizedAddress = ethers.utils.getAddress(vaultAddress);
@@ -935,8 +933,7 @@ export default class Tracker {
    * @private
    */
   async handleVaultRetrySuccess(data) {
-    const { vaultAddress } = data;
-    const timestamp = data.timestamp || Date.now();
+    const { vaultAddress, timestamp } = data;
 
     try {
       const normalizedAddress = ethers.utils.getAddress(vaultAddress);

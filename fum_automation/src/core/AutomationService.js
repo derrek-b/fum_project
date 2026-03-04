@@ -1247,6 +1247,7 @@ class AutomationService {
       reason: `EMERGENCY: ${reason}`,
       emergency: true,
       cleanupResults: results,
+      timestamp: Date.now(),
       log: {
         level: 'error',
         message: `Emergency blacklist: ${vaultAddress} - ${reason}`
@@ -1345,6 +1346,7 @@ class AutomationService {
       error,
       source,
       attempts: this.failedVaults.get(vaultAddress).attempts,
+      timestamp: Date.now(),
       log: {
         level: 'warn',
         message: `Vault ${vaultAddress} failed (${source}): ${error}`
@@ -1431,6 +1433,7 @@ class AutomationService {
       vaultAddress: normalizedAddress,
       reason,
       offboardResults,
+      timestamp: Date.now(),
       log: {
         level: 'warn',
         message: `Vault ${normalizedAddress} blacklisted: ${reason}`
