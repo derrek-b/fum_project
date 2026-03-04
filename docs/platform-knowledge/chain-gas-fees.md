@@ -57,3 +57,24 @@ maxFeePerGas = lastBaseFeePerGas * 2 + maxPriorityFeePerGas
 ```
 
 The `* 2` is fee slippage protection — a ceiling, not the actual price paid. The base fee can increase up to 12.5% per block, so doubling it gives the transaction room to survive several consecutive blocks of base fee increases. The effective price at inclusion is always `baseFee + min(maxPriorityFeePerGas, maxFeePerGas - baseFee)`.
+
+## Gas Profiling (Executor Balances)
+
+Measured via Hardhat fork tests running full rebalance cycles (close → swap → mint/create):
+
+**Uniswap V3 (Arbitrum):** 822,827 gas total
+- Close position: 184k
+- Swap: 196k
+- Mint: 442k
+
+**Trader Joe V2.2 (Avalanche):** 5,410,379 gas total
+- Close position: 1.4M
+- Approvals: 65k
+- Swap: 275k
+- Create position: 3.7M
+
+**Executor balance thresholds** (derived from above, sized for worst-case gas spikes):
+- Arbitrum: min=0.002 ETH, max=0.004 ETH (~12/24 worst-case rebalances at 200 gwei spike)
+- Avalanche: min=0.04 AVAX, max=0.08 AVAX (~13/26 worst-case rebalances at 565 nAVAX spike)
+
+These values are configured as `minExecutorBalance`/`maxExecutorBalance` in chain config. See `docs/decisions/per-vault-signer.md` for the gas distribution design.
