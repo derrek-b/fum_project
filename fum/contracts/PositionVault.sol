@@ -235,7 +235,7 @@ contract PositionVault is IERC721Receiver, ReentrancyGuard, IERC1271 {
      *      no executor is set — without this check, an owner call when executor == address(0)
      *      would pass onlyAuthorized (owner path) and burn ETH to the zero address.
      */
-    function fundExecutor(uint256 amount) external onlyAuthorized nonReentrant {
+    function fundExecutor(uint256 amount) external payable onlyAuthorized nonReentrant {
         require(executor != address(0), "PositionVault: no executor set");
         require(amount > 0, "PositionVault: zero amount");
         require(address(this).balance >= amount, "PositionVault: insufficient ETH balance");

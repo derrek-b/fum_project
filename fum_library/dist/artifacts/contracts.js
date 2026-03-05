@@ -1095,7 +1095,7 @@
         ],
         "name": "fundExecutor",
         "outputs": [],
-        "stateMutability": "nonpayable",
+        "stateMutability": "payable",
         "type": "function"
       },
       {

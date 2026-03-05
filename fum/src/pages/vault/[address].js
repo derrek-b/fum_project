@@ -28,7 +28,10 @@ import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Fuel } from 'lucide-react';
+import FundExecutorModal from '../../components/vaults/FundExecutorModal';
+import { getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
+import { getNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { getStrategyIcon } from '../../utils/strategyIcons';
 import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
 const ERC20ABI = ERC20ARTIFACT.abi;
@@ -109,6 +112,8 @@ export default function VaultDetailPage() {
   const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
+  const [showFundExecutorModal, setShowFundExecutorModal] = useState(false);
+  const [executorBalance, setExecutorBalance] = useState(null);
 
   // Get strategy data from Redux (memoized to prevent unnecessary re-renders)
   const strategyConfig = useMemo(() => strategyConfigs?.[vaultAddress], [strategyConfigs, vaultAddress]);
@@ -174,6 +179,25 @@ export default function VaultDetailPage() {
       loadData();
     }
   }, [vaultAddress, userAddress, isReadReady, chainId, lastUpdate]);
+
+  // Fetch executor balance when automation is enabled
+  useEffect(() => {
+    const fetchExecutorBalance = async () => {
+      const executor = vaultFromRedux?.executor;
+      if (!executor || executor === ethers.constants.AddressZero || !isReadReady) {
+        setExecutorBalance(null);
+        return;
+      }
+      try {
+        const balance = await readProvider.getBalance(executor);
+        setExecutorBalance(ethers.utils.formatEther(balance));
+      } catch (err) {
+        console.error('Error fetching executor balance:', err);
+      }
+    };
+
+    fetchExecutorBalance();
+  }, [vaultFromRedux?.executor, isReadReady, readProvider, lastUpdate]);
 
   // Handle token withdrawal (for owner) - memoized
   const handleWithdrawToken = useCallback(async (token) => {
@@ -283,6 +307,8 @@ export default function VaultDetailPage() {
             executor: "0x0000000000000000000000000000000000000000",
             isBlacklisted: false,
             blacklistReason: null,
+            isFundingRequired: false,
+            fundingRequiredAt: null,
             isRetrying: false,
             retryError: null
           }
@@ -664,6 +690,34 @@ export default function VaultDetailPage() {
             </Card.Body>
           </Card>
 
+          {/* Executor Balance Status - show when automation is enabled */}
+          {automationEnabled && executorBalance !== null && chainId && (
+            <div
+              className="mb-4 d-flex align-items-center justify-content-between px-3 py-2"
+              style={{
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px',
+                border: '1px solid #dee2e6'
+              }}
+            >
+              <div className="d-flex align-items-center">
+                <Fuel size={16} className="me-2 text-muted" />
+                <span className="text-muted" style={{ fontSize: '0.9rem' }}>
+                  Executor: {parseFloat(executorBalance).toFixed(4)} / {getMaxExecutorBalance(chainId)} {getNativeSymbol(chainId)}
+                </span>
+              </div>
+              {isOwner && (
+                <Button
+                  variant="outline-secondary"
+                  size="sm"
+                  onClick={() => setShowFundExecutorModal(true)}
+                >
+                  Fund
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* Automation Service Disconnection Alert */}
           {!automationConnected && (
             <Alert
@@ -714,8 +768,41 @@ export default function VaultDetailPage() {
             </Alert>
           )}
 
-          {/* Retry Warning Alert - show when retrying but not blacklisted and service connected */}
-          {vaultFromRedux?.isRetrying && !vaultFromRedux?.isBlacklisted && automationConnected && (
+          {/* Funding Required Alert - show when executor needs funding but not blacklisted */}
+          {vaultFromRedux?.isFundingRequired && !vaultFromRedux?.isBlacklisted && (
+            <Alert
+              variant="warning"
+              className="mb-4 d-flex align-items-start"
+              style={{
+                borderLeft: '4px solid #f59e0b',
+                backgroundColor: '#fffbeb'
+              }}
+            >
+              <Fuel size={24} className="me-3 flex-shrink-0" style={{ marginTop: '2px' }} />
+              <div className="flex-grow-1">
+                <Alert.Heading className="h5 mb-2">
+                  Executor Funding Required
+                </Alert.Heading>
+                <p className="mb-2">
+                  The automation executor has run out of gas and all automated top-up paths have failed.
+                  Automation is paused until the executor is funded.
+                </p>
+                {isOwner && (
+                  <Button
+                    variant="warning"
+                    size="sm"
+                    onClick={() => setShowFundExecutorModal(true)}
+                  >
+                    <Fuel size={14} className="me-1" />
+                    Fund Executor
+                  </Button>
+                )}
+              </div>
+            </Alert>
+          )}
+
+          {/* Retry Warning Alert - show when retrying but not blacklisted/funding-required and service connected */}
+          {vaultFromRedux?.isRetrying && !vaultFromRedux?.isBlacklisted && !vaultFromRedux?.isFundingRequired && automationConnected && (
             <Alert
               variant="warning"
               className="mb-4 d-flex align-items-start"
@@ -950,6 +1037,16 @@ export default function VaultDetailPage() {
           tokens={tokens}
           chainId={chainId}
           mode={positionModalMode}
+        />
+
+        {/* Fund Executor Modal */}
+        <FundExecutorModal
+          show={showFundExecutorModal}
+          onHide={() => setShowFundExecutorModal(false)}
+          vaultAddress={vaultAddress}
+          executorAddress={vaultFromRedux?.executor}
+          chainId={chainId}
+          onSuccess={() => { loadData(); dispatch(triggerUpdate()); }}
         />
       </Container>
     </>

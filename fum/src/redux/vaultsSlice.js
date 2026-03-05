@@ -21,6 +21,8 @@ const vaultsSlice = createSlice({
         tokenBalances: vault.tokenBalances || {}, // Ensure tokenBalances object exists
         isBlacklisted: vault.isBlacklisted || false, // Blacklist status from automation service
         blacklistReason: vault.blacklistReason || null, // Reason for blacklisting if applicable
+        isFundingRequired: vault.isFundingRequired || false, // Executor funding required
+        fundingRequiredAt: vault.fundingRequiredAt || null, // Timestamp when funding became required
         isRetrying: vault.isRetrying || false, // Vault load retry in progress
         retryError: vault.retryError || null, // Error info during retry attempts
         // Tracker data from automation service
@@ -40,6 +42,8 @@ const vaultsSlice = createSlice({
         },
         isBlacklisted: action.payload.isBlacklisted || false,
         blacklistReason: action.payload.blacklistReason || null,
+        isFundingRequired: action.payload.isFundingRequired || false,
+        fundingRequiredAt: action.payload.fundingRequiredAt || null,
         isRetrying: action.payload.isRetrying || false,
         retryError: action.payload.retryError || null,
         trackerMetadata: action.payload.trackerMetadata || null,

@@ -19,7 +19,8 @@ const REFRESH_TRIGGER_EVENTS = [
   'LiquidityAddedToPosition', // Liquidity added to existing position
   'FeesCollected',          // Fees collected, token balances changed
   'TokensSwapped',          // Tokens swapped, balances changed
-  'VaultUnrecoverable'      // Vault blacklisted
+  'VaultUnrecoverable',     // Vault blacklisted
+  'ExecutorFundingRequired' // Executor needs funding
 ];
 
 /**
@@ -91,7 +92,9 @@ export function useAutomationEvents() {
         'VaultBlacklisted',
         'VaultUnblacklisted',
         'FeeCollectionFailed',
-        'TransactionLogged'
+        'TransactionLogged',
+        'ExecutorFundingRequired',
+        'ExecutorFundingCleared'
       ];
 
       automationEvents.forEach(eventName => {
@@ -161,6 +164,22 @@ export function useAutomationEvents() {
                 vaultData: {
                   isBlacklisted: false,
                   blacklistReason: null
+                }
+              }));
+            } else if (eventName === 'ExecutorFundingRequired' && payload.data?.vaultAddress) {
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isFundingRequired: true,
+                  fundingRequiredAt: payload.data.timestamp || Date.now()
+                }
+              }));
+            } else if (eventName === 'ExecutorFundingCleared' && payload.data?.vaultAddress) {
+              dispatch(updateVault({
+                vaultAddress: payload.data.vaultAddress,
+                vaultData: {
+                  isFundingRequired: false,
+                  fundingRequiredAt: null
                 }
               }));
             } else if (eventName === 'TransactionLogged' && payload.data?.vaultAddress) {

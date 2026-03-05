@@ -72,7 +72,9 @@ export default class SSEBroadcaster {
       'TransactionLogged',
       'VaultAuthEventFailed',
       'TrackerFailure',
-      'TrackerFailureCleared'
+      'TrackerFailureCleared',
+      'ExecutorFundingRequired',
+      'ExecutorFundingCleared'
     ];
 
     this.unsubscribeFunctions = [];
@@ -150,7 +152,7 @@ export default class SSEBroadcaster {
     } else if (pathname === '/failed-vaults' && req.method === 'GET') {
       this.handleFailedVaultsRequest(res);
     } else if (pathname === '/funding-required' && req.method === 'GET') {
-      this.handleFundingRequiredRequest(res);
+      this.handleFundingRequiredRequest(urlParts, res);
     } else if (pathname.startsWith('/vault/') && req.method === 'GET') {
       this.handleVaultRequest(pathname, urlParts.searchParams, res);
     } else {
@@ -267,9 +269,18 @@ export default class SSEBroadcaster {
    * Handle funding-required request
    * @private
    */
-  handleFundingRequiredRequest(res) {
+  handleFundingRequiredRequest(urlParts, res) {
     try {
-      const fundingData = this.getFundingRequired();
+      let fundingData = this.getFundingRequired();
+      const vaultsParam = urlParts.searchParams.get('vaults');
+      if (vaultsParam) {
+        const requested = vaultsParam.split(',').map(v => v.trim());
+        const filtered = {};
+        for (const addr of requested) {
+          if (fundingData[addr]) filtered[addr] = fundingData[addr];
+        }
+        fundingData = filtered;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ fundingRequired: fundingData }));
     } catch (error) {

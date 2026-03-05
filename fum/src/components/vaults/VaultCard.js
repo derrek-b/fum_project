@@ -3,7 +3,7 @@ import React from "react";
 import { Card, Badge, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { useRouter } from "next/router";
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Fuel } from 'lucide-react';
 import { getStrategyDetails } from 'fum_library/helpers/strategyHelpers';
 import { getStrategyIcon } from '../../utils/strategyIcons';
 import { calculateVaultAPY } from '../../utils/vaultsHelpers';
@@ -62,17 +62,21 @@ export default function VaultCard({ vault }) {
         position: "relative",
         background: vault.isBlacklisted
           ? 'rgba(254, 242, 242, 0.95)'
-          : vault.isRetrying
+          : vault.isFundingRequired
             ? 'rgba(255, 251, 235, 0.95)'
-            : 'rgba(245, 245, 245, 0.95)',
+            : vault.isRetrying
+              ? 'rgba(255, 251, 235, 0.95)'
+              : 'rgba(245, 245, 245, 0.95)',
         borderColor: vault.isBlacklisted
           ? '#dc3545'
-          : vault.isRetrying
+          : vault.isFundingRequired
             ? '#f59e0b'
-            : isAutomationEnabled
-              ? 'rgba(16, 185, 129, 0.5)'
-              : 'rgba(0, 0, 0, 0.1)',
-        borderWidth: vault.isBlacklisted || vault.isRetrying ? '2px' : '1px'
+            : vault.isRetrying
+              ? '#f59e0b'
+              : isAutomationEnabled
+                ? 'rgba(16, 185, 129, 0.5)'
+                : 'rgba(0, 0, 0, 0.1)',
+        borderWidth: vault.isBlacklisted || vault.isFundingRequired || vault.isRetrying ? '2px' : '1px'
       }}
       onClick={handleCardClick}
     >
@@ -110,7 +114,7 @@ export default function VaultCard({ vault }) {
                     </Badge>
 
                     {/* Automation indicator - only show if enabled AND not blacklisted AND not retrying AND service connected */}
-                    {isAutomationEnabled && !vault.isBlacklisted && !vault.isRetrying && automationConnected && (
+                    {isAutomationEnabled && !vault.isBlacklisted && !vault.isFundingRequired && !vault.isRetrying && automationConnected && (
                       <div className="ms-2 d-inline-flex align-items-center">
                         {/* Pulsing green dot */}
                         <div
@@ -311,8 +315,30 @@ export default function VaultCard({ vault }) {
           </div>
         )}
 
-        {/* Retry Warning Banner - show when retrying but not blacklisted */}
-        {vault.isRetrying && !vault.isBlacklisted && (
+        {/* Funding Required Banner - show when funding required but not blacklisted */}
+        {vault.isFundingRequired && !vault.isBlacklisted && (
+          <div
+            className="mt-3 d-flex align-items-center justify-content-center"
+            style={{
+              backgroundColor: '#f59e0b',
+              color: '#ffffff',
+              padding: '0.75rem 1rem',
+              marginLeft: 'calc(-1 * var(--space-xl))',
+              marginRight: 'calc(-1 * var(--space-xl))',
+              marginBottom: 'calc(-1 * var(--space-xl))',
+              borderBottomLeftRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              borderBottomRightRadius: 'calc(var(--bs-card-border-radius) - 1px)',
+              fontWeight: '600',
+              fontSize: '0.9rem'
+            }}
+          >
+            <Fuel size={18} className="me-2" />
+            FUNDING REQUIRED
+          </div>
+        )}
+
+        {/* Retry Warning Banner - show when retrying but not blacklisted and not funding-required */}
+        {vault.isRetrying && !vault.isBlacklisted && !vault.isFundingRequired && (
           <div
             className="mt-3 d-flex align-items-center justify-content-center"
             style={{

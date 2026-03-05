@@ -39,6 +39,25 @@ export const fetchBlacklistData = async () => {
 };
 
 /**
+ * Fetch funding-required data from automation service
+ * @returns {Promise<object>} Funding-required data keyed by vault address
+ */
+export const fetchFundingRequiredData = async () => {
+  try {
+    const response = await fetch(`${SSE_BASE_URL}/funding-required`);
+    if (!response.ok) {
+      console.warn(`Failed to fetch funding-required data: ${response.status}`);
+      return {};
+    }
+    const data = await response.json();
+    return data.fundingRequired || {};
+  } catch (error) {
+    console.warn('Error fetching funding-required data:', error);
+    return {};
+  }
+};
+
+/**
  * Fetch tracker data (metadata and transactions) for a vault from automation service
  * @param {string} vaultAddress - The vault address
  * @returns {Promise<object>} Object with trackerMetadata and transactionHistory
@@ -1455,7 +1474,24 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       console.warn('Error applying blacklist data:', error);
     }
 
-    // 11. Fetch tracker data (metadata and transactions) for all vaults in parallel
+    // 11. Fetch funding-required data and apply to vaults
+    try {
+      const fundingRequiredData = await fetchFundingRequiredData();
+      for (let i = 0; i < completeVaultsData.length; i++) {
+        const addr = completeVaultsData[i].address;
+        const entry = fundingRequiredData[addr] ||
+                      fundingRequiredData[addr.toLowerCase()] ||
+                      fundingRequiredData[ethers.utils.getAddress(addr)];
+        if (entry) {
+          completeVaultsData[i].isFundingRequired = true;
+          completeVaultsData[i].fundingRequiredAt = entry.enteredAt || null;
+        }
+      }
+    } catch (error) {
+      console.warn('Error applying funding-required data:', error);
+    }
+
+    // 12. Fetch tracker data (metadata and transactions) for all vaults in parallel
     try {
       const trackerDataPromises = completeVaultsData.map(vault => fetchVaultTrackerData(vault.address));
       const trackerResults = await Promise.all(trackerDataPromises);
@@ -1472,7 +1508,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
       console.warn('Error fetching tracker data:', error);
     }
 
-    // 12. NOW update all vaults in Redux with COMPLETE data (including tokenBalances, blacklist, and tracker data)
+    // 13. NOW update all vaults in Redux with COMPLETE data (including tokenBalances, blacklist, funding-required, and tracker data)
     dispatch(setVaults(completeVaultsData));
 
     return {

@@ -524,6 +524,37 @@ describe("PositionVault - 2.0.0", function() {
       ).to.be.revertedWith("PositionVault: insufficient ETH balance");
     });
 
+    it("should fund executor via msg.value when vault has zero ETH", async function() {
+      await vault.setExecutor(executorWallet.address);
+      // Vault has 0 ETH — owner sends msg.value directly
+      const fundAmount = ethers.parseEther("0.05");
+      const executorBalanceBefore = await ethers.provider.getBalance(executorWallet.address);
+
+      await vault.fundExecutor(fundAmount, { value: fundAmount });
+
+      const executorBalanceAfter = await ethers.provider.getBalance(executorWallet.address);
+      expect(executorBalanceAfter - executorBalanceBefore).to.equal(fundAmount);
+    });
+
+    it("should keep excess msg.value in vault when msg.value exceeds amount", async function() {
+      await vault.setExecutor(executorWallet.address);
+      const vaultAddress = await vault.getAddress();
+      const fundAmount = ethers.parseEther("0.05");
+      const sendAmount = ethers.parseEther("0.10"); // 2x the fund amount
+
+      const executorBalanceBefore = await ethers.provider.getBalance(executorWallet.address);
+
+      await vault.fundExecutor(fundAmount, { value: sendAmount });
+
+      // Executor gets exactly fundAmount
+      const executorBalanceAfter = await ethers.provider.getBalance(executorWallet.address);
+      expect(executorBalanceAfter - executorBalanceBefore).to.equal(fundAmount);
+
+      // Excess stays in vault (sendAmount - fundAmount = 0.05 ETH)
+      const vaultBalance = await ethers.provider.getBalance(vaultAddress);
+      expect(vaultBalance).to.equal(sendAmount - fundAmount);
+    });
+
     it("should revert fundExecutor from non-authorized address", async function() {
       await vault.setExecutor(executorWallet.address);
       const vaultAddress = await vault.getAddress();
