@@ -122,6 +122,8 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
   } | null,
   isBlacklisted: boolean,
   blacklistReason: string | null,
+  isFundingRequired: boolean,          // Executor needs manual funding
+  fundingRequiredAt: number | null,    // Timestamp when funding became required
   isRetrying: boolean,
   retryError: {
     message: string,
@@ -341,8 +343,9 @@ triggerUpdate()
 8. **Second pass:** Calculate TVL for each vault
 9. `loadVaultTokenBalances()` for each vault
 10. Fetch blacklist data from automation service
-11. Fetch tracker data for all vaults (parallel)
-12. `dispatch(setVaults(completeVaultsData))`
+11. Fetch funding-required data from automation service
+12. Fetch tracker data for all vaults (parallel)
+13. `dispatch(setVaults(completeVaultsData))`
 
 **Single vault refresh:** `getVaultData(vaultAddress, ...)` runs steps 1–6 for one vault.
 
@@ -375,14 +378,17 @@ Connects to `process.env.NEXT_PUBLIC_SSE_URL` (e.g., `http://localhost:3001/even
 | `VaultUnblacklisted` | No | `isBlacklisted=false`, `blacklistReason=null` |
 | `FeeCollectionFailed` | No | — |
 | `TransactionLogged` | No | Prepends to `transactionHistory` |
+| `ExecutorFundingRequired` | **Yes** | `isFundingRequired=true`, `fundingRequiredAt` |
+| `ExecutorFundingCleared` | No | `isFundingRequired=false`, `fundingRequiredAt=null` |
 
-**REFRESH_TRIGGER_EVENTS:** `NewPositionCreated`, `PositionsClosed`, `LiquidityAddedToPosition`, `FeesCollected`, `TokensSwapped`, `VaultUnrecoverable`
+**REFRESH_TRIGGER_EVENTS:** `NewPositionCreated`, `PositionsClosed`, `LiquidityAddedToPosition`, `FeesCollected`, `TokensSwapped`, `VaultUnrecoverable`, `ExecutorFundingRequired`
 
 ### Automation Service REST Endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /blacklist` | Returns `{ [vaultAddress]: { reason, ...metadata } }` |
+| `GET /funding-required` | Returns `{ [vaultAddress]: { enteredAt, ...metadata } }`. Optional `?vaults=addr1,addr2` filter. |
 | `GET /vault/:address/metadata` | Tracker metadata (baseline, snapshot, aggregates) |
 | `GET /vault/:address/transactions` | Transaction history array |
 

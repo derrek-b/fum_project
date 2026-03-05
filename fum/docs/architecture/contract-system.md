@@ -155,6 +155,7 @@ Same pattern for `mint`, `increaseLiquidity`, `decreaseLiquidity`, `collect`, `b
 | `wrapETH(weth, amount)` | onlyAuthorized | None (stays in vault) | — |
 | `unwrapETH(weth, amount)` | onlyAuthorized | None (stays in vault) | — |
 | `withdrawPosition(nftContract, tokenId)` | onlyAuthorized | None (sends to owner) | — |
+| `fundExecutor(amount)` | onlyAuthorized | None (sends to executor) | **payable** — accepts `msg.value` |
 
 **Approve validation:** Only allows selectors `0x095ea7b3` (ERC20 `approve`) and `0x87517c45` (Permit2 `permit`). All other selectors revert.
 
