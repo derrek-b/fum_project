@@ -146,11 +146,11 @@ export default class SSEBroadcaster {
     } else if (pathname === '/health' && req.method === 'GET') {
       this.handleHealthCheck(res);
     } else if (pathname === '/blacklist' && req.method === 'GET') {
-      this.handleBlacklistRequest(res);
+      this.handleBlacklistRequest(urlParts, res);
     } else if (pathname === '/tracking-failures' && req.method === 'GET') {
       this.handleTrackingFailuresRequest(res);
     } else if (pathname === '/failed-vaults' && req.method === 'GET') {
-      this.handleFailedVaultsRequest(res);
+      this.handleFailedVaultsRequest(urlParts, res);
     } else if (pathname === '/funding-required' && req.method === 'GET') {
       this.handleFundingRequiredRequest(urlParts, res);
     } else if (pathname.startsWith('/vault/') && req.method === 'GET') {
@@ -221,9 +221,18 @@ export default class SSEBroadcaster {
    * Handle blacklist request
    * @private
    */
-  handleBlacklistRequest(res) {
+  handleBlacklistRequest(urlParts, res) {
     try {
-      const blacklistData = this.getBlacklist();
+      let blacklistData = this.getBlacklist();
+      const vaultsParam = urlParts.searchParams.get('vaults');
+      if (vaultsParam) {
+        const requested = vaultsParam.split(',').map(v => v.trim());
+        const filtered = {};
+        for (const addr of requested) {
+          if (blacklistData[addr]) filtered[addr] = blacklistData[addr];
+        }
+        blacklistData = filtered;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ blacklisted: blacklistData }));
     } catch (error) {
@@ -253,9 +262,18 @@ export default class SSEBroadcaster {
    * Handle failed vaults request
    * @private
    */
-  handleFailedVaultsRequest(res) {
+  handleFailedVaultsRequest(urlParts, res) {
     try {
-      const failedData = this.getFailedVaults();
+      let failedData = this.getFailedVaults();
+      const vaultsParam = urlParts.searchParams.get('vaults');
+      if (vaultsParam) {
+        const requested = vaultsParam.split(',').map(v => v.trim());
+        const filtered = {};
+        for (const addr of requested) {
+          if (failedData[addr]) filtered[addr] = failedData[addr];
+        }
+        failedData = filtered;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ failedVaults: failedData }));
     } catch (error) {

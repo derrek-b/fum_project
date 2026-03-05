@@ -23,9 +23,13 @@ const SSE_BASE_URL = process.env.NEXT_PUBLIC_SSE_URL?.replace('/events', '');
  * Fetch blacklist data from automation service
  * @returns {Promise<object>} Blacklist data keyed by vault address
  */
-export const fetchBlacklistData = async () => {
+export const fetchBlacklistData = async (vaultAddresses) => {
   try {
-    const response = await fetch(`${SSE_BASE_URL}/blacklist`);
+    let url = `${SSE_BASE_URL}/blacklist`;
+    if (vaultAddresses?.length > 0) {
+      url += `?vaults=${vaultAddresses.join(',')}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) {
       console.warn(`Failed to fetch blacklist: ${response.status}`);
       return {};
@@ -42,9 +46,13 @@ export const fetchBlacklistData = async () => {
  * Fetch funding-required data from automation service
  * @returns {Promise<object>} Funding-required data keyed by vault address
  */
-export const fetchFundingRequiredData = async () => {
+export const fetchFundingRequiredData = async (vaultAddresses) => {
   try {
-    const response = await fetch(`${SSE_BASE_URL}/funding-required`);
+    let url = `${SSE_BASE_URL}/funding-required`;
+    if (vaultAddresses?.length > 0) {
+      url += `?vaults=${vaultAddresses.join(',')}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) {
       console.warn(`Failed to fetch funding-required data: ${response.status}`);
       return {};
@@ -1455,8 +1463,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 10. Fetch blacklist data and apply to vaults
+    const vaultAddresses = completeVaultsData.map(v => v.address);
     try {
-      const blacklistData = await fetchBlacklistData();
+      const blacklistData = await fetchBlacklistData(vaultAddresses);
       if (Object.keys(blacklistData).length > 0) {
         for (let i = 0; i < completeVaultsData.length; i++) {
           const vaultAddress = completeVaultsData[i].address;
@@ -1476,7 +1485,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
     // 11. Fetch funding-required data and apply to vaults
     try {
-      const fundingRequiredData = await fetchFundingRequiredData();
+      const fundingRequiredData = await fetchFundingRequiredData(vaultAddresses);
       for (let i = 0; i < completeVaultsData.length; i++) {
         const addr = completeVaultsData[i].address;
         const entry = fundingRequiredData[addr] ||
