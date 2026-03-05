@@ -766,7 +766,7 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
 
   try {
     // Get adapters for the current chain
-    const { adapters, failures } = AdapterFactory.getAdaptersForChain(chainId, provider);
+    const { adapters, failures } = AdapterFactory.getAdaptersForChain(chainId);
     if (failures.length > 0) {
       console.warn(`Failed to create some adapters:`, failures);
     }
@@ -930,7 +930,7 @@ const calculatePositionsTVL = async (positions, poolData, chainId, provider) => 
   // Calculate TVL for each position
   for (const data of positionData) {
     try {
-      const adapter = AdapterFactory.getAdapter(data.position.platform, chainId, provider);
+      const adapter = AdapterFactory.getAdapter(data.position.platform, chainId);
       if (!adapter) {
         hasPartialData = true;
         continue;
@@ -1178,7 +1178,7 @@ export const refreshAfterPositionCreation = async (vaultAddress, provider, chain
 
         for (const data of positionData) {
           try {
-            const adapter = AdapterFactory.getAdapter(data.position.platform, chainId, provider);
+            const adapter = AdapterFactory.getAdapter(data.position.platform, chainId);
             if (!adapter) {
               hasPartialData = true;
               continue;
@@ -1326,7 +1326,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
     // 4. Get all user positions that aren't in vaults
     const vaultPositionIds = new Set(allPositions.map(p => p.id));
-    const { adapters: userAdapters, failures: userAdapterFailures } = AdapterFactory.getAdaptersForChain(chainId, provider);
+    const { adapters: userAdapters, failures: userAdapterFailures } = AdapterFactory.getAdaptersForChain(chainId);
     if (userAdapterFailures.length > 0) {
       console.warn(`Failed to create some adapters for user positions:`, userAdapterFailures);
     }

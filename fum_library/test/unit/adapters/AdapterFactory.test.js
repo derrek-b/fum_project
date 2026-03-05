@@ -5,32 +5,27 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ethers } from 'ethers';
 import AdapterFactory from '../../../src/adapters/AdapterFactory.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
 import TraderJoeV2_2Adapter from '../../../src/adapters/TraderJoeV2_2Adapter.js';
 
-// Create a mock provider for testing
-const mockProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
-
 // Create a failing adapter class for testing error handling
 class FailingAdapter {
-  constructor(chainId, provider) {
+  constructor(chainId) {
     throw new Error("Adapter creation failed");
   }
 }
 
 // Create a mock adapter class for testing registration
 class MockAdapter {
-  constructor(chainId, provider) {
+  constructor(chainId) {
     if (!chainId || typeof chainId !== 'number') {
       throw new Error("chainId must be a valid number");
     }
     this.chainId = chainId;
     this.platformId = 'mock';
     this.platformName = 'Mock Platform';
-    this.provider = provider;
   }
 }
 
@@ -38,7 +33,7 @@ describe('AdapterFactory - Unit Tests', () => {
   describe('getAdaptersForChain', () => {
     describe('Success Cases', () => {
       it('should return adapters for Arbitrum (42161)', () => {
-        const result = AdapterFactory.getAdaptersForChain(42161, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(42161);
 
         expect(result).toBeDefined();
         expect(result).toHaveProperty('adapters');
@@ -58,7 +53,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return adapters for Avalanche (43114)', () => {
-        const result = AdapterFactory.getAdaptersForChain(43114, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(43114);
 
         expect(result).toBeDefined();
         expect(result).toHaveProperty('adapters');
@@ -83,7 +78,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return adapters for local test chain (1337)', () => {
-        const result = AdapterFactory.getAdaptersForChain(1337, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(1337);
 
         expect(result).toBeDefined();
         expect(result.adapters.length).toBe(2); // V3, V4 (Arbitrum fork)
@@ -99,7 +94,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return adapters for local Avalanche test chain (1338)', () => {
-        const result = AdapterFactory.getAdaptersForChain(1338, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(1338);
 
         expect(result).toBeDefined();
         expect(result.adapters.length).toBe(1); // Trader Joe V2.2 only (Avalanche fork)
@@ -120,7 +115,7 @@ describe('AdapterFactory - Unit Tests', () => {
 
       it('should throw error for unsupported chain', () => {
         expect(() => {
-          AdapterFactory.getAdaptersForChain(999999, mockProvider);
+          AdapterFactory.getAdaptersForChain(999999);
         }).toThrow('Chain 999999 is not supported');
       });
 
@@ -129,7 +124,7 @@ describe('AdapterFactory - Unit Tests', () => {
         AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
 
         // Test with a chain that has uniswapV3 and uniswapV4
-        const result = AdapterFactory.getAdaptersForChain(42161, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(42161);
 
         // Should still get the working adapters (V3 and V4)
         expect(result.adapters.length).toBe(2);
@@ -174,7 +169,7 @@ describe('AdapterFactory - Unit Tests', () => {
         AdapterFactory.registerAdapterForTestingOnly('mock', MockAdapter);
 
         // Test with our special test chain
-        const result = AdapterFactory.getAdaptersForChain(88888, mockProvider);
+        const result = AdapterFactory.getAdaptersForChain(88888);
 
         // Should get the working adapter
         expect(result.adapters.length).toBe(1);
@@ -236,7 +231,7 @@ describe('AdapterFactory - Unit Tests', () => {
 
       it('should throw error for zero chainId', () => {
         expect(() => {
-          AdapterFactory.getAdaptersForChain(0, mockProvider);
+          AdapterFactory.getAdaptersForChain(0);
         }).toThrow('chainId must be a valid number');
       });
 
@@ -272,7 +267,7 @@ describe('AdapterFactory - Unit Tests', () => {
   describe('getAdapter', () => {
     describe('Success Cases', () => {
       it('should return UniswapV3Adapter for valid platform and chain', () => {
-        const adapter = AdapterFactory.getAdapter('uniswapV3', 42161, mockProvider);
+        const adapter = AdapterFactory.getAdapter('uniswapV3', 42161);
 
         expect(adapter).toBeDefined();
         expect(adapter).toBeInstanceOf(UniswapV3Adapter);
@@ -282,7 +277,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return adapter for test chain', () => {
-        const adapter = AdapterFactory.getAdapter('uniswapV3', 1337, mockProvider);
+        const adapter = AdapterFactory.getAdapter('uniswapV3', 1337);
 
         expect(adapter).toBeDefined();
         expect(adapter).toBeInstanceOf(UniswapV3Adapter);
@@ -290,7 +285,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return TraderJoeV2_2Adapter for Avalanche (43114)', () => {
-        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 43114, mockProvider);
+        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 43114);
 
         expect(adapter).toBeDefined();
         expect(adapter).toBeInstanceOf(TraderJoeV2_2Adapter);
@@ -300,7 +295,7 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should return TraderJoeV2_2Adapter for local Avalanche test chain (1338)', () => {
-        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 1338, mockProvider);
+        const adapter = AdapterFactory.getAdapter('traderjoeV2_2', 1338);
 
         expect(adapter).toBeDefined();
         expect(adapter).toBeInstanceOf(TraderJoeV2_2Adapter);
@@ -312,7 +307,7 @@ describe('AdapterFactory - Unit Tests', () => {
         // Register a custom adapter
         AdapterFactory.registerAdapterForTestingOnly('mock', MockAdapter);
 
-        const adapter = AdapterFactory.getAdapter('mock', 42161, mockProvider);
+        const adapter = AdapterFactory.getAdapter('mock', 42161);
 
         expect(adapter).toBeDefined();
         expect(adapter).toBeInstanceOf(MockAdapter);
@@ -325,43 +320,43 @@ describe('AdapterFactory - Unit Tests', () => {
     describe('Error Cases - Platform ID Validation', () => {
       it('should throw error for null platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter(null, 42161, mockProvider);
+          AdapterFactory.getAdapter(null, 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for undefined platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter(undefined, 42161, mockProvider);
+          AdapterFactory.getAdapter(undefined, 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for empty string platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter('', 42161, mockProvider);
+          AdapterFactory.getAdapter('', 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for number platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter(123, 42161, mockProvider);
+          AdapterFactory.getAdapter(123, 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for object platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter({ platform: 'uniswapV3' }, 42161, mockProvider);
+          AdapterFactory.getAdapter({ platform: 'uniswapV3' }, 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for array platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter(['uniswapV3'], 42161, mockProvider);
+          AdapterFactory.getAdapter(['uniswapV3'], 42161);
         }).toThrow('Platform ID must be a valid string');
       });
 
       it('should throw error for boolean platformId', () => {
         expect(() => {
-          AdapterFactory.getAdapter(true, 42161, mockProvider);
+          AdapterFactory.getAdapter(true, 42161);
         }).toThrow('Platform ID must be a valid string');
       });
     });
@@ -411,7 +406,7 @@ describe('AdapterFactory - Unit Tests', () => {
 
       it('should throw error for zero chainId', () => {
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV3', 0, mockProvider);
+          AdapterFactory.getAdapter('uniswapV3', 0);
         }).toThrow('chainId must be a valid number');
       });
 
@@ -425,13 +420,13 @@ describe('AdapterFactory - Unit Tests', () => {
     describe('Error Cases - Platform Not Found', () => {
       it('should throw error for non-existent platform', () => {
         expect(() => {
-          AdapterFactory.getAdapter('nonexistent', 42161, mockProvider);
+          AdapterFactory.getAdapter('nonexistent', 42161);
         }).toThrow('No adapter available for platform: nonexistent');
       });
 
       it('should throw error for empty platform registry', () => {
         expect(() => {
-          AdapterFactory.getAdapter('sushiswap', 42161, mockProvider);
+          AdapterFactory.getAdapter('sushiswap', 42161);
         }).toThrow('No adapter available for platform: sushiswap');
       });
     });
@@ -442,13 +437,13 @@ describe('AdapterFactory - Unit Tests', () => {
         AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
 
         expect(() => {
-          AdapterFactory.getAdapter('failing', 42161, mockProvider);
+          AdapterFactory.getAdapter('failing', 42161);
         }).toThrow('Failed to create failing adapter for chain 42161: Adapter creation failed');
       });
 
       it('should throw error for unsupported chain', () => {
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV3', 999999, mockProvider);
+          AdapterFactory.getAdapter('uniswapV3', 999999);
         }).toThrow('Failed to create uniswapV3 adapter for chain 999999: Chain 999999 is not supported');
       });
 
@@ -473,42 +468,42 @@ describe('AdapterFactory - Unit Tests', () => {
       it('should throw error for Uniswap V3 on Avalanche chain (43114)', () => {
         // Uniswap V3 is not deployed on Avalanche
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV3', 43114, mockProvider);
+          AdapterFactory.getAdapter('uniswapV3', 43114);
         }).toThrow('Failed to create uniswapV3 adapter for chain 43114: Platform uniswapV3 not configured for chain 43114');
       });
 
       it('should throw error for Uniswap V3 on Avalanche fork (1338)', () => {
         // Uniswap V3 is not deployed on Avalanche fork
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV3', 1338, mockProvider);
+          AdapterFactory.getAdapter('uniswapV3', 1338);
         }).toThrow('Failed to create uniswapV3 adapter for chain 1338: Platform uniswapV3 not configured for chain 1338');
       });
 
       it('should throw error for Uniswap V4 on Avalanche chain (43114)', () => {
         // Uniswap V4 is not deployed on Avalanche
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV4', 43114, mockProvider);
+          AdapterFactory.getAdapter('uniswapV4', 43114);
         }).toThrow('Failed to create uniswapV4 adapter for chain 43114: Platform uniswapV4 not configured for chain 43114');
       });
 
       it('should throw error for Uniswap V4 on Avalanche fork (1338)', () => {
         // Uniswap V4 is not deployed on Avalanche fork
         expect(() => {
-          AdapterFactory.getAdapter('uniswapV4', 1338, mockProvider);
+          AdapterFactory.getAdapter('uniswapV4', 1338);
         }).toThrow('Failed to create uniswapV4 adapter for chain 1338: Platform uniswapV4 not configured for chain 1338');
       });
 
       it('should throw error for Trader Joe on Arbitrum chain (42161)', () => {
         // Trader Joe is not deployed on Arbitrum
         expect(() => {
-          AdapterFactory.getAdapter('traderjoeV2_2', 42161, mockProvider);
+          AdapterFactory.getAdapter('traderjoeV2_2', 42161);
         }).toThrow('Failed to create traderjoeV2_2 adapter for chain 42161: Platform traderjoeV2_2 not configured for chain 42161');
       });
 
       it('should throw error for Trader Joe on Arbitrum fork (1337)', () => {
         // Trader Joe is not deployed on Arbitrum fork
         expect(() => {
-          AdapterFactory.getAdapter('traderjoeV2_2', 1337, mockProvider);
+          AdapterFactory.getAdapter('traderjoeV2_2', 1337);
         }).toThrow('Failed to create traderjoeV2_2 adapter for chain 1337: Platform traderjoeV2_2 not configured for chain 1337');
       });
 
@@ -527,7 +522,7 @@ describe('AdapterFactory - Unit Tests', () => {
         AdapterFactory.registerAdapterForTestingOnly('strict', StrictAdapter);
 
         expect(() => {
-          AdapterFactory.getAdapter('strict', 200000, mockProvider);
+          AdapterFactory.getAdapter('strict', 200000);
         }).toThrow('Failed to create strict adapter for chain 200000: Chain ID must be between 1 and 100000');
       });
     });

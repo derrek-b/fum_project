@@ -146,7 +146,7 @@ export default function PositionDetailPage() {
   const adapter = useMemo(() => {
     if (!position?.platform || !provider || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(position.platform, chainId, provider);
+      return AdapterFactory.getAdapter(position.platform, chainId);
     } catch (error) {
       console.error(`Failed to get adapter for position ${id}:`, error);
       return null;
@@ -272,7 +272,7 @@ export default function PositionDetailPage() {
       const fetchInitialPositions = async () => {
         try {
           // Get all adapters for this chain
-          const result = AdapterFactory.getAdaptersForChain(chainId, provider);
+          const result = AdapterFactory.getAdaptersForChain(chainId);
           const adapters = result.adapters || [];
 
           if (adapters.length === 0) {

@@ -156,7 +156,7 @@ export default function AddLiquidityModal({
   const adapter = useMemo(() => {
     if (!readProvider || !selectedPlatform || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(selectedPlatform, chainId, readProvider);
+      return AdapterFactory.getAdapter(selectedPlatform, chainId);
     } catch (error) {
       console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
       showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);

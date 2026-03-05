@@ -117,7 +117,7 @@ export default function PositionContainer() {
 
       try {
         // Get all platform adapters for the current chain
-        const result = AdapterFactory.getAdaptersForChain(chainId, provider);
+        const result = AdapterFactory.getAdaptersForChain(chainId);
         const adapters = result.adapters || [];
 
         if (adapters.length === 0) {
@@ -227,7 +227,7 @@ export default function PositionContainer() {
       const currentTokens = {...(tokens || {})};
 
       // Get adapters again (could be pulled from previous effect if stored)
-      const result = AdapterFactory.getAdaptersForChain(chainId, provider);
+      const result = AdapterFactory.getAdaptersForChain(chainId);
       const adapters = result.adapters || [];
 
       if (adapters.length === 0) {

@@ -150,7 +150,7 @@ export default function RemoveLiquidityModal({
   // Function to remove liquidity using the adapter
   const removeLiquidity = async (percentage, slippageTolerance) => {
     // Get the appropriate adapter (uses read provider)
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId, readProvider);
+    const adapter = AdapterFactory.getAdapter(position.platform, chainId);
 
     if (!adapter) {
       throw new Error("No adapter available for this position");

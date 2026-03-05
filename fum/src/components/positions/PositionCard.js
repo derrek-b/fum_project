@@ -29,7 +29,7 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
   const adapter = useMemo(() => {
     if (!position.platform || !provider || !chainId) return null;
     try {
-      return AdapterFactory.getAdapter(position.platform, chainId, provider);
+      return AdapterFactory.getAdapter(position.platform, chainId);
     } catch (error) {
       console.error(`Failed to get adapter for position ${position.id}:`, error);
       return null;
