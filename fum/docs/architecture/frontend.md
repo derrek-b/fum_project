@@ -387,7 +387,7 @@ Connects to `process.env.NEXT_PUBLIC_SSE_URL` (e.g., `http://localhost:3001/even
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /blacklist` | Returns `{ [vaultAddress]: { reason, ...metadata } }` |
+| `GET /blacklist` | Returns `{ [vaultAddress]: { reason, ...metadata } }`. Optional `?vaults=addr1,addr2` filter. |
 | `GET /funding-required` | Returns `{ [vaultAddress]: { enteredAt, ...metadata } }`. Optional `?vaults=addr1,addr2` filter. |
 | `GET /vault/:address/metadata` | Tracker metadata (baseline, snapshot, aggregates) |
 | `GET /vault/:address/transactions` | Transaction history array |

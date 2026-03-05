@@ -35,9 +35,9 @@ new SSEBroadcaster(eventManager, {
 |---|---|---|
 | `GET /events` | `handleSSEConnection` | SSE stream — keeps connection open, sends events |
 | `GET /health` | `handleHealthCheck` | Health check |
-| `GET /blacklist` | `handleBlacklistRequest` | Current blacklist data |
+| `GET /blacklist` | `handleBlacklistRequest` | Current blacklist data. Optional `?vaults=addr1,addr2` filter. |
 | `GET /tracking-failures` | `handleTrackingFailuresRequest` | Current tracking failures |
-| `GET /failed-vaults` | `handleFailedVaultsRequest` | Current failed vaults (retry queue) |
+| `GET /failed-vaults` | `handleFailedVaultsRequest` | Current failed vaults (retry queue). Optional `?vaults=addr1,addr2` filter. |
 | `GET /vault/:address/metadata` | `handleVaultRequest` | Vault metadata from Tracker |
 | `GET /vault/:address/transactions?start=&end=` | `handleVaultRequest` | Vault transaction history |
 
