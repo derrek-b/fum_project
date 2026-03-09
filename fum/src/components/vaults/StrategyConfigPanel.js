@@ -14,7 +14,6 @@ import StrategyValidationModal from './StrategyValidationModal';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
 import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, validateTokensForStrategy, validatePositionsForStrategy } from 'fum_library/helpers/strategyHelpers';
-import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
 import { config } from 'dotenv';
 
 /**

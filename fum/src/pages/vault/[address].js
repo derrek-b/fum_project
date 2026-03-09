@@ -27,7 +27,7 @@ import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
 import { getStrategyDetails } from "fum_library/helpers";
 import { getVaultContract } from 'fum_library/blockchain/contracts';
-import { getExecutorAddress } from 'fum_library/helpers/chainHelpers';
+import { getExecutorXpub } from 'fum_library/helpers/chainHelpers';
 import { AlertTriangle, RefreshCw, Fuel } from 'lucide-react';
 import FundExecutorModal from '../../components/vaults/FundExecutorModal';
 import { getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
@@ -213,13 +213,23 @@ export default function VaultDetailPage() {
   // Handle the automation toggle - memoized
   const handleAutomationToggle = useCallback((enabled) => {
     if (enabled) {
-      // Get the executor address for this chain
-      const executorAddr = getExecutorAddress(chainId);
-
-      if (!executorAddr) {
-        showError(`No automation executor available for network ${chainId}`);
+      // Derive per-vault executor address from xpub + executorIndex
+      let executorXpub;
+      try {
+        executorXpub = getExecutorXpub(chainId);
+      } catch (err) {
+        showError(`No automation executor configured for network ${chainId}`);
         return;
       }
+
+      const executorIndex = vaultFromRedux.executorIndex;
+      if (executorIndex === undefined || executorIndex === null) {
+        showError('Vault executor index not available — try refreshing');
+        return;
+      }
+
+      const hdNode = ethers.utils.HDNode.fromExtendedKey(executorXpub);
+      const executorAddr = hdNode.derivePath("m/44'/60'/0'/0/" + executorIndex).address;
 
       // Check 1: Validate strategy is selected for the vault
       if (!vaultFromRedux.hasActiveStrategy || !vaultFromRedux.strategyAddress) {
@@ -280,8 +290,9 @@ export default function VaultDetailPage() {
       if (isEnablingAutomation) {
         console.log('Setting executor...', pendingExecutorAddress);
 
-        // Call contract to set executor
-        const tx = await vaultContract.setExecutor(pendingExecutorAddress);
+        // Call contract to set executor with initial gas funding
+        const fundingAmount = ethers.utils.parseEther(String(getMaxExecutorBalance(chainId)));
+        const tx = await vaultContract.setExecutor(pendingExecutorAddress, { value: fundingAmount });
         await tx.wait();
 
         // Update Redux store
@@ -1024,6 +1035,8 @@ export default function VaultDetailPage() {
           onHide={() => setShowAutomationModal(false)}
           isEnabling={isEnablingAutomation}
           executorAddress={pendingExecutorAddress}
+          fundingAmount={getMaxExecutorBalance(chainId)}
+          nativeSymbol={getNativeSymbol(chainId)}
           onConfirm={handleConfirmAutomation}
           isLoading={isProcessingAutomation}
         />

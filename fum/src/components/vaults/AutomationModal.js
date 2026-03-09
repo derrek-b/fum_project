@@ -7,6 +7,8 @@ const AutomationModal = ({
   onHide,
   isEnabling,
   executorAddress,
+  fundingAmount,
+  nativeSymbol,
   onConfirm,
   isLoading = false
 }) => {
@@ -34,6 +36,13 @@ const AutomationModal = ({
             </ul>
 
             <p className="fw-bold">The executor cannot withdraw tokens or positions from your vault.</p>
+
+            {fundingAmount && nativeSymbol && (
+              <Alert variant="info">
+                This transaction will send {fundingAmount} {nativeSymbol} to the executor
+                for initial gas funding. You can top up the executor later if needed.
+              </Alert>
+            )}
 
             <Alert variant="warning">
               You can disable automation at any time by toggling it off or disabling the strategy.

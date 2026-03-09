@@ -1463,9 +1463,9 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
     }
 
     // 10. Fetch blacklist data and apply to vaults
-    const vaultAddresses = completeVaultsData.map(v => v.address);
+    const completedVaultAddresses = completeVaultsData.map(v => v.address);
     try {
-      const blacklistData = await fetchBlacklistData(vaultAddresses);
+      const blacklistData = await fetchBlacklistData(completedVaultAddresses);
       if (Object.keys(blacklistData).length > 0) {
         for (let i = 0; i < completeVaultsData.length; i++) {
           const vaultAddress = completeVaultsData[i].address;
@@ -1485,7 +1485,7 @@ export const loadVaultData = async (userAddress, provider, chainId, dispatch, op
 
     // 11. Fetch funding-required data and apply to vaults
     try {
-      const fundingRequiredData = await fetchFundingRequiredData(vaultAddresses);
+      const fundingRequiredData = await fetchFundingRequiredData(completedVaultAddresses);
       for (let i = 0; i < completeVaultsData.length; i++) {
         const addr = completeVaultsData[i].address;
         const entry = fundingRequiredData[addr] ||
