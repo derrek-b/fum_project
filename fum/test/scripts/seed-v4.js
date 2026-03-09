@@ -1,10 +1,10 @@
-// test/scripts/seed.js
-// Seeds the local Hardhat Arbitrum fork with a vault, tokens, and a Uniswap V3 WETH/USDC position.
+// test/scripts/seed-v4.js
+// Seeds the local Hardhat Arbitrum fork with a vault, tokens, and a Uniswap V4 ETH/USDC position.
 //
 // Usage:
-//   node test/scripts/seed.js                     # vault + tokens + position on wallet
-//   ENABLE_STRATEGY=1 node test/scripts/seed.js   # + strategy + targets on vault
-//   ENABLE_AUTOMATION=1 node test/scripts/seed.js  # + position transferred to vault + executor (full automation)
+//   node test/scripts/seed-v4.js                     # vault + tokens + position on wallet
+//   ENABLE_STRATEGY=1 node test/scripts/seed-v4.js   # + strategy + targets on vault
+//   ENABLE_AUTOMATION=1 node test/scripts/seed-v4.js  # + position transferred to vault + executor (full automation)
 //
 // NOTE: This script is for local Hardhat testing only
 
@@ -12,20 +12,19 @@ import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Token } from '@uniswap/sdk-core';
-import { Pool, Position } from '@uniswap/v3-sdk';
-import IUniswapV3PoolArtifact from '@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json' with { type: 'json' };
-import NonfungiblePositionManagerArtifact from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json' with { type: 'json' };
 import ERC20Artifact from '@openzeppelin/contracts/build/contracts/ERC20.json' with { type: 'json' };
-import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+import { UniswapV4Adapter } from 'fum_library/adapters';
+import { getTokenAddress } from 'fum_library/helpers/tokenHelpers';
+import { getChainConfig, getPlatformAddresses, configureChainHelpers } from 'fum_library/helpers/chainHelpers';
 import contractData from 'fum_library/artifacts/contracts';
+
+// V4 adapter constructor eagerly creates an AlphaRouter that requires an Alchemy RPC URL.
+// We don't use AlphaRouter in this script (direct V4 swaps), but the constructor requires it.
+configureChainHelpers({ alchemyApiKey: 'dummy-local-hardhat' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ABIs
-const IUniswapV3PoolABI = IUniswapV3PoolArtifact.abi;
-const NonfungiblePositionManagerABI = NonfungiblePositionManagerArtifact.abi;
 const ERC20ABI = ERC20Artifact.abi;
 
 const WETH_ABI = [
@@ -44,18 +43,91 @@ const STRATEGY_ABI = [
   'function selectTemplate(uint8 template) external',
 ];
 
+const POSITION_MANAGER_ABI = [
+  'function safeTransferFrom(address from, address to, uint256 tokenId)',
+];
+
 // Arbitrum addresses (same on local fork)
 const CHAIN_ID = 1337;
 const RPC_URL = 'http://localhost:8545';
+const NATIVE_ETH = ethers.constants.AddressZero;
 const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 const USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
 const WBTC_ADDRESS = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
 const LINK_ADDRESS = '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4';
-const POSITION_MANAGER_ADDRESS = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
-const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
-const FEE_TIER = 500; // 0.05%
+const UNISWAP_V3_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+const FEE = 500;
+const TICK_SPACING = 10;
 const TEMPLATE_AGGRESSIVE = 3;
+
+// V4 swap action types
+const Actions = {
+  SWAP_EXACT_IN_SINGLE: 6,
+  SETTLE: 11,
+  TAKE: 14
+};
+
+const POOL_KEY_STRUCT = '(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)';
+const SWAP_EXACT_IN_SINGLE_STRUCT = `(${POOL_KEY_STRUCT} poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)`;
+
+/**
+ * Execute a swap directly through the V4 ETH/USDC pool via Universal Router.
+ * Bypasses AlphaRouter to guarantee the swap hits the specific pool.
+ */
+async function executeDirectV4Swap(signer, poolKey, universalRouterAddress, tokenIn, tokenOut, amountIn) {
+  const zeroForOne = tokenIn.toLowerCase() < tokenOut.toLowerCase();
+  const amountInBN = ethers.BigNumber.from(amountIn);
+
+  const swapEncoded = ethers.utils.defaultAbiCoder.encode(
+    [SWAP_EXACT_IN_SINGLE_STRUCT],
+    [[
+      [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks],
+      zeroForOne,
+      amountInBN.toString(),
+      '0',
+      '0x'
+    ]]
+  );
+
+  const settleEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'uint256', 'bool'],
+    [tokenIn, 0, true]
+  );
+
+  const takeEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint256'],
+    [tokenOut, signer.address, 0]
+  );
+
+  const actionBytes = ethers.utils.hexlify([
+    Actions.SWAP_EXACT_IN_SINGLE,
+    Actions.SETTLE,
+    Actions.TAKE
+  ]);
+
+  const v4SwapPayload = ethers.utils.defaultAbiCoder.encode(
+    ['bytes', 'bytes[]'],
+    [actionBytes, [swapEncoded, settleEncoded, takeEncoded]]
+  );
+
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+  const commands = ethers.utils.hexlify([0x10]);
+
+  const routerInterface = new ethers.utils.Interface([
+    'function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable'
+  ]);
+  const calldata = routerInterface.encodeFunctionData('execute', [commands, [v4SwapPayload], deadline]);
+
+  const isNativeIn = tokenIn === NATIVE_ETH;
+  const tx = await signer.sendTransaction({
+    to: universalRouterAddress,
+    data: calldata,
+    value: isNativeIn ? amountInBN : 0
+  });
+  return tx.wait();
+}
 
 async function main() {
   const enableAutomation = process.env.ENABLE_AUTOMATION === '1';
@@ -66,7 +138,7 @@ async function main() {
     throw new Error(`Network with chainId ${CHAIN_ID} not configured`);
   }
 
-  console.log(`Seeding local Hardhat (${networkConfig.name}) — Uniswap V3 WETH/USDC`);
+  console.log(`Seeding local Hardhat (${networkConfig.name}) — Uniswap V4 ETH/USDC`);
   if (enableAutomation) console.log('  Mode: full automation (strategy + executor + position in vault)');
   else if (enableStrategy) console.log('  Mode: strategy configured (position on wallet)');
   else console.log('  Mode: base (position on wallet, no strategy)');
@@ -96,7 +168,7 @@ async function main() {
   const vaultFactory = new ethers.Contract(vaultFactoryAddress, vaultFactoryABI, signer);
 
   console.log(`\nCreating vault...`);
-  const vaultName = 'Test Vault ' + Math.floor(Date.now() / 1000);
+  const vaultName = 'Test Vault V4 ' + Math.floor(Date.now() / 1000);
   const createTx = await vaultFactory.createVault(vaultName);
   const createReceipt = await createTx.wait();
 
@@ -127,14 +199,14 @@ async function main() {
   console.log('\nWrapping 45 ETH to WETH...');
   await (await wethContract.deposit({ value: ethers.utils.parseEther('45') })).wait();
 
-  // Approve router for all swaps
-  const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, ROUTER_ABI, signer);
-  await (await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.utils.parseEther('40'))).wait();
+  // Approve V3 router for token acquisition swaps
+  const v3Router = new ethers.Contract(UNISWAP_V3_ROUTER_ADDRESS, ROUTER_ABI, signer);
+  await (await wethContract.approve(UNISWAP_V3_ROUTER_ADDRESS, ethers.utils.parseEther('40'))).wait();
 
   const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
   const swapWethFor = async (tokenOut, symbol, fee = 500) => {
     console.log(`Swapping 10 WETH for ${symbol}...`);
-    const tx = await router.exactInputSingle({
+    const tx = await v3Router.exactInputSingle({
       tokenIn: WETH_ADDRESS, tokenOut, fee,
       recipient: signer.address, deadline,
       amountIn: ethers.utils.parseEther('10'),
@@ -167,132 +239,133 @@ async function main() {
   await (await usdcContract.transfer(vaultAddress, usdcTransferAmount)).wait();
   console.log(`  Transferred ${ethers.utils.formatUnits(usdcTransferAmount, 6)} USDC`);
 
-  console.log('\nVault token balances:');
+  // Send 3 ETH to vault (V4 uses native ETH)
+  const ethTransferAmount = ethers.utils.parseEther('3');
+  await (await signer.sendTransaction({ to: vaultAddress, value: ethTransferAmount })).wait();
+  console.log(`  Transferred ${ethers.utils.formatEther(ethTransferAmount)} ETH`);
+
+  console.log('\nVault balances:');
+  console.log(`  ETH:  ${ethers.utils.formatEther(await provider.getBalance(vaultAddress))}`);
   console.log(`  WETH: ${ethers.utils.formatEther(await wethContract.balanceOf(vaultAddress))}`);
   console.log(`  USDC: ${ethers.utils.formatUnits(await usdcContract.balanceOf(vaultAddress), 6)}`);
 
-  // === 4. Mint V3 position ===
-  console.log('\nCreating Uniswap V3 WETH/USDC position...');
+  // === 4. Mint V4 position ===
+  console.log('\nCreating Uniswap V4 ETH/USDC position...');
 
-  const WETH = new Token(CHAIN_ID, WETH_ADDRESS, 18, 'WETH', 'Wrapped Ether');
-  const USDC = new Token(CHAIN_ID, USDC_ADDRESS, 6, 'USDC', 'USD Coin');
+  const adapter = new UniswapV4Adapter(CHAIN_ID);
+  const usdcAddress = getTokenAddress('USDC', CHAIN_ID);
 
-  const poolAddress = Pool.getAddress(WETH, USDC, FEE_TIER);
-  const poolContract = new ethers.Contract(poolAddress, IUniswapV3PoolABI, signer);
-
-  const [slot0Data, liquidity, tickSpacing, fee] = await Promise.all([
-    poolContract.slot0(),
-    poolContract.liquidity(),
-    poolContract.tickSpacing(),
-    poolContract.fee(),
-  ]);
-
-  const sqrtPriceX96 = slot0Data[0];
-  const currentTick = Number(slot0Data[1]);
-
-  const sqrtPrice = Number(sqrtPriceX96) / (2 ** 96);
-  const price = sqrtPrice * sqrtPrice * Math.pow(10, USDC.decimals - WETH.decimals) * Math.pow(10, WETH.decimals);
-  console.log(`Current price: ${price.toFixed(2)} USDC/WETH (tick: ${currentTick})`);
-
-  // Calculate tick range (±5% centered on current tick)
-  const spacing = Number(tickSpacing);
-  let tickLower = Math.floor((currentTick - Math.log(1.05) / Math.log(1.0001)) / spacing) * spacing;
-  let tickUpper = Math.ceil((currentTick + Math.log(1.05) / Math.log(1.0001)) / spacing) * spacing;
-
-  if (currentTick < tickLower || currentTick > tickUpper) {
-    tickLower = Math.floor(currentTick / spacing) * spacing - spacing;
-    tickUpper = Math.ceil(currentTick / spacing) * spacing + spacing;
-  }
-
-  console.log(`Tick range: ${tickLower} to ${tickUpper}`);
-
-  const poolInstance = new Pool(
-    WETH, USDC, Number(fee),
-    sqrtPriceX96.toString(),
-    liquidity.toString(),
-    currentTick
+  const poolData = await adapter._fetchPoolData(
+    NATIVE_ETH, usdcAddress, FEE, TICK_SPACING,
+    ethers.constants.AddressZero, provider
   );
 
-  const wethAmount = ethers.utils.parseEther('3');
-  const usdcValue = Math.floor(3 * price * 1e6);
+  if (!poolData || poolData.liquidity === '0') {
+    throw new Error('V4 native ETH/USDC 500 pool has no liquidity');
+  }
 
-  const position = Position.fromAmounts({
-    pool: poolInstance,
-    tickLower,
-    tickUpper,
-    amount0: wethAmount.toString(),
-    amount1: usdcValue.toString(),
-    useFullPrecision: true,
+  console.log(`Pool tick: ${poolData.tick}, liquidity: ${poolData.liquidity}`);
+
+  const tickLower = Math.floor(poolData.tick / TICK_SPACING) * TICK_SPACING - TICK_SPACING * 10;
+  const tickUpper = Math.floor(poolData.tick / TICK_SPACING) * TICK_SPACING + TICK_SPACING * 10;
+  console.log(`Tick range: ${tickLower} to ${tickUpper}`);
+
+  const ethForPosition = ethers.utils.parseEther('1');
+  const usdcBalance = await usdcContract.balanceOf(signer.address);
+  const usdcForPosition = usdcBalance.div(4);
+  console.log(`Position: 1 ETH + ${ethers.utils.formatUnits(usdcForPosition, 6)} USDC`);
+
+  // Approve USDC via Permit2
+  console.log('Setting up Permit2 approvals...');
+  await (await usdcContract.approve(PERMIT2_ADDRESS, ethers.constants.MaxUint256)).wait();
+
+  const permit2Contract = new ethers.Contract(PERMIT2_ADDRESS, [
+    'function approve(address token, address spender, uint160 amount, uint48 expiration) external'
+  ], signer);
+
+  const positionManagerAddress = adapter.addresses.positionManagerAddress;
+  const maxAmount = ethers.BigNumber.from(2).pow(160).sub(1);
+  const farFutureExpiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365;
+
+  await (await permit2Contract.approve(
+    usdcAddress, positionManagerAddress, maxAmount, farFutureExpiration
+  )).wait();
+
+  // Create position
+  console.log('Creating position...');
+  const poolKey = {
+    currency0: NATIVE_ETH,
+    currency1: usdcAddress,
+    fee: FEE,
+    tickSpacing: TICK_SPACING,
+    hooks: ethers.constants.AddressZero
+  };
+
+  const createPositionData = await adapter.generateCreatePositionData({
+    position: { tickLower, tickUpper },
+    token0Amount: ethForPosition.toString(),
+    token1Amount: usdcForPosition.toString(),
+    provider,
+    walletAddress: signer.address,
+    poolKey,
+    poolData,
+    token0Data: { address: NATIVE_ETH, decimals: 18 },
+    token1Data: { address: usdcAddress, decimals: 6 },
+    slippageTolerance: 5,
+    deadlineMinutes: 20
   });
 
-  console.log(`Position: ${ethers.utils.formatEther(position.amount0.quotient.toString())} WETH + ${ethers.utils.formatUnits(position.amount1.quotient.toString(), 6)} USDC`);
-
-  const positionManager = new ethers.Contract(POSITION_MANAGER_ADDRESS, NonfungiblePositionManagerABI, signer);
-
-  await (await wethContract.approve(POSITION_MANAGER_ADDRESS, position.amount0.quotient.toString())).wait();
-  await (await usdcContract.approve(POSITION_MANAGER_ADDRESS, position.amount1.quotient.toString())).wait();
-
-  const mintTx = await positionManager.mint({
-    token0: WETH.address,
-    token1: USDC.address,
-    fee: FEE_TIER,
-    tickLower: position.tickLower,
-    tickUpper: position.tickUpper,
-    amount0Desired: position.amount0.quotient.toString(),
-    amount1Desired: position.amount1.quotient.toString(),
-    amount0Min: 0,
-    amount1Min: 0,
-    recipient: signer.address,
-    deadline: Math.floor(Date.now() / 1000) + 60 * 20,
-  }, { gasLimit: 5000000 });
-
+  const mintTx = await signer.sendTransaction({
+    to: createPositionData.to,
+    data: createPositionData.data,
+    value: createPositionData.value
+  });
   const mintReceipt = await mintTx.wait();
 
-  const transferEvent = mintReceipt.logs.find(log => {
-    try {
-      return log.topics.length === 4 &&
-        log.topics[0] === ethers.utils.id('Transfer(address,address,uint256)') &&
-        log.topics[1] === ethers.utils.hexZeroPad(ethers.constants.AddressZero, 32);
-    } catch { return false; }
+  const mintResult = adapter.parseIncreaseLiquidityReceipt(mintReceipt, {
+    position: { tickLower, tickUpper },
+    poolData
   });
-
-  if (!transferEvent) throw new Error('Transfer event not found — mint may have failed');
-  const tokenId = ethers.BigNumber.from(transferEvent.topics[3]);
+  const tokenId = mintResult.tokenId;
   console.log(`Position minted: #${tokenId}`);
 
-  // === 5. Generate fees with round-trip swaps ===
+  // === 5. Generate fees with direct V4 pool swaps ===
   const NUM_SWAPS = 10;
-  console.log(`\nGenerating fees with ${NUM_SWAPS} round-trip swaps on WETH/USDC ${FEE_TIER / 10000}% pool...`);
+  console.log(`\nGenerating fees with ${NUM_SWAPS} round-trip swaps on V4 ETH/USDC ${FEE / 100}bps pool...`);
 
-  await (await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.constants.MaxUint256)).wait();
-  await (await usdcContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.constants.MaxUint256)).wait();
+  const v4Addresses = getPlatformAddresses(CHAIN_ID, 'uniswapV4');
+  const universalRouterAddress = v4Addresses.universalRouterAddress;
 
-  const swapDeadline = Math.floor(Date.now() / 1000) + 60 * 20;
+  await (await permit2Contract.approve(
+    usdcAddress, universalRouterAddress, maxAmount, farFutureExpiration
+  )).wait();
+
   for (let i = 0; i < NUM_SWAPS; i++) {
-    const isWethToUsdc = i % 2 === 0;
-    const tokenIn = isWethToUsdc ? WETH_ADDRESS : USDC_ADDRESS;
-    const tokenOut = isWethToUsdc ? USDC_ADDRESS : WETH_ADDRESS;
-    const amountIn = isWethToUsdc
-      ? ethers.utils.parseEther('0.5')
-      : ethers.utils.parseUnits('1700', 6);
-
     try {
-      const tx = await router.exactInputSingle({
-        tokenIn, tokenOut, fee: FEE_TIER,
-        recipient: signer.address, deadline: swapDeadline, amountIn,
-        amountOutMinimum: 0, sqrtPriceLimitX96: 0,
-      }, { gasLimit: 300000 });
-      await tx.wait();
-      console.log(`  Swap ${i + 1}/${NUM_SWAPS}: ${isWethToUsdc ? 'WETH -> USDC' : 'USDC -> WETH'}`);
+      await executeDirectV4Swap(
+        signer, poolKey, universalRouterAddress,
+        NATIVE_ETH, usdcAddress,
+        ethers.utils.parseEther('0.5')
+      );
+
+      const usdcBal = await usdcContract.balanceOf(signer.address);
+      const swapBack = usdcBal.div(2);
+      await executeDirectV4Swap(
+        signer, poolKey, universalRouterAddress,
+        usdcAddress, NATIVE_ETH,
+        swapBack
+      );
+
+      console.log(`  Round-trip ${i + 1}/${NUM_SWAPS} complete`);
     } catch (error) {
-      console.error(`  Swap ${i + 1} failed: ${error.message}`);
+      console.error(`  Round-trip ${i + 1} failed: ${error.message}`);
     }
   }
 
   // === 6. Set strategy + targets (opt-in) ===
   if (enableStrategy) {
-    const targetPlatform = 'uniswapV3';
-    const targetTokens = ['WETH', 'USDC'];
+    const targetPlatform = 'uniswapV4';
+    const targetTokens = ['ETH', 'USDC'];
 
     console.log(`\nSetting vault targets: ${targetPlatform} / ${targetTokens.join(', ')}...`);
     await (await vault.setTargetPlatforms([targetPlatform])).wait();
@@ -317,14 +390,14 @@ async function main() {
   if (enableAutomation) {
     // Transfer position into vault
     console.log(`\nTransferring position #${tokenId} to vault...`);
-    await (await positionManager['safeTransferFrom(address,address,uint256)'](signer.address, vaultAddress, tokenId)).wait();
+    const v4PositionManager = new ethers.Contract(positionManagerAddress, POSITION_MANAGER_ABI, signer);
+    await (await v4PositionManager['safeTransferFrom(address,address,uint256)'](signer.address, vaultAddress, tokenId)).wait();
     console.log(`Position #${tokenId} transferred to vault`);
 
     // Authorize executor — LAST step, triggers automation service
     const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
     const executorIndex = vaultInfo[4];
 
-    // Dev-only mnemonic — must match AUTOMATION_MNEMONIC in fum_automation/.env.local
     const DEV_MNEMONIC = 'pumpkin ghost mammal enrich toss laptop travel main again clever edit orchard';
     const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
     const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
@@ -346,12 +419,11 @@ async function main() {
   console.log(`Position: #${tokenId} (${enableAutomation ? 'in vault' : 'on wallet — transfer via UI'})`);
   console.log('Wallet funded with WETH, USDC, USDT, WBTC, LINK.');
   if (enableAutomation) console.log('Automation enabled — vault ready for automation service.');
-  console.log('Run "npm run generate-fees:weth" to generate more fees later.');
 }
 
 main()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.error('Error in seed script:', error);
+    console.error('Error in seed-v4 script:', error);
     process.exit(1);
   });

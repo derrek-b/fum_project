@@ -1,6 +1,5 @@
-// test/scripts/start-hardhat.js
-// Hardhat node start script with contract deployment
-// Replaces Ganache for Cancun hardfork support (required for Uniswap V4)
+// test/scripts/start-hardhat-avalanche.js
+// Hardhat node start script with Avalanche fork and Trader Joe contract deployment
 
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -8,7 +7,7 @@ import fs from 'fs';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import contractData from 'fum_library/artifacts/contracts';
-import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+import { getChainConfig, getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,6 +56,28 @@ function updateLibraryContracts(contractsData) {
   }
 }
 
+// Function to update chains.js config with deployed address
+function updateChainsConfig(chainId, platformId, key, value) {
+  const srcChainsPath = path.join(LIBRARY_PATH, 'src/configs/chains.js');
+  const distChainsPath = path.join(LIBRARY_PATH, 'dist/configs/chains.js');
+  const files = [srcChainsPath, distChainsPath];
+
+  for (const filePath of files) {
+    if (!fs.existsSync(filePath)) continue;
+
+    let content = fs.readFileSync(filePath, 'utf8');
+    const pattern = new RegExp(
+      `(${chainId}:\\s*\\{[\\s\\S]*?${platformId}:\\s*\\{[\\s\\S]*?${key}:\\s*)"[^"]*"`
+    );
+
+    if (pattern.test(content)) {
+      content = content.replace(pattern, `$1"${value}"`);
+      fs.writeFileSync(filePath, content);
+      console.log(`  Updated ${key} in ${platformId} for chain ${chainId} in ${path.basename(filePath)}: ${value}`);
+    }
+  }
+}
+
 // Wait for Hardhat node to be ready
 async function waitForNode(url, maxAttempts = 30) {
   const provider = new ethers.providers.JsonRpcProvider(url);
@@ -72,7 +93,7 @@ async function waitForNode(url, maxAttempts = 30) {
 }
 
 async function deployContracts(port) {
-  const chainId = 1337;
+  const chainId = 1338;
   const ethProvider = new ethers.providers.JsonRpcProvider(`http://localhost:${port}`);
 
   // Hardhat's default first account private key (from the test mnemonic)
@@ -80,7 +101,7 @@ async function deployContracts(port) {
   const wallet = new ethers.Wallet(privateKey, ethProvider);
 
   console.log(`\nDeploying with account: ${wallet.address}`);
-  console.log(`Balance: ${ethers.utils.formatEther(await ethProvider.getBalance(wallet.address))} ETH`);
+  console.log(`Balance: ${ethers.utils.formatEther(await ethProvider.getBalance(wallet.address))} AVAX`);
 
   const contractsDataCopy = JSON.parse(JSON.stringify(contractData));
   const deploymentResults = {};
@@ -140,22 +161,59 @@ async function deployContracts(port) {
       console.warn(`Warning: BabyStepsStrategy bytecode not found. Skipping deployment.`);
     }
 
-    // Deploy validators
+    // Deploy Trader Joe contracts
     const chainConfig = getChainConfig(chainId);
-    const validatorsToDeploy = [
-      'UniversalRouterValidator',
-      'UniswapV3PositionValidator',
-      'UniswapV4PositionValidator',
-      'MerklIncentiveValidator',
-    ];
+    const tjAddresses = getPlatformAddresses(chainId, 'traderjoeV2_2');
 
+    // Deploy TJPositionProxy implementation (cloned per position)
+    console.log("\nDeploying TJPositionProxy...");
+    const TJPositionProxyBytecodePath = path.join(__dirname, `../../bytecode/TJPositionProxy.bin`);
+    const TJPositionProxyBytecode = "0x" + fs.readFileSync(TJPositionProxyBytecodePath, "utf8").trim();
+    const TJPositionProxyFactory = new ethers.ContractFactory(
+      contractsDataCopy.TJPositionProxy.abi,
+      TJPositionProxyBytecode,
+      wallet
+    );
+    const tjPositionProxy = await TJPositionProxyFactory.deploy({ gasLimit: 5000000 });
+    await tjPositionProxy.deployed();
+    console.log(`TJPositionProxy deployed to: ${tjPositionProxy.address}`);
+    deploymentResults.TJPositionProxy = tjPositionProxy.address;
+
+    // Deploy TJPositionManager with lbRouter + proxy implementation
+    console.log("\nDeploying TJPositionManager...");
+    const TJPositionManagerBytecodePath = path.join(__dirname, `../../bytecode/TJPositionManager.bin`);
+    const TJPositionManagerBytecode = "0x" + fs.readFileSync(TJPositionManagerBytecodePath, "utf8").trim();
+    const TJPositionManagerFactory = new ethers.ContractFactory(
+      contractsDataCopy.TJPositionManager.abi,
+      TJPositionManagerBytecode,
+      wallet
+    );
+    const tjPositionManager = await TJPositionManagerFactory.deploy(
+      tjAddresses.lbRouterAddress,
+      tjPositionProxy.address,
+      { gasLimit: 5000000 }
+    );
+    await tjPositionManager.deployed();
+    console.log(`TJPositionManager deployed to: ${tjPositionManager.address}`);
+    deploymentResults.TJPositionManager = tjPositionManager.address;
+
+    if (contractsDataCopy.TJPositionManager) {
+      if (!contractsDataCopy.TJPositionManager.addresses) {
+        contractsDataCopy.TJPositionManager.addresses = {};
+      }
+      contractsDataCopy.TJPositionManager.addresses[chainId] = tjPositionManager.address;
+    }
+
+    // Deploy TJ validators
+    const tjValidators = ['TJPositionValidator', 'TJSwapValidator'];
     const deployedValidators = {};
-    for (const name of validatorsToDeploy) {
+
+    for (const name of tjValidators) {
       console.log(`\nDeploying ${name}...`);
       const bytecodePath = path.join(__dirname, `../../bytecode/${name}.bin`);
 
       if (!fs.existsSync(bytecodePath)) {
-        console.warn(`Warning: ${name} bytecode not found at ${bytecodePath}. Skipping.`);
+        console.warn(`Warning: ${name} bytecode not found. Skipping.`);
         continue;
       }
 
@@ -173,65 +231,55 @@ async function deployContracts(port) {
       deployedValidators[name] = contract.address;
     }
 
-    // Register validators on VaultFactory
-    if (Object.keys(deployedValidators).length > 0) {
-      console.log("\nRegistering validators on VaultFactory...");
-      const factoryContract = new ethers.Contract(vaultFactory.address, contractsDataCopy.VaultFactory.abi, wallet);
+    // Register TJ validators on VaultFactory
+    console.log("\nRegistering validators on VaultFactory...");
+    const factoryContract = new ethers.Contract(vaultFactory.address, contractsDataCopy.VaultFactory.abi, wallet);
 
-      // Swap validator: UniversalRouter (shared by V3 and V4)
-      if (deployedValidators.UniversalRouterValidator) {
-        const universalRouterAddress = chainConfig.platformAddresses.uniswapV3.universalRouterAddress;
-        const tx1 = await factoryContract.setSwapValidator(universalRouterAddress, deployedValidators.UniversalRouterValidator);
-        await tx1.wait();
-        console.log(`  Registered UniversalRouterValidator for router ${universalRouterAddress}`);
-      }
+    // Liquidity validator: TJPositionManager
+    if (deployedValidators.TJPositionValidator) {
+      const tx1 = await factoryContract.setLiquidityValidator(
+        tjPositionManager.address,
+        deployedValidators.TJPositionValidator
+      );
+      await tx1.wait();
+      console.log(`  Registered TJPositionValidator for TJPositionManager ${tjPositionManager.address}`);
+    }
 
-      // Liquidity validators: V3 and V4 position managers
-      if (deployedValidators.UniswapV3PositionValidator) {
-        const v3PositionManagerAddress = chainConfig.platformAddresses.uniswapV3.positionManagerAddress;
-        const tx2 = await factoryContract.setLiquidityValidator(v3PositionManagerAddress, deployedValidators.UniswapV3PositionValidator);
-        await tx2.wait();
-        console.log(`  Registered UniswapV3PositionValidator for positionManager ${v3PositionManagerAddress}`);
-      }
+    // Swap validator: LBRouter
+    if (deployedValidators.TJSwapValidator) {
+      const tx2 = await factoryContract.setSwapValidator(
+        tjAddresses.lbRouterAddress,
+        deployedValidators.TJSwapValidator
+      );
+      await tx2.wait();
+      console.log(`  Registered TJSwapValidator for LBRouter ${tjAddresses.lbRouterAddress}`);
+    }
 
-      if (deployedValidators.UniswapV4PositionValidator) {
-        const v4PositionManagerAddress = chainConfig.platformAddresses.uniswapV4.positionManagerAddress;
-        const tx3 = await factoryContract.setLiquidityValidator(v4PositionManagerAddress, deployedValidators.UniswapV4PositionValidator);
-        await tx3.wait();
-        console.log(`  Registered UniswapV4PositionValidator for positionManager ${v4PositionManagerAddress}`);
-      }
+    console.log("Validator registration complete!");
 
-      // Incentive validator: Merkl Distributor
-      if (deployedValidators.MerklIncentiveValidator) {
-        const merklDistributorAddress = chainConfig.merklDistributorAddress;
-        const tx4 = await factoryContract.setIncentiveValidator(merklDistributorAddress, deployedValidators.MerklIncentiveValidator);
-        await tx4.wait();
-        console.log(`  Registered MerklIncentiveValidator for distributor ${merklDistributorAddress}`);
-      }
-
-      console.log("Validator registration complete!");
-
-      // Add validator addresses to deployment results and contracts data
-      for (const [name, address] of Object.entries(deployedValidators)) {
-        deploymentResults[name] = address;
-        if (contractsDataCopy[name]) {
-          if (!contractsDataCopy[name].addresses) {
-            contractsDataCopy[name].addresses = {};
-          }
-          contractsDataCopy[name].addresses[chainId] = address;
+    // Add validator addresses to deployment results and contracts data
+    for (const [name, address] of Object.entries(deployedValidators)) {
+      deploymentResults[name] = address;
+      if (contractsDataCopy[name]) {
+        if (!contractsDataCopy[name].addresses) {
+          contractsDataCopy[name].addresses = {};
         }
+        contractsDataCopy[name].addresses[chainId] = address;
       }
     }
 
     // Update library contracts
     updateLibraryContracts(contractsDataCopy);
 
+    // Save TJPositionManager address to chains config so adapter can find it
+    updateChainsConfig(chainId, 'traderjoeV2_2', 'positionManagerAddress', tjPositionManager.address);
+
     // Save deployment info
     const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
     const deploymentInfo = {
       version: "0.2.1",
       timestamp,
-      network: { name: "arbitrum", chainId },
+      network: { name: "avalanche", chainId },
       contracts: deploymentResults,
       deployer: wallet.address
     };
@@ -261,28 +309,23 @@ async function main() {
   const portArgIndex = args.indexOf('--port');
   const port = portArgIndex !== -1 && args.length > portArgIndex + 1
     ? parseInt(args[portArgIndex + 1], 10)
-    : 8545;
+    : 8546;
 
-  console.log("Starting Hardhat node with Arbitrum mainnet fork...");
-  console.log("Hardfork: Cancun (supports Uniswap V4 transient storage)");
+  console.log("Starting Hardhat node with Avalanche C-Chain fork...");
   console.log(`Port: ${port}`);
 
-  // Start Hardhat node as a subprocess
-  const hardhatProcess = spawn('npx', ['hardhat', 'node', '--port', port.toString()], {
+  // Start Hardhat node with Avalanche config
+  const hardhatProcess = spawn('npx', [
+    'hardhat', 'node',
+    '--port', port.toString(),
+    '--config', 'hardhat-avalanche.config.cjs'
+  ], {
     cwd: path.resolve(__dirname, '../..'),
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
-  let nodeReady = false;
-
   hardhatProcess.stdout.on('data', (data) => {
-    const output = data.toString();
-    process.stdout.write(output);
-
-    // Detect when node is ready
-    if (output.includes('Started HTTP and WebSocket JSON-RPC server')) {
-      nodeReady = true;
-    }
+    process.stdout.write(data.toString());
   });
 
   hardhatProcess.stderr.on('data', (data) => {

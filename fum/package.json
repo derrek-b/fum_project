@@ -18,14 +18,26 @@
     "contracts:test": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat test'",
     "contracts:test:coverage": "bash -c 'node scripts/sync-contracts-to-ecosystem.js --sync-only && cd ../fum_testing && npx hardhat coverage'",
     "deployment-setup": "npm run contracts:sync",
-    "seed-localhost": "bash -c 'node test/scripts/create-test-vault.js && node test/scripts/seed.js'",
+    "seed-localhost": "node test/scripts/seed.js",
+    "seed-localhost:strategy": "ENABLE_STRATEGY=1 node test/scripts/seed.js",
+    "seed-localhost:automation": "ENABLE_AUTOMATION=1 node test/scripts/seed.js",
+    "seed-localhost:v4": "node test/scripts/seed-v4.js",
+    "seed-localhost:v4:strategy": "ENABLE_STRATEGY=1 node test/scripts/seed-v4.js",
+    "seed-localhost:v4:automation": "ENABLE_AUTOMATION=1 node test/scripts/seed-v4.js",
+    "seed-localhost:av": "node test/scripts/seed-avalanche.js",
+    "seed-localhost:av:pos": "ENABLE_POSITION=1 node test/scripts/seed-avalanche.js",
+    "seed-localhost:av:strategy": "ENABLE_STRATEGY=1 node test/scripts/seed-avalanche.js",
+    "seed-localhost:av:strategy:pos": "ENABLE_STRATEGY=1 ENABLE_POSITION=1 node test/scripts/seed-avalanche.js",
+    "seed-localhost:av:automation": "ENABLE_AUTOMATION=1 node test/scripts/seed-avalanche.js",
+    "seed-localhost:av:automation:pos": "ENABLE_AUTOMATION=1 ENABLE_POSITION=1 node test/scripts/seed-avalanche.js",
     "manipulate-price:up": "node test/scripts/manipulate-price.js --direction=up",
     "manipulate-price:down": "node test/scripts/manipulate-price.js --direction=down",
     "generate-fees": "node test/scripts/generate-fees.js",
     "generate-fees:weth": "node test/scripts/generate-fees.js --token=WETH",
     "generate-fees:wbtc": "node test/scripts/generate-fees.js --token=WBTC",
     "generate-fees:link": "node test/scripts/generate-fees.js --token=LINK",
-    "hardhat": "node test/scripts/start-hardhat.js"
+    "hardhat": "node test/scripts/start-hardhat.js",
+    "hardhat:av": "node test/scripts/start-hardhat-avalanche.js"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.6.0",
@@ -40,7 +52,8 @@
     "react-dom": "^19.0.0",
     "react-error-boundary": "^5.0.0",
     "react-redux": "^9.2.0",
-    "solc": "^0.8.29"
+    "solc": "^0.8.29",
+    "viem": "^2.47.0"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",

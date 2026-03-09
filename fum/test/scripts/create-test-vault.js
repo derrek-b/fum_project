@@ -1,4 +1,16 @@
 // test/scripts/create-test-vault.js
+// Creates a test vault, funds the wallet and vault with tokens.
+// Optionally enables automation (executor + strategy).
+//
+// Usage:
+//   node test/scripts/create-test-vault.js                                            # vault + tokens only
+//   ENABLE_STRATEGY=1 TARGET_PLATFORM=uniswapV3 node test/scripts/create-test-vault.js  # + strategy + targets
+//   ENABLE_AUTOMATION=1 TARGET_PLATFORM=uniswapV3 node test/scripts/create-test-vault.js # + executor + strategy + targets
+//
+// TARGET_PLATFORM determines both platform and target tokens:
+//   uniswapV3     → WETH/USDC
+//   uniswapV4     → ETH/USDC
+//
 // NOTE: This script is for local Hardhat testing only
 import { ethers } from 'ethers';
 import fs from 'fs';
@@ -145,112 +157,156 @@ async function main() {
   console.log(`New vault created at: ${vaultAddress}`);
   console.log(`Vault name: ${vaultName}`);
 
-  // === Authorize automation executor ===
-  // Read executorIndex assigned at vault creation (Phase 1: 5th return from getVaultInfo)
-  const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
-  const executorIndex = vaultInfo[4];
-  console.log(`Vault assigned executorIndex: ${executorIndex}`);
-
-  // Derive executor address from mnemonic + index
-  // WARNING: Dev-only mnemonic — must match AUTOMATION_MNEMONIC in fum_automation/.env.local
-  const DEV_MNEMONIC = 'pumpkin ghost mammal enrich toss laptop travel main again clever edit orchard';
-  const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
-  const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
-  console.log(`Derived executor address: ${executorAddress}`);
-
-  // Authorize executor via payable setExecutor — forwards msg.value as initial gas funding
   const vault = new ethers.Contract(vaultAddress, positionVaultABI, signer);
-  const executorFunding = ethers.utils.parseEther("10");
-  console.log(`\nAuthorizing executor and funding with ${ethers.utils.formatEther(executorFunding)} ETH...`);
-  const setExecutorTx = await vault.setExecutor(executorAddress, { value: executorFunding });
-  await setExecutorTx.wait();
 
-  // Verify
-  const executorBalance = await provider.getBalance(executorAddress);
-  console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
+  const enableAutomation = process.env.ENABLE_AUTOMATION === '1';
+  const enableStrategy = enableAutomation || process.env.ENABLE_STRATEGY === '1';
 
-  // Define token addresses for Arbitrum that will be needed later
-  const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'; // WETH on Arbitrum
-  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
+  // === Set strategy + targets (opt-in: ENABLE_STRATEGY=1 or ENABLE_AUTOMATION=1) ===
+  // Must run BEFORE executor auth — setExecutor triggers the automation service,
+  // so strategy and targets need to be in place first.
+  if (enableStrategy) {
+    const targetPlatform = process.env.TARGET_PLATFORM;
+    const TARGET_TOKENS_BY_PLATFORM = {
+      uniswapV3: ['WETH', 'USDC'],
+      uniswapV4: ['ETH', 'USDC'],
+    };
+    const targetTokens = TARGET_TOKENS_BY_PLATFORM[targetPlatform];
+    if (!targetTokens) {
+      throw new Error(`TARGET_PLATFORM must be set to one of: ${Object.keys(TARGET_TOKENS_BY_PLATFORM).join(', ')}`);
+    }
 
-  // Create contract instances for tokens
+    // Set target platform and tokens on vault
+    console.log(`\nSetting vault targets: ${targetPlatform} / ${targetTokens.join(', ')}...`);
+    await (await vault.setTargetPlatforms([targetPlatform])).wait();
+    await (await vault.setTargetTokens(targetTokens)).wait();
+
+    // Configure BabySteps Aggressive strategy
+    const babyStepsAddress = JSON.parse(fs.readFileSync(deploymentPath, 'utf8')).contracts.BabyStepsStrategy;
+    const STRATEGY_ABI = [
+      'function authorizeVault(address vault) external',
+      'function selectTemplate(uint8 template) external',
+    ];
+    const TEMPLATE_AGGRESSIVE = 3;
+
+    const strategy = new ethers.Contract(babyStepsAddress, STRATEGY_ABI, signer);
+
+    console.log(`Configuring BabySteps Aggressive strategy (${babyStepsAddress})...`);
+
+    // 1. Authorize vault on strategy (caller must be vault owner)
+    await (await strategy.authorizeVault(vaultAddress)).wait();
+
+    // 2. Set strategy address on vault
+    await (await vault.setStrategy(babyStepsAddress)).wait();
+
+    // 3. Select aggressive template via vault.execute (msg.sender must be vault)
+    const selectTemplateCalldata = strategy.interface.encodeFunctionData('selectTemplate', [TEMPLATE_AGGRESSIVE]);
+    await (await vault.execute([babyStepsAddress], [selectTemplateCalldata])).wait();
+
+    console.log('Strategy configured: BabySteps Aggressive (template 3)');
+  } else {
+    console.log('\nSkipping strategy setup (set ENABLE_STRATEGY=1 to enable)');
+  }
+
+  // === Authorize automation executor (opt-in: ENABLE_AUTOMATION=1) ===
+  // Runs LAST — this fires the on-chain event that the automation service listens for.
+  if (enableAutomation) {
+    const vaultInfo = await vaultFactory.getVaultInfo(vaultAddress);
+    const executorIndex = vaultInfo[4];
+    console.log(`\nVault assigned executorIndex: ${executorIndex}`);
+
+    // Dev-only mnemonic — must match AUTOMATION_MNEMONIC in fum_automation/.env.local
+    const DEV_MNEMONIC = 'pumpkin ghost mammal enrich toss laptop travel main again clever edit orchard';
+    const hdNode = ethers.utils.HDNode.fromMnemonic(DEV_MNEMONIC);
+    const executorAddress = hdNode.derivePath(`m/44'/60'/0'/0/${executorIndex}`).address;
+    console.log(`Derived executor address: ${executorAddress}`);
+
+    const executorFunding = ethers.utils.parseEther("10");
+    console.log(`Authorizing executor and funding with ${ethers.utils.formatEther(executorFunding)} ETH...`);
+    await (await vault.setExecutor(executorAddress, { value: executorFunding })).wait();
+
+    const executorBalance = await provider.getBalance(executorAddress);
+    console.log(`Executor authorized and funded. Balance: ${ethers.utils.formatEther(executorBalance)} ETH`);
+  } else {
+    console.log('\nSkipping executor setup (set ENABLE_AUTOMATION=1 to enable)');
+  }
+
+  // === Fund wallet with diverse tokens ===
+  const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+  const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+  const USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+  const WBTC_ADDRESS = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
+  const LINK_ADDRESS = '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4';
+
   const wethContract = new ethers.Contract(WETH_ADDRESS, FALLBACK_ABIS.WETH, signer);
   const usdcContract = new ethers.Contract(USDC_ADDRESS, FALLBACK_ABIS.ERC20, signer);
+  const usdtContract = new ethers.Contract(USDT_ADDRESS, FALLBACK_ABIS.ERC20, signer);
+  const wbtcContract = new ethers.Contract(WBTC_ADDRESS, FALLBACK_ABIS.ERC20, signer);
+  const linkContract = new ethers.Contract(LINK_ADDRESS, FALLBACK_ABIS.ERC20, signer);
 
-  // Check ETH balance
-  const ethBalance = await provider.getBalance(signer.address);
-  console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
-
-  // Wrap some ETH to get WETH
-  console.log("\nWrapping 5 ETH to WETH...");
-  const wrapTx = await wethContract.deposit({ value: ethers.utils.parseEther("5") });
+  // Wrap 45 ETH → WETH (5 to keep + 10 each for 4 token swaps)
+  console.log("\nWrapping 45 ETH to WETH...");
+  const wrapTx = await wethContract.deposit({ value: ethers.utils.parseEther("45") });
   await wrapTx.wait();
-  console.log("ETH wrapped to WETH successfully");
 
-  // Setup for swapping some WETH to USDC
-  const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router
+  // Approve router for all swaps
+  const UNISWAP_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
   const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, FALLBACK_ABIS.UniswapV3Router, signer);
 
-  // Approve the router to spend WETH
-  const approveWethTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.utils.parseEther("2"));
+  const approveWethTx = await wethContract.approve(UNISWAP_ROUTER_ADDRESS, ethers.utils.parseEther("40"));
   await approveWethTx.wait();
-  console.log("Router approved to spend WETH");
 
-  // Swap some WETH for USDC
-  console.log("\nSwapping WETH for USDC...");
-  const swapParams = {
-    tokenIn: WETH_ADDRESS,
-    tokenOut: USDC_ADDRESS,
-    fee: 500, // 0.05% fee pool
-    recipient: signer.address,
-    deadline: Math.floor(Date.now() / 1000) + 60 * 20, // 20 minutes
-    amountIn: ethers.utils.parseEther("2"), // Swap 2 WETH
-    amountOutMinimum: 0, // No minimum for testing
-    sqrtPriceLimitX96: 0 // No price limit
+  // Swap 10 WETH for each token
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+  const swapWethFor = async (tokenOut, symbol, fee = 500) => {
+    console.log(`Swapping 10 WETH for ${symbol}...`);
+    const tx = await router.exactInputSingle({
+      tokenIn: WETH_ADDRESS,
+      tokenOut,
+      fee,
+      recipient: signer.address,
+      deadline,
+      amountIn: ethers.utils.parseEther("10"),
+      amountOutMinimum: 0,
+      sqrtPriceLimitX96: 0,
+    });
+    await tx.wait();
   };
 
-  const swapTx = await router.exactInputSingle(swapParams);
-  await swapTx.wait();
-  console.log("WETH swapped for USDC successfully");
+  await swapWethFor(USDC_ADDRESS, 'USDC', 500);
+  await swapWethFor(USDT_ADDRESS, 'USDT', 500);
+  await swapWethFor(WBTC_ADDRESS, 'WBTC', 500);
+  await swapWethFor(LINK_ADDRESS, 'LINK', 3000);
 
-  // Transfer additional tokens to the vault
+  // Print wallet balances
+  console.log("\nWallet token balances:");
+  console.log(`  WETH: ${ethers.utils.formatEther(await wethContract.balanceOf(signer.address))}`);
+  console.log(`  USDC: ${ethers.utils.formatUnits(await usdcContract.balanceOf(signer.address), 6)}`);
+  console.log(`  USDT: ${ethers.utils.formatUnits(await usdtContract.balanceOf(signer.address), 6)}`);
+  console.log(`  WBTC: ${ethers.utils.formatUnits(await wbtcContract.balanceOf(signer.address), 8)}`);
+  console.log(`  LINK: ${ethers.utils.formatEther(await linkContract.balanceOf(signer.address))}`);
+
+  // === Transfer tokens to the vault ===
   console.log("\nTransferring tokens to the vault...");
 
-  // Get current balances
-  const currentWethBalance = await wethContract.balanceOf(signer.address);
-  const currentUsdcBalance = await usdcContract.balanceOf(signer.address);
-
-  console.log(`Current WETH balance: ${ethers.utils.formatEther(currentWethBalance)} WETH`);
-  console.log(`Current USDC balance: ${ethers.utils.formatUnits(currentUsdcBalance, 6)} USDC`);
-
-  // Amount to transfer: 3 WETH
   const wethTransferAmount = ethers.utils.parseEther("3");
-
-  // Amount to transfer: 1000 USDC
   const usdcTransferAmount = ethers.utils.parseUnits("1000", 6);
 
-  // Transfer WETH to the vault
-  console.log("\nTransferring 3 WETH to the vault...");
-  const transferWethTx = await wethContract.transfer(vaultAddress, wethTransferAmount);
-  await transferWethTx.wait();
-  console.log(`Successfully transferred ${ethers.utils.formatEther(wethTransferAmount)} WETH to vault`);
+  await (await wethContract.transfer(vaultAddress, wethTransferAmount)).wait();
+  console.log(`  Transferred ${ethers.utils.formatEther(wethTransferAmount)} WETH`);
 
-  // Transfer USDC to the vault
-  console.log("\nTransferring 1000 USDC to the vault...");
-  const transferUsdcTx = await usdcContract.transfer(vaultAddress, usdcTransferAmount);
-  await transferUsdcTx.wait();
-  console.log(`Successfully transferred ${ethers.utils.formatUnits(usdcTransferAmount, 6)} USDC to vault`);
+  await (await usdcContract.transfer(vaultAddress, usdcTransferAmount)).wait();
+  console.log(`  Transferred ${ethers.utils.formatUnits(usdcTransferAmount, 6)} USDC`);
 
-  // Verify token balances in the vault
-  const vaultWethBalance = await wethContract.balanceOf(vaultAddress);
-  const vaultUsdcBalance = await usdcContract.balanceOf(vaultAddress);
+  // Verify vault balances
   console.log("\nVault token balances:");
-  console.log(`WETH: ${ethers.utils.formatEther(vaultWethBalance)} WETH`);
-  console.log(`USDC: ${ethers.utils.formatUnits(vaultUsdcBalance, 6)} USDC`);
+  console.log(`  WETH: ${ethers.utils.formatEther(await wethContract.balanceOf(vaultAddress))}`);
+  console.log(`  USDC: ${ethers.utils.formatUnits(await usdcContract.balanceOf(vaultAddress), 6)}`);
 
   console.log("\nTest vault setup complete!");
   console.log("====================");
   console.log(`Vault Address: ${vaultAddress}`);
+  console.log("Wallet funded with WETH, USDC, USDT, WBTC, LINK for manual UI testing.");
 }
 
 // Execute the script

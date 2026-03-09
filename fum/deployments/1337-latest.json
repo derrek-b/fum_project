@@ -1,13 +1,17 @@
 {
   "version": "0.2.1",
-  "timestamp": "2025-12-18T00-08-54",
+  "timestamp": "2026-03-09T19-27-03",
   "network": {
     "name": "arbitrum",
     "chainId": 1337
   },
   "contracts": {
-    "VaultFactory": "0x32Cf7c29bAa92AB75A9f55E91603B8BabfEAA2c0",
-    "BabyStepsStrategy": "0x865B84d6bA604D24a43eADD464f6f75101965D06"
+    "VaultFactory": "0xDC85d43B5DcdD2180D292361B0E48400Aa420a7B",
+    "BabyStepsStrategy": "0x9Af67bD3F059fc733F0cB335D39168cB9E414a1A",
+    "UniversalRouterValidator": "0x1BDBfFDF76be34fBADDf5C3E7E015fbdf39C1f51",
+    "UniswapV3PositionValidator": "0x354264bd0a188B7d3ce824796B9CE8936a867766",
+    "UniswapV4PositionValidator": "0xfe6f14F3CbDc192B7B2a40D09E6D09D2538b5ed8",
+    "MerklIncentiveValidator": "0x1c8497588635Fa95b12F14F9777444656108e46c"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }
