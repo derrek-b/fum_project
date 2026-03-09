@@ -5,12 +5,12 @@
  * Mirrors test/workflow/service-init/basic-init.test.js but targets Avalanche chain (1338)
  * with Trader Joe V2.2 adapter instead of Uniswap V3/V4.
  *
- * Run with: FORK_CHAIN=avalanche npm test -- test/workflow/traderjoe/basic-init.test.js
+ * Run with: FORK_CHAIN=avalanche npm test -- test/workflow/traderjoe/service-init/basic-init.test.js
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import AutomationService from '../../../src/core/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
+import AutomationService from '../../../../src/core/AutomationService.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../../helpers/hardhat-setup.js';
 import fs from 'fs/promises';
 
 describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaults)', () => {

@@ -10,15 +10,15 @@
  * - After closures: USDT from non-aligned position used for deficit swaps
  * - addToPosition on the surviving centered position
  *
- * Run with: FORK_CHAIN=avalanche npm test -- test/workflow/traderjoe/BS-2100.test.js
+ * Run with: FORK_CHAIN=avalanche npm test -- test/workflow/traderjoe/service-init/BS-2100.test.js
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ethers } from 'ethers';
-import AutomationService from '../../../src/core/AutomationService.js';
-import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
-import { setupTraderJoeTestVault } from '../../helpers/traderjoe-vault-setup.js';
-import { configureTJStrategyParameters } from '../../helpers/traderjoe-swap-utils.js';
+import AutomationService from '../../../../src/core/AutomationService.js';
+import { setupTestBlockchain, cleanupTestBlockchain } from '../../../helpers/hardhat-setup.js';
+import { setupTraderJoeTestVault } from '../../../helpers/traderjoe-vault-setup.js';
+import { configureTJStrategyParameters } from '../../../helpers/traderjoe-swap-utils.js';
 
 // USD₮0 is the library key for USDT (Tether) on Avalanche
 const USDT = 'USD₮0';

@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "node scripts/start-automation.js",
+    "start:av": "ENV_FILE=.env.local.av node scripts/start-automation.js",
     "setup:dev": "npm install --include=dev --include=optional",
     "test": "vitest run",
     "test:v3:run-all": "vitest run test/workflow --exclude '**/v4/**' --exclude '**/traderjoe/**'",

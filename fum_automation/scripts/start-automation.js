@@ -36,7 +36,8 @@ const allVarsSet = REQUIRED_VARS.every(key => process.env[key]);
 if (allVarsSet) {
   console.log('Using environment variables from platform');
 } else {
-  const envPath = path.resolve(__dirname, '..', '.env.local');
+  const envFile = process.env.ENV_FILE || '.env.local';
+  const envPath = path.resolve(__dirname, '..', envFile);
   dotenv.config({ path: envPath });
   console.log(`Loaded environment from: ${envPath}`);
 }
