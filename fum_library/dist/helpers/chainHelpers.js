@@ -266,6 +266,19 @@ export function isChainSupported(chainId) {
 }
 
 /**
+ * Check if a chain is a local development chain (Hardhat fork)
+ * @memberof module:helpers/chainHelpers
+ * @param {number} chainId - The blockchain network ID
+ * @returns {boolean} True if the chain is a local development chain
+ * @throws {Error} If chainId is not a positive integer
+ * @since 1.2.1
+ */
+export function isLocalChain(chainId) {
+  validateChainId(chainId);
+  return chainId === 1337 || chainId === 1338;
+}
+
+/**
  * Lookup all supported chain IDs
  * @memberof module:helpers/chainHelpers
  * @returns {Array<number>} Array of supported chain IDs as integers

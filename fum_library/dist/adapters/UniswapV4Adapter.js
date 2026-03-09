@@ -26,7 +26,7 @@ import PlatformAdapter from "./PlatformAdapter.js";
 import { getBlockExplorerService } from "../services/blockExplorer.js";
 import { fetchPoolIncentives, fetchClaimData } from "../services/merkl.js";
 import { getPlatformTickBounds } from "../helpers/platformHelpers.js";
-import { getPlatformAddresses, getChainConfig, getChainRpcUrls } from "../helpers/chainHelpers.js";
+import { getPlatformAddresses, getChainConfig, getChainRpcUrls, isLocalChain } from "../helpers/chainHelpers.js";
 import { getTokenByAddress, getTokenBySymbol, getWrappedNativeAddress, getWrappedNativeSymbol, isNativeToken, isWrappedNativeToken } from "../helpers/tokenHelpers.js";
 import { discoverV4Pools, getV4PositionsByOwner } from "../services/theGraph.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
@@ -119,6 +119,71 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   // ===========================================================================
   // HELPER METHODS
   // ===========================================================================
+
+  /**
+   * Discover V4 position tokenIds owned by an address by scanning Transfer events.
+   * Used on local Hardhat chains where The Graph subgraph is unavailable.
+   *
+   * Scans Transfer events on the PositionManager contract where `to` matches
+   * the target address, then verifies current ownership via ownerOf().
+   *
+   * @param {string} address - Owner address to discover positions for
+   * @param {ethers.Provider} provider - Ethers provider
+   * @returns {Promise<string[]>} Array of tokenId strings currently owned by the address
+   * @private
+   */
+  async _discoverTokenIdsByTransferEvents(address, provider) {
+    const transferTopic = ethers.utils.id('Transfer(address,address,uint256)');
+    const addressTopic = ethers.utils.hexZeroPad(address.toLowerCase(), 32);
+
+    // Get the fork block number — local transactions only exist after this point.
+    // Scanning from block 0 would proxy the request to the upstream RPC (e.g. Alchemy)
+    // which rejects the massive block range.
+    const metadata = await provider.send('hardhat_metadata', []);
+    const forkBlock = metadata.forkedNetwork.forkBlockNumber;
+
+    // Get all Transfer events TO this address (mints + transfers in)
+    const incomingLogs = await provider.getLogs({
+      address: this.addresses.positionManagerAddress,
+      topics: [transferTopic, null, addressTopic],
+      fromBlock: forkBlock,
+      toBlock: 'latest'
+    });
+
+    // Collect candidate tokenIds (deduplicated)
+    const candidateTokenIds = new Set();
+    for (const log of incomingLogs) {
+      const tokenId = ethers.BigNumber.from(log.topics[3]).toString();
+      candidateTokenIds.add(tokenId);
+    }
+
+    if (candidateTokenIds.size === 0) {
+      return [];
+    }
+
+    // Verify current ownership on-chain via ownerOf()
+    const positionManagerContract = new ethers.Contract(
+      this.addresses.positionManagerAddress,
+      this.positionManagerABI,
+      provider
+    );
+
+    const ownedTokenIds = [];
+    const normalizedAddress = ethers.utils.getAddress(address);
+
+    for (const tokenId of candidateTokenIds) {
+      try {
+        const owner = await positionManagerContract.ownerOf(tokenId);
+        if (ethers.utils.getAddress(owner) === normalizedAddress) {
+          ownedTokenIds.push(tokenId);
+        }
+      } catch {
+        // ownerOf reverts for burned tokens (ERC721 spec) — skip
+      }
+    }
+
+    return ownedTokenIds;
+  }
 
   /**
    * Create SDK Token instance from address using cached config
@@ -506,9 +571,16 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         provider
       );
 
-      // Fetch user's position token IDs using The Graph
+      // Discover position tokenIds
       // V4 PositionManager doesn't implement ERC721Enumerable (no tokenOfOwnerByIndex)
-      const tokenIds = await getV4PositionsByOwner(address, this.chainId);
+      let tokenIds;
+      if (isLocalChain(this.chainId)) {
+        // Local Hardhat forks aren't indexed by The Graph — scan Transfer events instead
+        tokenIds = await this._discoverTokenIdsByTransferEvents(address, provider);
+      } else {
+        // Production chains: use The Graph subgraph
+        tokenIds = await getV4PositionsByOwner(address, this.chainId);
+      }
 
       if (tokenIds.length === 0) {
         return { positions: {}, poolData: {} };
@@ -841,10 +913,10 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       currentTick = options.swapData.tick;
     } else {
       // Fetch from blockchain
-      if (!position.poolId) {
-        throw new Error('Position missing poolId');
+      if (!position.pool) {
+        throw new Error('Position missing pool');
       }
-      currentTick = await this._getCurrentTickV4(position.poolId, provider);
+      currentTick = await this._getCurrentTickV4(position.pool, provider);
     }
 
     // Calculate range metrics
@@ -891,7 +963,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
     try {
       const stateViewContract = new ethers.Contract(
-        this.addresses.stateView,
+        this.addresses.stateViewAddress,
         this.stateViewABI,
         provider
       );

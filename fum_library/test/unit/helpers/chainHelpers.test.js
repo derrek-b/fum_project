@@ -14,6 +14,7 @@ import {
   getMinExecutorBalance,
   getMaxExecutorBalance,
   isChainSupported,
+  isLocalChain,
   lookupSupportedChainIds,
   getPlatformAddresses,
   lookupChainPlatformIds,
@@ -470,6 +471,34 @@ describe('Chain Helpers', () => {
         expect(() => isChainSupported(null)).toThrow('chainId parameter is required');
         expect(() => isChainSupported('1')).toThrow('chainId must be a number');
         expect(() => isChainSupported(-1)).toThrow('chainId must be greater than 0');
+      });
+    });
+  });
+
+  describe('isLocalChain', () => {
+    describe('Success Cases', () => {
+      it('should return true for Forked Arbitrum (chainId 1337)', () => {
+        expect(isLocalChain(1337)).toBe(true);
+      });
+
+      it('should return true for Forked Avalanche (chainId 1338)', () => {
+        expect(isLocalChain(1338)).toBe(true);
+      });
+
+      it('should return false for Arbitrum One (chainId 42161)', () => {
+        expect(isLocalChain(42161)).toBe(false);
+      });
+
+      it('should return false for Avalanche (chainId 43114)', () => {
+        expect(isLocalChain(43114)).toBe(false);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should validate chainId parameter', () => {
+        expect(() => isLocalChain(null)).toThrow('chainId parameter is required');
+        expect(() => isLocalChain('1')).toThrow('chainId must be a number');
+        expect(() => isLocalChain(-1)).toThrow('chainId must be greater than 0');
       });
     });
   });

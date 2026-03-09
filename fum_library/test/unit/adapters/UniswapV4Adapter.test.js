@@ -5041,11 +5041,11 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         )).rejects.toThrow('Position missing tick range data: tickLower=-100, tickUpper=undefined');
       });
 
-      it('should throw when poolId is missing (no swapData)', async () => {
+      it('should throw when pool is missing (no swapData)', async () => {
         await expect(adapter.evaluatePositionRange(
           { tickLower: -100, tickUpper: 100 },
           env.provider
-        )).rejects.toThrow('Position missing poolId');
+        )).rejects.toThrow('Position missing pool');
       });
 
       it('should throw when tick range is invalid (lower >= upper)', async () => {
@@ -7431,16 +7431,35 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(result.poolData).toEqual({});
       });
 
-      it('should return empty positions for vault on local fork (Graph cannot see fork positions)', async () => {
-        // The vault has a position on our local fork, but The Graph indexes mainnet,
-        // not our local fork, so it returns empty
+      it('should discover positions on local fork via Transfer event scanning', async () => {
+        // On local chains, Transfer event scanning replaces The Graph for position discovery
         const vaultAddress = env.testVault.address;
         const result = await adapter.getPositionsForVDS(vaultAddress, env.provider);
 
         expect(result).toHaveProperty('positions');
         expect(result).toHaveProperty('poolData');
-        // Graph can't see fork positions
-        expect(Object.keys(result.positions).length).toBe(0);
+
+        // The test setup creates a V4 position and transfers it to the vault
+        const positionIds = Object.keys(result.positions);
+        expect(positionIds.length).toBeGreaterThanOrEqual(1);
+
+        // Verify position structure
+        const position = result.positions[positionIds[0]];
+        expect(position).toHaveProperty('id');
+        expect(position).toHaveProperty('pool');
+        expect(position).toHaveProperty('tickLower');
+        expect(position).toHaveProperty('tickUpper');
+        expect(position).toHaveProperty('liquidity');
+        expect(position).toHaveProperty('feeGrowthInside0LastX128');
+        expect(position).toHaveProperty('feeGrowthInside1LastX128');
+        expect(position).toHaveProperty('lastUpdated');
+
+        // Verify pool data
+        const poolIds = Object.keys(result.poolData);
+        expect(poolIds.length).toBeGreaterThanOrEqual(1);
+        const poolData = result.poolData[poolIds[0]];
+        expect(poolData.platform).toBe('uniswapV4');
+        expect(poolData).toHaveProperty('poolKey');
       });
 
       // Test with real Arbitrum mainnet positions (requires THEGRAPH_API_KEY env var)
@@ -7553,6 +7572,27 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           adapter.getPositionsForVDS(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
       });
+    });
+  });
+
+  describe('_discoverTokenIdsByTransferEvents', () => {
+    it('should return tokenIds for vault with positions', async () => {
+      const tokenIds = await adapter._discoverTokenIdsByTransferEvents(
+        env.testVault.address, env.provider
+      );
+      expect(tokenIds.length).toBeGreaterThanOrEqual(1);
+      // Verify all returned values are numeric strings
+      for (const tokenId of tokenIds) {
+        expect(typeof tokenId).toBe('string');
+        expect(Number(tokenId)).toBeGreaterThan(0);
+      }
+    });
+
+    it('should return empty array for address with no positions', async () => {
+      const tokenIds = await adapter._discoverTokenIdsByTransferEvents(
+        '0x0000000000000000000000000000000000000001', env.provider
+      );
+      expect(tokenIds).toEqual([]);
     });
   });
 

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: 2026-03-05T18:31:59.651Z
+Generated on: 2026-03-09T19:50:44.172Z
 
 ## Table of Contents
 
@@ -288,6 +288,7 @@ Token configuration with addresses on multiple chains
 - `getMinExecutorBalance` (function)
 - `getMaxExecutorBalance` (function)
 - `isChainSupported` (function)
+- `isLocalChain` (function)
 - `lookupSupportedChainIds` (function)
 - `getPlatformAddresses` (function)
 - `lookupChainPlatformIds` (function)
