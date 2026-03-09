@@ -13,12 +13,26 @@ npm run build                  # Production build
 npm run contracts:sync         # Sync contracts → fum_testing, fum_automation, fum_library
 npm run contracts:test         # Sync + run Hardhat tests in fum_testing
 npm run contracts:test:coverage # Sync + run Hardhat coverage in fum_testing
-npm run hardhat                # Start local node + deploy contracts + update fum_library addresses
-npm run seed-localhost         # Create test vault + seed data on local node
+npm run hardhat                # Start Arbitrum fork (chain 1337, port 8545) + deploy + update fum_library
+npm run hardhat:av             # Start Avalanche fork (chain 1338, port 8546) + deploy + update fum_library
+npm run seed-localhost         # Create V3 vault + seed tokens (see variants below)
 npm run manipulate-price:up    # Push test token prices up (for testing rebalances)
 npm run manipulate-price:down  # Push test token prices down
 npm run generate-fees          # Generate trading fees on test positions
 ```
+
+**Seed script variants** — each platform has a base script plus opt-in flags via `ENABLE_STRATEGY`, `ENABLE_AUTOMATION`, and `ENABLE_POSITION` (TJ only):
+
+| Script | What it does |
+|---|---|
+| `seed-localhost` | V3: vault + tokens + position on wallet |
+| `seed-localhost:strategy` | + strategy + targets |
+| `seed-localhost:automation` | + strategy + position in vault + executor (triggers automation) |
+| `seed-localhost:v4` / `:v4:strategy` / `:v4:automation` | Same pattern for Uniswap V4 |
+| `seed-localhost:av` | Avalanche TJ: vault + tokens only |
+| `seed-localhost:av:pos` | + TJ position in vault |
+| `seed-localhost:av:strategy` / `:av:strategy:pos` | + strategy + targets (with/without position) |
+| `seed-localhost:av:automation` / `:av:automation:pos` | + executor (with/without position) |
 
 **Local frontend dev flow**: `npm run hardhat` → (new terminal) `npm run seed-localhost` → `npm run dev`
 

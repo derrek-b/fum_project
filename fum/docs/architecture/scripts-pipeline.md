@@ -1,4 +1,4 @@
-<!-- Source: scripts/deploy.js, scripts/sync-contracts-to-ecosystem.js, scripts/extract-abis.js, scripts/extract-bytecode.js, test/scripts/start-hardhat.js, test/scripts/create-test-vault.js, test/scripts/seed.js, test/scripts/generate-fees.js, test/scripts/manipulate-price.js -->
+<!-- Source: scripts/deploy.js, scripts/sync-contracts-to-ecosystem.js, scripts/extract-abis.js, scripts/extract-bytecode.js, test/scripts/start-hardhat.js, test/scripts/start-hardhat-avalanche.js, test/scripts/seed.js, test/scripts/seed-v4.js, test/scripts/seed-avalanche.js, test/scripts/generate-fees.js, test/scripts/manipulate-price.js -->
 # Scripts Pipeline
 
 How contracts move from source code in `fum/contracts/` through compilation, extraction, and deployment to reach all four subprojects. Reference this before modifying any script or debugging cross-project sync issues.
@@ -235,37 +235,59 @@ factory.deploy(
 
 All located in `test/scripts/`.
 
-### start-hardhat.js
+### start-hardhat.js / start-hardhat-avalanche.js
 
-**Command:** `npm run hardhat`
+**Commands:** `npm run hardhat` (Arbitrum) / `npm run hardhat:av` (Avalanche)
 
-Spawns a Hardhat node with Arbitrum mainnet fork, auto-deploys contracts, and updates fum_library addresses.
+Spawns a Hardhat node with a mainnet fork, auto-deploys contracts, and updates fum_library addresses.
 
-**Sequence:**
-1. Spawn `npx hardhat node --port 8545` (Cancun hardfork for V4 transient storage)
+| | Arbitrum | Avalanche |
+|---|---|---|
+| Chain ID | 1337 | 1338 |
+| Port | 8545 | 8546 |
+| Config | `hardhat.config.cjs` | `hardhat-avalanche.config.cjs` |
+| Extra contracts | V3/V4 validators | TJ validators, TJPositionManager, TJPositionProxy |
+
+**Sequence (both):**
+1. Spawn `npx hardhat node --port {port}` (Cancun hardfork for V4 transient storage)
 2. Wait for node ready
 3. Deploy VaultFactory with canonical Permit2 address
 4. Deploy BabyStepsStrategy (no constructor params)
-5. Update fum_library with localhost addresses (both src/ and dist/)
-6. Save deployment to `deployments/1337-latest.json`
-7. Keep running (Ctrl+C to stop)
+5. Deploy platform-specific validators and register on VaultFactory
+6. Update fum_library with localhost addresses (both src/ and dist/)
+7. Save deployment to `deployments/{chainId}-latest.json`
+8. Keep running (Ctrl+C to stop)
 
-### create-test-vault.js + seed.js
+The Avalanche script additionally deploys TJPositionProxy (implementation) and TJPositionManager (with lbRouterAddress + proxy address), and updates `chains.js` with the deployed TJPositionManager address.
 
-**Command:** `npm run seed-localhost` (runs both sequentially)
+### Seed Scripts (per-platform)
 
-**create-test-vault.js:**
-1. Read VaultFactory address from `deployments/1337-latest.json`
-2. Call `vaultFactory.createVault("Test Vault " + timestamp)`
-3. Wrap 5 ETH → WETH
-4. Swap 2 WETH → USDC via Uniswap V3 (0.05% pool)
-5. Transfer 3 WETH + 1000 USDC to vault
+Each platform has a single combined seed script that creates a vault, funds it, and optionally configures strategy/automation. The old separate `create-test-vault.js` + `seed.js` two-step flow was replaced to eliminate race conditions where `setExecutor` triggered the automation service before the vault was fully configured.
 
-**seed.js:**
-1. Wrap 45 ETH → WETH
-2. Swap WETH for USDC, USDT, WBTC, LINK
-3. Fund automation executor address with 10 ETH
-4. Log final balances
+**Scripts:**
+- `seed.js` — Uniswap V3 (WETH/USDC on chain 1337)
+- `seed-v4.js` — Uniswap V4 (ETH/USDC on chain 1337)
+- `seed-avalanche.js` — Trader Joe V2.2 (WAVAX/USDC on chain 1338)
+
+**Env var flags:**
+
+| Flag | Effect |
+|---|---|
+| (none) | Create vault, fund wallet with tokens, transfer tokens to vault |
+| `ENABLE_STRATEGY=1` | + set target platform/tokens, configure BabySteps Aggressive strategy |
+| `ENABLE_AUTOMATION=1` | Implies `ENABLE_STRATEGY=1`. + derive per-vault executor from mnemonic, call `setExecutor` (triggers automation service) |
+| `ENABLE_POSITION=1` | (Avalanche only) Create TJ position in vault + generate fees |
+
+**Execution order (designed to prevent race conditions):**
+1. Create vault via VaultFactory
+2. Fund wallet (wrap native, swap for stablecoins)
+3. Transfer tokens to vault
+4. Create position (V3/V4: always; TJ: only with `ENABLE_POSITION=1`)
+5. Generate fees via round-trip swaps
+6. Set strategy + targets (if `ENABLE_STRATEGY` or `ENABLE_AUTOMATION`)
+7. Set executor (if `ENABLE_AUTOMATION`) — **always last**, fires on-chain event
+
+For V3/V4, the position stays on the wallet by default (for transfer testing) and is only transferred to the vault when `ENABLE_AUTOMATION=1`. For TJ, positions are minted directly inside the vault via `vault.mint()`.
 
 ### generate-fees.js
 
@@ -311,6 +333,7 @@ Configuration: 5 swaps of 30,000 tokens each, 500ms delay between swaps, USDC/US
 | extract-bytecode.js | `fum_testing/artifacts/` | `fum/bytecode/` |
 | deploy.js | `fum/bytecode/`, chain config | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` |
 | start-hardhat.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js` |
+| start-hardhat-avalanche.js | `fum/bytecode/`, fum_library artifacts | `fum/deployments/`, `fum_library/src+dist/artifacts/contracts.js`, `fum_library/src+dist/configs/chains.js` |
 
 **The "forgot to pack" problem:** deploy.js and start-hardhat.js write directly to `fum_library/dist/` for immediate effect, but fum and fum_automation consume fum_library via tarball. Changes won't propagate until `cd fum_library && npm run pack` is run.
 
@@ -323,7 +346,7 @@ Configuration: 5 swaps of 30,000 tokens each, 500ms delay between swaps, USDC/US
 3. **`BabyStepsStrategy` → `'bob'`** — The library artifact name differs from the contract name. Appears in extract-abis.js, deploy.js, and start-hardhat.js
 4. **Address preservation** — extract-abis.js reads the existing contracts.js file and preserves addresses when updating ABIs. If the file is corrupted or missing, addresses are lost
 5. **hardhat.config.cjs must be .cjs** — The fum package is ESM (`"type": "module"`), but Hardhat requires CommonJS config
-6. **Alchemy key required** — All test scripts assume Arbitrum fork on port 8545, which requires `ALCHEMY_API_KEY` in environment
+6. **Alchemy key required** — Hardhat fork scripts require `ALCHEMY_API_KEY` in `.env.local` (Arbitrum fork on 8545, Avalanche fork on 8546)
 7. **Direct dist/ writes don't propagate** — deploy.js writes to `fum_library/dist/` for immediate effect, but consumers use the tarball. Run `npm run pack` after deployment
 
 ---
