@@ -11,6 +11,7 @@ const ProviderContext = createContext(null);
 export function ProviderProvider({ children }) {
   const [provider, setProviderState] = useState(null);
   const [readProvider, setReadProvider] = useState(null);
+  const [readProviderResolved, setReadProviderResolved] = useState(true);
   const [chainId, setChainId] = useState(null);
 
   /**
@@ -42,6 +43,7 @@ export function ProviderProvider({ children }) {
 
     // Create read provider and set chainId when wallet connects
     if (newProvider) {
+      setReadProviderResolved(false);
       try {
         const network = await newProvider.getNetwork();
         const networkChainId = Number(network.chainId);
@@ -54,9 +56,12 @@ export function ProviderProvider({ children }) {
         console.warn('Failed to setup read provider:', error.message);
         setReadProvider(null);
         setChainId(null);
+      } finally {
+        setReadProviderResolved(true);
       }
     } else {
       setReadProvider(null);
+      setReadProviderResolved(true);
       setChainId(null);
     }
 
@@ -104,9 +109,10 @@ export function ProviderProvider({ children }) {
   }, []);
 
   const value = {
-    provider,        // Wallet provider for write operations
-    readProvider,    // Dedicated RPC provider for read operations
-    chainId,         // Current chain ID
+    provider,              // Wallet provider for write operations
+    readProvider,          // Dedicated RPC provider for read operations
+    readProviderResolved,  // Whether readProvider creation has completed (success or failure)
+    chainId,               // Current chain ID
     setProvider,
     clearProvider
   };
@@ -120,7 +126,7 @@ export function ProviderProvider({ children }) {
 
 /**
  * Hook to access provider from context
- * @returns {Object} { provider, readProvider, chainId, setProvider, clearProvider }
+ * @returns {Object} { provider, readProvider, readProviderResolved, chainId, setProvider, clearProvider }
  */
 export function useProvider() {
   const context = useContext(ProviderContext);

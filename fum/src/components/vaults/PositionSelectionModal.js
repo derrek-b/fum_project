@@ -93,7 +93,7 @@ export default function PositionSelectionModal({
         console.warn('Positions with missing pool data:', missingPools);
       }
     }
-  }, [show, tokens, positions]);
+  }, [show, positions]);
 
   // Handle position toggle
   const handlePositionToggle = (positionId) => {

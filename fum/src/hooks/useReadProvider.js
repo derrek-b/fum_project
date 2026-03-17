@@ -11,11 +11,11 @@ import { useProvider } from '../contexts/ProviderContext';
  * @returns {Object} { provider, chainId, isReady }
  */
 export function useReadProvider() {
-  const { readProvider, provider, chainId } = useProvider();
+  const { readProvider, readProviderResolved, provider, chainId } = useProvider();
 
   return {
     provider: readProvider || provider,  // Fallback to wallet if read provider unavailable
     chainId,
-    isReady: !!(readProvider || provider)
+    isReady: !!(readProvider || (provider && readProviderResolved))
   };
 }
