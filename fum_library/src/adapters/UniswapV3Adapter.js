@@ -1397,136 +1397,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
-   * Assemble position data from contract data and pool data
-   * @param {string} tokenId - Position token ID
-   * @param {Object} positionData - Raw position data from contract
-   * @param {Object} poolData - Pool data containing token and pool information
-   * @returns {Object} Assembled position object
-   * @private
-   */
-  _assemblePositionData(tokenId, positionData, poolData) {
-    const {
-      nonce,
-      operator,
-      fee,
-      tickLower,
-      tickUpper,
-      liquidity,
-      feeGrowthInside0LastX128,
-      feeGrowthInside1LastX128,
-      tokensOwed0,
-      tokensOwed1
-    } = positionData;
-
-    // Get token data and pool address from poolData
-    const { token0, token1, poolAddress } = poolData;
-    const tokenPair = `${token0.symbol}/${token1.symbol}`;
-
-    return {
-      id: String(tokenId),
-      tokenPair,
-      pool: poolAddress,
-      nonce: Number(nonce),
-      operator,
-      fee: Number(fee),
-      tickLower: Number(tickLower),
-      tickUpper: Number(tickUpper),
-      liquidity: liquidity.toString(),
-      feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
-      feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
-      tokensOwed0: tokensOwed0.toString(),
-      tokensOwed1: tokensOwed1.toString(),
-      platform: this.platformId,
-      platformName: this.platformName
-    };
-  }
-
-  /**
-   * Get positions for the connected user
-   * @param {string} address - User's wallet address
-   * @param {Object} provider - Ethers provider instance
-   * @returns {Promise<{positions: Array, poolData: Object}>} Position data
-   */
-  async getPositions(address, provider) {
-    // Validate address
-    if (!address) {
-      throw new Error("Address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(address);
-    } catch (error) {
-      throw new Error(`Invalid address: ${address}`);
-    }
-
-    // Validate provider
-    await this._validateProviderChain(provider);
-
-    try {
-      // Get position manager contract
-      const positionManager = this._getPositionManager(provider);
-
-      // Fetch user's position token IDs
-      const tokenIds = await this._fetchUserPositionIds(address, positionManager);
-
-      if (tokenIds.length === 0) {
-        return { positions: {}, poolData: {} };
-      }
-
-      const positions = {};
-      const poolDataMap = {};
-      const processingErrors = [];
-
-      // Process each position
-      for (const tokenId of tokenIds) {
-        try {
-          // Get position data from contract
-          const positionData = await positionManager.positions(tokenId);
-          const { token0, token1, fee, tickLower, tickUpper } = positionData;
-
-          // Fetch pool data (which includes token data and canonical pool address)
-          const poolData = await this._fetchPoolData(token0, token1, Number(fee), provider);
-          const poolAddress = poolData.poolAddress;
-
-          // Cache pool data using canonical pool address
-          if (!poolDataMap[poolAddress]) {
-            poolDataMap[poolAddress] = poolData;
-          }
-
-          // Fetch tick data if not already present
-          const cachedPoolData = poolDataMap[poolAddress];
-          const tickLowerNum = Number(tickLower);
-          const tickUpperNum = Number(tickUpper);
-          if (!cachedPoolData.ticks[tickLowerNum] || !cachedPoolData.ticks[tickUpperNum]) {
-            const tickData = await this._fetchTickData(poolAddress, tickLowerNum, tickUpperNum, provider);
-            cachedPoolData.ticks[tickLowerNum] = tickData.tickLower;
-            cachedPoolData.ticks[tickUpperNum] = tickData.tickUpper;
-          }
-
-          // Assemble position data
-          const position = this._assemblePositionData(tokenId, positionData, cachedPoolData);
-          positions[position.id] = position;
-
-        } catch (error) {
-          processingErrors.push(`Position ${tokenId}: ${error.message}`);
-        }
-      }
-
-      // If any positions failed to process, throw error with all failures
-      if (processingErrors.length > 0) {
-        throw new Error(`Failed to process ${processingErrors.length} position(s): ${processingErrors.join('; ')}`);
-      }
-
-      return {
-        positions,
-        poolData: poolDataMap
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to fetch Uniswap V3 positions: ${error.message}`);
-    }
-  }
-
-  /**
    * Get positions formatted for VaultDataService
    * @param {string} address - Vault address
    * @param {Object} provider - Ethers provider instance
@@ -1549,54 +1419,268 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     }
 
     try {
-      // Call the existing getPositions method
-      const result = await this.getPositions(address, provider);
+      const positionManager = this._getPositionManager(provider);
 
-      // Normalize positions to VDS format - pare down to essential fields only
-      const normalizedPositions = {};
-      if (result.positions && Object.keys(result.positions).length > 0) {
-        Object.values(result.positions).forEach(position => {
-          // Skip positions with zero liquidity (closed positions)
-          if (BigInt(position.liquidity) === 0n) {
-            return;
-          }
-          normalizedPositions[position.id] = {
-            id: position.id,
-            pool: position.pool,
-            tickLower: position.tickLower,
-            tickUpper: position.tickUpper,
-            liquidity: position.liquidity,
-            // Fee fields - stable values that only change on position interaction (mint, +/- liquidity, collect, burn)
-            feeGrowthInside0LastX128: position.feeGrowthInside0LastX128,
-            feeGrowthInside1LastX128: position.feeGrowthInside1LastX128,
-            tokensOwed0: position.tokensOwed0,
-            tokensOwed1: position.tokensOwed1,
-            lastUpdated: Date.now()
-          };
-        });
+      const tokenIds = await this._fetchUserPositionIds(address, positionManager);
+      if (tokenIds.length === 0) return { positions: {}, poolData: {} };
+
+      const positions = {};
+      const poolData = {};
+      // Cache pool address lookups to avoid redundant RPC calls for same token0/token1/fee combo
+      const poolAddressCache = {};
+
+      for (const tokenId of tokenIds) {
+        const positionData = await positionManager.positions(tokenId);
+
+        // Skip zero-liquidity (closed) positions
+        if (BigInt(positionData.liquidity.toString()) === 0n) continue;
+
+        const token0Addr = positionData.token0;
+        const token1Addr = positionData.token1;
+        const fee = Number(positionData.fee);
+
+        // Resolve pool address (1 RPC call per unique pool)
+        const poolKey = `${token0Addr}-${token1Addr}-${fee}`;
+        if (!poolAddressCache[poolKey]) {
+          poolAddressCache[poolKey] = await this._getPoolAddress(token0Addr, token1Addr, fee, provider);
+        }
+        const poolAddress = poolAddressCache[poolKey];
+
+        // Build position (10 fields — matches V4/TJ shape)
+        positions[tokenId] = {
+          id: tokenId,
+          pool: poolAddress,
+          tickLower: Number(positionData.tickLower),
+          tickUpper: Number(positionData.tickUpper),
+          liquidity: positionData.liquidity.toString(),
+          feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+          tokensOwed0: positionData.tokensOwed0.toString(),
+          tokensOwed1: positionData.tokensOwed1.toString(),
+          lastUpdated: Date.now()
+        };
+
+        // Build pool metadata (4 fields — always build, caller handles caching)
+        const token0Config = getTokenByAddress(token0Addr, this.chainId);
+        const token1Config = getTokenByAddress(token1Addr, this.chainId);
+        poolData[poolAddress] = {
+          token0Symbol: token0Config.symbol,
+          token1Symbol: token1Config.symbol,
+          fee,
+          platform: this.platformId
+        };
       }
 
-      // Extract only essential metadata from poolData (no time-sensitive data)
-      const metadataPoolData = {};
-      if (result.poolData) {
-        for (const [poolAddress, poolInfo] of Object.entries(result.poolData)) {
-          metadataPoolData[poolAddress] = {
-            // Only stable metadata - no time-sensitive data
-            token0Symbol: poolInfo.token0?.symbol,
-            token1Symbol: poolInfo.token1?.symbol,
-            fee: poolInfo.fee,
-            platform: 'uniswapV3'
+      return { positions, poolData };
+
+    } catch (error) {
+      throw new Error(`Failed to fetch positions for VDS: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get positions formatted for frontend display
+   *
+   * Returns pre-computed, display-ready position data. All platform-specific
+   * math (price conversion, fee calculation, range check) is done internally.
+   * The frontend receives numbers it can render directly.
+   *
+   * @param {string} ownerAddress - Vault or wallet address that owns positions
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{positions: Object}>} Display-ready positions keyed by ID
+   */
+  async getPositionsForDisplay(ownerAddress, provider) {
+    // Validate address
+    if (!ownerAddress) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(ownerAddress);
+    } catch (error) {
+      throw new Error(`Invalid address: ${ownerAddress}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManager = this._getPositionManager(provider);
+      const tokenIds = await this._fetchUserPositionIds(ownerAddress, positionManager);
+
+      if (tokenIds.length === 0) {
+        return { positions: {} };
+      }
+
+      // Fetch raw position data for all token IDs
+      const rawPositions = await Promise.all(
+        tokenIds.map(async (tokenId) => {
+          const positionData = await positionManager.positions(tokenId);
+          return { tokenId, positionData };
+        })
+      );
+
+      // Filter out zero-liquidity positions
+      const activePositions = rawPositions.filter(
+        ({ positionData }) => BigInt(positionData.liquidity.toString()) > 0n
+      );
+
+      if (activePositions.length === 0) {
+        return { positions: {} };
+      }
+
+      // Group positions by pool to batch pool data fetches
+      const poolGroups = new Map(); // poolKey -> { poolAddress, token0, token1, fee, positions[] }
+      for (const { tokenId, positionData } of activePositions) {
+        const token0 = positionData.token0;
+        const token1 = positionData.token1;
+        const fee = positionData.fee;
+        const poolKey = `${token0}-${token1}-${fee}`;
+
+        if (!poolGroups.has(poolKey)) {
+          poolGroups.set(poolKey, { token0, token1, fee, positions: [] });
+        }
+        poolGroups.get(poolKey).positions.push({ tokenId, positionData });
+      }
+
+      // Fetch pool data and pool addresses once per pool
+      const poolDataMap = new Map(); // poolKey -> { poolAddress, poolData, token0Data, token1Data }
+      await Promise.all(
+        Array.from(poolGroups.entries()).map(async ([poolKey, group]) => {
+          const poolAddress = await this._getPoolAddress(group.token0, group.token1, group.fee, provider);
+          const poolData = await this.getPoolData(poolAddress, provider);
+          const token0Config = getTokenByAddress(group.token0, this.chainId);
+          const token1Config = getTokenByAddress(group.token1, this.chainId);
+          const token0Data = { address: group.token0, symbol: token0Config.symbol, decimals: token0Config.decimals };
+          const token1Data = { address: group.token1, symbol: token1Config.symbol, decimals: token1Config.decimals };
+          poolDataMap.set(poolKey, { poolAddress, poolData, token0Data, token1Data });
+        })
+      );
+
+      // Build display positions
+      const positions = {};
+
+      for (const [poolKey, group] of poolGroups.entries()) {
+        const { poolAddress, poolData, token0Data, token1Data } = poolDataMap.get(poolKey);
+
+        // Fetch tick data once per unique tick pair within this pool
+        const tickPairMap = new Map(); // `${tickLower}-${tickUpper}` -> tickData
+        const uniqueTickPairs = new Map();
+        for (const { positionData } of group.positions) {
+          const tickLower = positionData.tickLower;
+          const tickUpper = positionData.tickUpper;
+          const tickKey = `${tickLower}-${tickUpper}`;
+          if (!uniqueTickPairs.has(tickKey)) {
+            uniqueTickPairs.set(tickKey, { tickLower, tickUpper });
+          }
+        }
+
+        await Promise.all(
+          Array.from(uniqueTickPairs.entries()).map(async ([tickKey, { tickLower, tickUpper }]) => {
+            const tickData = await this._fetchTickData(poolAddress, tickLower, tickUpper, provider);
+            tickPairMap.set(tickKey, tickData);
+          })
+        );
+
+        for (const { tokenId, positionData } of group.positions) {
+          const tickLower = positionData.tickLower;
+          const tickUpper = positionData.tickUpper;
+
+          // Range check
+          const inRange = this.isPositionInRange(poolData.tick, tickLower, tickUpper);
+
+          // Current price
+          const currentPriceObj = this.calculatePriceFromSqrtPrice(
+            poolData.sqrtPriceX96, token0Data, token1Data
+          );
+          const currentPrice = parseFloat(currentPriceObj.toSignificant(8));
+
+          // Bound prices
+          const priceLowerObj = this.tickToPrice(tickLower, token0Data, token1Data);
+          const priceUpperObj = this.tickToPrice(tickUpper, token0Data, token1Data);
+          const priceLower = parseFloat(priceLowerObj.toSignificant(8));
+          const priceUpper = parseFloat(priceUpperObj.toSignificant(8));
+
+          // Token amounts
+          const positionForCalc = {
+            liquidity: positionData.liquidity.toString(),
+            tickLower,
+            tickUpper,
+          };
+          const [token0Raw, token1Raw] = await this.calculateTokenAmounts(
+            positionForCalc, poolData, token0Data, token1Data
+          );
+          const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+          const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+          // Uncollected fees
+          const tickKey = `${tickLower}-${tickUpper}`;
+          const tickData = tickPairMap.get(tickKey);
+          const poolDataWithTicks = {
+            ...poolData,
+            ticks: {
+              [tickLower]: tickData.tickLower,
+              [tickUpper]: tickData.tickUpper,
+            }
+          };
+          const positionForFees = {
+            ...positionForCalc,
+            feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+            feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+            tokensOwed0: positionData.tokensOwed0.toString(),
+            tokensOwed1: positionData.tokensOwed1.toString(),
+          };
+          const [fees0Raw, fees1Raw] = this.calculateUncollectedFees(positionForFees, poolDataWithTicks);
+          const uncollectedFees0 = Number(fees0Raw) / Math.pow(10, token0Data.decimals);
+          const uncollectedFees1 = Number(fees1Raw) / Math.pow(10, token1Data.decimals);
+
+          // Fee percentage
+          const fee = poolData.fee / 10000;
+
+          positions[String(tokenId)] = {
+            // Identity
+            id: String(tokenId),
+            platform: this.platformId,
+            platformName: this.platformName,
+            tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+            pool: poolAddress,
+
+            // Display-ready numbers
+            inRange,
+            currentPrice,
+            priceLower,
+            priceUpper,
+            token0Amount,
+            token1Amount,
+            uncollectedFees0,
+            uncollectedFees1,
+            fee,
+
+            // Opaque platform data for actions
+            platformData: {
+              tickLower,
+              tickUpper,
+              liquidity: positionData.liquidity.toString(),
+              feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+              feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+              tokensOwed0: positionData.tokensOwed0.toString(),
+              tokensOwed1: positionData.tokensOwed1.toString(),
+            }
           };
         }
       }
 
-      return {
-        positions: normalizedPositions,
-        poolData: metadataPoolData
-      };
+      return { positions };
 
     } catch (error) {
-      throw new Error(`Failed to fetch positions for VDS: ${error.message}`);
+      // Re-throw validation errors as-is
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch positions for display: ${error.message}`);
     }
   }
 

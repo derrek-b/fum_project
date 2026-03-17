@@ -180,48 +180,6 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 
 The `inVault` flag is the key discriminator. `setPositions` marks all incoming as `inVault: false` (wallet positions). `addVaultPositions` marks as `inVault: true`.
 
-### state.pools
-
-**Source:** `src/redux/poolSlice.js`
-
-```javascript
-{
-  [poolAddress]: {
-    address: string,
-    token0: { address, symbol, name, decimals, logoURI },
-    token1: { address, symbol, name, decimals, logoURI },
-    fee: number,                 // Fee tier (3000 = 0.3%)
-    price: number,               // Current spot price
-    ticks: {                     // For V3 fee calculation
-      [tickIndex]: { liquidityGross, liquidityNet, ...tickData }
-    }
-  }
-}
-```
-
-Object keyed by pool address. Token data is **embedded** in pool objects (not referenced by ID). `setPools` merges, preserving tick data from both sources.
-
-### state.tokens
-
-**Source:** `src/redux/tokensSlice.js`
-
-```javascript
-{
-  [symbol]: {
-    symbol: string,
-    name: string,
-    decimals: number,
-    logoURI: string,
-    coingeckoId: string,
-    addresses: { [chainId]: string },
-    isNative: boolean,
-    wethAddresses: { [chainId]: string }
-  }
-}
-```
-
-Simple key-value store. `setTokens` assigns directly.
-
 ### state.strategies
 
 **Source:** `src/redux/strategiesSlice.js`
@@ -275,9 +233,7 @@ Simple key-value store. `setTokens` assigns directly.
     lastAutoRefresh: number | null
   },
   resourcesUpdating: {
-    positions: boolean,
-    pools: boolean,
-    tokens: boolean
+    positions: boolean
   }
 }
 ```
@@ -317,7 +273,7 @@ Simple key-value store. `setTokens` assigns directly.
 triggerUpdate()
   └── lastUpdate = Date.now()
         └── useEffect watchers fire
-              └── re-fetch data (positions, pools, balances)
+              └── re-fetch data (positions, balances)
                     └── dispatch to slices
                           └── components re-render
 ```

@@ -1103,7 +1103,7 @@ describe('TraderJoeV2_2Adapter', () => {
     describe('Success Cases', () => {
       it('should calculate bin range for symmetric percentages', () => {
         const poolData = { activeId: 8388608, binStep: 20 }; // binStep=20 → 0.20% per bin
-        const result = adapter.getPositionRange(poolData, 5, 5);
+        const result = adapter.getPositionRange(poolData, 1, 1);
 
         expect(result).toHaveProperty('lowerBinId');
         expect(result).toHaveProperty('upperBinId');
@@ -1126,7 +1126,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
       it('should produce wider range with larger percentages', () => {
         const poolData = { activeId: 8388608, binStep: 20 };
-        const narrow = adapter.getPositionRange(poolData, 5, 5);
+        const narrow = adapter.getPositionRange(poolData, 1, 1);
         const wide = adapter.getPositionRange(poolData, 10, 10);
 
         expect(wide.upperBinId - wide.lowerBinId).toBeGreaterThan(
@@ -2124,7 +2124,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
             console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping');
@@ -2382,7 +2382,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
             console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping E2E test');
@@ -2430,7 +2430,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         expect(txData.to).toBe(pmAddress);
 
-        // 5. Execute vault.mint() with the calldata
+        // 5. Execute vault.mint() with the calldata (no explicit estimateGas — this one always passes)
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         const mintReceipt = await mintTx.wait();
         expect(mintReceipt.status).toBe(1);
@@ -2602,6 +2602,272 @@ describe('TraderJoeV2_2Adapter', () => {
     });
   });
 
+  describe('getPositionsForDisplay', () => {
+    describe('Success Cases', () => {
+      it('should return positions object with correct shape and field types', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+
+        // Verify top-level structure
+        expect(result).toHaveProperty('positions');
+        expect(typeof result.positions).toBe('object');
+        expect(Array.isArray(result.positions)).toBe(false);
+
+        // Should not have poolData in return
+        expect(result).not.toHaveProperty('poolData');
+
+        // Should have at least 1 position from E2E test setup
+        const positionIds = Object.keys(result.positions);
+        expect(positionIds.length).toBeGreaterThanOrEqual(1);
+
+        const position = result.positions[positionIds[0]];
+
+        // Verify only expected fields are present
+        const expectedFields = [
+          'id', 'platform', 'platformName', 'tokenPair', 'pool',
+          'inRange', 'currentPrice', 'priceLower', 'priceUpper',
+          'token0Amount', 'token1Amount', 'uncollectedFees0', 'uncollectedFees1',
+          'fee', 'platformData'
+        ];
+        expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
+      }, 60000);
+
+      it('should have correct identity fields', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        expect(position.platform).toBe('traderjoeV2_2');
+        expect(position.platformName).toBe('Trader Joe V2.2');
+        expect(position.pool).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(position.tokenPair).toContain('/');
+
+        // Should be WAVAX/USDC pair
+        const [sym0, sym1] = position.tokenPair.split('/');
+        expect([sym0, sym1].sort()).toEqual(['USDC', 'WAVAX']);
+      }, 60000);
+
+      it('should have numeric display values with correct types', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        expect(typeof position.inRange).toBe('boolean');
+        expect(typeof position.currentPrice).toBe('number');
+        expect(typeof position.priceLower).toBe('number');
+        expect(typeof position.priceUpper).toBe('number');
+        expect(typeof position.token0Amount).toBe('number');
+        expect(typeof position.token1Amount).toBe('number');
+        expect(typeof position.uncollectedFees0).toBe('number');
+        expect(typeof position.uncollectedFees1).toBe('number');
+        expect(typeof position.fee).toBe('number');
+        expect(typeof position.platformData).toBe('object');
+
+        // Prices should be positive
+        expect(position.currentPrice).toBeGreaterThan(0);
+        expect(position.priceLower).toBeGreaterThan(0);
+        expect(position.priceUpper).toBeGreaterThan(0);
+        // At least one token amount should be > 0 for an active position
+        expect(position.token0Amount + position.token1Amount).toBeGreaterThan(0);
+      }, 60000);
+
+      it('should compute fee from baseFactor × binStep', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        // Verify fee against pool data
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const expectedFee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8;
+        expect(position.fee).toBe(expectedFee);
+      }, 60000);
+
+      it('should have platformData with TJ-specific fields', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        const expectedPlatformFields = [
+          'lowerBinId', 'upperBinId', 'binStep', 'depositIds', 'activeId', 'proxyAddress'
+        ];
+        expect(Object.keys(position.platformData).sort()).toEqual(expectedPlatformFields.sort());
+
+        // Types
+        expect(typeof position.platformData.lowerBinId).toBe('number');
+        expect(typeof position.platformData.upperBinId).toBe('number');
+        expect(typeof position.platformData.binStep).toBe('number');
+        expect(Array.isArray(position.platformData.depositIds)).toBe(true);
+        expect(typeof position.platformData.activeId).toBe('number');
+        expect(typeof position.platformData.proxyAddress).toBe('string');
+        expect(position.platformData.proxyAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+
+        // Bin bounds consistency
+        expect(position.platformData.lowerBinId).toBeLessThanOrEqual(position.platformData.upperBinId);
+      }, 60000);
+
+      it('should only contain expected fields (no extra fields leak)', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        // Top-level: only 'positions' key
+        expect(Object.keys(result)).toEqual(['positions']);
+
+        // Position: exactly 15 fields
+        expect(Object.keys(position).length).toBe(15);
+
+        // No VDS-specific fields should leak
+        expect(position).not.toHaveProperty('proxy');
+        expect(position).not.toHaveProperty('depositIds');
+        expect(position).not.toHaveProperty('liquidityMinted');
+        expect(position).not.toHaveProperty('active');
+        expect(position).not.toHaveProperty('createdAt');
+        expect(position).not.toHaveProperty('lastUpdated');
+      }, 60000);
+
+      it('should handle empty positions (address with no positions)', async () => {
+        const randomAddress = '0x0000000000000000000000000000000000000001';
+        const result = await adapter.getPositionsForDisplay(randomAddress, env.provider);
+        expect(result.positions).toEqual({});
+      }, 30000);
+    });
+
+    describe('Value Consistency', () => {
+      it('should match values against existing adapter method outputs', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        // Fetch same data via existing methods for comparison
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const token0Config = { address: poolData.tokenX, symbol: position.tokenPair.split('/')[0], decimals: position.tokenPair.split('/')[0] === 'WAVAX' ? 18 : 6 };
+        const token1Config = { address: poolData.tokenY, symbol: position.tokenPair.split('/')[1], decimals: position.tokenPair.split('/')[1] === 'USDC' ? 6 : 18 };
+
+        // currentPrice should match _binIdToPrice for activeId
+        const expectedCurrentPrice = adapter._binIdToPrice(
+          poolData.activeId, poolData.binStep, token0Config.decimals, token1Config.decimals
+        );
+        expect(position.currentPrice).toBeCloseTo(expectedCurrentPrice, 6);
+
+        // priceLower/priceUpper should match _binIdToPrice for bin bounds
+        const expectedPriceLower = adapter._binIdToPrice(
+          position.platformData.lowerBinId, poolData.binStep, token0Config.decimals, token1Config.decimals
+        );
+        const expectedPriceUpper = adapter._binIdToPrice(
+          position.platformData.upperBinId, poolData.binStep, token0Config.decimals, token1Config.decimals
+        );
+        expect(position.priceLower).toBeCloseTo(expectedPriceLower, 6);
+        expect(position.priceUpper).toBeCloseTo(expectedPriceUpper, 6);
+
+        // inRange should match activeId vs bin bounds
+        const expectedInRange = poolData.activeId >= position.platformData.lowerBinId &&
+                                poolData.activeId <= position.platformData.upperBinId;
+        expect(position.inRange).toBe(expectedInRange);
+
+        // token amounts should match calculateTokenAmounts
+        const positionForCalc = {
+          pool: position.pool,
+          depositIds: position.platformData.depositIds,
+          liquidityMinted: (() => {
+            // Fetch from position manager to get liquidityMinted
+            // We can't easily get this from display data, so verify amounts are non-negative
+            return null;
+          })(),
+        };
+        // Since liquidityMinted is not in platformData (opaque), verify amounts are reasonable
+        expect(position.token0Amount).toBeGreaterThanOrEqual(0);
+        expect(position.token1Amount).toBeGreaterThanOrEqual(0);
+      }, 60000);
+
+      it('should have tokenPair symbols matching token lookups', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        // Get pool data and verify token symbols match
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const { getTokenByAddress: getToken } = await import('../../../src/helpers/tokenHelpers.js');
+        const token0Info = getToken(poolData.tokenX, env.chainId);
+        const token1Info = getToken(poolData.tokenY, env.chainId);
+
+        expect(position.tokenPair).toBe(`${token0Info.symbol}/${token1Info.symbol}`);
+      }, 60000);
+
+      it('should have token amounts matching calculateTokenAmounts output', async () => {
+        const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const position = Object.values(result.positions)[0];
+
+        // Fetch position data from position manager for liquidityMinted
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+
+        // Find the matching position
+        let matchingPosData;
+        for (const pid of positionIds) {
+          if (String(pid) === position.id) {
+            matchingPosData = await tjpm.getPosition(pid);
+            break;
+          }
+        }
+
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const { getTokenByAddress: getToken } = await import('../../../src/helpers/tokenHelpers.js');
+        const token0Data = getToken(poolData.tokenX, env.chainId);
+        const token1Data = getToken(poolData.tokenY, env.chainId);
+
+        const positionForCalc = {
+          pool: position.pool,
+          depositIds: matchingPosData.depositIds.map(id => Number(id)),
+          liquidityMinted: matchingPosData.liquidityMinted.map(lm => lm.toString()),
+        };
+
+        const [raw0, raw1] = await adapter.calculateTokenAmounts(
+          positionForCalc, poolData, token0Data, token1Data, env.provider
+        );
+        const expectedToken0 = Number(raw0) / Math.pow(10, token0Data.decimals);
+        const expectedToken1 = Number(raw1) / Math.pow(10, token1Data.decimals);
+
+        expect(position.token0Amount).toBe(expectedToken0);
+        expect(position.token1Amount).toBe(expectedToken1);
+      }, 60000);
+    });
+
+    describe('Error Cases', () => {
+      it('should throw if address is null/undefined/empty', async () => {
+        await expect(
+          adapter.getPositionsForDisplay(null, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+
+        await expect(
+          adapter.getPositionsForDisplay(undefined, env.provider)
+        ).rejects.toThrow('Address parameter is required');
+
+        await expect(
+          adapter.getPositionsForDisplay('', env.provider)
+        ).rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw if address is invalid', async () => {
+        await expect(
+          adapter.getPositionsForDisplay('invalid-address', env.provider)
+        ).rejects.toThrow('Invalid address: invalid-address');
+
+        await expect(
+          adapter.getPositionsForDisplay('0x123', env.provider)
+        ).rejects.toThrow('Invalid address: 0x123');
+      });
+
+      it('should throw if provider is null/undefined/invalid', async () => {
+        const validAddress = testVault.address;
+
+        await expect(
+          adapter.getPositionsForDisplay(validAddress, null)
+        ).rejects.toThrow('Valid provider parameter is required');
+
+        await expect(
+          adapter.getPositionsForDisplay(validAddress, undefined)
+        ).rejects.toThrow('Valid provider parameter is required');
+
+        await expect(
+          adapter.getPositionsForDisplay(validAddress, {})
+        ).rejects.toThrow('Valid provider parameter is required');
+      });
+    });
+  });
+
   describe('getPositionById', () => {
     let positionId;
     let expectedPoolAddress;
@@ -2626,7 +2892,7 @@ describe('TraderJoeV2_2Adapter', () => {
       try {
         const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
         poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-        positionRange = adapter.getPositionRange(poolData, 5, 5);
+        positionRange = adapter.getPositionRange(poolData, 1, 1);
       } catch (error) {
         if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
           console.log('No Trader Joe V2.2 WAVAX/USDC pools - cannot create position for getPositionById tests');
@@ -2665,6 +2931,9 @@ describe('TraderJoeV2_2Adapter', () => {
         slippageTolerance: 5,
         deadlineMinutes: 10,
       });
+
+      // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+      await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
 
       const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
       await mintTx.wait();
@@ -2913,7 +3182,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
             console.log('No TJ V2.2 WAVAX/USDC pools - cannot create position for getAccruedFeesUSD tests');
@@ -2948,6 +3217,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
 
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         await mintTx.wait();
@@ -3566,7 +3838,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
           e2ePoolData = poolData;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
@@ -3607,6 +3879,12 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug — the second createPosition
+        // via vault.mint() fails without this explicit estimateGas call. callStatic
+        // passes (logic is correct), but ethers' internal estimateGas underestimates.
+        // This call warms the fork's storage cache, making the subsequent tx succeed.
+        await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
 
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         await mintTx.wait();
@@ -3673,7 +3951,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         if (!e2ePoolData) return;
 
-        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+        const positionRange = adapter.getPositionRange(e2ePoolData, 1, 1);
 
         // Use small amounts
         const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
@@ -3693,6 +3971,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [createData.data], [0]);
 
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
@@ -3743,7 +4024,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const pmAddress = adapter.addresses.positionManagerAddress;
 
         // Create position
-        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+        const positionRange = adapter.getPositionRange(e2ePoolData, 1, 1);
         const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
 
@@ -3759,6 +4040,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [createData.data], [0]);
 
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
@@ -4054,7 +4338,7 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should return valid shares for an in-range position', async () => {
         if (!poolData) return;
 
-        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const positionRange = adapter.getPositionRange(poolData, 1, 1);
 
         const result = await adapter.getOptimalTokenRatio({
           position: positionRange,
@@ -4177,7 +4461,7 @@ describe('TraderJoeV2_2Adapter', () => {
       it('should produce consistent results when token order is swapped', async () => {
         if (!poolData) return;
 
-        const positionRange = adapter.getPositionRange(poolData, 5, 5);
+        const positionRange = adapter.getPositionRange(poolData, 1, 1);
 
         // Call with WAVAX as token0
         const resultA = await adapter.getOptimalTokenRatio({
@@ -4382,7 +4666,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
           e2ePoolData = poolData;
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
@@ -4423,6 +4707,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
 
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         await mintTx.wait();
@@ -4499,7 +4786,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
 
         // 1. Create a fresh position
-        const positionRange = adapter.getPositionRange(e2ePoolData, 5, 5);
+        const positionRange = adapter.getPositionRange(e2ePoolData, 1, 1);
         const vaultWavaxBal = await wavax.balanceOf(vaultAddress);
         const vaultUsdcBal = await usdc.balanceOf(vaultAddress);
         const wavaxAmount = vaultWavaxBal.div(40);
@@ -4517,6 +4804,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [createData.data], [0]);
 
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
@@ -5601,7 +5891,7 @@ describe('TraderJoeV2_2Adapter', () => {
         try {
           const poolResult = await adapter.selectBestPool('WAVAX', 'USDC', env.provider, env.chainId);
           poolData = await adapter.getPoolData(poolResult.bestPool.address, env.provider);
-          positionRange = adapter.getPositionRange(poolData, 5, 5);
+          positionRange = adapter.getPositionRange(poolData, 1, 1);
         } catch (error) {
           if (error.message.includes('No pools found') || error.message.includes('No active pools')) {
             console.log('No Trader Joe V2.2 WAVAX/USDC pools - skipping parseIncreaseLiquidityReceipt E2E');
@@ -5641,6 +5931,9 @@ describe('TraderJoeV2_2Adapter', () => {
           slippageTolerance: 5,
           deadlineMinutes: 10,
         });
+
+        // Workaround: Hardhat fork gas estimation bug (see removeE2E beforeAll)
+        await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
 
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         const receipt = await mintTx.wait();

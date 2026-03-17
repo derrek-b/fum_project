@@ -42,6 +42,13 @@
  * | getOptimalTokenRatio         | Strategy.createNewPosition          | CONFIRMED |
  * ----------------------------------------------------------------------------------
  *
+ * FRONTEND INTERFACE METHODS (display-ready data for the frontend):
+ * ----------------------------------------------------------------------------------
+ * | Method                       | Used By                             | Status    |
+ * |------------------------------|-------------------------------------|-----------|
+ * | getPositionsForDisplay       | Frontend position display           | CONFIRMED |
+ * ----------------------------------------------------------------------------------
+ *
  * OPTIONAL CAPABILITY METHODS (default no-op implementations, override to enable):
  * ----------------------------------------------------------------------------------
  * | Method                              | Used By                        | Status    |
@@ -157,6 +164,39 @@ export default class PlatformAdapter {
    */
   async getPositionsForVDS(address, provider) {
     throw new Error("getPositionsForVDS must be implemented by subclasses");
+  }
+
+  /**
+   * Get positions formatted for frontend display
+   *
+   * Returns pre-computed, display-ready position data with a universal shape
+   * across all platforms. The adapter computes all display values internally
+   * (prices, amounts, fees, range status) so the frontend never interprets
+   * platform-specific pool state.
+   *
+   * @param {string} ownerAddress - Vault or wallet address that owns positions
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{positions: Object}>} Display-ready position data keyed by position ID
+   *
+   * Position shape per entry:
+   * @returns {string}  positions[id].id - Position identifier
+   * @returns {string}  positions[id].platform - Platform ID (e.g. 'uniswapV3')
+   * @returns {string}  positions[id].platformName - Display name (e.g. 'Uniswap V3')
+   * @returns {string}  positions[id].tokenPair - Token pair string (e.g. 'WETH/USDC')
+   * @returns {string}  positions[id].pool - Pool identifier (address, poolId, etc.)
+   * @returns {boolean} positions[id].inRange - Whether position is currently in range
+   * @returns {number}  positions[id].currentPrice - Current pool price (token0/token1)
+   * @returns {number}  positions[id].priceLower - Lower bound price
+   * @returns {number}  positions[id].priceUpper - Upper bound price
+   * @returns {number}  positions[id].token0Amount - Decimal-adjusted token0 amount
+   * @returns {number}  positions[id].token1Amount - Decimal-adjusted token1 amount
+   * @returns {number}  positions[id].uncollectedFees0 - Decimal-adjusted uncollected token0 fees
+   * @returns {number}  positions[id].uncollectedFees1 - Decimal-adjusted uncollected token1 fees
+   * @returns {number}  positions[id].fee - Fee as percentage (e.g. 0.05 for 0.05%)
+   * @returns {Object}  positions[id].platformData - Opaque platform-specific data for actions
+   */
+  async getPositionsForDisplay(ownerAddress, provider) {
+    throw new Error("getPositionsForDisplay must be implemented by subclasses");
   }
 
   /**

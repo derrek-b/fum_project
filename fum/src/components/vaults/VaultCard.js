@@ -12,7 +12,6 @@ export default function VaultCard({ vault }) {
   const router = useRouter();
   const { activeStrategies, strategyPerformance } = useSelector((state) => state.strategies);
   const allPositions = useSelector((state) => state.positions.positions);
-  const pools = useSelector((state) => state.pools);
   const automationConnected = useSelector((state) => state.automation?.connected);
 
   // Check if automation is enabled
@@ -270,9 +269,9 @@ export default function VaultCard({ vault }) {
                     const position = allPositions.find(p => p.id === positionId);
                     if (!position) return null;
 
-                    const poolData = pools[position.pool];
-                    const token0Symbol = poolData?.token0?.symbol || 'T0';
-                    const token1Symbol = poolData?.token1?.symbol || 'T1';
+                    const [token0Symbol, token1Symbol] = position.tokenPair
+                      ? position.tokenPair.split('/')
+                      : ['T0', 'T1'];
 
                     return (
                       <div key={positionId} className="mb-1">

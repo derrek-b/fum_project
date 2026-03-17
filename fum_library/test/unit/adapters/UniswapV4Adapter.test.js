@@ -133,6 +133,8 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     if (env && env.revert && snapshotId) {
       try {
         await env.revert(snapshotId);
+        // evm_revert invalidates the snapshot ID — must take a fresh one
+        snapshotId = await env.snapshot();
       } catch (error) {
         console.warn('Failed to revert snapshot:', error.message);
       }
@@ -7593,6 +7595,235 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         '0x0000000000000000000000000000000000000001', env.provider
       );
       expect(tokenIds).toEqual([]);
+    });
+  });
+
+  describe('getPositionsForDisplay', () => {
+    describe('Success Cases', () => {
+      it('should return positions object with correct shape and field types', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+
+        expect(result).toHaveProperty('positions');
+        expect(result).not.toHaveProperty('poolData');
+        expect(typeof result.positions).toBe('object');
+
+        const positionIds = Object.keys(result.positions);
+        expect(positionIds.length).toBeGreaterThanOrEqual(1);
+
+        const position = result.positions[positionIds[0]];
+
+        // Verify exact field set — no extra fields
+        const expectedFields = [
+          'id', 'platform', 'platformName', 'tokenPair', 'pool',
+          'inRange', 'currentPrice', 'priceLower', 'priceUpper',
+          'token0Amount', 'token1Amount', 'uncollectedFees0', 'uncollectedFees1',
+          'fee', 'platformData'
+        ];
+        expect(Object.keys(position).sort()).toEqual(expectedFields.sort());
+      });
+
+      it('should have correct identity fields', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        expect(position.id).toBe(String(env.positionTokenId));
+        expect(position.platform).toBe('uniswapV4');
+        expect(position.platformName).toBe('Uniswap V4');
+        expect(position.tokenPair).toBe('ETH/USDC');
+        expect(position.pool).toBe(env.testPosition.pool);
+      });
+
+      it('should have numeric display values with correct types', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        expect(typeof position.inRange).toBe('boolean');
+        expect(typeof position.currentPrice).toBe('number');
+        expect(typeof position.priceLower).toBe('number');
+        expect(typeof position.priceUpper).toBe('number');
+        expect(typeof position.token0Amount).toBe('number');
+        expect(typeof position.token1Amount).toBe('number');
+        expect(typeof position.uncollectedFees0).toBe('number');
+        expect(typeof position.uncollectedFees1).toBe('number');
+        expect(typeof position.fee).toBe('number');
+
+        // Prices should be positive
+        expect(position.currentPrice).toBeGreaterThan(0);
+        expect(position.priceLower).toBeGreaterThan(0);
+        expect(position.priceUpper).toBeGreaterThan(0);
+        expect(position.priceLower).toBeLessThan(position.priceUpper);
+      });
+
+      it('should compute fee as percentage', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        // Test setup uses fee=500 → 500/10000 = 0.05
+        expect(position.fee).toBe(env.testPosition.fee / 10000);
+      });
+
+      it('should have platformData with V4-specific fields', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        const expectedPlatformFields = [
+          'tickLower', 'tickUpper', 'poolKey', 'poolId',
+          'feeGrowthInside0LastX128', 'feeGrowthInside1LastX128'
+        ];
+        expect(Object.keys(position.platformData).sort()).toEqual(expectedPlatformFields.sort());
+
+        // Verify poolKey structure
+        expect(position.platformData.poolKey).toHaveProperty('currency0');
+        expect(position.platformData.poolKey).toHaveProperty('currency1');
+        expect(position.platformData.poolKey).toHaveProperty('fee');
+        expect(position.platformData.poolKey).toHaveProperty('tickSpacing');
+        expect(position.platformData.poolKey).toHaveProperty('hooks');
+
+        // Verify tick bounds match
+        expect(position.platformData.tickLower).toBe(env.testPosition.tickLower);
+        expect(position.platformData.tickUpper).toBe(env.testPosition.tickUpper);
+        expect(position.platformData.poolId).toBe(env.testPosition.pool);
+
+        // Fee growth values should be strings
+        expect(typeof position.platformData.feeGrowthInside0LastX128).toBe('string');
+        expect(typeof position.platformData.feeGrowthInside1LastX128).toBe('string');
+      });
+
+      it('should handle empty positions for address with no positions', async () => {
+        const emptyAddress = '0x0000000000000000000000000000000000000001';
+        const result = await adapter.getPositionsForDisplay(emptyAddress, env.provider);
+
+        expect(result).toHaveProperty('positions');
+        expect(result.positions).toEqual({});
+      });
+
+      it('should filter out zero-liquidity positions', async () => {
+        // First get positions to confirm we have one
+        const beforeResult = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const allCount = Object.keys(beforeResult.positions).length;
+
+        // Close the position (remove all liquidity)
+        // Use env.poolData which includes poolKey (from _fetchPoolData)
+        const removeTxData = await adapter.generateRemoveLiquidityData({
+          position: {
+            id: env.positionTokenId,
+            pool: env.testPosition.pool,
+            tickLower: env.testPosition.tickLower,
+            tickUpper: env.testPosition.tickUpper,
+            liquidity: env.testPosition.liquidity,
+          },
+          poolData: env.poolData,
+          token0Data: env.poolData.token0,
+          token1Data: env.poolData.token1,
+          percentage: 100,
+          walletAddress: env.signers[0].address,
+          provider: env.provider,
+          slippageTolerance: 50,
+          deadlineMinutes: 20,
+        });
+
+        const owner = env.signers[0];
+        const vault = env.testVault;
+        await (await vault.connect(owner).execute(
+          [removeTxData.to], [removeTxData.data]
+        )).wait();
+
+        // Now getPositionsForDisplay should have one fewer position
+        const afterResult = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        expect(Object.keys(afterResult.positions).length).toBe(allCount - 1);
+      });
+    });
+
+    describe('Value Consistency', () => {
+      it('should match _tickToPrice output for current price', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const token0Data = { address: ethers.constants.AddressZero, decimals: 18 };
+        const token1Data = { address: env.usdcAddress, decimals: 6 };
+
+        const priceObj = adapter._tickToPrice(poolData.tick, token0Data, token1Data);
+        expect(position.currentPrice).toBe(parseFloat(priceObj.toSignificant(8)));
+      });
+
+      it('should match _tickToPrice output for price bounds', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        const token0Data = { address: ethers.constants.AddressZero, decimals: 18 };
+        const token1Data = { address: env.usdcAddress, decimals: 6 };
+
+        const priceLowerObj = adapter._tickToPrice(env.testPosition.tickLower, token0Data, token1Data);
+        const priceUpperObj = adapter._tickToPrice(env.testPosition.tickUpper, token0Data, token1Data);
+        expect(position.priceLower).toBe(parseFloat(priceLowerObj.toSignificant(8)));
+        expect(position.priceUpper).toBe(parseFloat(priceUpperObj.toSignificant(8)));
+      });
+
+      it('should match manual tick comparison for inRange', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const expectedInRange = poolData.tick >= env.testPosition.tickLower && poolData.tick <= env.testPosition.tickUpper;
+        expect(position.inRange).toBe(expectedInRange);
+      });
+
+      it('should match calculateTokenAmounts output', async () => {
+        const result = await adapter.getPositionsForDisplay(env.testVault.address, env.provider);
+        const position = result.positions[String(env.positionTokenId)];
+
+        const poolData = await adapter.getPoolData(position.pool, env.provider);
+        const token0Data = { address: ethers.constants.AddressZero, decimals: 18 };
+        const token1Data = { address: env.usdcAddress, decimals: 6 };
+
+        const [amt0, amt1] = await adapter.calculateTokenAmounts(
+          { liquidity: env.testPosition.liquidity, tickLower: env.testPosition.tickLower, tickUpper: env.testPosition.tickUpper },
+          poolData,
+          token0Data,
+          token1Data
+        );
+
+        expect(position.token0Amount).toBeCloseTo(Number(amt0) / Math.pow(10, 18), 10);
+        expect(position.token1Amount).toBeCloseTo(Number(amt1) / Math.pow(10, 6), 6);
+      });
+    });
+
+    describe('Error Cases', () => {
+      it('should throw if address is null', async () => {
+        await expect(adapter.getPositionsForDisplay(null, env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw if address is undefined', async () => {
+        await expect(adapter.getPositionsForDisplay(undefined, env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw if address is empty string', async () => {
+        await expect(adapter.getPositionsForDisplay('', env.provider))
+          .rejects.toThrow('Address parameter is required');
+      });
+
+      it('should throw if address is invalid', async () => {
+        await expect(adapter.getPositionsForDisplay('not-an-address', env.provider))
+          .rejects.toThrow('Invalid address');
+      });
+
+      it('should throw if provider is null', async () => {
+        await expect(adapter.getPositionsForDisplay(env.testVault.address, null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw if provider is undefined', async () => {
+        await expect(adapter.getPositionsForDisplay(env.testVault.address, undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw if provider is invalid object', async () => {
+        await expect(adapter.getPositionsForDisplay(env.testVault.address, { invalid: true }))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
     });
   });
 

@@ -1,8 +1,6 @@
 // redux/store.js - Updated to include strategiesSlice
 import { configureStore } from "@reduxjs/toolkit";
 import positionsReducer from "./positionsSlice";
-import poolReducer from "./poolSlice";
-import tokensReducer from "./tokensSlice";
 import walletReducer from "./walletSlice";
 import updatesReducer from "./updateSlice";
 import platformsReducer from "./platformsSlice";
@@ -13,8 +11,6 @@ import automationReducer from "./automationSlice";
 export const store = configureStore({
   reducer: {
     positions: positionsReducer,
-    pools: poolReducer,
-    tokens: tokensReducer,
     wallet: walletReducer,
     updates: updatesReducer,
     platforms: platformsReducer,
@@ -29,8 +25,6 @@ export const store = configureStore({
         ignoredActions: [
           "wallet/setWallet",
           "positions/setPositions",
-          "pools/setPools",
-          "tokens/setTokens",
           "platforms/setPlatforms",
           "vaults/setVaults",
           "vaults/addVault",
@@ -42,8 +36,6 @@ export const store = configureStore({
         ignoredPaths: [
           "wallet.chainId",
           "positions.positions",
-          "pools",
-          "tokens",
           "platforms.supportedPlatforms",
           "vaults.userVaults",
           "strategies.strategyConfigs",

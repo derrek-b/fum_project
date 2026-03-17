@@ -64,6 +64,7 @@ Cannot be instantiated directly. Subclass constructors typically take `(chainId,
 
 | Method | Signature | Used By | Description |
 |---|---|---|---|
+| `getPositionsForDisplay` | `(address, provider) → Promise<{positions}>` | Frontend (all pages) | Get positions with pre-computed display values (prices, amounts, fees, in-range). See `docs/decisions/adapter-display-interface.md` |
 | `getPositionsForVDS` | `(address, provider) → Promise<{positions, poolData}>` | VDS.fetchPositions | Get positions formatted for VaultDataService cache |
 | `getPositionById` | `(tokenId, provider) → Promise<{position, poolData}>` | Strategy.createNewPosition | Fetch single position by NFT tokenId (no Graph dependency) |
 | `getPoolData` | `(poolId, provider) → Promise<Object>` | VDS.fetchAssetValues | Get pool state data by pool identifier |
@@ -360,9 +361,9 @@ export { default as NewPlatformAdapter } from './NewPlatformAdapter.js';
 
 ## Key Decisions
 
-### Why `getPositionsForVDS` vs `getPositions`?
+### Why two position methods (`getPositionsForDisplay` vs `getPositionsForVDS`)?
 
-`getPositions` is a V3-specific internal method that returns rich data with full pool state. `getPositionsForVDS` is the platform-agnostic interface method that returns only the essential fields the automation cache needs. The VDS format excludes time-sensitive data (current tick, sqrtPriceX96) because that data is fetched fresh when needed via `getPoolData` or from swap events.
+Each serves a different consumer with different needs. `getPositionsForDisplay` returns pre-computed display values (prices, amounts, fees, in-range status as numbers/booleans) so the frontend never interprets platform-specific pool state. `getPositionsForVDS` returns raw position data (liquidity, feeGrowthInside, tokensOwed as strings) plus minimal pool metadata for the automation cache. The VDS format excludes time-sensitive data (current tick, sqrtPriceX96) because that data is fetched fresh when needed via `getPoolData` or from swap events.
 
 ### Why separate `parseClosureReceipt` from `parseCollectReceipt`?
 

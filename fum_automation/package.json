@@ -35,15 +35,20 @@
   "dependencies": {
     "@uniswap/permit2-sdk": "^1.4.0",
     "@uniswap/sdk-core": "^7.7.2",
-    "@uniswap/universal-router-sdk": "^4.19.7",
+    "@uniswap/universal-router-sdk": "4.34.0",
     "@uniswap/v3-core": "^1.0.1",
     "@uniswap/v3-periphery": "^1.4.4",
-    "@uniswap/v3-sdk": "^3.25.2",
+    "@uniswap/v3-sdk": "3.29.1",
     "axios": "^1.9.0",
     "ethers": "^5.7.2",
     "fum_library": "file:../fum_library/fum_library-1.2.1.tgz",
     "jsbi": "^3.2.5",
     "tslib": "^2.8.1"
+  },
+  "overrides": {
+    "@uniswap/router-sdk": "2.7.1",
+    "@uniswap/v2-sdk": "4.19.1",
+    "@uniswap/v4-sdk": "1.29.1"
   },
   "devDependencies": {
     "@openzeppelin/contracts": "^5.3.0",

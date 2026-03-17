@@ -123,9 +123,9 @@ async function main() {
   const wbtcContract = new ethers.Contract(WBTC_ADDRESS, ERC20ABI, signer);
   const linkContract = new ethers.Contract(LINK_ADDRESS, ERC20ABI, signer);
 
-  // Wrap 45 ETH → WETH (5 to keep + 10 each for 4 token swaps)
-  console.log('\nWrapping 45 ETH to WETH...');
-  await (await wethContract.deposit({ value: ethers.utils.parseEther('45') })).wait();
+  // Wrap 50 ETH → WETH (10 to keep + 10 each for 4 token swaps)
+  console.log('\nWrapping 50 ETH to WETH...');
+  await (await wethContract.deposit({ value: ethers.utils.parseEther('50') })).wait();
 
   // Approve router for all swaps
   const router = new ethers.Contract(UNISWAP_ROUTER_ADDRESS, ROUTER_ABI, signer);
@@ -191,7 +191,7 @@ async function main() {
   const currentTick = Number(slot0Data[1]);
 
   const sqrtPrice = Number(sqrtPriceX96) / (2 ** 96);
-  const price = sqrtPrice * sqrtPrice * Math.pow(10, USDC.decimals - WETH.decimals) * Math.pow(10, WETH.decimals);
+  const price = sqrtPrice * sqrtPrice * Math.pow(10, WETH.decimals - USDC.decimals);
   console.log(`Current price: ${price.toFixed(2)} USDC/WETH (tick: ${currentTick})`);
 
   // Calculate tick range (±5% centered on current tick)

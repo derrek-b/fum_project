@@ -54,8 +54,6 @@ export default function AddLiquidityModal({
   // Get auto-refresh state to manage pausing during liquidity addition
   const { autoRefresh } = useSelector(state => state.updates);
   const { supportedPlatforms } = useSelector(state => state.platforms);
-  const pools = useSelector(state => state.pools);
-
   // Keep track of the original auto-refresh setting to restore it on close
   const [originalAutoRefreshState, setOriginalAutoRefreshState] = useState(null);
 
@@ -293,9 +291,9 @@ export default function AddLiquidityModal({
           current: poolData.tick
         });
 
-        // Set fee tier from pool data
-        if (position.pool && pools && pools[position.pool]) {
-          setSelectedFeeTier(pools[position.pool].fee);
+        // Set fee tier from position (convert display percentage back to raw fee tier)
+        if (position.fee != null) {
+          setSelectedFeeTier(position.fee * 10000);
         }
 
         // Set platform
@@ -1902,7 +1900,7 @@ export default function AddLiquidityModal({
             {isExistingPosition ? (
               <>
                 Add Liquidity to Position #{position?.id} - {position?.tokenPair}
-                <small className="ms-2 text-muted">({position?.fee / 10000}% fee)</small>
+                <small className="ms-2 text-muted">({position?.fee}% fee)</small>
               </>
             ) : (
               "Create New Liquidity Position"

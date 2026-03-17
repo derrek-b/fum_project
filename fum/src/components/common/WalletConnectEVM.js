@@ -27,7 +27,7 @@ export default function WalletConnectEVM() {
         throw new Error("No Ethereum wallet detected. Please install MetaMask or another wallet.");
       }
 
-      setProvider(newProvider); // Store provider in context
+      await setProvider(newProvider); // Store provider in context (await ensures readProvider is ready)
 
       await newProvider.send("eth_requestAccounts", []); // Request accounts from MetaMask
       const signer = await newProvider.getSigner();
@@ -89,7 +89,7 @@ export default function WalletConnectEVM() {
           return;
         }
 
-        setProvider(newProvider);
+        await setProvider(newProvider);
 
         // Check if accounts are accessible (wallet might be locked)
         const accounts = await newProvider.listAccounts();

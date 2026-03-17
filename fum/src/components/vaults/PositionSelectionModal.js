@@ -10,7 +10,7 @@ import { triggerUpdate } from "../../redux/updateSlice";
 import { setPositionVaultStatus } from "../../redux/positionsSlice";
 import { addPositionToVault, removePositionFromVault } from "../../redux/vaultsSlice";
 import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
-import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
+import { getTokenBySymbol } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
 import TransactionProgressModal from '../common/TransactionProgressModal';
@@ -19,8 +19,6 @@ export default function PositionSelectionModal({
   show,
   onHide,
   vault,
-  pools,
-  tokens,
   chainId,
   mode // 'add' or 'remove'
 }) {
@@ -32,8 +30,6 @@ export default function PositionSelectionModal({
   //const { provider } = useSelector((state) => state.wallet.provider);
   const { address } = useSelector((state) => state.wallet);
   const { readProvider, getSigner, isWriteReady } = useProviders();
-  // const { pools = {} } = useSelector((state) => state.pools);
-  // const { tokens = {} } = useSelector((state) => state.tokens);
 
   // State for selected positions
   const [selectedPositions, setSelectedPositions] = useState([]);
@@ -47,32 +43,6 @@ export default function PositionSelectionModal({
   const [transactionError, setTransactionError] = useState("");
   const [transactionWarning, setTransactionWarning] = useState("");
   const [showTransactionModal, setShowTransactionModal] = useState(false);
-
-  // Check if we have the necessary data
-  const poolsLoaded = Object.keys(pools).length > 0;
-  const tokensLoaded = Object.keys(tokens).length > 0;
-
-  // Debug logs
-  useEffect(() => {
-    if (show) {
-      // Log some position details to help debug
-      const directWalletPositions = positions.filter(p => !p.inVault);
-      const vaultPositions = positions.filter(p => p.inVault && p.vaultAddress === vault.address);
-
-      // Check for pool addresses
-      const uniquePoolAddresses = new Set();
-      positions.forEach(pos => {
-        if (pos.poolAddress) uniquePoolAddresses.add(pos.poolAddress);
-      });
-
-      // Check which pools are missing
-      const missingPools = Array.from(uniquePoolAddresses).filter(addr => !pools[addr]);
-      if (missingPools.length > 0) {
-        console.warn(`- Missing ${missingPools.length} pools in the store`);
-        console.warn(`- First missing pool: ${missingPools[0]}`);
-      }
-    }
-  }, [show, positions, tokens, vault.address, poolsLoaded, tokensLoaded]);
 
   // Filter positions based on mode using useMemo to avoid unnecessary recalculations
   const filteredPositions = useMemo(() => {
@@ -92,22 +62,14 @@ export default function PositionSelectionModal({
 
   // Check if a position has supported tokens (only for 'add' mode)
   const isPositionSupported = (position) => {
-    const poolData = pools[position.poolAddress];
-    if (!poolData) {
-      return { supported: false, reason: 'Pool data not loaded' };
-    }
-
+    if (!position?.tokenPair) return { supported: false, reason: 'Missing token pair' };
     try {
-      // Check if both token addresses are in our config
-      getTokenByAddress(poolData.token0, chainId);
-      getTokenByAddress(poolData.token1, chainId);
+      const [t0Symbol, t1Symbol] = position.tokenPair.split('/');
+      getTokenBySymbol(t0Symbol);
+      getTokenBySymbol(t1Symbol);
       return { supported: true };
     } catch (error) {
-      // getTokenByAddress throws if token not found
-      return {
-        supported: false,
-        reason: 'Contains unsupported token(s)'
-      };
+      return { supported: false, reason: 'Contains unsupported token(s)' };
     }
   };
 
@@ -157,7 +119,7 @@ export default function PositionSelectionModal({
       }
 
       const tokenPair = position.tokenPair || 'Unknown pair';
-      const feeTier = position.fee ? `${position.fee / 10000}%` : 'Unknown fee';
+      const feeTier = position.fee != null ? `${position.fee}%` : 'Unknown fee';
 
       return {
         title: `Transfer Position #${positionId}`,
@@ -392,11 +354,11 @@ export default function PositionSelectionModal({
     const tokenPair = position.tokenPair;
 
     // Fee tier from position
-    const feeTier = `${position.fee / 10000}%`;
+    const feeTier = `${position.fee}%`;
 
     // Get the platform color directly from config
-    const platformColor = position.protocol && platforms[position.protocol]?.color
-                         ? platforms[position.protocol].color
+    const platformColor = position.platform && platforms[position.platform]?.color
+                         ? platforms[position.platform].color
                          : '#6c757d';
 
     return { pair: tokenPair, feeTier, platformColor };
@@ -429,12 +391,6 @@ export default function PositionSelectionModal({
             ? 'Select the positions you want to transfer to this vault:'
             : 'Select the positions you want to remove from this vault:'}
         </p>
-
-        {Object.keys(pools).length === 0 && (
-          <Alert variant="warning">
-            Loading pool data... Position details may be limited until data is loaded.
-          </Alert>
-        )}
 
         {positions.length === 0 ? (
           <Alert variant="warning">
@@ -475,8 +431,8 @@ export default function PositionSelectionModal({
                     disabled={isProcessing || !supportStatus.supported}
                   />
                   {/* Conditional display of either logo or badge */}
-                  {position.protocol && (
-                    platforms[position.protocol]?.logo ? (
+                  {position.platform && (
+                    platforms[position.platform]?.logo ? (
                       // Show logo if available
                       <div
                         className="ms-2 d-inline-flex align-items-center justify-content-center"

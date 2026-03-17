@@ -61,9 +61,8 @@ const StrategyConfigPanel = ({
     state.vaults.userVaults.find(v => v.address === vaultAddress)
   );
 
-  // Get positions and pools from Redux for validation
+  // Get positions from Redux for validation
   const allPositions = useSelector((state) => state.positions.positions);
-  const pools = useSelector((state) => state.pools);
 
   // State
   const [selectedStrategy, setSelectedStrategy] = useState('');
@@ -616,7 +615,15 @@ const StrategyConfigPanel = ({
         .map(id => allPositions.find(p => p.id === id))
         .filter(Boolean); // Remove any undefined positions
 
-      const positionValidation = validatePositionsForStrategy(vaultPositions, pools, selectedTokens);
+      // Build synthetic pools map from display positions for library function compatibility
+      const syntheticPools = {};
+      vaultPositions.forEach(p => {
+        if (p.pool && p.tokenPair) {
+          const [t0, t1] = p.tokenPair.split('/');
+          syntheticPools[p.pool] = { token0: { symbol: t0 }, token1: { symbol: t1 } };
+        }
+      });
+      const positionValidation = validatePositionsForStrategy(vaultPositions, syntheticPools, selectedTokens);
       if (!positionValidation.isValid) {
         warnings.push(...positionValidation.warnings);
       }

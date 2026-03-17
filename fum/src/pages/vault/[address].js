@@ -77,8 +77,6 @@ export default function VaultDetailPage() {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address: vaultAddress } = router.query;
-  const pools = useSelector((state) => state.pools);
-  const tokens = useSelector((state) => state.tokens);
   const { chainId, address: userAddress, isConnected, isReconnecting } = useSelector((state) => state.wallet);
   const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const lastUpdate = useSelector((state) => state.updates.lastUpdate);
@@ -1046,8 +1044,6 @@ export default function VaultDetailPage() {
           show={showPositionModal}
           onHide={() => setShowPositionModal(false)}
           vault={vault}
-          pools={pools}
-          tokens={tokens}
           chainId={chainId}
           mode={positionModalMode}
         />

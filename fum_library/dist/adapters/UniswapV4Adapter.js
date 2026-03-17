@@ -628,18 +628,16 @@ export default class UniswapV4Adapter extends PlatformAdapter {
             continue;
           }
 
-          // Cache pool metadata if not already cached
-          if (!poolDataMap[poolId]) {
-            poolDataMap[poolId] = {
-              token0Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency0),
-              token1Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency1),
-              fee: normalizedPoolKey.fee,
-              tickSpacing: normalizedPoolKey.tickSpacing,
-              hooks: normalizedPoolKey.hooks,
-              platform: 'uniswapV4',
-              poolKey: normalizedPoolKey
-            };
-          }
+          // Build pool metadata — always build, caller handles caching
+          poolDataMap[poolId] = {
+            token0Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency0),
+            token1Symbol: this._resolveTokenSymbol(normalizedPoolKey.currency1),
+            fee: normalizedPoolKey.fee,
+            tickSpacing: normalizedPoolKey.tickSpacing,
+            hooks: normalizedPoolKey.hooks,
+            platform: 'uniswapV4',
+            poolKey: normalizedPoolKey
+          };
 
           // Assemble position data
           positions[tokenId] = {
@@ -679,6 +677,260 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       }
       throw new Error(`Failed to fetch V4 positions for VDS: ${error.message}`);
     }
+  }
+
+  /**
+   * Get positions formatted for frontend display
+   *
+   * Returns pre-computed, display-ready position data with a universal shape
+   * across all platforms. The adapter computes all display values internally
+   * (prices, amounts, fees, range status) so the frontend never interprets
+   * platform-specific pool state.
+   *
+   * V4 differences from V3:
+   * - Pool identified by poolId (bytes32 hash of PoolKey), not contract address
+   * - Position discovery via Transfer events (local) or The Graph (production)
+   * - Fee calculation via StateView (async), not manual tick math
+   * - Native ETH support (currency0 = AddressZero)
+   * - Price computed from tick via _tickToPrice (no calculatePriceFromSqrtPrice)
+   *
+   * @param {string} ownerAddress - Vault or wallet address that owns positions
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<{positions: Object}>} Display-ready position data keyed by position ID
+   *
+   * Position shape per entry:
+   * @returns {string}  positions[id].id - Position identifier
+   * @returns {string}  positions[id].platform - 'uniswapV4'
+   * @returns {string}  positions[id].platformName - 'Uniswap V4'
+   * @returns {string}  positions[id].tokenPair - Token pair string (e.g. 'ETH/USDC')
+   * @returns {string}  positions[id].pool - Pool identifier (poolId bytes32)
+   * @returns {boolean} positions[id].inRange - Whether position is currently in range
+   * @returns {number}  positions[id].currentPrice - Current pool price (token0/token1)
+   * @returns {number}  positions[id].priceLower - Lower bound price
+   * @returns {number}  positions[id].priceUpper - Upper bound price
+   * @returns {number}  positions[id].token0Amount - Decimal-adjusted token0 amount
+   * @returns {number}  positions[id].token1Amount - Decimal-adjusted token1 amount
+   * @returns {number}  positions[id].uncollectedFees0 - Decimal-adjusted uncollected token0 fees
+   * @returns {number}  positions[id].uncollectedFees1 - Decimal-adjusted uncollected token1 fees
+   * @returns {number}  positions[id].fee - Fee as percentage (e.g. 0.05 for 0.05%)
+   * @returns {Object}  positions[id].platformData - Opaque platform-specific data for actions
+   */
+  async getPositionsForDisplay(ownerAddress, provider) {
+    // Validate address
+    if (!ownerAddress) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(ownerAddress);
+    } catch (error) {
+      throw new Error(`Invalid address: ${ownerAddress}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManagerContract = new ethers.Contract(
+        this.addresses.positionManagerAddress,
+        this.positionManagerABI,
+        provider
+      );
+
+      const stateViewContract = new ethers.Contract(
+        this.addresses.stateViewAddress,
+        this.stateViewABI,
+        provider
+      );
+
+      // Discover position token IDs
+      let tokenIds;
+      if (isLocalChain(this.chainId)) {
+        tokenIds = await this._discoverTokenIdsByTransferEvents(ownerAddress, provider);
+      } else {
+        tokenIds = await getV4PositionsByOwner(ownerAddress, this.chainId);
+      }
+
+      if (tokenIds.length === 0) {
+        return { positions: {} };
+      }
+
+      // Fetch raw position data for all token IDs
+      const rawPositions = [];
+      const processingErrors = [];
+
+      for (const tokenId of tokenIds) {
+        try {
+          const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(tokenId);
+          const { tickLower, tickUpper } = this._decodePositionInfo(packedInfo);
+
+          const normalizedPoolKey = {
+            currency0: poolKey.currency0,
+            currency1: poolKey.currency1,
+            fee: Number(poolKey.fee),
+            tickSpacing: Number(poolKey.tickSpacing),
+            hooks: poolKey.hooks
+          };
+          const poolId = this._computePoolId(normalizedPoolKey);
+
+          // Get position liquidity and fee data from StateView
+          const salt = ethers.utils.hexZeroPad(ethers.BigNumber.from(tokenId).toHexString(), 32);
+          const positionInfo = await stateViewContract['getPositionInfo(bytes32,address,int24,int24,bytes32)'](
+            poolId,
+            this.addresses.positionManagerAddress,
+            tickLower,
+            tickUpper,
+            salt
+          );
+
+          const liquidity = positionInfo[0];
+          const feeGrowthInside0LastX128 = positionInfo[1];
+          const feeGrowthInside1LastX128 = positionInfo[2];
+
+          // Skip zero-liquidity positions
+          if (BigInt(liquidity.toString()) === 0n) {
+            continue;
+          }
+
+          rawPositions.push({
+            tokenId,
+            tickLower,
+            tickUpper,
+            liquidity,
+            feeGrowthInside0LastX128,
+            feeGrowthInside1LastX128,
+            poolKey: normalizedPoolKey,
+            poolId
+          });
+        } catch (error) {
+          processingErrors.push(`Position ${tokenId}: ${error.message}`);
+        }
+      }
+
+      if (processingErrors.length > 0) {
+        throw new Error(`Failed to process ${processingErrors.length} position(s): ${processingErrors.join('; ')}`);
+      }
+
+      if (rawPositions.length === 0) {
+        return { positions: {} };
+      }
+
+      // Group positions by poolId to batch pool data fetches
+      const poolGroups = new Map();
+      for (const pos of rawPositions) {
+        if (!poolGroups.has(pos.poolId)) {
+          poolGroups.set(pos.poolId, { poolKey: pos.poolKey, positions: [] });
+        }
+        poolGroups.get(pos.poolId).positions.push(pos);
+      }
+
+      // Fetch pool data once per pool and resolve token metadata
+      const poolDataMap = new Map();
+      await Promise.all(
+        Array.from(poolGroups.entries()).map(async ([poolId, group]) => {
+          const poolData = await this.getPoolData(poolId, provider);
+
+          // Resolve token metadata — handle native ETH (AddressZero)
+          const token0Data = this._resolveTokenDataForDisplay(group.poolKey.currency0);
+          const token1Data = this._resolveTokenDataForDisplay(group.poolKey.currency1);
+
+          poolDataMap.set(poolId, { poolData, token0Data, token1Data });
+        })
+      );
+
+      // Build display positions
+      const positions = {};
+
+      for (const [poolId, group] of poolGroups.entries()) {
+        const { poolData, token0Data, token1Data } = poolDataMap.get(poolId);
+
+        for (const pos of group.positions) {
+          // Range check
+          const inRange = poolData.tick >= pos.tickLower && poolData.tick <= pos.tickUpper;
+
+          // Prices from ticks
+          const currentPriceObj = this._tickToPrice(poolData.tick, token0Data, token1Data);
+          const currentPrice = parseFloat(currentPriceObj.toSignificant(8));
+
+          const priceLowerObj = this._tickToPrice(pos.tickLower, token0Data, token1Data);
+          const priceUpperObj = this._tickToPrice(pos.tickUpper, token0Data, token1Data);
+          const priceLower = parseFloat(priceLowerObj.toSignificant(8));
+          const priceUpper = parseFloat(priceUpperObj.toSignificant(8));
+
+          // Token amounts
+          const positionForCalc = {
+            liquidity: pos.liquidity.toString(),
+            tickLower: pos.tickLower,
+            tickUpper: pos.tickUpper,
+          };
+          const [token0Raw, token1Raw] = await this.calculateTokenAmounts(
+            positionForCalc, poolData, token0Data, token1Data
+          );
+          const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+          const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+          // Uncollected fees
+          const { fees0, fees1 } = await this._calculateUncollectedFees(
+            pos.tokenId, poolId, pos.tickLower, pos.tickUpper, provider
+          );
+          const uncollectedFees0 = Number(fees0) / Math.pow(10, token0Data.decimals);
+          const uncollectedFees1 = Number(fees1) / Math.pow(10, token1Data.decimals);
+
+          // Fee percentage
+          const fee = poolData.fee / 10000;
+
+          positions[String(pos.tokenId)] = {
+            id: String(pos.tokenId),
+            platform: this.platformId,
+            platformName: this.platformName,
+            tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+            pool: poolId,
+            inRange,
+            currentPrice,
+            priceLower,
+            priceUpper,
+            token0Amount,
+            token1Amount,
+            uncollectedFees0,
+            uncollectedFees1,
+            fee,
+            platformData: {
+              tickLower: pos.tickLower,
+              tickUpper: pos.tickUpper,
+              poolKey: pos.poolKey,
+              poolId,
+              feeGrowthInside0LastX128: pos.feeGrowthInside0LastX128.toString(),
+              feeGrowthInside1LastX128: pos.feeGrowthInside1LastX128.toString(),
+            }
+          };
+        }
+      }
+
+      return { positions };
+
+    } catch (error) {
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch positions for display: ${error.message}`);
+    }
+  }
+
+  /**
+   * Resolve token metadata for display — handles native ETH (AddressZero)
+   * @param {string} currencyAddress - Token address or AddressZero for native ETH
+   * @returns {{address: string, symbol: string, decimals: number}} Flat token data
+   * @private
+   */
+  _resolveTokenDataForDisplay(currencyAddress) {
+    if (currencyAddress === ethers.constants.AddressZero) {
+      return { address: ethers.constants.AddressZero, symbol: 'ETH', decimals: 18 };
+    }
+    const config = getTokenByAddress(currencyAddress, this.chainId);
+    return { address: currencyAddress, symbol: config.symbol, decimals: config.decimals };
   }
 
   /**

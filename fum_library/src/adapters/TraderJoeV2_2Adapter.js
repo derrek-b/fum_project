@@ -345,6 +345,177 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     }
   }
 
+  async getPositionsForDisplay(ownerAddress, provider) {
+    // Validate address
+    if (!ownerAddress) {
+      throw new Error("Address parameter is required");
+    }
+    try {
+      ethers.utils.getAddress(ownerAddress);
+    } catch (error) {
+      throw new Error(`Invalid address: ${ownerAddress}`);
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManagerAddress = this.addresses.positionManagerAddress;
+      if (!positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+
+      // Get all position IDs for this vault
+      const positionIds = await positionManager.getPositionsByVault(ownerAddress);
+
+      if (positionIds.length === 0) {
+        return { positions: {} };
+      }
+
+      // Fetch each position and filter inactive
+      const activePositions = [];
+      for (const positionId of positionIds) {
+        const positionData = await positionManager.getPosition(positionId);
+        if (!positionData.active) continue;
+
+        const depositIds = positionData.depositIds.map(id => Number(id));
+        if (depositIds.length === 0) continue;
+
+        activePositions.push({
+          id: String(positionId),
+          lbPair: positionData.lbPair.toLowerCase(),
+          proxy: positionData.proxy,
+          tokenX: positionData.tokenX,
+          tokenY: positionData.tokenY,
+          depositIds,
+          liquidityMinted: positionData.liquidityMinted.map(lm => lm.toString()),
+          binStep: Number(positionData.binStep),
+          lowerBinId: Math.min(...depositIds),
+          upperBinId: Math.max(...depositIds),
+        });
+      }
+
+      if (activePositions.length === 0) {
+        return { positions: {} };
+      }
+
+      // Group by pool (LBPair address) to batch pool data fetches
+      const poolGroups = new Map();
+      for (const pos of activePositions) {
+        const poolKey = pos.lbPair;
+        if (!poolGroups.has(poolKey)) {
+          poolGroups.set(poolKey, []);
+        }
+        poolGroups.get(poolKey).push(pos);
+      }
+
+      // Fetch pool data and token metadata once per pool
+      const poolDataMap = new Map();
+      await Promise.all(
+        Array.from(poolGroups.keys()).map(async (poolAddress) => {
+          const poolData = await this.getPoolData(poolAddress, provider);
+          const token0Config = getTokenByAddress(poolData.tokenX, this.chainId);
+          const token1Config = getTokenByAddress(poolData.tokenY, this.chainId);
+          const token0Data = { address: poolData.tokenX, symbol: token0Config.symbol, decimals: token0Config.decimals };
+          const token1Data = { address: poolData.tokenY, symbol: token1Config.symbol, decimals: token1Config.decimals };
+          poolDataMap.set(poolAddress, { poolData, token0Data, token1Data });
+        })
+      );
+
+      // Build display positions
+      const positions = {};
+
+      for (const [poolAddress, posGroup] of poolGroups.entries()) {
+        const { poolData, token0Data, token1Data } = poolDataMap.get(poolAddress);
+
+        for (const pos of posGroup) {
+          // Range check
+          const inRange = poolData.activeId >= pos.lowerBinId && poolData.activeId <= pos.upperBinId;
+
+          // Prices from bin IDs
+          const currentPrice = this._binIdToPrice(poolData.activeId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+          const priceLower = this._binIdToPrice(pos.lowerBinId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+          const priceUpper = this._binIdToPrice(pos.upperBinId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+
+          // Token amounts (requires RPC for TJ)
+          const positionForCalc = {
+            pool: pos.lbPair,
+            depositIds: pos.depositIds,
+            liquidityMinted: pos.liquidityMinted,
+          };
+          const [token0Raw, token1Raw] = await this.calculateTokenAmounts(
+            positionForCalc, poolData, token0Data, token1Data, provider
+          );
+          const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+          const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+          // Uncollected fees via LiquidityHelperV2
+          const posData = await this._getPositionOnChainData(pos.id, provider);
+          const feeResult = await this._computeFeeShares(posData, provider);
+
+          let totalFeesX = 0n;
+          let totalFeesY = 0n;
+          for (const feeX of feeResult.feesX) totalFeesX += BigInt(feeX);
+          for (const feeY of feeResult.feesY) totalFeesY += BigInt(feeY);
+
+          const uncollectedFees0 = Number(totalFeesX) / Math.pow(10, token0Data.decimals);
+          const uncollectedFees1 = Number(totalFeesY) / Math.pow(10, token1Data.decimals);
+
+          // Fee percentage (base fee only)
+          const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8;
+
+          positions[pos.id] = {
+            // Identity
+            id: pos.id,
+            platform: this.platformId,
+            platformName: this.platformName,
+            tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+            pool: poolAddress,
+
+            // Display-ready numbers
+            inRange,
+            currentPrice,
+            priceLower,
+            priceUpper,
+            token0Amount,
+            token1Amount,
+            uncollectedFees0,
+            uncollectedFees1,
+            fee,
+
+            // Opaque platform data for actions
+            platformData: {
+              lowerBinId: pos.lowerBinId,
+              upperBinId: pos.upperBinId,
+              binStep: poolData.binStep,
+              depositIds: pos.depositIds,
+              activeId: poolData.activeId,
+              proxyAddress: pos.proxy,
+            }
+          };
+        }
+      }
+
+      return { positions };
+
+    } catch (error) {
+      // Re-throw validation errors as-is
+      if (error.message.includes('Address parameter') ||
+          error.message.includes('Invalid address') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('No position manager')) {
+        throw error;
+      }
+      throw new Error(`Failed to fetch positions for display: ${error.message}`);
+    }
+  }
+
   async getPositionById(tokenId, provider) {
     // Validate params (same pattern as V3/V4)
     if (tokenId === null || tokenId === undefined || tokenId === '') {

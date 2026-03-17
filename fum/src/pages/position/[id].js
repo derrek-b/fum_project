@@ -15,13 +15,12 @@ import ClosePositionModal from "../../components/positions/ClosePositionModal";
 import ClaimFeesModal from "../../components/positions/ClaimFeesModal";
 import { triggerUpdate, setResourceUpdating } from "../../redux/updateSlice";
 import { setPositions } from "@/redux/positionsSlice";
-import { setPools } from "@/redux/poolSlice";
-import { setTokens } from "@/redux/tokensSlice";
 import { useToast } from "../../context/ToastContext";
 import { AdapterFactory } from "fum_library/adapters";
 import { useReadProvider } from '../../hooks/useReadProvider';
 import { formatPrice, formatFeeDisplay, getPlatformColor, getPlatformLogo } from "fum_library/helpers";
 import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingecko";
+import { getTokenByAddress } from "fum_library/helpers/tokenHelpers";
 
 // Fallback component to show when an error occurs
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -65,8 +64,6 @@ export default function PositionDetailPage() {
   const { showError, showSuccess } = useToast();
   const { id } = router.query;
   const { positions } = useSelector((state) => state.positions);
-  const pools = useSelector((state) => state.pools);
-  const tokens = useSelector((state) => state.tokens);
   const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useReadProvider();
@@ -81,12 +78,6 @@ export default function PositionDetailPage() {
 
   // State for various UI elements
   const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
-  const [uncollectedFees, setUncollectedFees] = useState(null);
-  const [isLoadingFees, setIsLoadingFees] = useState(false);
-  const [feeLoadingError, setFeeLoadingError] = useState(false);
-  const [tokenBalances, setTokenBalances] = useState(null);
-  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
-  const [balanceError, setBalanceError] = useState(false);
   const [tokenPrices, setTokenPrices] = useState({
     token0: null,
     token1: null,
@@ -96,6 +87,11 @@ export default function PositionDetailPage() {
 
   // Track initial data loading to prevent "Position not found" flash
   const [isLoadingInitialData, setIsLoadingInitialData] = useState(false);
+
+  // Modal pool/token data — fetched on-demand, replaces Redux pool cache for modal infrastructure
+  const [modalPoolData, setModalPoolData] = useState(null);
+  const [modalToken0Data, setModalToken0Data] = useState(null);
+  const [modalToken1Data, setModalToken1Data] = useState(null);
 
   // State for modals
   const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
@@ -119,19 +115,11 @@ export default function PositionDetailPage() {
     }
   }, [positions, id]);
 
-  // Get pool and token data for the position
-  const poolData = useMemo(() => {
-    return position ? pools[position.pool] : null;
-  }, [position, pools]);
-
-  // Token data is embedded in pool data, not stored separately
-  const token0Data = useMemo(() => {
-    return poolData?.token0 || null;
-  }, [poolData]);
-
-  const token1Data = useMemo(() => {
-    return poolData?.token1 || null;
-  }, [poolData]);
+  // Derive token symbols from position's tokenPair
+  const [token0Symbol, token1Symbol] = useMemo(() => {
+    if (!position?.tokenPair) return ['', ''];
+    return position.tokenPair.split('/');
+  }, [position?.tokenPair]);
 
   // Get vault data if position is in a vault
   const vaultData = useMemo(() => {
@@ -142,7 +130,7 @@ export default function PositionDetailPage() {
   // Check if any resources are currently updating
   const isUpdating = resourcesUpdating?.positions || false;
 
-  // Get the appropriate adapter for this position
+  // Get the appropriate adapter for this position (needed by modals via fee/balance useEffects)
   const adapter = useMemo(() => {
     if (!position?.platform || !provider || !chainId) return null;
     try {
@@ -153,98 +141,37 @@ export default function PositionDetailPage() {
     }
   }, [position?.platform, chainId, provider, id]);
 
-  // Use adapter for position-specific calculations
-  const isActive = useMemo(() => {
-    if (!adapter || !position || !poolData || typeof poolData.tick !== 'number') return false;
-    try {
-      return adapter.isPositionInRange(poolData.tick, position.tickLower, position.tickUpper);
-    } catch (error) {
-      console.error("Error checking if position is in range:", error);
-      return false;
-    }
-  }, [adapter, position, poolData]);
+  // Use position's pre-computed in-range status
+  const isActive = position?.inRange ?? false;
 
-  // Calculate price information using the adapter
+  // Price information from position's pre-computed values, with inversion support
   const priceInfo = useMemo(() => {
-    if (!adapter || !position || !poolData || !token0Data || !token1Data) {
-      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
-    }
-
-    try {
-      const baseToken = invertPriceDisplay ? token0Data : token1Data;
-      const quoteToken = invertPriceDisplay ? token1Data : token0Data;
-
-      const currentPrice = adapter.calculatePriceFromSqrtPrice(
-        poolData.sqrtPriceX96,
-        baseToken,
-        quoteToken
-      );
-      const lowerPrice = adapter.tickToPrice(
-        position.tickLower,
-        baseToken,
-        quoteToken
-      );
-      const upperPrice = adapter.tickToPrice(
-        position.tickUpper,
-        baseToken,
-        quoteToken
-      );
-
+    if (!position) return { currentPrice: null, lowerPrice: null, upperPrice: null };
+    const { currentPrice, priceLower, priceUpper } = position;
+    if (invertPriceDisplay) {
       return {
-        currentPrice: parseFloat(currentPrice.toSignificant(6)),
-        lowerPrice: parseFloat(lowerPrice.toSignificant(6)),
-        upperPrice: parseFloat(upperPrice.toSignificant(6))
+        currentPrice: 1 / currentPrice,
+        lowerPrice: 1 / priceUpper,
+        upperPrice: 1 / priceLower,
       };
-    } catch (error) {
-      console.error("Error calculating price:", error);
-      return { currentPrice: "N/A", lowerPrice: "N/A", upperPrice: "N/A" };
     }
-  }, [adapter, position, poolData, token0Data, token1Data, invertPriceDisplay]);
-
-  // Extract values from priceInfo
-  const { currentPrice, lowerPrice, upperPrice } = priceInfo;
+    return { currentPrice, lowerPrice: priceLower, upperPrice: priceUpper };
+  }, [position?.currentPrice, position?.priceLower, position?.priceUpper, invertPriceDisplay]);
 
   // Set price direction labels
-  // When invertPriceDisplay is true: baseToken=token0, quoteToken=token1, price shows token1 per token0
-  // When invertPriceDisplay is false: baseToken=token1, quoteToken=token0, price shows token0 per token1
-  const priceLabel = token0Data && token1Data ? (
-    invertPriceDisplay
-      ? `${token1Data.symbol} per ${token0Data.symbol}`
-      : `${token0Data.symbol} per ${token1Data.symbol}`
-  ) : "";
-
-  // Ensure lower price is always smaller than upper price (they swap when inverting)
-  const displayLowerPrice = useMemo(() => {
-    if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
-    try {
-      const result = Math.min(parseFloat(lowerPrice), parseFloat(upperPrice));
-      return result;
-    } catch (error) {
-      console.error("Error calculating display lower price:", error);
-      return "N/A";
-    }
-  }, [lowerPrice, upperPrice]);
-
-  const displayUpperPrice = useMemo(() => {
-    if (lowerPrice === "N/A" || upperPrice === "N/A") return "N/A";
-    try {
-      const result = Math.max(parseFloat(lowerPrice), parseFloat(upperPrice));
-      return result;
-    } catch (error) {
-      console.error("Error calculating display upper price:", error);
-      return "N/A";
-    }
-  }, [lowerPrice, upperPrice]);
+  const priceLabel = invertPriceDisplay
+    ? `${token1Symbol} per ${token0Symbol}`
+    : `${token0Symbol} per ${token1Symbol}`;
 
   // Calculate position percentage for the progress bar
   const pricePositionPercent = useMemo(() => {
-    if (displayLowerPrice === "N/A" || displayUpperPrice === "N/A" || currentPrice === "N/A")
+    if (!priceInfo.lowerPrice || !priceInfo.upperPrice || !priceInfo.currentPrice)
       return 0;
 
     try {
-      const lower = parseFloat(displayLowerPrice);
-      const upper = parseFloat(displayUpperPrice);
-      const current = parseFloat(currentPrice);
+      const lower = priceInfo.lowerPrice;
+      const upper = priceInfo.upperPrice;
+      const current = priceInfo.currentPrice;
 
       if (current < lower) return 0;
       if (current > upper) return 100;
@@ -257,7 +184,7 @@ export default function PositionDetailPage() {
       console.error("Error calculating price position percent:", error);
       return 0;
     }
-  }, [displayLowerPrice, displayUpperPrice, currentPrice]);
+  }, [priceInfo.lowerPrice, priceInfo.upperPrice, priceInfo.currentPrice]);
 
   // Fetch positions on initial load if they're not already in Redux
   useEffect(() => {
@@ -284,32 +211,22 @@ export default function PositionDetailPage() {
           const platformResults = await Promise.all(
             adapters.map(async adapter => {
               try {
-                return await adapter.getPositions(address, provider);
+                return await adapter.getPositionsForDisplay(address, provider);
               } catch (adapterError) {
                 console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
-                return { positions: {}, poolData: {}, tokenData: {} };
+                return { positions: {} };
               }
             })
           );
 
           // Combine results
           let allPositions = [];
-          let allPoolData = {};
-          let allTokenData = {};
 
           platformResults.forEach((result) => {
             const positionsArray = result.positions ? Object.values(result.positions) : [];
 
             if (positionsArray.length > 0) {
               allPositions = [...allPositions, ...positionsArray];
-
-              if (result.poolData) {
-                allPoolData = { ...allPoolData, ...result.poolData };
-              }
-
-              if (result.tokenData) {
-                allTokenData = { ...allTokenData, ...result.tokenData };
-              }
             }
           });
 
@@ -324,8 +241,6 @@ export default function PositionDetailPage() {
 
           // Update Redux
           dispatch(setPositions(allPositions));
-          dispatch(setPools(allPoolData));
-          dispatch(setTokens(allTokenData));
 
         } catch (error) {
           console.error("Error fetching initial positions:", error);
@@ -343,16 +258,7 @@ export default function PositionDetailPage() {
   useEffect(() => {
     if (id && lastUpdate) {
       try {
-        // Force state resets to trigger recalculations
-        setUncollectedFees(null);
-        setTokenBalances(null);
-        setIsLoadingFees(true);
-        setIsLoadingBalances(true);
-        setFeeLoadingError(false);
-        setBalanceError(false);
         setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
-
-        // Mark resources as updating in Redux
         dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
       } catch (error) {
         console.error("Error marking resources as updating:", error);
@@ -360,7 +266,7 @@ export default function PositionDetailPage() {
     }
   }, [lastUpdate, id, dispatch]);
 
-  // Add this useEffect to position/[id].js
+  // Refresh position data when lastUpdate changes
   useEffect(() => {
     // Only run when lastUpdate changes and we have necessary context
     if (lastUpdate && adapter && provider && address && chainId && id) {
@@ -368,8 +274,11 @@ export default function PositionDetailPage() {
         // Track the latest refresh timestamp to avoid duplicate refreshes
         const refreshTimestamp = lastUpdate;
 
+        // Use the vault address for vault positions, wallet address for wallet positions
+        const owner = position?.vaultAddress || address;
+
         // Fetch fresh data from blockchain
-        adapter.getPositions(address, provider).then(result => {
+        adapter.getPositionsForDisplay(owner, provider).then(result => {
           // Check if this is still the latest refresh (prevents race conditions)
           if (refreshTimestamp !== lastUpdate) return;
 
@@ -378,9 +287,6 @@ export default function PositionDetailPage() {
           const positionsArray = result.positions ? Object.values(result.positions) : [];
           const freshPosition = positionsArray.find(p => p.id === id);
           if (freshPosition) {
-            // Get fresh pool data
-            const freshPoolData = result.poolData[freshPosition.pool];
-
             // Update Redux with fresh data (without creating reference cycles)
             const currentPositions = positionsRef.current;
             if (currentPositions && currentPositions.length > 0) {
@@ -393,11 +299,6 @@ export default function PositionDetailPage() {
                 dispatch(setPositions(updatedPositions));
               }
             }
-
-            // Update the specific pool (tokens are embedded in pool data)
-            if (freshPoolData) {
-              dispatch(setPools({ [freshPosition.pool]: freshPoolData }));
-            }
           }
         }).catch(error => {
           console.error("Error refreshing position data:", error);
@@ -408,136 +309,68 @@ export default function PositionDetailPage() {
         showError("Error updating position data");
       }
     }
-  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, showError]);
+  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, showError, position?.vaultAddress]);
 
-  // Fetch fee data using the adapter
+  // Fetch pool data for modal infrastructure (replaces Redux pool cache)
   useEffect(() => {
+    if (!adapter || !position?.pool || !provider || !chainId) return;
     let isMounted = true;
 
-    // Guard against undefined values
-    if (!adapter || !position || !poolData || !token0Data || !token1Data) {
-      return; // Early return if any required data is missing
-    }
-
-    setIsLoadingFees(true);
-    setFeeLoadingError(false);
-
-    const loadFees = async () => {
+    const fetchPoolData = async () => {
       try {
-        // Calculate raw fees (returns [bigint, bigint])
-        const [fees0Raw, fees1Raw] = adapter.calculateUncollectedFees(position, poolData);
+        const poolData = await adapter.getPoolData(position.pool, provider);
+        if (!isMounted) return;
 
-        // Format the fees using token decimals (ethers v5 uses utils.formatUnits)
-        // Convert to number since formatFeeDisplay expects a number, not a string
-        const fees0Formatted = parseFloat(ethers.utils.formatUnits(fees0Raw.toString(), token0Data.decimals));
-        const fees1Formatted = parseFloat(ethers.utils.formatUnits(fees1Raw.toString(), token1Data.decimals));
-
-        // Only update state if component is still mounted
-        if (isMounted) {
-          setUncollectedFees({
-            token0: {
-              formatted: fees0Formatted,
-              raw: fees0Raw.toString()
-            },
-            token1: {
-              formatted: fees1Formatted,
-              raw: fees1Raw.toString()
-            }
-          });
-          setIsLoadingFees(false);
-
-          // Mark resource as updated in Redux
-          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
-        }
-      } catch (error) {
-        console.error("Error calculating fees for position", id, ":", error);
-        if (isMounted) {
-          setFeeLoadingError(true);
-          setIsLoadingFees(false);
-          showError("Failed to calculate uncollected fees");
-        }
-      }
-    };
-
-    loadFees();
-
-    // Cleanup function
-    return () => {
-      isMounted = false;
-    };
-  }, [adapter, position, poolData, token0Data, token1Data, lastUpdate, dispatch, id, showError]);
-
-  // Fetch token balances using the adapter
-  useEffect(() => {
-    let isMounted = true;
-
-    // Guard against undefined values
-    if (!adapter || !position || !poolData || !token0Data || !token1Data || !chainId) {
-      return; // Early return if any required data is missing
-    }
-
-    setIsLoadingBalances(true);
-    setBalanceError(false);
-
-    const calculateBalances = async () => {
-      try {
-        const balances = await adapter.calculateTokenAmounts(
-          position,
-          poolData,
-          token0Data,
-          token1Data,
-          chainId
+        // Resolve token metadata from pool contract
+        const poolContract = new ethers.Contract(
+          position.pool,
+          ['function token0() view returns (address)', 'function token1() view returns (address)'],
+          provider
         );
+        const [token0Addr, token1Addr] = await Promise.all([
+          poolContract.token0(), poolContract.token1()
+        ]);
+
+        const token0Config = getTokenByAddress(token0Addr, chainId);
+        const token1Config = getTokenByAddress(token1Addr, chainId);
+
+        const t0Data = { address: token0Addr, symbol: token0Config.symbol, decimals: token0Config.decimals, isNative: token0Config.isNative || false };
+        const t1Data = { address: token1Addr, symbol: token1Config.symbol, decimals: token1Config.decimals, isNative: token1Config.isNative || false };
+
+        // Embed token data in poolData for modal compatibility
+        poolData.token0 = t0Data;
+        poolData.token1 = t1Data;
 
         if (isMounted) {
-          // balances is an array [amount0BigInt, amount1BigInt]
-          // Format it into the expected object structure
-          const formattedBalances = {
-            token0: {
-              raw: balances[0].toString(),
-              formatted: parseFloat(ethers.utils.formatUnits(balances[0].toString(), token0Data.decimals))
-            },
-            token1: {
-              raw: balances[1].toString(),
-              formatted: parseFloat(ethers.utils.formatUnits(balances[1].toString(), token1Data.decimals))
-            }
-          };
-          setTokenBalances(formattedBalances);
-          setIsLoadingBalances(false);
+          setModalPoolData(poolData);
+          setModalToken0Data(t0Data);
+          setModalToken1Data(t1Data);
         }
       } catch (error) {
-        console.error("Error calculating token balances:", error);
-        if (isMounted) {
-          setBalanceError(true);
-          setIsLoadingBalances(false);
-          showError("Failed to calculate token balances");
-        }
+        console.error("Error fetching pool data for modals:", error);
       }
     };
 
-    calculateBalances();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [adapter, position, poolData, token0Data, token1Data, chainId, lastUpdate, showError]);
+    fetchPoolData();
+    return () => { isMounted = false; };
+  }, [adapter, position?.pool, provider, chainId, lastUpdate]);
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
-    // Guard against undefined token data
-    if (!token0Data?.symbol || !token1Data?.symbol) return;
+    // Guard against undefined token symbols
+    if (!token0Symbol || !token1Symbol) return;
 
     const getPrices = async () => {
       setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
 
       try {
         // Use our utility function to fetch prices (2-minute cache for position detail page)
-        const tokenSymbols = [token0Data.symbol, token1Data.symbol];
+        const tokenSymbols = [token0Symbol, token1Symbol];
         const prices = await fetchTokenPrices(tokenSymbols, CACHE_DURATIONS['2-MINUTES']);
 
         setTokenPrices({
-          token0: prices[token0Data.symbol],
-          token1: prices[token1Data.symbol],
+          token0: prices[token0Symbol],
+          token1: prices[token1Symbol],
           loading: false,
           error: null
         });
@@ -553,7 +386,7 @@ export default function PositionDetailPage() {
     };
 
     getPrices();
-  }, [token0Data, token1Data, lastUpdate, showError]);
+  }, [token0Symbol, token1Symbol, lastUpdate, showError]);
 
   // Function to manually refresh data
   const refreshData = () => {
@@ -571,7 +404,7 @@ export default function PositionDetailPage() {
     if (!amount || amount === "0" || tokenPrices.loading || tokenPrices.error) return null;
 
     try {
-      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
+      const price = tokenSymbol === token0Symbol ? tokenPrices.token0 : tokenPrices.token1;
       if (!price) return null;
 
       // Calculate USD value inline
@@ -582,22 +415,6 @@ export default function PositionDetailPage() {
       return null;
     }
   };
-
-  // // Get the platform color directly from config
-  // const getPlatformColor = () => {
-  //   if (position && position.platform && config.platformMetadata[position.platform]?.color) {
-  //     return config.platformMetadata[position.platform].color;
-  //   }
-  //   return '#6c757d'; // Default gray color
-  // };
-
-  // // Get platform logo if available
-  // const getPlatformLogo = () => {
-  //   if (position && position.platform && config.platformMetadata[position.platform]?.logo) {
-  //     return config.platformMetadata[position.platform].logo;
-  //   }
-  //   return null;
-  // };
 
   // Check if platform has a logo
   const platformLogo = position?.platform ? getPlatformLogo(position.platform) : null;
@@ -664,8 +481,8 @@ export default function PositionDetailPage() {
     );
   }
 
-  // If we're still loading the position or it doesn't exist (after positions array is populated)
-  if (!position || !poolData || !token0Data || !token1Data) {
+  // If the position doesn't exist (after positions array is populated)
+  if (!position) {
     return (
       <>
         <Navbar />
@@ -677,11 +494,8 @@ export default function PositionDetailPage() {
           </Link>
           <Card>
             <Card.Body className="text-center p-5">
-              <h3>Position not found or still loading...</h3>
-              {!position && <p>No position found with ID: {id}</p>}
-              {position && (!poolData || !token0Data || !token1Data) && (
-                <p>Missing pool or token data for this position.</p>
-              )}
+              <h3>Position not found</h3>
+              <p>No position found with ID: {id}</p>
               <Button
                 variant="primary"
                 onClick={refreshData}
@@ -781,20 +595,14 @@ export default function PositionDetailPage() {
                     {/* TVL in top right */}
                     <div style={{ textAlign: 'right', margin: 0, padding: 0 }}>
                       <div style={{ fontSize: '2.5rem', fontWeight: '600', margin: 0 }}>
-                        {isLoadingBalances || isLoadingFees ? (
+                        {tokenPrices.loading ? (
                           <Spinner animation="border" size="sm" />
-                        ) : tokenBalances && uncollectedFees && tokenPrices.token0 && tokenPrices.token1 ? (
+                        ) : tokenPrices.token0 && tokenPrices.token1 ? (
                           <>
                             <span className="text-crimson">
                               ${(() => {
-                                const tokenTVL = (
-                                  (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
-                                  (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
-                                );
-                                const feesTVL = (
-                                  (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
-                                  (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
-                                );
+                                const tokenTVL = (position.token0Amount * tokenPrices.token0) + (position.token1Amount * tokenPrices.token1);
+                                const feesTVL = (position.uncollectedFees0 * tokenPrices.token0) + (position.uncollectedFees1 * tokenPrices.token1);
                                 return (tokenTVL + feesTVL).toLocaleString(undefined, {
                                   minimumFractionDigits: 2,
                                   maximumFractionDigits: 2
@@ -805,26 +613,14 @@ export default function PositionDetailPage() {
                               placement="top"
                               overlay={
                                 <Tooltip>
-                                  <div>Token TVL: ${(() => {
-                                    const tokenTVL = (
-                                      (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
-                                      (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
-                                    );
-                                    return tokenTVL.toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2
-                                    });
-                                  })()}</div>
-                                  <div>Uncollected Fees: ${(() => {
-                                    const feesTVL = (
-                                      (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
-                                      (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
-                                    );
-                                    return feesTVL.toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2
-                                    });
-                                  })()}</div>
+                                  <div>Token TVL: ${((position.token0Amount * tokenPrices.token0) + (position.token1Amount * tokenPrices.token1)).toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2
+                                  })}</div>
+                                  <div>Uncollected Fees: ${((position.uncollectedFees0 * tokenPrices.token0) + (position.uncollectedFees1 * tokenPrices.token1)).toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2
+                                  })}</div>
                                 </Tooltip>
                               }
                             >
@@ -856,7 +652,7 @@ export default function PositionDetailPage() {
 
                   <div className="mb-3">
                     <small style={{ fontSize: '0.9rem', color: '#525252' }}>
-                      <strong>Fee Tier:</strong> {position.fee && isFinite(position.fee) ? (position.fee / 10000) : 'N/A'}%
+                      <strong>Fee Tier:</strong> {position.fee != null && isFinite(position.fee) ? position.fee : 'N/A'}%
                     </small>
                   </div>
 
@@ -867,100 +663,75 @@ export default function PositionDetailPage() {
                     <Col md={6} style={{ borderRight: '1px solid rgba(0, 0, 0, 0.1)', paddingRight: '2rem' }}>
                       <div className="mb-3" style={{ paddingLeft: '9rem', paddingRight: '9rem' }}>
                         <strong>Token Balances:</strong>
-                        {balanceError ? (
-                          <div className="text-danger small">Error calculating balances</div>
-                        ) : isLoadingBalances ? (
-                          <div className="d-flex align-items-center">
-                            <Spinner animation="border" size="sm" className="me-2" />
-                            <span className="small">Loading...</span>
-                          </div>
-                        ) : tokenBalances?.token0 && tokenBalances?.token1 ? (
-                          <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
-                            <div className="mb-1 d-flex justify-content-between align-items-center">
-                              <div>
-                                <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
-                                <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token0.formatted).toFixed(4)}</span>
-                              </div>
-                              {tokenPrices.token0 && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
-                                  ${getUsdValue(tokenBalances.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
+                        <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
+                          <div className="mb-1 d-flex justify-content-between align-items-center">
+                            <div>
+                              <strong style={{ color: 'var(--crimson-700)' }}>{token0Symbol}:</strong>{' '}
+                              <span style={{ color: '#525252' }}>{position.token0Amount.toFixed(4)}</span>
                             </div>
-                            <div className="mb-1 d-flex justify-content-between align-items-center">
-                              <div>
-                                <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
-                                <span style={{ color: '#525252' }}>{parseFloat(tokenBalances.token1.formatted).toFixed(4)}</span>
-                              </div>
-                              {tokenPrices.token1 && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
-                                  ${getUsdValue(tokenBalances.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
-                            </div>
-                            {tokenPrices.token0 && tokenPrices.token1 && (
-                              <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
-                                Total: ${(
-                                  (getUsdValue(tokenBalances.token0.formatted, token0Data.symbol) || 0) +
-                                  (getUsdValue(tokenBalances.token1.formatted, token1Data.symbol) || 0)
-                                ).toFixed(2)}
-                              </div>
+                            {tokenPrices.token0 && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                ${getUsdValue(position.token0Amount, token0Symbol)?.toFixed(2) || '—'}
+                              </span>
                             )}
                           </div>
-                        ) : (
-                          <div className="text-muted small">Not available</div>
-                        )}
+                          <div className="mb-1 d-flex justify-content-between align-items-center">
+                            <div>
+                              <strong style={{ color: 'var(--crimson-700)' }}>{token1Symbol}:</strong>{' '}
+                              <span style={{ color: '#525252' }}>{position.token1Amount.toFixed(4)}</span>
+                            </div>
+                            {tokenPrices.token1 && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                ${getUsdValue(position.token1Amount, token1Symbol)?.toFixed(2) || '—'}
+                              </span>
+                            )}
+                          </div>
+                          {tokenPrices.token0 && tokenPrices.token1 && (
+                            <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
+                              Total: ${(
+                                (getUsdValue(position.token0Amount, token0Symbol) || 0) +
+                                (getUsdValue(position.token1Amount, token1Symbol) || 0)
+                              ).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </Col>
                     <Col md={6} style={{ paddingLeft: '2rem' }}>
                       <div className="mb-3" style={{ paddingLeft: '9rem', paddingRight: '9rem' }}>
                         <strong>Uncollected Fees:</strong>
-                        {feeLoadingError ? (
-                          <div className="text-danger small w-100">
-                            <i className="me-1">⚠️</i>
-                            Unable to load fee data. Please try refreshing.
-                          </div>
-                        ) : isLoadingFees ? (
-                          <div className="text-secondary text-center py-2">
-                            <Spinner animation="border" size="sm" className="me-2" />
-                            Loading fee data...
-                          </div>
-                        ) : uncollectedFees ? (
-                          <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
-                            <div className="mb-1 d-flex justify-content-between align-items-center">
-                              <div>
-                                <strong style={{ color: 'var(--crimson-700)' }}>{token0Data.symbol}:</strong>{' '}
-                                <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}</span>
-                              </div>
-                              {tokenPrices.token0 && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
-                                  ${getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
+                        <div style={{ fontSize: '0.8125rem', color: '#0a0a0a', paddingLeft: '.7rem', paddingRight: '.7rem' }}>
+                          <div className="mb-1 d-flex justify-content-between align-items-center">
+                            <div>
+                              <strong style={{ color: 'var(--crimson-700)' }}>{token0Symbol}:</strong>{' '}
+                              <span style={{ color: '#525252' }}>{formatFeeDisplay(position.uncollectedFees0)}</span>
                             </div>
-                            <div className="mb-1 d-flex justify-content-between align-items-center">
-                              <div>
-                                <strong style={{ color: 'var(--crimson-700)' }}>{token1Data.symbol}:</strong>{' '}
-                                <span style={{ color: '#525252' }}>{formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}</span>
-                              </div>
-                              {tokenPrices.token1 && (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
-                                  ${getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol)?.toFixed(2) || '—'}
-                                </span>
-                              )}
-                            </div>
-                            {tokenPrices.token0 && tokenPrices.token1 && (
-                              <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
-                                Total: ${(
-                                  (getUsdValue(uncollectedFees.token0.formatted, token0Data.symbol) || 0) +
-                                  (getUsdValue(uncollectedFees.token1.formatted, token1Data.symbol) || 0)
-                                ).toFixed(2)}
-                              </div>
+                            {tokenPrices.token0 && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                ${getUsdValue(position.uncollectedFees0, token0Symbol)?.toFixed(2) || '—'}
+                              </span>
                             )}
                           </div>
-                        ) : (
-                          <div className="text-muted small">Not available</div>
-                        )}
+                          <div className="mb-1 d-flex justify-content-between align-items-center">
+                            <div>
+                              <strong style={{ color: 'var(--crimson-700)' }}>{token1Symbol}:</strong>{' '}
+                              <span style={{ color: '#525252' }}>{formatFeeDisplay(position.uncollectedFees1)}</span>
+                            </div>
+                            {tokenPrices.token1 && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-600)' }}>
+                                ${getUsdValue(position.uncollectedFees1, token1Symbol)?.toFixed(2) || '—'}
+                              </span>
+                            )}
+                          </div>
+                          {tokenPrices.token0 && tokenPrices.token1 && (
+                            <div className="mt-1 text-end" style={{ fontSize: '0.75rem', color: 'var(--blue-accent)', fontWeight: 'bold' }}>
+                              Total: ${(
+                                (getUsdValue(position.uncollectedFees0, token0Symbol) || 0) +
+                                (getUsdValue(position.uncollectedFees1, token1Symbol) || 0)
+                              ).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </Col>
                   </Row>
@@ -994,10 +765,8 @@ export default function PositionDetailPage() {
                       <Button
                         variant="outline-primary"
                         className="w-100"
-                        disabled={position.inVault || feeLoadingError || !uncollectedFees ||
-                                  (uncollectedFees &&
-                                  parseFloat(uncollectedFees.token0.formatted) < 0.0001 &&
-                                  parseFloat(uncollectedFees.token1.formatted) < 0.0001)}
+                        disabled={position.inVault ||
+                                  (position.uncollectedFees0 < 0.0001 && position.uncollectedFees1 < 0.0001)}
                         onClick={() => setShowClaimFeesModal(true)}
                       >
                         Claim Fees
@@ -1043,13 +812,13 @@ export default function PositionDetailPage() {
                     <Card.Body>
                       <div style={{ height: "120px" }}>
                         {/* Using the PriceRangeChart component with real data */}
-                        {displayLowerPrice !== "N/A" && displayUpperPrice !== "N/A" && currentPrice !== "N/A" ? (
+                        {priceInfo.lowerPrice && priceInfo.upperPrice && priceInfo.currentPrice ? (
                           <PriceRangeChart
-                            lowerPrice={parseFloat(displayLowerPrice)}
-                            upperPrice={parseFloat(displayUpperPrice)}
-                            currentPrice={parseFloat(currentPrice)}
-                            token0Symbol={token0Data.symbol}
-                            token1Symbol={token1Data.symbol}
+                            lowerPrice={priceInfo.lowerPrice}
+                            upperPrice={priceInfo.upperPrice}
+                            currentPrice={priceInfo.currentPrice}
+                            token0Symbol={token0Symbol}
+                            token1Symbol={token1Symbol}
                             isInverted={invertPriceDisplay}
                             isActive={isActive}
                           />
@@ -1062,13 +831,13 @@ export default function PositionDetailPage() {
 
                       <div>
                         <div className="mb-2">
-                          <strong style={{ color: 'var(--crimson-700)' }}>Min Price:</strong> {displayLowerPrice === "N/A" ? "N/A" : formatPrice(displayLowerPrice)}
+                          <strong style={{ color: 'var(--crimson-700)' }}>Min Price:</strong> {formatPrice(priceInfo.lowerPrice)}
                         </div>
                         <div className="mb-2">
-                          <strong style={{ color: 'var(--crimson-700)' }}>Current Price:</strong> {currentPrice === "N/A" ? "N/A" : formatPrice(parseFloat(currentPrice))}
+                          <strong style={{ color: 'var(--crimson-700)' }}>Current Price:</strong> {formatPrice(priceInfo.currentPrice)}
                         </div>
                         <div className="mb-2">
-                          <strong style={{ color: 'var(--crimson-700)' }}>Max Price:</strong> {displayUpperPrice === "N/A" ? "N/A" : formatPrice(displayUpperPrice)}
+                          <strong style={{ color: 'var(--crimson-700)' }}>Max Price:</strong> {formatPrice(priceInfo.upperPrice)}
                         </div>
                       </div>
                     </Card.Body>
@@ -1082,22 +851,16 @@ export default function PositionDetailPage() {
                     </Card.Header>
                     <Card.Body>
                       <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Tick Range:</strong> {position.tickLower} to {position.tickUpper}
-                      </div>
-                      <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Tick Spacing:</strong> {poolData?.tickSpacing || 'N/A'}
+                        <strong style={{ color: 'var(--crimson-700)' }}>Tick Range:</strong> {position.platformData?.tickLower} to {position.platformData?.tickUpper}
                       </div>
                       <div className="mb-2">
                         <strong style={{ color: 'var(--crimson-700)' }}>Chain ID:</strong> {chainId}
                       </div>
                       <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Liquidity:</strong> {position.liquidity.toLocaleString()}
+                        <strong style={{ color: 'var(--crimson-700)' }}>Token0 Address:</strong> {modalToken0Data?.address || 'N/A'}
                       </div>
                       <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Token0 Address:</strong> {token0Data?.address || 'N/A'}
-                      </div>
-                      <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Token1 Address:</strong> {token1Data?.address || 'N/A'}
+                        <strong style={{ color: 'var(--crimson-700)' }}>Token1 Address:</strong> {modalToken1Data?.address || 'N/A'}
                       </div>
                       <div className="mb-2">
                         <strong style={{ color: 'var(--crimson-700)' }}>Pool Address:</strong> {position.pool}
@@ -1115,44 +878,44 @@ export default function PositionDetailPage() {
           show={showClaimFeesModal}
           onHide={() => setShowClaimFeesModal(false)}
           position={position}
-          uncollectedFees={uncollectedFees}
-          token0Data={token0Data}
-          token1Data={token1Data}
+          uncollectedFees={null}
+          token0Data={modalToken0Data}
+          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={poolData}
+          poolData={modalPoolData}
         />
 
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}
           onHide={() => setShowRemoveLiquidityModal(false)}
           position={position}
-          tokenBalances={tokenBalances}
-          uncollectedFees={uncollectedFees}
-          token0Data={token0Data}
-          token1Data={token1Data}
+          tokenBalances={null}
+          uncollectedFees={null}
+          token0Data={modalToken0Data}
+          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={poolData}
+          poolData={modalPoolData}
         />
 
         <ClosePositionModal
           show={showClosePositionModal}
           onHide={() => setShowClosePositionModal(false)}
           position={position}
-          tokenBalances={tokenBalances}
-          uncollectedFees={uncollectedFees}
-          token0Data={token0Data}
-          token1Data={token1Data}
+          tokenBalances={null}
+          uncollectedFees={null}
+          token0Data={modalToken0Data}
+          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={poolData}
+          poolData={modalPoolData}
         />
 
         <AddLiquidityModal
           show={showAddLiquidityModal}
           onHide={() => setShowAddLiquidityModal(false)}
           position={position}
-          poolData={poolData}
-          token0Data={token0Data}
-          token1Data={token1Data}
+          poolData={modalPoolData}
+          token0Data={modalToken0Data}
+          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
         />
       </Container>

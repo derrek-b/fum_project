@@ -1,4 +1,4 @@
-// src/components/PositionContainer.js - Updated version with modal adapter calls
+// src/components/PositionContainer.js - Uses getPositionsForDisplay for self-contained position data
 import React, { useEffect, useState } from "react";
 import { Row, Col, Alert, Spinner, Button } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
@@ -13,8 +13,6 @@ import PositionCard from "./PositionCard";
 import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
 import { setPositions, addVaultPositions } from "../../redux/positionsSlice";
-import { setPools, clearPools } from "../../redux/poolSlice";
-import { setTokens, clearTokens } from "../../redux/tokensSlice";
 import { setResourceUpdating } from "../../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
@@ -30,9 +28,6 @@ export default function PositionContainer() {
   const { platformFilter } = useSelector((state) => state.platforms);
   const { userVaults } = useSelector((state) => state.vaults);
   const { positions } = useSelector((state) => state.positions);
-  const pools = useSelector((state) => state.pools);
-  const tokens = useSelector((state) => state.tokens);
-  const [localPositions, setLocalPositions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -94,10 +89,7 @@ export default function PositionContainer() {
   useEffect(() => {
     if (!isConnected || !address || !provider || !chainId) {
       console.warn("Wallet disconnected or incomplete connection, clearing state");
-      setLocalPositions([]);
       dispatch(setPositions([]));
-      dispatch(clearPools());
-      dispatch(clearTokens());
       dispatch(clearPlatforms());
       dispatch(clearVaults());
       setError(null);
@@ -142,41 +134,42 @@ export default function PositionContainer() {
         const platformResults = await Promise.all(
           adapters.map(async adapter => {
             try {
-              return await adapter.getPositions(address, provider);
+              return await adapter.getPositionsForDisplay(address, provider);
             } catch (adapterError) {
               console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
               showError(`Failed to fetch positions from ${adapter.platformName}. Some data may be missing.`);
-              // Return empty result to avoid breaking the entire flow
-              return { positions: {}, poolData: {}, tokenData: {} };
+              return { positions: {} };
             }
           })
         );
 
+        // 🔍 Debug: dump raw adapter results
+        platformResults.forEach((result, i) => {
+          const positions = Object.values(result.positions || {});
+          positions.forEach(p => {
+            console.log(`🔍 [${adapters[i].platformName}] Position #${p.id}:`, {
+              token0Amount: p.token0Amount,
+              token1Amount: p.token1Amount,
+              currentPrice: p.currentPrice,
+              priceLower: p.priceLower,
+              priceUpper: p.priceUpper,
+              inRange: p.inRange,
+              tokenPair: p.tokenPair,
+              fee: p.fee,
+            });
+          });
+        });
+
         // Combine position data from all platforms
         let allPositions = [];
-        let allPoolData = {};
-        let allTokenData = {};
         let activePlatforms = [];
 
         platformResults.forEach((result, index) => {
-          // Convert positions object to array
           const positionsArray = result.positions ? Object.values(result.positions) : [];
 
           if (positionsArray.length > 0) {
             allPositions = [...allPositions, ...positionsArray];
-
-            // Track active platforms (those with positions)
             activePlatforms.push(adapters[index].platformId);
-
-            // Merge pool data
-            if (result.poolData) {
-              allPoolData = { ...allPoolData, ...result.poolData };
-            }
-
-            // Merge token data
-            if (result.tokenData) {
-              allTokenData = { ...allTokenData, ...result.tokenData };
-            }
           }
         });
 
@@ -190,10 +183,7 @@ export default function PositionContainer() {
           vaultAddress: null
         }));
 
-        setLocalPositions(allPositions);
         dispatch(setPositions(allPositions));
-        dispatch(setPools(allPoolData));
-        dispatch(setTokens(allTokenData));
 
         // Success notification removed as per request - positions are visible on screen
 
@@ -201,9 +191,8 @@ export default function PositionContainer() {
         console.error("Position fetching error:", error);
         setError(`Error fetching positions: ${error.message}`);
         showError(`Failed to fetch your positions: ${error.message}`);
-        setLocalPositions([]);
         dispatch(setPositions([]));
-        // Do not clear pools or tokens on partial error—only on disconnect
+        // Do not clear positions on partial error—only on disconnect
       } finally {
         setLoading(false);
         dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
@@ -222,11 +211,6 @@ export default function PositionContainer() {
     const fetchVaultPositions = async () => {
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: true }));
 
-      // Get current pool and token data from the store
-      const currentPools = {...(pools || {})};
-      const currentTokens = {...(tokens || {})};
-
-      // Get adapters again (could be pulled from previous effect if stored)
       const result = AdapterFactory.getAdaptersForChain(chainId);
       const adapters = result.adapters || [];
 
@@ -249,38 +233,17 @@ export default function PositionContainer() {
           // For each vault, fetch positions from all platforms
           for (const adapter of adapters) {
             try {
-              const result = await adapter.getPositions(vault.address, provider);
+              const result = await adapter.getPositionsForDisplay(vault.address, provider);
 
-              // Convert positions object to array
               const positionsArray = result.positions ? Object.values(result.positions) : [];
 
               if (positionsArray.length > 0) {
                 vaultPositionsFound += positionsArray.length;
 
-                // Add these positions to Redux with vault flag
                 dispatch(addVaultPositions({
                   positions: positionsArray,
                   vaultAddress: vault.address
                 }));
-
-                // Also merge any new pool or token data
-                if (result.poolData) {
-                  dispatch(setPools({
-                    ...currentPools,
-                    ...result.poolData
-                  }));
-                  // Update our local copy
-                  Object.assign(currentPools, result.poolData);
-                }
-
-                if (result.tokenData) {
-                  dispatch(setTokens({
-                    ...currentTokens,
-                    ...result.tokenData
-                  }));
-                  // Update our local copy
-                  Object.assign(currentTokens, result.tokenData);
-                }
               }
             } catch (adapterError) {
               console.error(`Error fetching ${adapter.platformName} positions from vault ${vault.name}:`, adapterError);
@@ -308,10 +271,9 @@ export default function PositionContainer() {
     fetchVaultPositions();
   }, [isConnected, address, provider, chainId, userVaults, lastUpdate, dispatch]);
 
-  // Filter active positions (with liquidity > 0)
+  // getPositionsForDisplay already filters out inactive/zero-liquidity positions
   // Apply platform filter if selected
   const activePositions = positions
-    .filter((pos) => pos.liquidity > 0)
     .filter((pos) => platformFilter === null || pos.platform === platformFilter);
 
   // Count vault positions for display
