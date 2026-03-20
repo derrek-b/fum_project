@@ -65,6 +65,7 @@ Cannot be instantiated directly. Subclass constructors typically take `(chainId,
 | Method | Signature | Used By | Description |
 |---|---|---|---|
 | `getPositionsForDisplay` | `(address, provider) → Promise<{positions}>` | Frontend (all pages) | Get positions with pre-computed display values (prices, amounts, fees, in-range). See `docs/decisions/adapter-display-interface.md` |
+| `refreshPositionForDisplay` | `(positionId, provider) → Promise<position>` | Frontend (modal refresh) | Single-position refresh returning same shape as `getPositionsForDisplay`. Used by `useModalData` hook for 30s auto-refresh while modals are open. |
 | `getPositionsForVDS` | `(address, provider) → Promise<{positions, poolData}>` | VDS.fetchPositions | Get positions formatted for VaultDataService cache |
 | `getPositionById` | `(tokenId, provider) → Promise<{position, poolData}>` | Strategy.createNewPosition | Fetch single position by NFT tokenId (no Graph dependency) |
 | `getPoolData` | `(poolId, provider) → Promise<Object>` | VDS.fetchAssetValues | Get pool state data by pool identifier |
