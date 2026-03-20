@@ -46,6 +46,7 @@ Two providers serve different purposes:
 - `useProviders()` — Returns `{ readProvider, writeProvider, getSigner, chainId, isReadReady, isWriteReady }`
 - `useReadProvider()` — Shortcut for read-only contexts
 - `useWriteProvider()` — Shortcut for write contexts
+- `useModalData(adapter, position, provider, isVisible)` — Returns `{ poolData, positionForAdapter, isLoading }`. Auto-refreshes pool data and position display data every 30s while modal is open. Flattens `platformData` onto position for adapter calls.
 
 **Lifecycle:** On wallet connect, creates dedicated read provider. On chain change, reloads page (MetaMask recommendation). On disconnect, clears both providers.
 
