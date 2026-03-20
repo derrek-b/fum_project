@@ -47,6 +47,7 @@
  * | Method                       | Used By                             | Status    |
  * |------------------------------|-------------------------------------|-----------|
  * | getPositionsForDisplay       | Frontend position display           | CONFIRMED |
+ * | refreshPositionForDisplay    | Frontend modal data refresh         | CONFIRMED |
  * ----------------------------------------------------------------------------------
  *
  * OPTIONAL CAPABILITY METHODS (default no-op implementations, override to enable):
@@ -197,6 +198,22 @@ export default class PlatformAdapter {
    */
   async getPositionsForDisplay(ownerAddress, provider) {
     throw new Error("getPositionsForDisplay must be implemented by subclasses");
+  }
+
+  /**
+   * Refresh display data for a single position
+   *
+   * Returns the same per-position shape as getPositionsForDisplay but for one position.
+   * Used by the frontend to refresh display data while a modal is open without
+   * re-fetching all positions for the owner.
+   *
+   * @param {string} positionId - Position identifier (numeric string)
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Single position in getPositionsForDisplay shape
+   * @throws {Error} If positionId is invalid, position not found, or has zero liquidity
+   */
+  async refreshPositionForDisplay(positionId, provider) {
+    throw new Error("refreshPositionForDisplay must be implemented by subclasses");
   }
 
   /**

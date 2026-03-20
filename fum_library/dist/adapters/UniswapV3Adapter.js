@@ -1685,6 +1685,129 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   }
 
   /**
+   * Refresh display data for a single position
+   *
+   * Returns the same per-position shape as getPositionsForDisplay but for one position.
+   * Used by the frontend to refresh display data while a modal is open without
+   * re-fetching all positions for the owner.
+   *
+   * @param {string} positionId - Position NFT token ID (numeric string)
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Single position in getPositionsForDisplay shape
+   * @throws {Error} If positionId is invalid, position not found, or has zero liquidity
+   */
+  async refreshPositionForDisplay(positionId, provider) {
+    // Validate positionId
+    if (positionId === null || positionId === undefined) {
+      throw new Error("Position ID is required");
+    }
+    if (typeof positionId !== 'string') {
+      throw new Error("Position ID must be a string");
+    }
+    if (!/^\d+$/.test(positionId)) {
+      throw new Error("Position ID must be a numeric string");
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      // Fetch position data from chain
+      const positionManager = this._getPositionManager(provider);
+      const positionData = await positionManager.positions(positionId);
+
+      // Reject zero-liquidity (closed) positions
+      if (BigInt(positionData.liquidity.toString()) === 0n) {
+        throw new Error(`Position ${positionId} has zero liquidity`);
+      }
+
+      const tickLower = positionData.tickLower;
+      const tickUpper = positionData.tickUpper;
+
+      // Resolve pool data
+      const poolAddress = await this._getPoolAddress(
+        positionData.token0, positionData.token1, positionData.fee, provider
+      );
+      const poolData = await this.getPoolData(poolAddress, provider);
+
+      // Resolve token metadata
+      const token0Config = getTokenByAddress(positionData.token0, this.chainId);
+      const token1Config = getTokenByAddress(positionData.token1, this.chainId);
+      const token0Data = { address: positionData.token0, symbol: token0Config.symbol, decimals: token0Config.decimals };
+      const token1Data = { address: positionData.token1, symbol: token1Config.symbol, decimals: token1Config.decimals };
+
+      // Fetch tick data for fee calculation
+      const tickData = await this._fetchTickData(poolAddress, tickLower, tickUpper, provider);
+
+      // Range check
+      const inRange = this.isPositionInRange(poolData.tick, tickLower, tickUpper);
+
+      // Current price
+      const currentPriceObj = this.calculatePriceFromSqrtPrice(poolData.sqrtPriceX96, token0Data, token1Data);
+      const currentPrice = parseFloat(currentPriceObj.toSignificant(8));
+
+      // Bound prices
+      const priceLowerObj = this.tickToPrice(tickLower, token0Data, token1Data);
+      const priceUpperObj = this.tickToPrice(tickUpper, token0Data, token1Data);
+      const priceLower = parseFloat(priceLowerObj.toSignificant(8));
+      const priceUpper = parseFloat(priceUpperObj.toSignificant(8));
+
+      // Token amounts
+      const positionForCalc = { liquidity: positionData.liquidity.toString(), tickLower, tickUpper };
+      const [token0Raw, token1Raw] = await this.calculateTokenAmounts(positionForCalc, poolData, token0Data, token1Data);
+      const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+      const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+      // Uncollected fees
+      const poolDataWithTicks = {
+        ...poolData,
+        ticks: { [tickLower]: tickData.tickLower, [tickUpper]: tickData.tickUpper }
+      };
+      const positionForFees = {
+        ...positionForCalc,
+        feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+        feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+        tokensOwed0: positionData.tokensOwed0.toString(),
+        tokensOwed1: positionData.tokensOwed1.toString(),
+      };
+      const [fees0Raw, fees1Raw] = this.calculateUncollectedFees(positionForFees, poolDataWithTicks);
+      const uncollectedFees0 = Number(fees0Raw) / Math.pow(10, token0Data.decimals);
+      const uncollectedFees1 = Number(fees1Raw) / Math.pow(10, token1Data.decimals);
+
+      // Fee percentage
+      const fee = poolData.fee / 10000;
+
+      return {
+        id: String(positionId),
+        platform: this.platformId,
+        platformName: this.platformName,
+        tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+        pool: poolAddress,
+        inRange, currentPrice, priceLower, priceUpper,
+        token0Amount, token1Amount, uncollectedFees0, uncollectedFees1, fee,
+        platformData: {
+          tickLower, tickUpper,
+          liquidity: positionData.liquidity.toString(),
+          feeGrowthInside0LastX128: positionData.feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: positionData.feeGrowthInside1LastX128.toString(),
+          tokensOwed0: positionData.tokensOwed0.toString(),
+          tokensOwed1: positionData.tokensOwed1.toString(),
+        }
+      };
+    } catch (error) {
+      // Re-throw validation errors as-is
+      if (error.message.includes('Position ID') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('zero liquidity')) {
+        throw error;
+      }
+      throw new Error(`Failed to refresh position ${positionId} for display: ${error.message}`);
+    }
+  }
+
+  /**
    * Fetch a single position by tokenId (no Graph dependency)
    * Used for immediate cache updates after position creation
    *
@@ -2993,10 +3116,10 @@ export default class UniswapV3Adapter extends PlatformAdapter {
   async generateClaimFeesData(params) {
     const {
       position, provider, walletAddress,
-      token0Address, token1Address,
-      token0Decimals, token1Decimals,
-      token0IsNative = false,
-      token1IsNative = false,
+      token0Address: providedToken0Address, token1Address: providedToken1Address,
+      token0Decimals: providedToken0Decimals, token1Decimals: providedToken1Decimals,
+      token0IsNative: providedToken0IsNative = false,
+      token1IsNative: providedToken1IsNative = false,
       poolData  // Accepted for V4 compatibility, not used by V3
     } = params;
 
@@ -3020,26 +3143,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error('positionId must be a numeric string');
     }
 
-    // Validate token0 address
-    if (!token0Address) {
-      throw new Error("Token0 address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(token0Address);
-    } catch (error) {
-      throw new Error(`Invalid token0 address: ${token0Address}`);
-    }
-
-    // Validate token1 address
-    if (!token1Address) {
-      throw new Error("Token1 address parameter is required");
-    }
-    try {
-      ethers.utils.getAddress(token1Address);
-    } catch (error) {
-      throw new Error(`Invalid token1 address: ${token1Address}`);
-    }
-
     // Validate wallet address
     if (!walletAddress) {
       throw new Error("Wallet address parameter is required");
@@ -3050,23 +3153,36 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error(`Invalid wallet address: ${walletAddress}`);
     }
 
-    // Validate token decimals
-    if (token0Decimals === null || token0Decimals === undefined) {
-      throw new Error("Token0 decimals is required");
-    }
-    if (typeof token0Decimals !== 'number' || !Number.isFinite(token0Decimals)) {
-      throw new Error("Token0 decimals must be a valid number");
-    }
-
-    if (token1Decimals === null || token1Decimals === undefined) {
-      throw new Error("Token1 decimals is required");
-    }
-    if (typeof token1Decimals !== 'number' || !Number.isFinite(token1Decimals)) {
-      throw new Error("Token1 decimals must be a valid number");
-    }
-
     // Validate provider
     await this._validateProviderChain(provider);
+
+    // Resolve token data: use provided values or fetch from chain + config
+    let token0Address = providedToken0Address;
+    let token1Address = providedToken1Address;
+    let token0Decimals = providedToken0Decimals;
+    let token1Decimals = providedToken1Decimals;
+    let token0IsNative = providedToken0IsNative;
+    let token1IsNative = providedToken1IsNative;
+
+    if (!token0Address || !token1Address || token0Decimals == null || token1Decimals == null) {
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address found for chainId: ${this.chainId}`);
+      }
+      const nftManager = new ethers.Contract(
+        this.addresses.positionManagerAddress, this.nonfungiblePositionManagerABI, provider
+      );
+      const positionData = await nftManager.positions(positionId);
+
+      token0Address = token0Address || positionData.token0;
+      token1Address = token1Address || positionData.token1;
+
+      const token0Config = getTokenByAddress(token0Address, this.chainId);
+      const token1Config = getTokenByAddress(token1Address, this.chainId);
+      token0Decimals = token0Decimals ?? token0Config.decimals;
+      token1Decimals = token1Decimals ?? token1Config.decimals;
+      token0IsNative = providedToken0IsNative || (token0Config.isNative === true);
+      token1IsNative = providedToken1IsNative || (token1Config.isNative === true);
+    }
 
     try {
       // Get position manager address from cached addresses
@@ -3148,12 +3264,12 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       provider,
       walletAddress,
       poolData,
-      token0Data,
-      token1Data,
+      token0Data: providedToken0Data,
+      token1Data: providedToken1Data,
       slippageTolerance,
       deadlineMinutes,
-      token0IsNative = false,
-      token1IsNative = false
+      token0IsNative: providedToken0IsNative = false,
+      token1IsNative: providedToken1IsNative = false
     } = params;
 
     // Input validation
@@ -3254,58 +3370,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Pool data tick must be a finite number");
     }
 
-    if (token0Data === null || token0Data === undefined) {
-      throw new Error("Token0 data parameter is required");
-    }
-    if (typeof token0Data !== 'object' || Array.isArray(token0Data)) {
-      throw new Error("Token0 data must be an object");
-    }
-    if (token0Data.address === null || token0Data.address === undefined || token0Data.address === '') {
-      throw new Error("Token0 address is required");
-    }
-    if (typeof token0Data.address !== 'string') {
-      throw new Error("Token0 address must be a string");
-    }
-    try {
-      ethers.utils.getAddress(token0Data.address);
-    } catch (error) {
-      throw new Error(`Invalid token0 address: ${token0Data.address}`);
-    }
-    if (token0Data.decimals === null || token0Data.decimals === undefined) {
-      throw new Error("Token0 decimals is required");
-    }
-    if (!Number.isFinite(token0Data.decimals) || token0Data.decimals < 0 || token0Data.decimals > 255) {
-      throw new Error("Token0 decimals must be a finite number between 0 and 255");
-    }
-
-    if (token1Data === null || token1Data === undefined) {
-      throw new Error("Token1 data parameter is required");
-    }
-    if (typeof token1Data !== 'object' || Array.isArray(token1Data)) {
-      throw new Error("Token1 data must be an object");
-    }
-    if (token1Data.address === null || token1Data.address === undefined || token1Data.address === '') {
-      throw new Error("Token1 address is required");
-    }
-    if (typeof token1Data.address !== 'string') {
-      throw new Error("Token1 address must be a string");
-    }
-    try {
-      ethers.utils.getAddress(token1Data.address);
-    } catch (error) {
-      throw new Error(`Invalid token1 address: ${token1Data.address}`);
-    }
-    if (token1Data.decimals === null || token1Data.decimals === undefined) {
-      throw new Error("Token1 decimals is required");
-    }
-    if (!Number.isFinite(token1Data.decimals) || token1Data.decimals < 0 || token1Data.decimals > 255) {
-      throw new Error("Token1 decimals must be a finite number between 0 and 255");
-    }
-
-    if (token0Data.address.toLowerCase() === token1Data.address.toLowerCase()) {
-      throw new Error("Token0 and token1 addresses cannot be the same");
-    }
-
     if (slippageTolerance === null || slippageTolerance === undefined) {
       throw new Error("Slippage tolerance is required");
     }
@@ -3341,6 +3405,23 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       );
 
       const positionData = await nftManager.positions(position.id);
+
+      // Resolve token data: use provided values or resolve from position + chain config
+      let token0Data, token1Data, token0IsNative, token1IsNative;
+
+      if (providedToken0Data && providedToken1Data) {
+        token0Data = providedToken0Data;
+        token1Data = providedToken1Data;
+        token0IsNative = providedToken0IsNative;
+        token1IsNative = providedToken1IsNative;
+      } else {
+        const token0Config = getTokenByAddress(positionData.token0, this.chainId);
+        const token1Config = getTokenByAddress(positionData.token1, this.chainId);
+        token0Data = { address: positionData.token0, decimals: token0Config.decimals };
+        token1Data = { address: positionData.token1, decimals: token1Config.decimals };
+        token0IsNative = token0Config.isNative === true;
+        token1IsNative = token1Config.isNative === true;
+      }
 
       // Use sortTokens to get correct Uniswap token ordering
       const { sortedToken0, sortedToken1 } = this.sortTokens(token0Data, token1Data);

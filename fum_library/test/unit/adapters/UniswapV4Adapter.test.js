@@ -2352,13 +2352,13 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         })).rejects.toThrow('deadlineMinutes must be a positive number');
       });
 
-      it('should throw when poolData.poolKey is missing', async () => {
+      it('should throw when poolKey is missing from both poolData and position', async () => {
         await expect(adapter.generateClaimFeesData({
           position: { id: '12345', tickLower: -100, tickUpper: 100 },
           walletAddress: validTestAddress,
           provider: env.provider,
           poolData: { token0Symbol: 'ETH', token1Symbol: 'USDC' }  // No poolKey
-        })).rejects.toThrow('poolData.poolKey is required');
+        })).rejects.toThrow('poolKey is required');
       });
 
       it('should throw when poolData is not provided', async () => {
@@ -2368,6 +2368,30 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           provider: env.provider
         })).rejects.toThrow('poolData is required');
       });
+
+      it('should use position.poolKey as fallback when poolData.poolKey is absent', async () => {
+        const walletAddress = await env.signers[0].getAddress();
+
+        // Pass poolData WITHOUT poolKey, but include poolKey on position
+        const poolDataWithoutKey = { ...env.poolData };
+        delete poolDataWithoutKey.poolKey;
+
+        const positionWithPoolKey = {
+          ...env.testPosition,
+          poolKey: env.poolData.poolKey
+        };
+
+        const result = await adapter.generateClaimFeesData({
+          position: positionWithPoolKey,
+          walletAddress,
+          provider: env.provider,
+          poolData: poolDataWithoutKey
+        });
+
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.data).toBeDefined();
+      }, 120000);
     });
 
     describe('Success Cases', () => {
@@ -2761,7 +2785,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         })).rejects.toThrow('deadlineMinutes must be a positive number');
       });
 
-      it('should throw when poolData.poolKey is missing', async () => {
+      it('should throw when poolKey is missing from both poolData and position', async () => {
         await expect(adapter.generateRemoveLiquidityData({
           position: { id: '12345', tickLower: -100, tickUpper: 100 },
           percentage: 50,
@@ -2770,7 +2794,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           poolData: { token0Symbol: 'ETH', token1Symbol: 'USDC' },  // No poolKey
           slippageTolerance: 1,
           deadlineMinutes: 20
-        })).rejects.toThrow('poolData.poolKey is required');
+        })).rejects.toThrow('poolKey is required');
       });
 
       it('should throw when poolData is not provided', async () => {
@@ -2783,6 +2807,32 @@ describe('UniswapV4Adapter - Unit Tests', () => {
           deadlineMinutes: 20
         })).rejects.toThrow('poolData is required');
       });
+
+      it('should use position.poolKey as fallback when poolData.poolKey is absent', async () => {
+        const walletAddress = await env.signers[0].getAddress();
+
+        const poolDataWithoutKey = { ...env.poolData };
+        delete poolDataWithoutKey.poolKey;
+
+        const positionWithPoolKey = {
+          ...env.testPosition,
+          poolKey: env.poolData.poolKey
+        };
+
+        const result = await adapter.generateRemoveLiquidityData({
+          position: positionWithPoolKey,
+          percentage: 50,
+          walletAddress,
+          provider: env.provider,
+          poolData: poolDataWithoutKey,
+          slippageTolerance: 1,
+          deadlineMinutes: 20
+        });
+
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.data).toBeDefined();
+      }, 120000);
     });
 
     describe('Success Cases', () => {
@@ -7824,6 +7874,143 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         await expect(adapter.getPositionsForDisplay(env.testVault.address, { invalid: true }))
           .rejects.toThrow('Valid provider parameter is required');
       });
+    });
+  });
+
+  describe('refreshPositionForDisplay', () => {
+    describe('Error Cases', () => {
+      it('should throw when positionId is null', async () => {
+        await expect(adapter.refreshPositionForDisplay(null, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay(undefined, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is not a string', async () => {
+        await expect(adapter.refreshPositionForDisplay(123, env.provider))
+          .rejects.toThrow('Position ID must be a string');
+      });
+
+      it('should throw when positionId is not numeric', async () => {
+        await expect(adapter.refreshPositionForDisplay('abc', env.provider))
+          .rejects.toThrow('Position ID must be a numeric string');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider lacks getNetwork', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for non-existent positionId', async () => {
+        await expect(adapter.refreshPositionForDisplay('999999999', env.provider))
+          .rejects.toThrow();
+      }, 60000);
+    });
+
+    describe('Success Cases', () => {
+      it('should return position with correct shape and field types', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          String(env.positionTokenId), env.provider
+        );
+
+        const expectedFields = [
+          'id', 'platform', 'platformName', 'tokenPair', 'pool',
+          'inRange', 'currentPrice', 'priceLower', 'priceUpper',
+          'token0Amount', 'token1Amount', 'uncollectedFees0', 'uncollectedFees1',
+          'fee', 'platformData'
+        ];
+        expect(Object.keys(result).sort()).toEqual(expectedFields.sort());
+      }, 60000);
+
+      it('should have correct identity fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          String(env.positionTokenId), env.provider
+        );
+
+        expect(result.id).toBe(String(env.positionTokenId));
+        expect(result.platform).toBe('uniswapV4');
+        expect(result.platformName).toBe('Uniswap V4');
+        expect(result.tokenPair).toBe('ETH/USDC');
+        expect(result.pool).toBe(env.testPosition.pool);
+      }, 60000);
+
+      it('should have correct numeric display values', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          String(env.positionTokenId), env.provider
+        );
+
+        expect(typeof result.inRange).toBe('boolean');
+        expect(typeof result.currentPrice).toBe('number');
+        expect(typeof result.priceLower).toBe('number');
+        expect(typeof result.priceUpper).toBe('number');
+        expect(typeof result.token0Amount).toBe('number');
+        expect(typeof result.token1Amount).toBe('number');
+        expect(typeof result.uncollectedFees0).toBe('number');
+        expect(typeof result.uncollectedFees1).toBe('number');
+        expect(typeof result.fee).toBe('number');
+
+        expect(result.currentPrice).toBeGreaterThan(0);
+        expect(result.priceLower).toBeGreaterThan(0);
+        expect(result.priceUpper).toBeGreaterThan(0);
+        expect(result.token0Amount + result.token1Amount).toBeGreaterThan(0);
+      }, 60000);
+
+      it('should have correct platformData fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          String(env.positionTokenId), env.provider
+        );
+
+        const expectedPlatformFields = [
+          'tickLower', 'tickUpper', 'poolKey', 'poolId',
+          'feeGrowthInside0LastX128', 'feeGrowthInside1LastX128'
+        ];
+        expect(Object.keys(result.platformData).sort()).toEqual(expectedPlatformFields.sort());
+
+        expect(typeof result.platformData.tickLower).toBe('number');
+        expect(typeof result.platformData.tickUpper).toBe('number');
+        expect(typeof result.platformData.poolKey).toBe('object');
+        expect(typeof result.platformData.poolId).toBe('string');
+
+        // poolKey sub-fields
+        const poolKeyFields = ['currency0', 'currency1', 'fee', 'tickSpacing', 'hooks'];
+        expect(Object.keys(result.platformData.poolKey).sort()).toEqual(poolKeyFields.sort());
+      }, 60000);
+
+      it('should match getPositionsForDisplay data for the same position', async () => {
+        const refreshResult = await adapter.refreshPositionForDisplay(
+          String(env.positionTokenId), env.provider
+        );
+
+        const displayResult = await adapter.getPositionsForDisplay(
+          env.testVault.address, env.provider
+        );
+        const displayPosition = displayResult.positions[String(env.positionTokenId)];
+
+        // Identity fields should match exactly
+        expect(refreshResult.id).toBe(displayPosition.id);
+        expect(refreshResult.platform).toBe(displayPosition.platform);
+        expect(refreshResult.tokenPair).toBe(displayPosition.tokenPair);
+        expect(refreshResult.pool).toBe(displayPosition.pool);
+        expect(refreshResult.fee).toBe(displayPosition.fee);
+
+        // platformData should match
+        expect(refreshResult.platformData.tickLower).toBe(displayPosition.platformData.tickLower);
+        expect(refreshResult.platformData.tickUpper).toBe(displayPosition.platformData.tickUpper);
+        expect(refreshResult.platformData.poolId).toBe(displayPosition.platformData.poolId);
+      }, 120000);
     });
   });
 

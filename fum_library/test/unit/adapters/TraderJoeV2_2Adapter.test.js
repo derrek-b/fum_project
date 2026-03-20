@@ -2668,14 +2668,13 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(position.token0Amount + position.token1Amount).toBeGreaterThan(0);
       }, 60000);
 
-      it('should compute fee from baseFactor × binStep', async () => {
+      it('should return fee as display-ready percentage value', async () => {
         const result = await adapter.getPositionsForDisplay(testVault.address, env.provider);
         const position = Object.values(result.positions)[0];
 
-        // Verify fee against pool data
-        const poolData = await adapter.getPoolData(position.pool, env.provider);
-        const expectedFee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8;
-        expect(position.fee).toBe(expectedFee);
+        // WAVAX/USDC V2.2 pool on Avalanche has a base fee of 0.05%
+        // All adapters return fee as a percentage number (e.g., 0.05 means 0.05%)
+        expect(position.fee).toBe(0.05);
       }, 60000);
 
       it('should have platformData with TJ-specific fields', async () => {
@@ -2683,7 +2682,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const position = Object.values(result.positions)[0];
 
         const expectedPlatformFields = [
-          'lowerBinId', 'upperBinId', 'binStep', 'depositIds', 'activeId', 'proxyAddress'
+          'lowerBinId', 'upperBinId', 'binStep', 'depositIds', 'liquidityMinted', 'activeId', 'proxyAddress'
         ];
         expect(Object.keys(position.platformData).sort()).toEqual(expectedPlatformFields.sort());
 
@@ -2695,6 +2694,9 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(typeof position.platformData.activeId).toBe('number');
         expect(typeof position.platformData.proxyAddress).toBe('string');
         expect(position.platformData.proxyAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(Array.isArray(position.platformData.liquidityMinted)).toBe(true);
+        expect(position.platformData.liquidityMinted.length).toBeGreaterThan(0);
+        expect(typeof position.platformData.liquidityMinted[0]).toBe('string');
 
         // Bin bounds consistency
         expect(position.platformData.lowerBinId).toBeLessThanOrEqual(position.platformData.upperBinId);
@@ -2865,6 +2867,148 @@ describe('TraderJoeV2_2Adapter', () => {
           adapter.getPositionsForDisplay(validAddress, {})
         ).rejects.toThrow('Valid provider parameter is required');
       });
+    });
+  });
+
+  describe('refreshPositionForDisplay', () => {
+    describe('Error Cases', () => {
+      it('should throw when positionId is null', async () => {
+        await expect(adapter.refreshPositionForDisplay(null, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay(undefined, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is not a string', async () => {
+        await expect(adapter.refreshPositionForDisplay(123, env.provider))
+          .rejects.toThrow('Position ID must be a string');
+      });
+
+      it('should throw when positionId is not numeric', async () => {
+        await expect(adapter.refreshPositionForDisplay('abc', env.provider))
+          .rejects.toThrow('Position ID must be a numeric string');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider lacks getNetwork', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for non-existent positionId', async () => {
+        await expect(adapter.refreshPositionForDisplay('999999', env.provider))
+          .rejects.toThrow();
+      }, 60000);
+    });
+
+    describe('Success Cases', () => {
+      let activePositionId;
+
+      beforeAll(async () => {
+        const pmAddress = adapter.addresses.positionManagerAddress;
+        const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
+        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        for (const pid of positionIds) {
+          const pos = await tjpm.getPosition(pid);
+          if (pos.active) {
+            activePositionId = String(pid);
+            break;
+          }
+        }
+        if (!activePositionId) throw new Error('No active TJ position found for tests');
+      }, 60000);
+
+      it('should return position with correct shape and field types', async () => {
+        const result = await adapter.refreshPositionForDisplay(activePositionId, env.provider);
+
+        const expectedFields = [
+          'id', 'platform', 'platformName', 'tokenPair', 'pool',
+          'inRange', 'currentPrice', 'priceLower', 'priceUpper',
+          'token0Amount', 'token1Amount', 'uncollectedFees0', 'uncollectedFees1',
+          'fee', 'platformData'
+        ];
+        expect(Object.keys(result).sort()).toEqual(expectedFields.sort());
+      }, 60000);
+
+      it('should have correct identity fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(activePositionId, env.provider);
+
+        expect(result.id).toBe(activePositionId);
+        expect(result.platform).toBe('traderjoeV2_2');
+        expect(result.platformName).toBe('Trader Joe V2.2');
+        expect(result.pool).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.tokenPair).toContain('/');
+      }, 60000);
+
+      it('should have correct numeric display values', async () => {
+        const result = await adapter.refreshPositionForDisplay(activePositionId, env.provider);
+
+        expect(typeof result.inRange).toBe('boolean');
+        expect(typeof result.currentPrice).toBe('number');
+        expect(typeof result.priceLower).toBe('number');
+        expect(typeof result.priceUpper).toBe('number');
+        expect(typeof result.token0Amount).toBe('number');
+        expect(typeof result.token1Amount).toBe('number');
+        expect(typeof result.uncollectedFees0).toBe('number');
+        expect(typeof result.uncollectedFees1).toBe('number');
+        expect(typeof result.fee).toBe('number');
+
+        expect(result.currentPrice).toBeGreaterThan(0);
+        expect(result.priceLower).toBeGreaterThan(0);
+        expect(result.priceUpper).toBeGreaterThan(0);
+        expect(result.token0Amount + result.token1Amount).toBeGreaterThan(0);
+      }, 60000);
+
+      it('should have correct platformData fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(activePositionId, env.provider);
+
+        const expectedPlatformFields = [
+          'lowerBinId', 'upperBinId', 'binStep', 'depositIds',
+          'liquidityMinted', 'activeId', 'proxyAddress'
+        ];
+        expect(Object.keys(result.platformData).sort()).toEqual(expectedPlatformFields.sort());
+
+        expect(typeof result.platformData.lowerBinId).toBe('number');
+        expect(typeof result.platformData.upperBinId).toBe('number');
+        expect(typeof result.platformData.binStep).toBe('number');
+        expect(Array.isArray(result.platformData.depositIds)).toBe(true);
+        expect(Array.isArray(result.platformData.liquidityMinted)).toBe(true);
+        expect(result.platformData.liquidityMinted.length).toBeGreaterThan(0);
+        expect(typeof result.platformData.liquidityMinted[0]).toBe('string');
+        expect(typeof result.platformData.activeId).toBe('number');
+        expect(typeof result.platformData.proxyAddress).toBe('string');
+        expect(result.platformData.proxyAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.platformData.lowerBinId).toBeLessThanOrEqual(result.platformData.upperBinId);
+      }, 60000);
+
+      it('should match getPositionsForDisplay data for the same position', async () => {
+        const refreshResult = await adapter.refreshPositionForDisplay(activePositionId, env.provider);
+
+        const displayResult = await adapter.getPositionsForDisplay(testVault.address, env.provider);
+        const displayPosition = displayResult.positions[activePositionId];
+
+        expect(refreshResult.id).toBe(displayPosition.id);
+        expect(refreshResult.platform).toBe(displayPosition.platform);
+        expect(refreshResult.tokenPair).toBe(displayPosition.tokenPair);
+        expect(refreshResult.pool).toBe(displayPosition.pool);
+        expect(refreshResult.fee).toBe(displayPosition.fee);
+
+        expect(refreshResult.platformData.lowerBinId).toBe(displayPosition.platformData.lowerBinId);
+        expect(refreshResult.platformData.upperBinId).toBe(displayPosition.platformData.upperBinId);
+        expect(refreshResult.platformData.binStep).toBe(displayPosition.platformData.binStep);
+      }, 120000);
     });
   });
 

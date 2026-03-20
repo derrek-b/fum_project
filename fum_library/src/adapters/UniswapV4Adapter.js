@@ -934,6 +934,134 @@ export default class UniswapV4Adapter extends PlatformAdapter {
   }
 
   /**
+   * Refresh display data for a single position
+   *
+   * Returns the same per-position shape as getPositionsForDisplay but for one position.
+   * Used by the frontend to refresh display data while a modal is open without
+   * re-fetching all positions for the owner.
+   *
+   * @param {string} positionId - Position NFT token ID (numeric string)
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Single position in getPositionsForDisplay shape
+   * @throws {Error} If positionId is invalid, position not found, or has zero liquidity
+   */
+  async refreshPositionForDisplay(positionId, provider) {
+    // Validate positionId
+    if (positionId === null || positionId === undefined) {
+      throw new Error("Position ID is required");
+    }
+    if (typeof positionId !== 'string') {
+      throw new Error("Position ID must be a string");
+    }
+    if (!/^\d+$/.test(positionId)) {
+      throw new Error("Position ID must be a numeric string");
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      const positionManagerContract = new ethers.Contract(
+        this.addresses.positionManagerAddress,
+        this.positionManagerABI,
+        provider
+      );
+      const stateViewContract = new ethers.Contract(
+        this.addresses.stateViewAddress,
+        this.stateViewABI,
+        provider
+      );
+
+      // Fetch position's pool key and tick bounds
+      const [poolKey, packedInfo] = await positionManagerContract.getPoolAndPositionInfo(positionId);
+      const { tickLower, tickUpper } = this._decodePositionInfo(packedInfo);
+
+      const normalizedPoolKey = {
+        currency0: poolKey.currency0,
+        currency1: poolKey.currency1,
+        fee: Number(poolKey.fee),
+        tickSpacing: Number(poolKey.tickSpacing),
+        hooks: poolKey.hooks
+      };
+      const poolId = this._computePoolId(normalizedPoolKey);
+
+      // Fetch position liquidity and fee growth from StateView
+      const salt = ethers.utils.hexZeroPad(ethers.BigNumber.from(positionId).toHexString(), 32);
+      const positionInfo = await stateViewContract['getPositionInfo(bytes32,address,int24,int24,bytes32)'](
+        poolId, this.addresses.positionManagerAddress, tickLower, tickUpper, salt
+      );
+      const liquidity = positionInfo[0];
+      const feeGrowthInside0LastX128 = positionInfo[1];
+      const feeGrowthInside1LastX128 = positionInfo[2];
+
+      // Reject zero-liquidity positions
+      if (BigInt(liquidity.toString()) === 0n) {
+        throw new Error(`Position ${positionId} has zero liquidity`);
+      }
+
+      // Fetch pool data
+      const poolData = await this.getPoolData(poolId, provider);
+
+      // Resolve token metadata
+      const token0Data = this._resolveTokenDataForDisplay(normalizedPoolKey.currency0);
+      const token1Data = this._resolveTokenDataForDisplay(normalizedPoolKey.currency1);
+
+      // Range check
+      const inRange = poolData.tick >= tickLower && poolData.tick <= tickUpper;
+
+      // Prices
+      const currentPriceObj = this._tickToPrice(poolData.tick, token0Data, token1Data);
+      const currentPrice = parseFloat(currentPriceObj.toSignificant(8));
+      const priceLowerObj = this._tickToPrice(tickLower, token0Data, token1Data);
+      const priceUpperObj = this._tickToPrice(tickUpper, token0Data, token1Data);
+      const priceLower = parseFloat(priceLowerObj.toSignificant(8));
+      const priceUpper = parseFloat(priceUpperObj.toSignificant(8));
+
+      // Token amounts
+      const positionForCalc = { liquidity: liquidity.toString(), tickLower, tickUpper };
+      const [token0Raw, token1Raw] = await this.calculateTokenAmounts(positionForCalc, poolData, token0Data, token1Data);
+      const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+      const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+      // Uncollected fees
+      const { fees0, fees1 } = await this._calculateUncollectedFees(
+        positionId, poolId, tickLower, tickUpper, provider
+      );
+      const uncollectedFees0 = Number(fees0) / Math.pow(10, token0Data.decimals);
+      const uncollectedFees1 = Number(fees1) / Math.pow(10, token1Data.decimals);
+
+      // Fee percentage
+      const fee = poolData.fee / 10000;
+
+      return {
+        id: String(positionId),
+        platform: this.platformId,
+        platformName: this.platformName,
+        tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+        pool: poolId,
+        inRange, currentPrice, priceLower, priceUpper,
+        token0Amount, token1Amount, uncollectedFees0, uncollectedFees1, fee,
+        platformData: {
+          tickLower, tickUpper,
+          poolKey: normalizedPoolKey,
+          poolId,
+          feeGrowthInside0LastX128: feeGrowthInside0LastX128.toString(),
+          feeGrowthInside1LastX128: feeGrowthInside1LastX128.toString(),
+        }
+      };
+    } catch (error) {
+      if (error.message.includes('Position ID') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('zero liquidity')) {
+        throw error;
+      }
+      throw new Error(`Failed to refresh position ${positionId} for display: ${error.message}`);
+    }
+  }
+
+  /**
    * Fetch a single position by tokenId (no Graph dependency)
    * Used for immediate cache updates after position creation
    *
@@ -1344,7 +1472,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       position,
       walletAddress,
       provider,
-      poolKey: providedPoolKey,
       poolData: providedPoolData,
       deadlineMinutes = 20,
       hookData = '0x'
@@ -1394,17 +1521,18 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
-    // Validate poolData and poolData.poolKey
+    // Validate poolData
     if (!providedPoolData || typeof providedPoolData !== 'object') {
       throw new Error('poolData is required');
     }
-    if (!providedPoolData.poolKey || typeof providedPoolData.poolKey !== 'object') {
-      throw new Error('poolData.poolKey is required');
+
+    // Resolve poolKey: prefer poolData.poolKey, fall back to position.poolKey (from flattened platformData)
+    const poolKey = providedPoolData.poolKey || position.poolKey;
+    if (!poolKey || typeof poolKey !== 'object') {
+      throw new Error('poolKey is required — provide via poolData.poolKey or position.poolKey');
     }
 
     try {
-      const poolKey = providedPoolData.poolKey;
-
       // Fetch current pool state (sqrtPriceX96, liquidity, tick change with every swap)
       const poolId = position.pool;
       if (!poolId) {
@@ -1506,7 +1634,6 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       percentage,
       walletAddress,
       provider,
-      poolKey: providedPoolKey,
       poolData: providedPoolData,
       slippageTolerance,
       deadlineMinutes,
@@ -1571,17 +1698,19 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       throw new Error('deadlineMinutes must be a positive number');
     }
 
-    // Validate poolData.poolKey (required for V4)
+    // Validate poolData
     if (!providedPoolData || typeof providedPoolData !== 'object') {
       throw new Error('poolData is required');
     }
-    if (!providedPoolData.poolKey || typeof providedPoolData.poolKey !== 'object') {
-      throw new Error('poolData.poolKey is required');
+
+    // Resolve poolKey: prefer poolData.poolKey, fall back to position.poolKey (from flattened platformData)
+    const poolKey = providedPoolData.poolKey || position.poolKey;
+    if (!poolKey || typeof poolKey !== 'object') {
+      throw new Error('poolKey is required — provide via poolData.poolKey or position.poolKey');
     }
 
     try {
-      const poolKey = providedPoolData.poolKey;
-      const poolData = providedPoolData;  // Strategy provides fresh pool data
+      const poolData = providedPoolData;
 
       // Get actual position liquidity from StateView
       const poolId = this._computePoolId(poolKey);

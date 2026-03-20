@@ -468,7 +468,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
           const uncollectedFees1 = Number(totalFeesY) / Math.pow(10, token1Data.decimals);
 
           // Fee percentage (base fee only)
-          const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8;
+          const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100;
 
           positions[pos.id] = {
             // Identity
@@ -495,6 +495,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
               upperBinId: pos.upperBinId,
               binStep: poolData.binStep,
               depositIds: pos.depositIds,
+              liquidityMinted: pos.liquidityMinted,
               activeId: poolData.activeId,
               proxyAddress: pos.proxy,
             }
@@ -513,6 +514,130 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         throw error;
       }
       throw new Error(`Failed to fetch positions for display: ${error.message}`);
+    }
+  }
+
+  /**
+   * Refresh display data for a single position
+   *
+   * Returns the same per-position shape as getPositionsForDisplay but for one position.
+   * Used by the frontend to refresh display data while a modal is open without
+   * re-fetching all positions for the owner.
+   *
+   * @param {string} positionId - Position ID (numeric string)
+   * @param {Object} provider - Ethers provider instance
+   * @returns {Promise<Object>} Single position in getPositionsForDisplay shape
+   * @throws {Error} If positionId is invalid, position not found, inactive, or has no bins
+   */
+  async refreshPositionForDisplay(positionId, provider) {
+    // Validate positionId
+    if (positionId === null || positionId === undefined) {
+      throw new Error("Position ID is required");
+    }
+    if (typeof positionId !== 'string') {
+      throw new Error("Position ID must be a string");
+    }
+    if (!/^\d+$/.test(positionId)) {
+      throw new Error("Position ID must be a numeric string");
+    }
+
+    // Validate provider
+    if (!provider || typeof provider.getNetwork !== 'function') {
+      throw new Error("Valid provider parameter is required");
+    }
+
+    try {
+      if (!this.addresses?.positionManagerAddress) {
+        throw new Error(`No position manager address configured for chainId: ${this.chainId}`);
+      }
+
+      const positionManager = new ethers.Contract(
+        this.addresses.positionManagerAddress, contractData.TJPositionManager.abi, provider
+      );
+      const positionData = await positionManager.getPosition(positionId);
+
+      // Reject non-existent positions
+      if (positionData.lbPair === ethers.constants.AddressZero) {
+        throw new Error(`Position ${positionId} not found`);
+      }
+
+      // Reject inactive positions
+      if (!positionData.active) {
+        throw new Error(`Position ${positionId} is not active`);
+      }
+
+      const depositIds = positionData.depositIds.map(id => Number(id));
+      if (depositIds.length === 0) {
+        throw new Error(`Position ${positionId} has no deposit bins`);
+      }
+
+      const liquidityMinted = positionData.liquidityMinted.map(lm => lm.toString());
+      const lowerBinId = Math.min(...depositIds);
+      const upperBinId = Math.max(...depositIds);
+      const poolAddress = positionData.lbPair.toLowerCase();
+
+      // Fetch pool data and token metadata
+      const poolData = await this.getPoolData(poolAddress, provider);
+      const token0Config = getTokenByAddress(poolData.tokenX, this.chainId);
+      const token1Config = getTokenByAddress(poolData.tokenY, this.chainId);
+      const token0Data = { address: poolData.tokenX, symbol: token0Config.symbol, decimals: token0Config.decimals };
+      const token1Data = { address: poolData.tokenY, symbol: token1Config.symbol, decimals: token1Config.decimals };
+
+      // Range check
+      const inRange = poolData.activeId >= lowerBinId && poolData.activeId <= upperBinId;
+
+      // Prices
+      const currentPrice = this._binIdToPrice(poolData.activeId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+      const priceLower = this._binIdToPrice(lowerBinId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+      const priceUpper = this._binIdToPrice(upperBinId, poolData.binStep, token0Data.decimals, token1Data.decimals);
+
+      // Token amounts
+      const positionForCalc = { pool: poolAddress, depositIds, liquidityMinted };
+      const [token0Raw, token1Raw] = await this.calculateTokenAmounts(positionForCalc, poolData, token0Data, token1Data, provider);
+      const token0Amount = Number(token0Raw) / Math.pow(10, token0Data.decimals);
+      const token1Amount = Number(token1Raw) / Math.pow(10, token1Data.decimals);
+
+      // Uncollected fees
+      const posData = await this._getPositionOnChainData(positionId, provider);
+      const feeResult = await this._computeFeeShares(posData, provider);
+
+      let totalFeesX = 0n;
+      let totalFeesY = 0n;
+      for (const feeX of feeResult.feesX) totalFeesX += BigInt(feeX);
+      for (const feeY of feeResult.feesY) totalFeesY += BigInt(feeY);
+
+      const uncollectedFees0 = Number(totalFeesX) / Math.pow(10, token0Data.decimals);
+      const uncollectedFees1 = Number(totalFeesY) / Math.pow(10, token1Data.decimals);
+
+      // Fee percentage
+      const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100;
+
+      return {
+        id: String(positionId),
+        platform: this.platformId,
+        platformName: this.platformName,
+        tokenPair: `${token0Data.symbol}/${token1Data.symbol}`,
+        pool: poolAddress,
+        inRange, currentPrice, priceLower, priceUpper,
+        token0Amount, token1Amount, uncollectedFees0, uncollectedFees1, fee,
+        platformData: {
+          lowerBinId, upperBinId,
+          binStep: poolData.binStep,
+          depositIds,
+          liquidityMinted,
+          activeId: poolData.activeId,
+          proxyAddress: positionData.proxy,
+        }
+      };
+    } catch (error) {
+      if (error.message.includes('Position ID') ||
+          error.message.includes('Valid provider') ||
+          error.message.includes('not found') ||
+          error.message.includes('not active') ||
+          error.message.includes('no deposit bins')) {
+        throw error;
+      }
+      throw new Error(`Failed to refresh position ${positionId} for display: ${error.message}`);
     }
   }
 

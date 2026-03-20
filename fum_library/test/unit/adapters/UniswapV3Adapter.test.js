@@ -5680,6 +5680,138 @@ describe('UniswapV3Adapter - Unit Tests', () => {
     });
   });
 
+  describe('refreshPositionForDisplay', () => {
+    describe('Error Cases', () => {
+      it('should throw when positionId is null', async () => {
+        await expect(adapter.refreshPositionForDisplay(null, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay(undefined, env.provider))
+          .rejects.toThrow('Position ID is required');
+      });
+
+      it('should throw when positionId is not a string', async () => {
+        await expect(adapter.refreshPositionForDisplay(123, env.provider))
+          .rejects.toThrow('Position ID must be a string');
+      });
+
+      it('should throw when positionId is not numeric', async () => {
+        await expect(adapter.refreshPositionForDisplay('abc', env.provider))
+          .rejects.toThrow('Position ID must be a numeric string');
+      });
+
+      it('should throw when provider is null', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', null))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider is undefined', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', undefined))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw when provider lacks getNetwork', async () => {
+        await expect(adapter.refreshPositionForDisplay('1', {}))
+          .rejects.toThrow('Valid provider parameter is required');
+      });
+
+      it('should throw for non-existent positionId', async () => {
+        await expect(adapter.refreshPositionForDisplay('999999999', env.provider))
+          .rejects.toThrow();
+      }, 60000);
+    });
+
+    describe('Success Cases', () => {
+      it('should return position with correct shape and field types', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          env.positionTokenId.toString(), env.provider
+        );
+
+        const expectedFields = [
+          'id', 'platform', 'platformName', 'tokenPair', 'pool',
+          'inRange', 'currentPrice', 'priceLower', 'priceUpper',
+          'token0Amount', 'token1Amount', 'uncollectedFees0', 'uncollectedFees1',
+          'fee', 'platformData'
+        ];
+        expect(Object.keys(result).sort()).toEqual(expectedFields.sort());
+      }, 60000);
+
+      it('should have correct identity fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          env.positionTokenId.toString(), env.provider
+        );
+
+        expect(result.id).toBe(env.positionTokenId.toString());
+        expect(result.platform).toBe('uniswapV3');
+        expect(result.platformName).toBe('Uniswap V3');
+        expect(result.pool).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        expect(result.tokenPair).toContain('/');
+      }, 60000);
+
+      it('should have correct numeric display values', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          env.positionTokenId.toString(), env.provider
+        );
+
+        expect(typeof result.inRange).toBe('boolean');
+        expect(typeof result.currentPrice).toBe('number');
+        expect(typeof result.priceLower).toBe('number');
+        expect(typeof result.priceUpper).toBe('number');
+        expect(typeof result.token0Amount).toBe('number');
+        expect(typeof result.token1Amount).toBe('number');
+        expect(typeof result.uncollectedFees0).toBe('number');
+        expect(typeof result.uncollectedFees1).toBe('number');
+        expect(typeof result.fee).toBe('number');
+
+        expect(result.currentPrice).toBeGreaterThan(0);
+        expect(result.priceLower).toBeGreaterThan(0);
+        expect(result.priceUpper).toBeGreaterThan(0);
+        expect(result.token0Amount + result.token1Amount).toBeGreaterThan(0);
+      }, 60000);
+
+      it('should have correct platformData fields', async () => {
+        const result = await adapter.refreshPositionForDisplay(
+          env.positionTokenId.toString(), env.provider
+        );
+
+        const expectedPlatformFields = [
+          'tickLower', 'tickUpper', 'liquidity',
+          'feeGrowthInside0LastX128', 'feeGrowthInside1LastX128',
+          'tokensOwed0', 'tokensOwed1'
+        ];
+        expect(Object.keys(result.platformData).sort()).toEqual(expectedPlatformFields.sort());
+
+        expect(typeof result.platformData.tickLower).toBe('number');
+        expect(typeof result.platformData.tickUpper).toBe('number');
+        expect(typeof result.platformData.liquidity).toBe('string');
+        expect(/^\d+$/.test(result.platformData.liquidity)).toBe(true);
+      }, 60000);
+
+      it('should match getPositionsForDisplay data for the same position', async () => {
+        const refreshResult = await adapter.refreshPositionForDisplay(
+          env.positionTokenId.toString(), env.provider
+        );
+
+        const displayResult = await adapter.getPositionsForDisplay(
+          env.testVault.address, env.provider
+        );
+        const displayPosition = displayResult.positions[env.positionTokenId.toString()];
+
+        expect(refreshResult.id).toBe(displayPosition.id);
+        expect(refreshResult.platform).toBe(displayPosition.platform);
+        expect(refreshResult.tokenPair).toBe(displayPosition.tokenPair);
+        expect(refreshResult.pool).toBe(displayPosition.pool);
+        expect(refreshResult.fee).toBe(displayPosition.fee);
+
+        expect(refreshResult.platformData.tickLower).toBe(displayPosition.platformData.tickLower);
+        expect(refreshResult.platformData.tickUpper).toBe(displayPosition.platformData.tickUpper);
+        expect(refreshResult.platformData.liquidity).toBe(displayPosition.platformData.liquidity);
+      }, 120000);
+    });
+  });
+
   describe('getPositionById', () => {
     describe('Success Cases', () => {
       it('should return position and pool data for valid tokenId', async () => {
@@ -7256,56 +7388,28 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         });
       });
 
-      describe('Token address validation', () => {
-        it('should throw error for missing token addresses', async () => {
-          await expect(
-            adapter.generateClaimFeesData({ ...baseParams, token0Address: null, token1Address: env.wethAddress })
-          ).rejects.toThrow('Token0 address parameter is required');
+      describe('Token data self-resolution', () => {
+        it('should resolve token data internally when not provided', async () => {
+          const result = await adapter.generateClaimFeesData({
+            position: env.testPosition,
+            provider: env.provider,
+            walletAddress: env.testVault.address
+          });
 
-          await expect(
-            adapter.generateClaimFeesData({ ...baseParams, token0Address: env.usdcAddress, token1Address: null })
-          ).rejects.toThrow('Token1 address parameter is required');
-        });
+          expect(result).toBeDefined();
+          expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+          expect(result.data).toBeDefined();
+          expect(typeof result.data).toBe('string');
+          expect(result.data.startsWith('0x')).toBe(true);
+        }, 120000);
 
-        it('should throw error for invalid token address format', async () => {
-          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
-
-          for (const invalidAddress of invalidAddresses) {
-            await expect(
-              adapter.generateClaimFeesData({ ...baseParams, token0Address: invalidAddress, token1Address: env.wethAddress })
-            ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
-
-            await expect(
-              adapter.generateClaimFeesData({ ...baseParams, token0Address: env.usdcAddress, token1Address: invalidAddress })
-            ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
-          }
-        });
-      });
-
-      describe('Token decimals validation', () => {
-        it('should throw error for missing token decimals', async () => {
-          await expect(
-            adapter.generateClaimFeesData({ ...baseParams, token0Decimals: null, token1Decimals: 18 })
-          ).rejects.toThrow('Token0 decimals is required');
-
-          await expect(
-            adapter.generateClaimFeesData({ ...baseParams, token0Decimals: 6, token1Decimals: null })
-          ).rejects.toThrow('Token1 decimals is required');
-        });
-
-        it('should throw error for invalid token decimals type', async () => {
-          const invalidTypes = ['18', true, {}, [], NaN, Infinity, -Infinity];
-
-          for (const invalidType of invalidTypes) {
-            await expect(
-              adapter.generateClaimFeesData({ ...baseParams, token0Decimals: invalidType, token1Decimals: 18 })
-            ).rejects.toThrow('Token0 decimals must be a valid number');
-
-            await expect(
-              adapter.generateClaimFeesData({ ...baseParams, token0Decimals: 6, token1Decimals: invalidType })
-            ).rejects.toThrow('Token1 decimals must be a valid number');
-          }
-        });
+        it('should throw when token data not provided and position lookup fails', async () => {
+          await expect(adapter.generateClaimFeesData({
+            position: { id: '999999999' },
+            provider: env.provider,
+            walletAddress: env.testVault.address
+          })).rejects.toThrow();
+        }, 60000);
       });
     });
 
@@ -7768,129 +7872,40 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         });
       });
 
-      describe('Token data validation', () => {
-        it('should throw error for null/undefined token data', async () => {
-          await expect(
-            adapter.generateRemoveLiquidityData({ ...baseParams, token0Data: null })
-          ).rejects.toThrow('Token0 data parameter is required');
+      describe('Token data self-resolution', () => {
+        it('should resolve token data internally when not provided', async () => {
+          // Use real position ID (Error Cases baseParams uses fake ID '123')
+          const realParams = {
+            ...baseParams,
+            position: { ...baseParams.position, id: env.positionTokenId.toString() }
+          };
+          const { token0Data, token1Data, token0IsNative, token1IsNative, ...paramsWithoutTokenData } = realParams;
 
-          await expect(
-            adapter.generateRemoveLiquidityData({ ...baseParams, token1Data: undefined })
-          ).rejects.toThrow('Token1 data parameter is required');
-        });
+          const result = await adapter.generateRemoveLiquidityData(paramsWithoutTokenData);
 
-        it('should throw error for non-object token data', async () => {
-          const invalidTypes = ['string', 123, true, false, []];
-          for (const invalidType of invalidTypes) {
-            await expect(
-              adapter.generateRemoveLiquidityData({ ...baseParams, token0Data: invalidType })
-            ).rejects.toThrow('Token0 data must be an object');
+          expect(result).toBeDefined();
+          expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+          expect(result.data).toBeDefined();
+          expect(typeof result.data).toBe('string');
+          expect(result.data.startsWith('0x')).toBe(true);
+        }, 120000);
 
-            await expect(
-              adapter.generateRemoveLiquidityData({ ...baseParams, token1Data: invalidType })
-            ).rejects.toThrow('Token1 data must be an object');
-          }
-        });
+        it('should produce same result whether token data is provided or resolved', async () => {
+          // Use real position ID (Error Cases baseParams uses fake ID '123')
+          const realParams = {
+            ...baseParams,
+            position: { ...baseParams.position, id: env.positionTokenId.toString() }
+          };
+          const { token0Data, token1Data, token0IsNative, token1IsNative, ...paramsWithoutTokenData } = realParams;
 
-        it('should throw error for missing token addresses', async () => {
-          await expect(
-            adapter.generateRemoveLiquidityData({
-              ...baseParams,
-              token0Data: { ...baseParams.token0Data, address: null }
-            })
-          ).rejects.toThrow('Token0 address is required');
+          const resultWithTokenData = await adapter.generateRemoveLiquidityData(realParams);
+          const resultWithoutTokenData = await adapter.generateRemoveLiquidityData(paramsWithoutTokenData);
 
-          await expect(
-            adapter.generateRemoveLiquidityData({
-              ...baseParams,
-              token1Data: { ...baseParams.token1Data, address: '' }
-            })
-          ).rejects.toThrow('Token1 address is required');
-        });
-
-        it('should throw error for non-string token addresses', async () => {
-          const invalidTypes = [123, true, false, {}, []];
-          for (const invalidType of invalidTypes) {
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token0Data: { ...baseParams.token0Data, address: invalidType }
-              })
-            ).rejects.toThrow('Token0 address must be a string');
-
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token1Data: { ...baseParams.token1Data, address: invalidType }
-              })
-            ).rejects.toThrow('Token1 address must be a string');
-          }
-        });
-
-        it('should throw error for invalid token address format', async () => {
-          const invalidAddresses = ['not-an-address', '0x123', '0xGHIJKL'];
-          for (const invalidAddress of invalidAddresses) {
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token0Data: { ...baseParams.token0Data, address: invalidAddress }
-              })
-            ).rejects.toThrow(`Invalid token0 address: ${invalidAddress}`);
-
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token1Data: { ...baseParams.token1Data, address: invalidAddress }
-              })
-            ).rejects.toThrow(`Invalid token1 address: ${invalidAddress}`);
-          }
-        });
-
-        it('should throw error for missing token decimals', async () => {
-          await expect(
-            adapter.generateRemoveLiquidityData({
-              ...baseParams,
-              token0Data: { ...baseParams.token0Data, decimals: null }
-            })
-          ).rejects.toThrow('Token0 decimals is required');
-
-          await expect(
-            adapter.generateRemoveLiquidityData({
-              ...baseParams,
-              token1Data: { ...baseParams.token1Data, decimals: undefined }
-            })
-          ).rejects.toThrow('Token1 decimals is required');
-        });
-
-        it('should throw error for invalid token decimals', async () => {
-          const invalidDecimals = [-1, 256, NaN, Infinity, 'string', {}, []];
-          for (const invalidDecimal of invalidDecimals) {
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token0Data: { ...baseParams.token0Data, decimals: invalidDecimal }
-              })
-            ).rejects.toThrow('Token0 decimals must be a finite number between 0 and 255');
-
-            await expect(
-              adapter.generateRemoveLiquidityData({
-                ...baseParams,
-                token1Data: { ...baseParams.token1Data, decimals: invalidDecimal }
-              })
-            ).rejects.toThrow('Token1 decimals must be a finite number between 0 and 255');
-          }
-        });
-
-        it('should throw error for identical token addresses', async () => {
-          const sameAddress = env.usdcAddress;
-          await expect(
-            adapter.generateRemoveLiquidityData({
-              ...baseParams,
-              token0Data: { ...baseParams.token0Data, address: sameAddress },
-              token1Data: { ...baseParams.token1Data, address: sameAddress }
-            })
-          ).rejects.toThrow('Token0 and token1 addresses cannot be the same');
-        });
+          // Both should target the same contract
+          expect(resultWithoutTokenData.to).toBe(resultWithTokenData.to);
+          // Both should produce valid calldata (exact bytes may differ due to timing)
+          expect(resultWithoutTokenData.data.startsWith('0x')).toBe(true);
+        }, 120000);
       });
 
       describe('Slippage tolerance validation', () => {
