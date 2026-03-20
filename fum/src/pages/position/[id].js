@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
-import { ethers } from "ethers";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert, Tabs, Tab, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Link from "next/link";
@@ -20,7 +19,6 @@ import { AdapterFactory } from "fum_library/adapters";
 import { useReadProvider } from '../../hooks/useReadProvider';
 import { formatPrice, formatFeeDisplay, getPlatformColor, getPlatformLogo } from "fum_library/helpers";
 import { fetchTokenPrices, CACHE_DURATIONS } from "fum_library/services/coingecko";
-import { getTokenByAddress } from "fum_library/helpers/tokenHelpers";
 
 // Fallback component to show when an error occurs
 function ErrorFallback({ error, resetErrorBoundary }) {
@@ -87,11 +85,6 @@ export default function PositionDetailPage() {
 
   // Track initial data loading to prevent "Position not found" flash
   const [isLoadingInitialData, setIsLoadingInitialData] = useState(false);
-
-  // Modal pool/token data — fetched on-demand, replaces Redux pool cache for modal infrastructure
-  const [modalPoolData, setModalPoolData] = useState(null);
-  const [modalToken0Data, setModalToken0Data] = useState(null);
-  const [modalToken1Data, setModalToken1Data] = useState(null);
 
   // State for modals
   const [showClaimFeesModal, setShowClaimFeesModal] = useState(false);
@@ -310,50 +303,6 @@ export default function PositionDetailPage() {
       }
     }
   }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, showError, position?.vaultAddress]);
-
-  // Fetch pool data for modal infrastructure (replaces Redux pool cache)
-  useEffect(() => {
-    if (!adapter || !position?.pool || !provider || !chainId) return;
-    let isMounted = true;
-
-    const fetchPoolData = async () => {
-      try {
-        const poolData = await adapter.getPoolData(position.pool, provider);
-        if (!isMounted) return;
-
-        // Resolve token metadata from pool contract
-        const poolContract = new ethers.Contract(
-          position.pool,
-          ['function token0() view returns (address)', 'function token1() view returns (address)'],
-          provider
-        );
-        const [token0Addr, token1Addr] = await Promise.all([
-          poolContract.token0(), poolContract.token1()
-        ]);
-
-        const token0Config = getTokenByAddress(token0Addr, chainId);
-        const token1Config = getTokenByAddress(token1Addr, chainId);
-
-        const t0Data = { address: token0Addr, symbol: token0Config.symbol, decimals: token0Config.decimals, isNative: token0Config.isNative || false };
-        const t1Data = { address: token1Addr, symbol: token1Config.symbol, decimals: token1Config.decimals, isNative: token1Config.isNative || false };
-
-        // Embed token data in poolData for modal compatibility
-        poolData.token0 = t0Data;
-        poolData.token1 = t1Data;
-
-        if (isMounted) {
-          setModalPoolData(poolData);
-          setModalToken0Data(t0Data);
-          setModalToken1Data(t1Data);
-        }
-      } catch (error) {
-        console.error("Error fetching pool data for modals:", error);
-      }
-    };
-
-    fetchPoolData();
-    return () => { isMounted = false; };
-  }, [adapter, position?.pool, provider, chainId, lastUpdate]);
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
@@ -857,10 +806,7 @@ export default function PositionDetailPage() {
                         <strong style={{ color: 'var(--crimson-700)' }}>Chain ID:</strong> {chainId}
                       </div>
                       <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Token0 Address:</strong> {modalToken0Data?.address || 'N/A'}
-                      </div>
-                      <div className="mb-2">
-                        <strong style={{ color: 'var(--crimson-700)' }}>Token1 Address:</strong> {modalToken1Data?.address || 'N/A'}
+                        <strong style={{ color: 'var(--crimson-700)' }}>Token Pair:</strong> {position?.tokenPair || 'N/A'}
                       </div>
                       <div className="mb-2">
                         <strong style={{ color: 'var(--crimson-700)' }}>Pool Address:</strong> {position.pool}
@@ -873,49 +819,32 @@ export default function PositionDetailPage() {
           </Row>
         </ErrorBoundary>
 
-        {/* Add the modals using our updated components */}
+        {/* Action modals — each manages its own data via useModalData hook */}
         <ClaimFeesModal
           show={showClaimFeesModal}
           onHide={() => setShowClaimFeesModal(false)}
           position={position}
-          uncollectedFees={null}
-          token0Data={modalToken0Data}
-          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={modalPoolData}
         />
 
         <RemoveLiquidityModal
           show={showRemoveLiquidityModal}
           onHide={() => setShowRemoveLiquidityModal(false)}
           position={position}
-          tokenBalances={null}
-          uncollectedFees={null}
-          token0Data={modalToken0Data}
-          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={modalPoolData}
         />
 
         <ClosePositionModal
           show={showClosePositionModal}
           onHide={() => setShowClosePositionModal(false)}
           position={position}
-          tokenBalances={null}
-          uncollectedFees={null}
-          token0Data={modalToken0Data}
-          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
-          poolData={modalPoolData}
         />
 
         <AddLiquidityModal
           show={showAddLiquidityModal}
           onHide={() => setShowAddLiquidityModal(false)}
           position={position}
-          poolData={modalPoolData}
-          token0Data={modalToken0Data}
-          token1Data={modalToken1Data}
           tokenPrices={tokenPrices}
         />
       </Container>

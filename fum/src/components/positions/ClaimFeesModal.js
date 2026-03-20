@@ -1,67 +1,71 @@
-import React, { useState } from 'react';
-import { Modal, Button, Spinner, Alert, Badge } from 'react-bootstrap';
+import React, { useState, useMemo } from 'react';
+import { Modal, Button, Spinner, Alert } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
-import { ethers } from 'ethers';
 
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
-import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
+import { useModalData } from '../../hooks/useModalData';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 export default function ClaimFeesModal({
   show,
   onHide,
   position,
-  uncollectedFees,
-  token0Data,
-  token1Data,
-  tokenPrices,
-  poolData
+  tokenPrices
 }) {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address, chainId } = useSelector(state => state.wallet);
-  const { readProvider, getSigner, isReadReady } = useProviders();
+  const { readProvider, getSigner } = useProviders();
 
   // State for operation status
   const [isClaiming, setIsClaiming] = useState(false);
   const [operationError, setOperationError] = useState(null);
 
-  // Calculate USD values
-  const getUsdValue = (amount, tokenSymbol) => {
-    if (!amount || amount === "0" || !tokenPrices) return null;
-
+  // Get adapter for this position's platform
+  const adapter = useMemo(() => {
+    if (!position?.platform || !chainId) return null;
     try {
-      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-      if (!price) return null;
-
-      return parseFloat(amount) * price;
-    } catch (error) {
-      console.error(`Error calculating USD value for ${tokenSymbol}:`, error);
+      return AdapterFactory.getAdapter(position.platform, chainId);
+    } catch {
       return null;
     }
+  }, [position?.platform, chainId]);
+
+  // Hook manages fresh pool data + position display data with 30s auto-refresh
+  const { poolData, positionForAdapter, isLoading } = useModalData(adapter, position, readProvider, show);
+
+  // Token symbols from position's tokenPair
+  const [token0Symbol, token1Symbol] = useMemo(() => {
+    if (!position?.tokenPair) return ['', ''];
+    return position.tokenPair.split('/');
+  }, [position?.tokenPair]);
+
+  // Calculate USD values
+  const getUsdValue = (amount, isToken0) => {
+    if (!amount || !tokenPrices) return null;
+    const price = isToken0 ? tokenPrices.token0 : tokenPrices.token1;
+    if (!price) return null;
+    return amount * price;
   };
 
   // Calculate total USD value for the fees
-  const totalFeeValue = (uncollectedFees?.token0 && uncollectedFees?.token1) ? (
-    (getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol) || 0) +
-    (getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol) || 0)
+  const totalFeeValue = positionForAdapter ? (
+    (getUsdValue(positionForAdapter.uncollectedFees0, true) || 0) +
+    (getUsdValue(positionForAdapter.uncollectedFees1, false) || 0)
   ) : null;
 
-  // Check if we have meaningful token amounts
-  const hasFees = (uncollectedFees?.token0 && uncollectedFees?.token1) &&
-    (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
+  // Check if we have meaningful fee amounts
+  const hasFees = positionForAdapter &&
+    (positionForAdapter.uncollectedFees0 > 0 || positionForAdapter.uncollectedFees1 > 0);
 
   // Function to claim fees using the adapter
   const claimFees = async () => {
-    // Get the appropriate adapter (uses read provider for initialization)
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId);
-
     if (!adapter) {
       throw new Error("No adapter available for this position");
     }
@@ -70,22 +74,14 @@ export default function ClaimFeesModal({
     setOperationError(null);
 
     try {
-      // Look up native status for ETH unwrapping
-      const token0Info = getTokenByAddress(token0Data.address, chainId);
-      const token1Info = getTokenByAddress(token1Data.address, chainId);
-
-      // Generate transaction data for claiming fees (uses read provider for data lookup)
-      // Pass native flags to trigger unwrapWETH9 for ETH positions
+      // Generate transaction data — adapter resolves token data internally (Fix 6)
       const txData = await adapter.generateClaimFeesData({
-        positionId: position.id,
+        position: positionForAdapter,
         provider: readProvider,
         walletAddress: address,
-        token0Address: token0Data.address,
-        token1Address: token1Data.address,
-        token0Decimals: token0Data.decimals,
-        token1Decimals: token1Data.decimals,
-        token0IsNative: token0Info?.isNative || false,
-        token1IsNative: token1Info?.isNative || false
+        poolData,
+        slippageTolerance: 0.5,
+        deadlineMinutes: 20
       });
 
       // Get signer to send transaction
@@ -165,7 +161,7 @@ export default function ClaimFeesModal({
       <Modal.Header closeButton>
         <Modal.Title>
           Claim Fees from Position #{position?.id} - {position?.tokenPair}
-          <small className="ms-2 text-muted">({position?.fee / 10000}% fee)</small>
+          <small className="ms-2 text-muted">({position?.fee}% fee)</small>
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -179,7 +175,12 @@ export default function ClaimFeesModal({
         {/* Uncollected Fees Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
-          {!uncollectedFees?.token0 || !uncollectedFees?.token1 ? (
+          {isLoading ? (
+            <div className="text-center py-3">
+              <Spinner animation="border" size="sm" className="me-2" />
+              Loading fee data...
+            </div>
+          ) : !positionForAdapter ? (
             <Alert variant="warning">
               Fee information is not available
             </Alert>
@@ -191,21 +192,21 @@ export default function ClaimFeesModal({
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Symbol}:</span> {formatFeeDisplay(positionForAdapter.uncollectedFees0)}
                 </div>
                 {tokenPrices?.token0 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.uncollectedFees0, true)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Symbol}:</span> {formatFeeDisplay(positionForAdapter.uncollectedFees1)}
                 </div>
                 {tokenPrices?.token1 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.uncollectedFees1, false)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
@@ -232,7 +233,7 @@ export default function ClaimFeesModal({
         <Button
           variant="primary"
           onClick={handleClaimFees}
-          disabled={isClaiming}
+          disabled={isClaiming || isLoading}
         >
           {isClaiming ? (
             <>

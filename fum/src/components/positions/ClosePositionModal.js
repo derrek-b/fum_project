@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { Modal, Button, Spinner, Alert, Badge, Form, InputGroup } from 'react-bootstrap';
+import React, { useState, useMemo } from 'react';
+import { Modal, Button, Spinner, Alert, Form, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
 
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
 import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
-import { getTokenByAddress } from 'fum_library/helpers/tokenHelpers';
 
 // Local project imports
 import { useToast } from '../../context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
+import { useModalData } from '../../hooks/useModalData';
 import { triggerUpdate } from '../../redux/updateSlice';
 
 // CSS to hide number input spinner arrows
@@ -31,13 +31,7 @@ export default function ClosePositionModal({
   show,
   onHide,
   position,
-  tokenBalances,
-  uncollectedFees,
-  token0Data,
-  token1Data,
-  tokenPrices,
-  errorMessage,
-  poolData
+  tokenPrices
 }) {
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
@@ -45,68 +39,66 @@ export default function ClosePositionModal({
   const { readProvider, getSigner } = useProviders();
 
   // State for burn option
-  const [shouldBurn, setShouldBurn] = useState(true); // Default to true - burning is recommended
+  const [shouldBurn, setShouldBurn] = useState(true);
 
-  // Add state for slippage tolerance with default of 0.5%
+  // State for slippage tolerance
   const [slippageTolerance, setSlippageTolerance] = useState(0.5);
 
   // State for operation status
   const [isClosing, setIsClosing] = useState(false);
   const [operationError, setOperationError] = useState(null);
 
+  // Get adapter for this position's platform
+  const adapter = useMemo(() => {
+    if (!position?.platform || !chainId) return null;
+    try {
+      return AdapterFactory.getAdapter(position.platform, chainId);
+    } catch {
+      return null;
+    }
+  }, [position?.platform, chainId]);
+
+  // Hook manages fresh pool data + position display data with 30s auto-refresh
+  const { poolData, positionForAdapter, isLoading } = useModalData(adapter, position, readProvider, show);
+
+  // Token symbols from position's tokenPair
+  const [token0Symbol, token1Symbol] = useMemo(() => {
+    if (!position?.tokenPair) return ['', ''];
+    return position.tokenPair.split('/');
+  }, [position?.tokenPair]);
+
   // Calculate USD values
-  const getUsdValue = (amount, tokenSymbol) => {
-    if (!amount || amount === "0" || !tokenPrices) return null;
-
-    try {
-      const price = tokenSymbol === token0Data?.symbol ? tokenPrices.token0 : tokenPrices.token1;
-      if (!price) return null;
-
-      return parseFloat(amount) * price;
-    } catch (error) {
-      console.error(`Error calculating USD value for ${tokenSymbol}:`, error);
-      return null;
-    }
-  };
-
-  // Calculate total USD value for tokens
-  const calculateTotalUsdValue = (token0Amount, token1Amount) => {
-    if (!token0Data || !token1Data || !tokenPrices) return null;
-
-    try {
-      const token0UsdValue = getUsdValue(token0Amount, token0Data.symbol) || 0;
-      const token1UsdValue = getUsdValue(token1Amount, token1Data.symbol) || 0;
-
-      return token0UsdValue + token1UsdValue;
-    } catch (error) {
-      console.error("Error calculating total USD value:", error);
-      return null;
-    }
+  const getUsdValue = (amount, isToken0) => {
+    if (!amount || !tokenPrices) return null;
+    const price = isToken0 ? tokenPrices.token0 : tokenPrices.token1;
+    if (!price) return null;
+    return amount * price;
   };
 
   // Total balance value
-  const totalBalanceUsd = (tokenBalances?.token0 && tokenBalances?.token1) ?
-    calculateTotalUsdValue(tokenBalances.token0.formatted, tokenBalances.token1.formatted) : null;
+  const totalBalanceUsd = positionForAdapter ?
+    (getUsdValue(positionForAdapter.token0Amount, true) || 0) +
+    (getUsdValue(positionForAdapter.token1Amount, false) || 0) :
+    null;
 
   // Total fees value
-  const totalFeesUsd = (uncollectedFees?.token0 && uncollectedFees?.token1) ?
-    calculateTotalUsdValue(uncollectedFees.token0.formatted, uncollectedFees.token1.formatted) : null;
+  const totalFeesUsd = positionForAdapter ?
+    (getUsdValue(positionForAdapter.uncollectedFees0, true) || 0) +
+    (getUsdValue(positionForAdapter.uncollectedFees1, false) || 0) :
+    null;
 
   // Grand total (balances + fees)
   const grandTotalUsd = (totalBalanceUsd || 0) + (totalFeesUsd || 0);
 
   // Check if we have meaningful token amounts
-  const hasBalances = (tokenBalances?.token0 && tokenBalances?.token1) &&
-    (parseFloat(tokenBalances.token0.formatted) > 0 || parseFloat(tokenBalances.token1.formatted) > 0);
+  const hasBalances = positionForAdapter &&
+    (positionForAdapter.token0Amount > 0 || positionForAdapter.token1Amount > 0);
 
-  const hasFees = (uncollectedFees?.token0 && uncollectedFees?.token1) &&
-    (parseFloat(uncollectedFees.token0.formatted) > 0 || parseFloat(uncollectedFees.token1.formatted) > 0);
+  const hasFees = positionForAdapter &&
+    (positionForAdapter.uncollectedFees0 > 0 || positionForAdapter.uncollectedFees1 > 0);
 
   // Function to close position using the adapter
   const closePosition = async (shouldBurn, slippageTolerance) => {
-    // Get the appropriate adapter (uses read provider)
-    const adapter = AdapterFactory.getAdapter(position.platform, chainId);
-
     if (!adapter) {
       throw new Error("No adapter available for this position");
     }
@@ -115,24 +107,16 @@ export default function ClosePositionModal({
     setOperationError(null);
 
     try {
-      // Look up native status for ETH unwrapping
-      const token0Info = getTokenByAddress(token0Data.address, chainId);
-      const token1Info = getTokenByAddress(token1Data.address, chainId);
-
-      // Closing a position is just removing 100% of liquidity (which also collects fees)
-      // Pass native flags to trigger unwrapWETH9 for ETH positions
+      // Closing a position is removing 100% of liquidity (which also collects fees)
+      // Adapter resolves token data internally (Fix 6)
       const txData = await adapter.generateRemoveLiquidityData({
-        position,
-        percentage: 100, // Remove 100% to close
+        position: positionForAdapter,
+        percentage: 100,
         provider: readProvider,
         walletAddress: address,
         poolData,
-        token0Data,
-        token1Data,
         slippageTolerance,
-        deadlineMinutes: 20,
-        token0IsNative: token0Info?.isNative || false,
-        token1IsNative: token1Info?.isNative || false
+        deadlineMinutes: 20
       });
 
       // Get signer to send transaction
@@ -211,14 +195,14 @@ export default function ClosePositionModal({
       onHide={handleModalClose}
       centered
       backdrop="static"
-      keyboard={false} // Prevent Escape key from closing
-      data-no-propagation="true" // Custom attribute for clarity
+      keyboard={false}
+      data-no-propagation="true"
     >
       <style>{numberInputStyles}</style>
       <Modal.Header closeButton>
         <Modal.Title>
           Close Position #{position?.id} - {position?.tokenPair}
-          <small className="ms-2 text-muted">({position?.fee / 10000}% fee)</small>
+          <small className="ms-2 text-muted">({position?.fee}% fee)</small>
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -232,7 +216,12 @@ export default function ClosePositionModal({
         {/* Token Balances Section */}
         <div className="mb-4">
           <h6 className="border-bottom pb-2">Token Balances to Withdraw</h6>
-          {!tokenBalances?.token0 || !tokenBalances?.token1 ? (
+          {isLoading ? (
+            <div className="text-center py-3">
+              <Spinner animation="border" size="sm" className="me-2" />
+              Loading position data...
+            </div>
+          ) : !positionForAdapter ? (
             <Alert variant="warning">
               Token balance information is not available
             </Alert>
@@ -244,21 +233,21 @@ export default function ClosePositionModal({
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {tokenBalances.token0.formatted}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Symbol}:</span> {positionForAdapter.token0Amount.toFixed(6)}
                 </div>
                 {tokenPrices?.token0 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(tokenBalances.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.token0Amount, true)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {tokenBalances.token1.formatted}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Symbol}:</span> {positionForAdapter.token1Amount.toFixed(6)}
                 </div>
                 {tokenPrices?.token1 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(tokenBalances.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.token1Amount, false)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
@@ -274,7 +263,7 @@ export default function ClosePositionModal({
         {/* Uncollected Fees Section */}
         <div className="mb-3">
           <h6 className="border-bottom pb-2">Uncollected Fees to Claim</h6>
-          {!uncollectedFees?.token0 || !uncollectedFees?.token1 ? (
+          {isLoading || !positionForAdapter ? (
             <Alert variant="warning">
               Fee information is not available
             </Alert>
@@ -286,21 +275,21 @@ export default function ClosePositionModal({
             <>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token0.formatted))}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token0Symbol}:</span> {formatFeeDisplay(positionForAdapter.uncollectedFees0)}
                 </div>
                 {tokenPrices?.token0 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(uncollectedFees.token0.formatted, token0Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.uncollectedFees0, true)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <div style={{ fontSize: '0.9em' }}>
-                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Data?.symbol}:</span> {formatFeeDisplay(parseFloat(uncollectedFees.token1.formatted))}
+                  <span style={{ color: 'var(--crimson-700)', fontWeight: 'bold' }}>{token1Symbol}:</span> {formatFeeDisplay(positionForAdapter.uncollectedFees1)}
                 </div>
                 {tokenPrices?.token1 > 0 && (
                   <span style={{ fontSize: '0.9em', color: 'var(--neutral-600)' }}>
-                    ${getUsdValue(uncollectedFees.token1.formatted, token1Data?.symbol)?.toFixed(2) || '—'}
+                    ${getUsdValue(positionForAdapter.uncollectedFees1, false)?.toFixed(2) || '—'}
                   </span>
                 )}
               </div>
@@ -323,7 +312,7 @@ export default function ClosePositionModal({
           </div>
         )}
 
-        {/* Add slippage tolerance input */}
+        {/* Slippage Tolerance */}
         <div className="border-top pt-3 mt-3 mb-5">
           <h6 className="mb-2">Slippage Tolerance</h6>
           <Form.Group>
@@ -334,7 +323,7 @@ export default function ClosePositionModal({
                 value={slippageTolerance}
                 onChange={(e) => {
                   setSlippageTolerance(e.target.value);
-                  setOperationError(null); // Clear error when typing
+                  setOperationError(null);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
@@ -374,7 +363,7 @@ export default function ClosePositionModal({
         <Button
           variant="primary"
           onClick={handleClosePosition}
-          disabled={isClosing}
+          disabled={isClosing || isLoading}
         >
           {isClosing ? (
             <>
