@@ -1875,13 +1875,38 @@ describe("PositionVault - 2.0.0", function() {
       ).to.be.revertedWith("UniswapV3PositionValidator: collect recipient must be vault");
     });
 
+    it("should allow multicall with decreaseLiquidity + collect + burn (full close with burn)", async function() {
+      const vaultAddress = await vault.getAddress();
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const maxUint128 = 2n ** 128n - 1n;
+
+      const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCalldata = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const burnIface = new ethers.Interface(["function burn(uint256 tokenId)"]);
+      const burnCalldata = burnIface.encodeFunctionData("burn", [1]);
+      const multicallData = encodeMulticall([decreaseCalldata, collectCalldata, burnCalldata]);
+
+      await expect(
+        vault.decreaseLiquidity(
+          [nonfungiblePositionManagerAddress],
+          [multicallData]
+        )
+      ).to.not.be.reverted;
+    });
+
     it("should reject multicall with disallowed function", async function() {
       const deadline = Math.floor(Date.now() / 1000) + 3600;
 
       const decreaseCalldata = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
-      const burnIface = new ethers.Interface(["function burn(uint256 tokenId)"]);
-      const burnCalldata = burnIface.encodeFunctionData("burn", [1]);
-      const multicallData = encodeMulticall([decreaseCalldata, burnCalldata]);
+      // increaseLiquidity is not allowed inside a decreaseLiquidity multicall
+      const increaseIface = new ethers.Interface([
+        "function increaseLiquidity((uint256 tokenId, uint256 amount0Desired, uint256 amount1Desired, uint256 amount0Min, uint256 amount1Min, uint256 deadline) params)"
+      ]);
+      const increaseCalldata = increaseIface.encodeFunctionData("increaseLiquidity", [{
+        tokenId: 1, amount0Desired: 1000, amount1Desired: 1000,
+        amount0Min: 0, amount1Min: 0, deadline
+      }]);
+      const multicallData = encodeMulticall([decreaseCalldata, increaseCalldata]);
 
       await expect(
         vault.decreaseLiquidity(

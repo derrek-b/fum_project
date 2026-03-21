@@ -217,10 +217,27 @@ describe("UniswapV3PositionValidator", function() {
         .to.be.revertedWith("UniswapV3PositionValidator: must be multicall");
     });
 
+    it("should allow multicall with decreaseLiquidity + burn (close and burn NFT)", async function() {
+      const decreaseCall = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const burnCall = encodeBurn(1);
+      const calldata = encodeMulticall([decreaseCall, burnCall]);
+
+      await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
+    it("should allow multicall with decreaseLiquidity + collect + burn (full close with burn)", async function() {
+      const decreaseCall = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
+      const collectCall = encodeCollect(1, vaultAddress, maxUint128, maxUint128);
+      const burnCall = encodeBurn(1);
+      const calldata = encodeMulticall([decreaseCall, collectCall, burnCall]);
+
+      await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress)).to.not.be.reverted;
+    });
+
     it("should reject multicall with disallowed function", async function() {
       const decreaseCall = encodeDecreaseLiquidity(1, 1000, 0, 0, deadline);
-      const burnCall = encodeBurn(1); // Burn not allowed in decreaseLiquidity multicall
-      const calldata = encodeMulticall([decreaseCall, burnCall]);
+      const mintCall = encodeMint(vaultAddress, otherAddress, 3000, -100, 100, 1000, 1000, 0, 0, vaultAddress, deadline);
+      const calldata = encodeMulticall([decreaseCall, mintCall]);
 
       await expect(validator.validateDecreaseLiquidity(calldata, vaultAddress))
         .to.be.revertedWith("UniswapV3PositionValidator: function not allowed in multicall");
