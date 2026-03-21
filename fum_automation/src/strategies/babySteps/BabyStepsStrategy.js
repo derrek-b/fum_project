@@ -1085,7 +1085,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         hasNativeToken   // Track for fee fallback logic
       };
 
-      // Generate close position transaction data (100% removal)
+      // Generate close position transaction data (100% removal + burn NFT)
       const closeData = await retryRpcCall(
         () => adapter.generateRemoveLiquidityData({
           position,
@@ -1096,7 +1096,8 @@ export default class BabyStepsStrategy extends StrategyBase {
           token0Data,
           token1Data,
           slippageTolerance: vault.strategy.parameters.maxSlippage,
-          deadlineMinutes: getTransactionDeadlineMinutes(this.chainId)
+          deadlineMinutes: getTransactionDeadlineMinutes(this.chainId),
+          burnToken: true
         }),
         'generateRemoveLiquidityData',
         { log: (msg) => this.log(msg) }

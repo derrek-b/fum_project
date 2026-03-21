@@ -24,6 +24,7 @@ import {
   getV4TokenAddress
 } from '../../../helpers/v4-swap-utils.js';
 import { waitForCondition } from '../../../helpers/wait-utils.js';
+import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 
 const NATIVE_ETH = ethers.constants.AddressZero;
 
@@ -339,6 +340,15 @@ describe('V4 Rebalance and Fee Collection', () => {
       expect(closedEvent.closedPositions.length).toBeGreaterThan(0);
       const closedPositionIds = closedEvent.closedPositions.map(p => p.positionId);
       expect(closedPositionIds).toContain(initialPosition.id);
+
+      // Verify old position NFT was burned (ownerOf reverts for burned ERC721 tokens)
+      const v4Addresses = getPlatformAddresses(1337, 'uniswapV4');
+      const v4PositionManager = new ethers.Contract(
+        v4Addresses.positionManagerAddress,
+        ['function ownerOf(uint256 tokenId) view returns (address)'],
+        testEnv.hardhatServer.provider
+      );
+      await expect(v4PositionManager.ownerOf(initialPosition.id)).rejects.toThrow();
 
       // Verify new position was created
       await waitForCondition(

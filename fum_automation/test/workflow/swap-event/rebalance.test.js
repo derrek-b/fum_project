@@ -20,6 +20,7 @@ import {
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
 import { UniswapV3Adapter } from 'fum_library/adapters';
+import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 import {
   expectTrackerAggregates,
   expectTrackerBaseline,
@@ -220,6 +221,15 @@ describe('Position Rebalancing', () => {
     expect(rebalanceEvent.vaultAddress).toBe(testVault.vaultAddress);
     expect(rebalanceEvent.oldPositionId).toBeDefined();
 
+    // Verify old position NFT was burned (ownerOf reverts for burned ERC721 tokens)
+    const v3Addresses = getPlatformAddresses(1337, 'uniswapV3');
+    const nftManager = new ethers.Contract(
+      v3Addresses.positionManagerAddress,
+      ['function ownerOf(uint256 tokenId) view returns (address)'],
+      testEnv.hardhatServer.provider
+    );
+    await expect(nftManager.ownerOf(rebalanceEvent.oldPositionId)).rejects.toThrow();
+
     // Verify new position was created
     await waitForCondition(
       () => newPositionEvents.length > 0,
@@ -332,6 +342,15 @@ describe('Position Rebalancing', () => {
 
     expect(rebalanceEvent.vaultAddress).toBe(testVault.vaultAddress);
     expect(rebalanceEvent.oldPositionId).toBeDefined();
+
+    // Verify old position NFT was burned (ownerOf reverts for burned ERC721 tokens)
+    const v3Addresses = getPlatformAddresses(1337, 'uniswapV3');
+    const nftManagerReverse = new ethers.Contract(
+      v3Addresses.positionManagerAddress,
+      ['function ownerOf(uint256 tokenId) view returns (address)'],
+      testEnv.hardhatServer.provider
+    );
+    await expect(nftManagerReverse.ownerOf(rebalanceEvent.oldPositionId)).rejects.toThrow();
 
     // Verify new position was created
     await waitForCondition(
