@@ -504,11 +504,25 @@ export function getTokenBySymbol(symbol) {
   validateTokenSymbol(symbol);
 
   const token = tokens[symbol];
-  if (!token) {
-    throw new Error(`Token ${symbol} not found`);
+  if (token) {
+    return token;
   }
 
-  return token;
+  // Check wrappedSymbol fields (e.g., 'WETH' → ETH token with wrappedSymbol: 'WETH')
+  for (const t of Object.values(tokens)) {
+    if (t.wrappedSymbol === symbol) {
+      return {
+        ...t,
+        symbol: t.wrappedSymbol,
+        name: `Wrapped ${t.name}`,
+        isNative: false,
+        addresses: { ...t.wrappedAddresses },
+        logoURI: t.wrappedLogoURI
+      };
+    }
+  }
+
+  throw new Error(`Token ${symbol} not found`);
 }
 
 /**
