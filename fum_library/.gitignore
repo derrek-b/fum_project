@@ -7,6 +7,5 @@ bytecode/
 !test/.env.test.example
 
 **/.claude/settings.local.json
-artifacts/
 cache/
 *.tgz
