@@ -60,7 +60,9 @@ export default function PositionDetailPage() {
   const dispatch = useDispatch();
   const router = useRouter();
   const { showError, showSuccess } = useToast();
-  const { id } = router.query;
+  const { id, vault: fromVault } = router.query;
+  const backUrl = fromVault ? `/vault/${fromVault}` : '/positions';
+  const backLabel = fromVault ? 'Back to Vault' : 'Back to Positions';
   const { positions } = useSelector((state) => state.positions);
   const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
@@ -293,9 +295,11 @@ export default function PositionDetailPage() {
               }
             }
           }
+          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
         }).catch(error => {
           console.error("Error refreshing position data:", error);
           showError("Failed to refresh position data from blockchain");
+          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
         });
       } catch (error) {
         console.error("Error in position refresh effect:", error);
@@ -375,9 +379,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/positions" passHref>
+          <Link href={backUrl} passHref>
             <Button className="btn btn-back mb-4">
-              &larr; Back to Positions
+              &larr; {backLabel}
             </Button>
           </Link>
           <div className="text-center py-5">
@@ -395,9 +399,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/positions" passHref>
+          <Link href={backUrl} passHref>
             <Button className="btn btn-back mb-4">
-              &larr; Back to Positions
+              &larr; {backLabel}
             </Button>
           </Link>
           <Alert variant="warning" className="text-center">
@@ -416,9 +420,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/positions" passHref>
+          <Link href={backUrl} passHref>
             <Button className="btn btn-back mb-4">
-              &larr; Back to Positions
+              &larr; {backLabel}
             </Button>
           </Link>
           <div className="text-center py-5">
@@ -436,9 +440,9 @@ export default function PositionDetailPage() {
       <>
         <Navbar />
         <Container className="py-4">
-          <Link href="/positions" passHref>
+          <Link href={backUrl} passHref>
             <Button className="btn btn-back mb-4">
-              &larr; Back to Positions
+              &larr; {backLabel}
             </Button>
           </Link>
           <Card>
@@ -468,9 +472,9 @@ export default function PositionDetailPage() {
         </Head>
 
         <div className="d-flex justify-content-between align-items-center mb-4">
-          <Link href="/positions" passHref>
+          <Link href={backUrl} passHref>
             <Button className="btn btn-back">
-              &larr; Back to Positions
+              &larr; {backLabel}
             </Button>
           </Link>
 
@@ -839,6 +843,7 @@ export default function PositionDetailPage() {
           onHide={() => setShowClosePositionModal(false)}
           position={position}
           tokenPrices={tokenPrices}
+          onCloseRedirect={backUrl}
         />
 
         <AddLiquidityModal

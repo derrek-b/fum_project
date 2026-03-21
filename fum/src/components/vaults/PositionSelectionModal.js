@@ -1,7 +1,6 @@
 // src/components/PositionSelectionModal.js
 import React, { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Form, Spinner, Alert, ListGroup, Badge } from "react-bootstrap";
-import Image from "next/image";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
@@ -81,19 +80,6 @@ export default function PositionSelectionModal({
     }
   }, [show, mode]);
 
-  // Log the state of pools and tokens when they change
-  useEffect(() => {
-    if (show) {
-      // Check if any positions have pool addresses that don't exist in pools
-      const missingPools = positions
-        .filter(p => p.poolAddress && !pools[p.poolAddress])
-        .map(p => ({ id: p.id, poolAddress: p.poolAddress }));
-
-      if (missingPools.length > 0) {
-        console.warn('Positions with missing pool data:', missingPools);
-      }
-    }
-  }, [show, positions]);
 
   // Handle position toggle
   const handlePositionToggle = (positionId) => {
@@ -441,11 +427,11 @@ export default function PositionSelectionModal({
                           width: '20px'
                         }}
                       >
-                        <Image
+                        <img
                           src={platforms[position.platform].logo}
                           alt={position.platformName || position.platform}
-                          width={40}
-                          height={40}
+                          width={20}
+                          height={20}
                           title={position.platformName || position.platform}
                         />
                       </div>

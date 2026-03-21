@@ -100,7 +100,8 @@ export default function PositionCard({ position, inVault = false, vaultAddress =
 
   // Handle card click to navigate to detail page
   const handleCardClick = () => {
-    router.push(`/position/${position.id}`);
+    const query = vaultAddress ? `?vault=${vaultAddress}` : '';
+    router.push(`/position/${position.id}${query}`);
   };
 
   // Get card styling based on vault status

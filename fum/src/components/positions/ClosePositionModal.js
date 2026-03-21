@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Modal, Button, Spinner, Alert, Form, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
+import { useRouter } from 'next/router';
 
 // FUM Library imports
 import { AdapterFactory } from 'fum_library/adapters';
@@ -31,8 +32,10 @@ export default function ClosePositionModal({
   show,
   onHide,
   position,
-  tokenPrices
+  tokenPrices,
+  onCloseRedirect
 }) {
+  const router = useRouter();
   const dispatch = useDispatch();
   const { showError, showSuccess } = useToast();
   const { address, chainId } = useSelector(state => state.wallet);
@@ -132,9 +135,9 @@ export default function ClosePositionModal({
       // Show success message
       showSuccess("Successfully closed position!", receipt.transactionHash);
 
-      // Close modal and refresh data
-      onHide();
+      // Refresh data and redirect to source page
       dispatch(triggerUpdate());
+      router.push(onCloseRedirect);
 
       setIsClosing(false);
     } catch (error) {
