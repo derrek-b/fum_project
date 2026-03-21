@@ -116,7 +116,8 @@ export default function ClosePositionModal({
         walletAddress: address,
         poolData,
         slippageTolerance,
-        deadlineMinutes: 20
+        deadlineMinutes: 20,
+        burnToken: shouldBurn
       });
 
       // Get signer to send transaction
@@ -127,10 +128,6 @@ export default function ClosePositionModal({
 
       // Wait for confirmation
       const receipt = await tx.wait();
-
-      // TODO: If shouldBurn is true, we could send a second transaction to burn the NFT
-      // For now, we just remove 100% liquidity which leaves an empty NFT
-      // The burn functionality may need to be implemented separately
 
       // Show success message
       showSuccess("Successfully closed position!", receipt.transactionHash);

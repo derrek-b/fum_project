@@ -26,7 +26,7 @@ import {
   getStrategyTokens
 } from 'fum_library/helpers/strategyHelpers';
 import { getAvailablePlatforms } from 'fum_library/helpers/platformHelpers';
-import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
+import { getTokensByChain } from 'fum_library/helpers/tokenHelpers';
 
 // CSS to hide number input spinner arrows
 const numberInputStyles = `
@@ -113,14 +113,19 @@ const StrategyDetailsSection = ({
     return getStrategyTemplates(strategyId);
   }, [strategyId]);
 
-  // Get available tokens for the selected strategy
-  // Errors propagate to Error Boundary - no silent fallback
+  // Get available tokens for the selected strategy, filtered to current chain
+  // Token selection UI only renders when a strategy is selected, so return empty when none
   const availableTokens = useMemo(() => {
-    if (!strategyId || strategyId === 'none') {
-      return getAllTokens();
-    }
-    return getStrategyTokens(strategyId);
-  }, [strategyId]);
+    if (!strategyId || strategyId === 'none') return {};
+
+    const strategyTokens = getStrategyTokens(strategyId);
+    if (!chainId) return strategyTokens;
+
+    const chainTokenSymbols = new Set(getTokensByChain(chainId).map(t => t.symbol));
+    return Object.fromEntries(
+      Object.entries(strategyTokens).filter(([symbol]) => chainTokenSymbols.has(symbol))
+    );
+  }, [strategyId, chainId]);
 
   // Get available platforms for the current chain
   const availablePlatforms = useMemo(() => {

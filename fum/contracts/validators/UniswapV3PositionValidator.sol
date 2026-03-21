@@ -102,6 +102,10 @@ contract UniswapV3PositionValidator is ILiquidityValidator {
                 require(recipient == vault, "UniswapV3PositionValidator: collect recipient must be vault");
                 continue;
             }
+            // burn (0x42966c68) - allowed, no recipient (just removes empty NFT)
+            if (innerSelector == BURN_SELECTOR) {
+                continue;
+            }
             // All other selectors blocked
             revert("UniswapV3PositionValidator: function not allowed in multicall");
         }
