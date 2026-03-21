@@ -192,6 +192,7 @@ for each inner call:
   selector = assembly { mload(add(innerCall, 32)) }  // first 4 bytes
   if selector == DECREASE_LIQUIDITY: allowed, continue
   if selector == COLLECT: validate recipient
+  if selector == BURN: allowed, continue (no recipient — removes empty NFT)
 ```
 
 **Collect recipient in multicall context:**
