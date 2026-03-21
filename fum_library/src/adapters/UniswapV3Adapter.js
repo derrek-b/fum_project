@@ -3269,7 +3269,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       slippageTolerance,
       deadlineMinutes,
       token0IsNative: providedToken0IsNative = false,
-      token1IsNative: providedToken1IsNative = false
+      token1IsNative: providedToken1IsNative = false,
+      burnToken = false
     } = params;
 
     // Input validation
@@ -3390,6 +3391,14 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       throw new Error("Deadline minutes must be greater than 0");
     }
 
+    // Validate burnToken
+    if (typeof burnToken !== 'boolean') {
+      throw new Error("burnToken must be a boolean");
+    }
+    if (burnToken && percentage !== 100) {
+      throw new Error("Cannot burn position NFT unless removing 100% of liquidity");
+    }
+
     try {
       // Get position manager address from cached addresses
       if (!this.addresses?.positionManagerAddress) {
@@ -3500,6 +3509,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         // Percentage of liquidity to remove
         liquidityPercentage: liquidityPercentage,
         collectOptions,
+        burnToken,
       };
 
       // Generate the calldata using the SDK

@@ -7529,6 +7529,44 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         }
       });
 
+      it('should default burnToken to false when not provided', async () => {
+        const result = await adapter.generateRemoveLiquidityData(baseParams);
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+      });
+
+      it('should generate valid calldata with burnToken true and 100% removal', async () => {
+        const result = await adapter.generateRemoveLiquidityData({
+          ...baseParams,
+          percentage: 100,
+          burnToken: true
+        });
+
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+        expect(result.data).toBeDefined();
+        expect(typeof result.data).toBe('string');
+        expect(result.data.startsWith('0x')).toBe(true);
+
+        // Burn calldata should be longer than non-burn (extra burn() call in multicall)
+        const resultNoBurn = await adapter.generateRemoveLiquidityData({
+          ...baseParams,
+          percentage: 100,
+          burnToken: false
+        });
+        expect(result.data.length).toBeGreaterThan(resultNoBurn.data.length);
+      });
+
+      it('should allow burnToken false with any percentage', async () => {
+        const result = await adapter.generateRemoveLiquidityData({
+          ...baseParams,
+          percentage: 50,
+          burnToken: false
+        });
+        expect(result).toBeDefined();
+        expect(result.to).toBe(adapter.addresses.positionManagerAddress);
+      });
+
       it('should handle reversed token order correctly', async () => {
         // Test with tokens in reverse order (should still work due to sortTokens)
         const reversedParams = {
@@ -7906,6 +7944,24 @@ describe('UniswapV3Adapter - Unit Tests', () => {
           // Both should produce valid calldata (exact bytes may differ due to timing)
           expect(resultWithoutTokenData.data.startsWith('0x')).toBe(true);
         }, 120000);
+      });
+
+      describe('burnToken validation', () => {
+        it('should throw when burnToken is not a boolean', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, burnToken: 'true' })
+          ).rejects.toThrow('burnToken must be a boolean');
+
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, burnToken: 1 })
+          ).rejects.toThrow('burnToken must be a boolean');
+        });
+
+        it('should throw when burnToken is true but percentage is not 100', async () => {
+          await expect(
+            adapter.generateRemoveLiquidityData({ ...baseParams, percentage: 50, burnToken: true })
+          ).rejects.toThrow('Cannot burn position NFT unless removing 100% of liquidity');
+        });
       });
 
       describe('Slippage tolerance validation', () => {
