@@ -1,4 +1,4 @@
-<!-- Source: src/redux/*, src/hooks/*, src/contexts/*, src/context/*, src/pages/_app.js, src/utils/vaultsHelpers.js, src/components/* -->
+<!-- Source: src/redux/*, src/hooks/*, src/contexts/*, src/context/*, src/pages/_app.js, src/utils/vaultsHelpers.js, src/utils/sseEventHandlers.js, src/components/* -->
 # Frontend Architecture
 
 Redux state shapes, data flow patterns, SSE integration, and component organization for the Next.js 15 frontend. Reference this before modifying Redux slices, data loading logic, or automation event handling.
@@ -79,7 +79,8 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 {
   userVaults: [VaultObject],     // Array of full vault objects
   isLoadingVaults: boolean,
-  vaultError: string | null
+  vaultError: string | null,
+  vaultsLastFetched: number | null  // Timestamp for freshness gating
 }
 ```
 
@@ -106,8 +107,9 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
       valueUsd: number,
       decimals: number,
       logoURI: string,
-      isNativeEntry: boolean,        // Native ETH entry
-      isWeth: boolean,               // Flag for withdraw modal
+      isNativeEntry: boolean,        // Native token entry (ETH, AVAX, etc.)
+      isWrappedNative: boolean,      // Wrapped native — withdraw modal offers unwrap option
+      nativeSymbol: string | null,   // e.g., 'ETH' for WETH, 'AVAX' for WAVAX
       address: string | null         // Token contract address
     }
   },
@@ -152,7 +154,9 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 }
 ```
 
-**Key reducers:** `setVaults`, `addVault`, `updateVault` (merges), `setVaultPositions`, `addPositionToVault`, `removePositionFromVault`, `updateVaultPositions` (add/remove/replace), `updateVaultTokenBalances`, `updateVaultMetrics`, `updateVaultStrategy`, `updateVaultTrackerData`, `appendVaultTransaction` (prepends — most recent first)
+**Key reducers:** `setVaults`, `addVault`, `updateVault` (merges), `setVaultPositions`, `updateVaultPositions` (add/remove/replace), `updateVaultTokenBalances`, `updateVaultMetrics`, `updateVaultStrategy`, `updateVaultTrackerData`, `appendVaultTransaction` (prepends — most recent first), `setVaultsLastFetched`
+
+**Cross-slice actions** (`src/redux/vaultPositionActions.js`): `transferPositionToVault({ positionId, vaultAddress })` and `transferPositionFromVault({ positionId, vaultAddress })` — both slices listen via `extraReducers`. positionsSlice flips `inVault`/`vaultAddress` on the position. vaultsSlice adds/removes the position ID from the vault's `positions` array. Single dispatch updates both slices atomically.
 
 ### state.positions
 
@@ -160,7 +164,8 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 
 ```javascript
 {
-  positions: [PositionObject]    // Mixed array of wallet + vault positions
+  positions: [PositionObject],    // Mixed array of wallet + vault positions
+  positionsLastFetched: number | null  // Timestamp for freshness gating
 }
 ```
 
@@ -180,6 +185,8 @@ Persisted to `localStorage["fum_wallet_connection"]`. Reducers: `setWallet`, `di
 ```
 
 The `inVault` flag is the key discriminator. `setPositions` marks all incoming as `inVault: false` (wallet positions). `addVaultPositions` marks as `inVault: true`.
+
+**Key reducers:** `setPositions`, `addVaultPositions`, `updatePosition` (preserves vault status), `addPosition`, `removePosition`, `setPositionsLastFetched`. Also listens to cross-slice `transferPositionToVault`/`transferPositionFromVault` via `extraReducers`.
 
 ### state.strategies
 
@@ -226,8 +233,6 @@ The `inVault` flag is the key discriminator. `setPositions` marks all incoming a
 
 ```javascript
 {
-  lastUpdate: number,            // Date.now() — the central refresh signal
-  isUpdating: boolean,
   autoRefresh: {
     enabled: boolean,            // Toggle
     interval: 30000,             // Milliseconds
@@ -239,7 +244,7 @@ The `inVault` flag is the key discriminator. `setPositions` marks all incoming a
 }
 ```
 
-**`lastUpdate` is the universal refresh mechanism.** All refresh sources (SSE events, auto-refresh timer, manual refresh) converge on `dispatch(triggerUpdate())` which sets `lastUpdate = Date.now()`. Components watch `lastUpdate` in useEffect to re-fetch.
+**Freshness-gated fetching** replaces the old `triggerUpdate`/`lastUpdate` cascade. Each data domain has its own freshness timestamp (`positionsLastFetched`, `vaultsLastFetched`, `vaultFromRedux.lastUpdated`). Pages check freshness before fetching — if data is <30s old, skip the fetch. SSE events trigger targeted fetches directly (not freshness invalidation).
 
 ### state.automation
 
@@ -268,21 +273,23 @@ The `inVault` flag is the key discriminator. `setPositions` marks all incoming a
 
 ## Data Flow
 
-### The Refresh Cycle
+### Freshness-Gated Fetching
+
+Pages check freshness timestamps before making RPC calls. If data was fetched within 30s, skip the fetch:
 
 ```
-triggerUpdate()
-  └── lastUpdate = Date.now()
-        └── useEffect watchers fire
-              └── re-fetch data (positions, balances)
-                    └── dispatch to slices
-                          └── components re-render
+Page mounts / navigates
+  └── Check freshness (positionsLastFetched, vaultFromRedux.lastUpdated)
+        ├── Fresh (<30s) → use Redux data, skip RPC
+        └── Stale (>30s or null) → fetch from chain → dispatch to Redux → re-render
 ```
 
-**Three refresh triggers:**
-1. **SSE events** — REFRESH_TRIGGER_EVENTS dispatch `triggerUpdate()`
-2. **Auto-refresh** — AutoRefreshHandler calls `triggerUpdate()` every 30s (if enabled)
-3. **Manual** — RefreshControls button dispatches `triggerUpdate()`
+The vault detail page also hydrates from Redux when VaultsContainer has already loaded the vault (avoids duplicate fetches on navigation).
+
+**Three refresh mechanisms:**
+1. **SSE events** — Targeted fetches via `sseEventHandlers.js` (see SSE Integration below)
+2. **Auto-refresh** — AutoRefreshHandler invalidates freshness timestamps every 30s (if enabled)
+3. **Manual** — RefreshControls invalidates freshness timestamps
 
 ### Vault Data Loading Pipeline
 
@@ -310,35 +317,43 @@ triggerUpdate()
 
 ## SSE Integration
 
-**Source:** `src/hooks/useAutomationEvents.js`
+**Source:** `src/hooks/useAutomationEvents.js` (SSE connection + event routing), `src/utils/sseEventHandlers.js` (targeted data fetches)
 
-Connects to `process.env.NEXT_PUBLIC_SSE_URL` (e.g., `http://localhost:3001/events`).
+Connects to `process.env.NEXT_PUBLIC_SSE_URL` (e.g., `http://localhost:3001/events`). Mounted globally via `AutomationEventsHandler` in `_app.js`.
 
-### Event Types
+### Targeted SSE Updates
 
-| Event | Triggers Refresh | Vault State Update |
+Instead of invalidating freshness timestamps, SSE events trigger **targeted data fetches** that dispatch directly to Redux. No freshness gate — when we know data changed, we fetch only what changed.
+
+| Event | Token Balances | Positions |
 |---|---|---|
-| `ServiceStarted` | No | — |
-| `ServiceStartFailed` | No | — |
-| `NewPositionCreated` | **Yes** | — |
-| `PositionsClosed` | **Yes** | — |
-| `PositionRebalanced` | No | — |
-| `LiquidityAddedToPosition` | **Yes** | — |
-| `FeesCollected` | **Yes** | — |
-| `TokensSwapped` | **Yes** | — |
-| `VaultBaselineCaptured` | No | — |
-| `MonitoringStarted` | No | — |
-| `VaultLoadFailed` | No | `isRetrying=true`, `retryError={message, attempts, lastAttempt}` |
-| `VaultLoadRecovered` | No | Clears `isRetrying`, `retryError`, `isBlacklisted` |
-| `VaultUnrecoverable` | **Yes** | `isBlacklisted=true`, `blacklistReason` |
-| `VaultBlacklisted` | No | `isBlacklisted=true`, `blacklistReason` |
-| `VaultUnblacklisted` | No | `isBlacklisted=false`, `blacklistReason=null` |
-| `FeeCollectionFailed` | No | — |
-| `TransactionLogged` | No | Prepends to `transactionHistory` |
-| `ExecutorFundingRequired` | **Yes** | `isFundingRequired=true`, `fundingRequiredAt` |
-| `ExecutorFundingCleared` | No | `isFundingRequired=false`, `fundingRequiredAt=null` |
+| `TokensSwapped` | `refreshTokenBalances` | — |
+| `NativeWrapped` | `refreshTokenBalances` | — |
+| `NativeUnwrapped` | `refreshTokenBalances` | — |
+| `NewPositionCreated` | `refreshTokenBalances` | `refreshSinglePosition(isNew: true)` |
+| `LiquidityAddedToPosition` | `refreshTokenBalances` | `refreshSinglePosition` |
+| `FeesCollected` | `refreshTokenBalances` | `refreshSinglePosition` per positionId |
+| `PositionsClosed` | `refreshTokenBalances` | `removePosition` + `updateVaultPositions(remove)` |
+| `PositionRebalanced` | — | — (covered by PositionsClosed + TokensSwapped + NewPositionCreated) |
 
-**REFRESH_TRIGGER_EVENTS:** `NewPositionCreated`, `PositionsClosed`, `LiquidityAddedToPosition`, `FeesCollected`, `TokensSwapped`, `VaultUnrecoverable`, `ExecutorFundingRequired`
+**Helpers in `sseEventHandlers.js`:**
+- `refreshTokenBalances(vaultAddress, provider, chainId, dispatch)` — calls `loadVaultTokenBalances` from vaultsHelpers
+- `refreshSinglePosition(positionId, platform, vaultAddress, provider, chainId, dispatch, isNew)` — calls `adapter.refreshPositionForDisplay`, dispatches `addVaultPositions` (new) or `updatePosition` (existing)
+- `processSSEEvent(eventName, data, { provider, chainId, dispatch, getPositions })` — orchestrator that routes events to handlers
+
+**Closure handling:** `useAutomationEvents` uses refs (`providerRef`, `chainIdRef`, `positionsRef`) for stable closure access inside SSE event listeners that are created once in `connect()`.
+
+### Vault State Events (unchanged)
+
+| Event | Vault State Update |
+|---|---|
+| `VaultLoadFailed` | `isRetrying=true`, `retryError={message, attempts, lastAttempt}` |
+| `VaultLoadRecovered` | Clears `isRetrying`, `retryError`, `isBlacklisted` |
+| `VaultBlacklisted` | `isBlacklisted=true`, `blacklistReason` |
+| `VaultUnblacklisted` | `isBlacklisted=false`, `blacklistReason=null` |
+| `ExecutorFundingRequired` | `isFundingRequired=true`, `fundingRequiredAt` |
+| `ExecutorFundingCleared` | `isFundingRequired=false`, `fundingRequiredAt=null` |
+| `TransactionLogged` | Prepends to `transactionHistory` |
 
 ### Automation Service REST Endpoints
 
@@ -422,7 +437,7 @@ src/components/
 
 1. **Providers in Context / data in Redux** — Provider objects can't be serialized; everything else goes in Redux
 2. **readProvider for reads / wallet provider for writes** — Never use the wallet provider for batch reads
-3. **`lastUpdate` as universal refresh signal** — SSE, auto-refresh, and manual refresh all converge here
+3. **Freshness-gated fetching + targeted SSE updates** — Pages check freshness timestamps before fetching. SSE events trigger targeted fetches via `sseEventHandlers.js` that dispatch directly to Redux (no freshness gate for known changes).
 4. **Token data embedded in pool objects** — Pool state includes full token metadata, not just addresses
 5. **Mixed positions array** — `state.positions` contains both wallet and vault positions, distinguished by `inVault` flag
 6. **Two context directories** — `context/` (singular, contains ToastContext) and `contexts/` (plural, contains ProviderContext)
