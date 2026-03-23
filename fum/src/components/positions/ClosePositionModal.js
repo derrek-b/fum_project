@@ -11,7 +11,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 import { useToast } from '../../context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
 import { useModalData } from '../../hooks/useModalData';
-import { triggerUpdate } from '../../redux/updateSlice';
+import { removePosition } from '../../redux/positionsSlice';
 
 // CSS to hide number input spinner arrows
 const numberInputStyles = `
@@ -135,8 +135,8 @@ export default function ClosePositionModal({
       // Show success message
       showSuccess("Successfully closed position!", receipt.transactionHash);
 
-      // Refresh data and redirect to source page
-      dispatch(triggerUpdate());
+      // Remove position from Redux and redirect to source page
+      dispatch(removePosition(positionForAdapter.id));
       router.push(onCloseRedirect);
 
       setIsClosing(false);

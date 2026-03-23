@@ -12,7 +12,7 @@ import { getChainName } from "fum_library/helpers/chainHelpers";
 import PositionCard from "./PositionCard";
 import PlatformFilter from "./PlatformFilter";
 import AddLiquidityModal from "./AddLiquidityModal";
-import { setPositions, addVaultPositions } from "../../redux/positionsSlice";
+import { setPositions, addVaultPositions, setPositionsLastFetched } from "../../redux/positionsSlice";
 import { setResourceUpdating } from "../../redux/updateSlice";
 import { setPlatforms, setActivePlatforms, setPlatformFilter, clearPlatforms } from "../../redux/platformsSlice";
 import { setVaults, clearVaults, setLoadingVaults, setVaultError } from "../../redux/vaultsSlice";
@@ -24,10 +24,9 @@ export default function PositionContainer() {
   const { showError, showSuccess } = useToast();
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
   const { provider } = useReadProvider();
-  const { lastUpdate } = useSelector((state) => state.updates);
   const { platformFilter } = useSelector((state) => state.platforms);
   const { userVaults } = useSelector((state) => state.vaults);
-  const { positions } = useSelector((state) => state.positions);
+  const { positions, positionsLastFetched } = useSelector((state) => state.positions);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -82,7 +81,7 @@ export default function PositionContainer() {
     };
 
     fetchUserVaults();
-  }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
+  }, [isConnected, address, provider, chainId, dispatch]);
 
   // Fetch positions data from all platforms for the user's wallet
   // Effect 1: Handle disconnection and clear state
@@ -96,11 +95,15 @@ export default function PositionContainer() {
     }
   }, [isConnected, address, provider, chainId, dispatch]);
 
-  // Effect 2: Fetch wallet positions when connected
+  // Effect 2: Fetch wallet positions when connected (gated by freshness)
   useEffect(() => {
     if (!isConnected || !address || !provider || !chainId) {
       return; // Exit early if not connected
     }
+
+    // Skip fetch if positions were loaded recently (within 30 seconds)
+    const isFresh = positionsLastFetched && (Date.now() - positionsLastFetched < 30000);
+    if (isFresh) return;
 
     const fetchWalletPositions = async () => {
       setLoading(true);
@@ -185,14 +188,11 @@ export default function PositionContainer() {
 
         dispatch(setPositions(allPositions));
 
-        // Success notification removed as per request - positions are visible on screen
-
       } catch (error) {
         console.error("Position fetching error:", error);
         setError(`Error fetching positions: ${error.message}`);
         showError(`Failed to fetch your positions: ${error.message}`);
         dispatch(setPositions([]));
-        // Do not clear positions on partial error—only on disconnect
       } finally {
         setLoading(false);
         dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
@@ -200,13 +200,17 @@ export default function PositionContainer() {
     };
 
     fetchWalletPositions();
-  }, [isConnected, address, provider, chainId, lastUpdate, dispatch]);
+  }, [isConnected, address, provider, chainId, positionsLastFetched, dispatch]);
 
-  // Effect 3: Fetch vault positions when wallet is connected and vaults are loaded
+  // Effect 3: Fetch vault positions when wallet is connected and vaults are loaded (gated by freshness)
   useEffect(() => {
     if (!isConnected || !address || !provider || !chainId || !userVaults || userVaults.length === 0) {
       return; // Exit early if not connected or no vaults
     }
+
+    // Skip fetch if positions were loaded recently (within 30 seconds)
+    const isFresh = positionsLastFetched && (Date.now() - positionsLastFetched < 30000);
+    if (isFresh) return;
 
     const fetchVaultPositions = async () => {
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: true }));
@@ -266,10 +270,13 @@ export default function PositionContainer() {
       }
 
       dispatch(setResourceUpdating({ resource: 'vaultPositions', isUpdating: false }));
+
+      // Mark full positions load as complete (wallet + vault positions both fetched)
+      dispatch(setPositionsLastFetched(Date.now()));
     };
 
     fetchVaultPositions();
-  }, [isConnected, address, provider, chainId, userVaults, lastUpdate, dispatch]);
+  }, [isConnected, address, provider, chainId, userVaults, positionsLastFetched, dispatch]);
 
   // getPositionsForDisplay already filters out inactive/zero-liquidity positions
   // Apply platform filter if selected
@@ -303,6 +310,7 @@ export default function PositionContainer() {
               Connected to {getChainName(chainId) || `Chain ID ${chainId}`}
             </small>
           )}
+          {/* Create Position disabled for v2.0 — requires AddLiquidityModal redesign for multi-platform support
           <p className="mt-2">
             <Button
               variant="primary"
@@ -311,6 +319,7 @@ export default function PositionContainer() {
               Create Your First Position
             </Button>
           </p>
+          */}
         </Alert>
       ) : (
         <>
@@ -326,8 +335,8 @@ export default function PositionContainer() {
               </p>
             </div>
 
+            {/* Create Position disabled for v2.0 — requires AddLiquidityModal redesign for multi-platform support
             <div>
-              {/* Create position button */}
               <Button
                 variant="outline-primary"
                 size="sm"
@@ -337,6 +346,7 @@ export default function PositionContainer() {
                 + Create New Position
               </Button>
             </div>
+            */}
           </div>
 
           {/* Add platform filter */}

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
+import { createSelector } from "@reduxjs/toolkit";
 import { Container, Row, Col, Card, Button, Alert, Spinner, Badge, Tabs, Tab, Table, Form, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { ErrorBoundary } from "react-error-boundary";
 import Head from "next/head";
@@ -19,9 +20,8 @@ import PositionSelectionModal from "../../components/vaults/PositionSelectionMod
 import RefreshControls from "../../components/common/RefreshControls";
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
-import { triggerUpdate } from "../../redux/updateSlice";
 import { updateVault } from "../../redux/vaultsSlice";
-import { loadVaultData, getVaultData, loadVaultTokenBalances, calculateVaultAPY } from '../../utils/vaultsHelpers';
+import { getVaultData, loadVaultTokenBalances, calculateVaultAPY } from '../../utils/vaultsHelpers';
 import { formatTimestamp } from "fum_library/helpers";
 import { getAllTokens } from "fum_library/helpers";
 import { fetchTokenPrices, prefetchTokenPrices } from 'fum_library/services';
@@ -79,7 +79,6 @@ export default function VaultDetailPage() {
   const { address: vaultAddress } = router.query;
   const { chainId, address: userAddress, isConnected, isReconnecting } = useSelector((state) => state.wallet);
   const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
-  const lastUpdate = useSelector((state) => state.updates.lastUpdate);
   const vaultFromRedux = useSelector((state) =>
     state.vaults.userVaults.find(v => v.address === vaultAddress)
   );
@@ -92,7 +91,15 @@ export default function VaultDetailPage() {
 
   // Component state
   const [vault, setVault] = useState(null);
-  const [vaultPositions, setVaultPositions] = useState([]);
+  // Derive vault positions from Redux positionsSlice (reactive to transferPositionToVault/FromVault)
+  const selectVaultPositions = useMemo(
+    () => createSelector(
+      (state) => state.positions.positions,
+      (positions) => positions.filter(p => p.inVault && p.vaultAddress === vaultAddress)
+    ),
+    [vaultAddress]
+  );
+  const vaultPositions = useSelector(selectVaultPositions);
   const [activeTab, setActiveTab] = useState('positions');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showPositionModal, setShowPositionModal] = useState(false);
@@ -119,41 +126,45 @@ export default function VaultDetailPage() {
   // NOTE: executionHistory kept in destructure for potential future use
   // History tab now uses transactionHistory from tracker data via vaultFromRedux
 
-  // Create loadData function to replace the useVaultDetailData hook (memoized)
+  // Load this specific vault's data (gated by freshness)
   const loadData = useCallback(async () => {
     if (!vaultAddress || !isReadReady || !chainId) {
       return;
     }
 
-    // Only show loading spinner on initial load, not on refreshes
+    // Check freshness — skip if vault data was loaded recently
+    const vaultLastUpdated = vaultFromRedux?.lastUpdated;
+    const isFresh = vaultLastUpdated && (Date.now() - vaultLastUpdated < 30000);
+    if (isFresh) {
+      // Hydrate local state from Redux if not already set (e.g., VaultsContainer loaded it)
+      if (!vault && vaultFromRedux) {
+        setVault(vaultFromRedux);
+        setIsOwner(
+          userAddress &&
+          vaultFromRedux.owner &&
+          userAddress.toLowerCase() === vaultFromRedux.owner.toLowerCase()
+        );
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (!vault) {
       setIsLoading(true);
-      // Use our loadVaultData utility function to load all the user's vault data (uses dedicated read provider)
-      const loadResult = await loadVaultData(userAddress, readProvider, chainId, dispatch, {
-        showError,
-        showSuccess
-      });
-
-      if (!loadResult.success) {
-        setError(loadResult.err || "Failed to load user's vault data");
-      }
     }
 
     setError(null);
 
     try {
-      // Load this specific vault's data
+      // Load just this vault's data (not all vaults)
       const result = await getVaultData(vaultAddress, readProvider, chainId, dispatch, {
         showError,
         showSuccess
       });
 
       if (result.success) {
-        // Update local vault info
         setVault(result.vault);
-        setVaultPositions(result.positions || []);
 
-        // Check if user is the owner
         setIsOwner(
           userAddress &&
           result.vault.owner &&
@@ -169,14 +180,14 @@ export default function VaultDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [vaultAddress, readProvider, isReadReady, chainId, userAddress, dispatch, showError, showSuccess]);
+  }, [vaultAddress, readProvider, isReadReady, chainId, userAddress, dispatch, showError, showSuccess, vaultFromRedux?.lastUpdated, vault]);
 
-  // Call loadData when dependencies change or refresh is triggered
+  // Call loadData when dependencies change
   useEffect(() => {
     if (vaultAddress) {
       loadData();
     }
-  }, [vaultAddress, userAddress, isReadReady, chainId, lastUpdate]);
+  }, [vaultAddress, userAddress, isReadReady, chainId]);
 
   // Fetch executor balance when automation is enabled
   useEffect(() => {
@@ -195,7 +206,7 @@ export default function VaultDetailPage() {
     };
 
     fetchExecutorBalance();
-  }, [vaultFromRedux?.executor, isReadReady, readProvider, lastUpdate]);
+  }, [vaultFromRedux?.executor, isReadReady, readProvider]);
 
   // Handle token withdrawal (for owner) - memoized
   const handleWithdrawToken = useCallback(async (token) => {
@@ -227,7 +238,7 @@ export default function VaultDetailPage() {
       }
 
       const hdNode = ethers.utils.HDNode.fromExtendedKey(executorXpub);
-      const executorAddr = hdNode.derivePath("m/44'/60'/0'/0/" + executorIndex).address;
+      const executorAddr = hdNode.derivePath(String(executorIndex)).address;
 
       // Check 1: Validate strategy is selected for the vault
       if (!vaultFromRedux.hasActiveStrategy || !vaultFromRedux.strategyAddress) {
@@ -1055,7 +1066,15 @@ export default function VaultDetailPage() {
           vaultAddress={vaultAddress}
           executorAddress={vaultFromRedux?.executor}
           chainId={chainId}
-          onSuccess={() => { loadData(); dispatch(triggerUpdate()); }}
+          onSuccess={async () => {
+            // Refresh executor balance after funding
+            try {
+              const balance = await readProvider.getBalance(vaultFromRedux?.executor);
+              setExecutorBalance(ethers.utils.formatEther(balance));
+            } catch (err) {
+              console.error('Error refreshing executor balance:', err);
+            }
+          }}
         />
       </Container>
     </>

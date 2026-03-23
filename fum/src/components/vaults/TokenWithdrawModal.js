@@ -32,12 +32,12 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
   const [amount, setAmount] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [withdrawAsEth, setWithdrawAsEth] = useState(true);
+  const [withdrawAsNative, setWithdrawAsNative] = useState(true);
 
-  // Check if this is WETH (has isWeth flag from vaultsHelpers)
-  const isWeth = token?.isWeth === true;
-  // Check if this is native ETH
-  const isNativeEth = token?.isNativeEntry === true;
+  // Check if this is a wrapped native token (WETH, WAVAX, etc.)
+  const isWrappedNative = token?.isWrappedNative === true;
+  // Check if this is a native token (ETH, AVAX, etc.)
+  const isNativeToken = token?.isNativeEntry === true;
 
   // Reset state when modal closes
   useEffect(() => {
@@ -45,7 +45,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
       setAmount("");
       setError("");
       setIsSubmitting(false);
-      setWithdrawAsEth(true); // Default to native ETH (recommended)
+      setWithdrawAsNative(true); // Default to native (recommended)
     }
   }, [show]);
 
@@ -113,13 +113,13 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
       let tx;
       let successSymbol = token.symbol;
 
-      if (isNativeEth) {
-        // Native ETH withdrawal
+      if (isNativeToken) {
+        // Native token withdrawal (ETH, AVAX, etc.)
         tx = await vaultContract.withdrawETH(amountInUnits);
-      } else if (isWeth && withdrawAsEth) {
-        // WETH → unwrap and withdraw as native ETH
+      } else if (isWrappedNative && withdrawAsNative) {
+        // Wrapped native → unwrap and withdraw as native (WETH→ETH, WAVAX→AVAX)
         tx = await vaultContract.unwrapAndWithdrawETH(token.address, amountInUnits);
-        successSymbol = 'ETH';
+        successSymbol = token.nativeSymbol;
       } else {
         // Regular ERC20 withdrawal (including WETH if not unwrapping)
         const tokenAddress = token.address || getTokenAddress(token.symbol, chainId);
@@ -226,19 +226,19 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
             </InputGroup>
           </Form.Group>
 
-          {/* WETH → ETH toggle (only shown for WETH) */}
-          {isWeth && (
+          {/* Wrapped native → native toggle (only shown for WETH, WAVAX, etc.) */}
+          {isWrappedNative && (
             <Form.Group className="mb-4">
               <Form.Check
                 type="switch"
-                id="withdraw-as-eth"
-                label="Withdraw as native ETH"
-                checked={withdrawAsEth}
-                onChange={(e) => setWithdrawAsEth(e.target.checked)}
+                id="withdraw-as-native"
+                label={`Withdraw as native ${token.nativeSymbol}`}
+                checked={withdrawAsNative}
+                onChange={(e) => setWithdrawAsNative(e.target.checked)}
                 disabled={isSubmitting}
               />
               <Form.Text className="text-muted">
-                Unwraps WETH to native ETH before sending to your wallet. Recommended unless WETH is specifically required.
+                Unwraps {token.symbol} to native {token.nativeSymbol} before sending to your wallet. Recommended unless {token.symbol} is specifically required.
               </Form.Text>
             </Form.Group>
           )}
@@ -256,7 +256,7 @@ const TokenWithdrawModal = ({ show, onHide, vaultAddress, token, ownerAddress, o
                   Processing...
                 </>
               ) : (
-                `Withdraw ${withdrawAsEth ? 'ETH' : token.symbol}`
+                `Withdraw ${withdrawAsNative && isWrappedNative ? token.nativeSymbol : token.symbol}`
               )}
             </Button>
           </div>

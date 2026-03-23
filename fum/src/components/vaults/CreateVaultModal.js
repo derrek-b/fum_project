@@ -5,7 +5,6 @@ import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
 import { useWriteProvider } from '../../hooks/useWriteProvider';
 import { createVault } from 'fum_library/blockchain/contracts';
-import { triggerUpdate } from "../../redux/updateSlice";
 import { useRouter } from "next/router";
 
 export default function CreateVaultModal({

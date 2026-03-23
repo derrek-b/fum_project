@@ -496,7 +496,11 @@ const StrategyDetailsSection = ({
           <ListGroup>
             {tokenList.map(([symbol, token]) => {
               // Check if token has balance in vault (for display purposes only)
-              const hasBalance = vaultTokenBalances[symbol] && parseFloat(vaultTokenBalances[symbol].balance) > 0;
+              const nativeBalance = vaultTokenBalances[symbol];
+              const wrappedSymbol = token.wrappedSymbol;
+              const wrappedBalance = wrappedSymbol ? vaultTokenBalances[wrappedSymbol] : null;
+              const hasBalance = (nativeBalance && parseFloat(nativeBalance.balance) > 0) ||
+                (wrappedBalance && parseFloat(wrappedBalance.balance) > 0);
               return (
                 <ListGroup.Item
                   key={symbol}
@@ -518,9 +522,15 @@ const StrategyDetailsSection = ({
                       <small className="text-muted">{token.name}</small>
                     </div>
 
-                    {vaultTokenBalances[symbol] && (
+                    {nativeBalance && parseFloat(nativeBalance.balance) > 0 && (
                       <Badge bg="info" className="ms-2">
-                        Balance: {parseFloat(vaultTokenBalances[symbol].balance).toFixed(4)}
+                        {symbol}: {parseFloat(nativeBalance.balance).toFixed(4)}
+                      </Badge>
+                    )}
+
+                    {wrappedBalance && parseFloat(wrappedBalance.balance) > 0 && (
+                      <Badge bg="info" className="ms-2">
+                        {wrappedSymbol}: {parseFloat(wrappedBalance.balance).toFixed(4)}
                       </Badge>
                     )}
 

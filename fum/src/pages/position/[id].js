@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
 import { useSelector, useDispatch } from "react-redux";
 import { Container, Row, Col, Card, Button, Badge, ProgressBar, Spinner, Alert, Tabs, Tab, OverlayTrigger, Tooltip } from "react-bootstrap";
@@ -12,8 +12,8 @@ import AddLiquidityModal from "../../components/positions/AddLiquidityModal";
 import RemoveLiquidityModal from "../../components/positions/RemoveLiquidityModal";
 import ClosePositionModal from "../../components/positions/ClosePositionModal";
 import ClaimFeesModal from "../../components/positions/ClaimFeesModal";
-import { triggerUpdate, setResourceUpdating } from "../../redux/updateSlice";
-import { setPositions } from "@/redux/positionsSlice";
+import { setResourceUpdating } from "../../redux/updateSlice";
+import { updatePosition, addPosition } from "@/redux/positionsSlice";
 import { useToast } from "../../context/ToastContext";
 import { AdapterFactory } from "fum_library/adapters";
 import { useReadProvider } from '../../hooks/useReadProvider';
@@ -67,14 +67,7 @@ export default function PositionDetailPage() {
   const vaults = useSelector((state) => state.vaults.userVaults);
   const { isConnected, address, chainId, isReconnecting } = useSelector((state) => state.wallet);
   const { provider } = useReadProvider();
-  const { lastUpdate, resourcesUpdating } = useSelector((state) => state.updates);
-  const hasAttemptedFetch = useRef(false);
-  const positionsRef = useRef(positions);
-
-  // Keep positionsRef in sync with positions
-  useEffect(() => {
-    positionsRef.current = positions;
-  }, [positions]);
+  const { resourcesUpdating } = useSelector((state) => state.updates);
 
   // State for various UI elements
   const [invertPriceDisplay, setInvertPriceDisplay] = useState(false);
@@ -181,132 +174,35 @@ export default function PositionDetailPage() {
     }
   }, [priceInfo.lowerPrice, priceInfo.upperPrice, priceInfo.currentPrice]);
 
-  // Fetch positions on initial load if they're not already in Redux
+  // Fetch or refresh position data on mount (gated by freshness)
   useEffect(() => {
-    // Only fetch once on mount if positions are missing and we haven't attempted yet
-    if (hasAttemptedFetch.current) return;
+    if (!adapter || !provider || !id) return;
 
-    if (isConnected && provider && address && chainId && id && (!positions || positions.length === 0)) {
-      console.log("📥 Initial load: Fetching positions because Redux is empty");
-      hasAttemptedFetch.current = true;
-      setIsLoadingInitialData(true); // Set loading state
+    const positionInRedux = positions?.find(p => p.id === id);
+    const isStale = !positionInRedux?.lastUpdated || (Date.now() - positionInRedux.lastUpdated > 30000);
 
-      const fetchInitialPositions = async () => {
-        try {
-          // Get all adapters for this chain
-          const result = AdapterFactory.getAdaptersForChain(chainId);
-          const adapters = result.adapters || [];
+    if (!isStale) return;
 
-          if (adapters.length === 0) {
-            showError(`No supported platforms found for this chain`);
-            return;
-          }
-
-          // Fetch positions from all platforms
-          const platformResults = await Promise.all(
-            adapters.map(async adapter => {
-              try {
-                return await adapter.getPositionsForDisplay(address, provider);
-              } catch (adapterError) {
-                console.error(`Error fetching positions from ${adapter.platformName}:`, adapterError);
-                return { positions: {} };
-              }
-            })
-          );
-
-          // Combine results
-          let allPositions = [];
-
-          platformResults.forEach((result) => {
-            const positionsArray = result.positions ? Object.values(result.positions) : [];
-
-            if (positionsArray.length > 0) {
-              allPositions = [...allPositions, ...positionsArray];
-            }
-          });
-
-          // Mark as wallet positions (not in vault)
-          allPositions = allPositions.map(position => ({
-            ...position,
-            inVault: false,
-            vaultAddress: null
-          }));
-
-          console.log(`📥 Fetched ${allPositions.length} positions on initial load`);
-
-          // Update Redux
-          dispatch(setPositions(allPositions));
-
-        } catch (error) {
-          console.error("Error fetching initial positions:", error);
-          showError(`Failed to load position data: ${error.message}`);
-        } finally {
-          setIsLoadingInitialData(false); // Clear loading state
-        }
-      };
-
-      fetchInitialPositions();
+    // Position not in Redux or stale — fetch fresh data for this single position
+    if (!positionInRedux) {
+      setIsLoadingInitialData(true);
     }
-  }, [isConnected, provider, address, chainId, id, positions, dispatch, showError]);
+    dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
 
-  // Mark resources as updating when lastUpdate changes
-  useEffect(() => {
-    if (id && lastUpdate) {
-      try {
-        setTokenPrices(prev => ({ ...prev, loading: true, error: null }));
-        dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
-      } catch (error) {
-        console.error("Error marking resources as updating:", error);
+    adapter.refreshPositionForDisplay(id, provider).then(freshPosition => {
+      if (positionInRedux) {
+        dispatch(updatePosition(freshPosition));
+      } else {
+        dispatch(addPosition(freshPosition));
       }
-    }
-  }, [lastUpdate, id, dispatch]);
-
-  // Refresh position data when lastUpdate changes
-  useEffect(() => {
-    // Only run when lastUpdate changes and we have necessary context
-    if (lastUpdate && adapter && provider && address && chainId && id) {
-      try {
-        // Track the latest refresh timestamp to avoid duplicate refreshes
-        const refreshTimestamp = lastUpdate;
-
-        // Use the vault address for vault positions, wallet address for wallet positions
-        const owner = position?.vaultAddress || address;
-
-        // Fetch fresh data from blockchain
-        adapter.getPositionsForDisplay(owner, provider).then(result => {
-          // Check if this is still the latest refresh (prevents race conditions)
-          if (refreshTimestamp !== lastUpdate) return;
-
-          // Find our specific position
-          // Convert positions object to array since adapter returns object with IDs as keys
-          const positionsArray = result.positions ? Object.values(result.positions) : [];
-          const freshPosition = positionsArray.find(p => p.id === id);
-          if (freshPosition) {
-            // Update Redux with fresh data (without creating reference cycles)
-            const currentPositions = positionsRef.current;
-            if (currentPositions && currentPositions.length > 0) {
-              // Create a new array to avoid reference issues
-              const updatedPositions = [...currentPositions];
-              // Find and replace the specific position
-              const posIndex = updatedPositions.findIndex(p => p.id === id);
-              if (posIndex >= 0) {
-                updatedPositions[posIndex] = freshPosition;
-                dispatch(setPositions(updatedPositions));
-              }
-            }
-          }
-          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
-        }).catch(error => {
-          console.error("Error refreshing position data:", error);
-          showError("Failed to refresh position data from blockchain");
-          dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
-        });
-      } catch (error) {
-        console.error("Error in position refresh effect:", error);
-        showError("Error updating position data");
-      }
-    }
-  }, [lastUpdate, adapter, provider, address, chainId, id, dispatch, showError, position?.vaultAddress]);
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
+      setIsLoadingInitialData(false);
+    }).catch(error => {
+      console.error("Error refreshing position data:", error);
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
+      setIsLoadingInitialData(false);
+    });
+  }, [adapter, provider, id, dispatch]);
 
   // Fetch token prices from CoinGecko
   useEffect(() => {
@@ -339,17 +235,20 @@ export default function PositionDetailPage() {
     };
 
     getPrices();
-  }, [token0Symbol, token1Symbol, lastUpdate, showError]);
+  }, [token0Symbol, token1Symbol, showError]);
 
-  // Function to manually refresh data
+  // Function to manually refresh position data
   const refreshData = () => {
-    try {
-      dispatch(triggerUpdate());
-      showSuccess("Refreshing position data...");
-    } catch (error) {
-      console.error("Error triggering manual refresh:", error);
+    if (!adapter || !provider || !id) return;
+    dispatch(setResourceUpdating({ resource: 'positions', isUpdating: true }));
+    adapter.refreshPositionForDisplay(id, provider).then(freshPosition => {
+      dispatch(updatePosition(freshPosition));
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
+    }).catch(error => {
+      console.error("Error refreshing position data:", error);
       showError("Failed to refresh data");
-    }
+      dispatch(setResourceUpdating({ resource: 'positions', isUpdating: false }));
+    });
   };
 
   // Calculate USD values
@@ -694,6 +593,7 @@ export default function PositionDetailPage() {
 
                   {/* Action Buttons */}
                   <Row>
+                    {/* Add Liquidity disabled for v2.0 — requires AddLiquidityModal redesign for multi-platform support
                     <Col xs={3}>
                       <Button
                         variant="outline-primary"
@@ -704,6 +604,7 @@ export default function PositionDetailPage() {
                         + Add Liquidity
                       </Button>
                     </Col>
+                    */}
                     <Col xs={3}>
                       <Button
                         variant="outline-primary"

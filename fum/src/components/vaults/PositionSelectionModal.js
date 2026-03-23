@@ -5,9 +5,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
 import { platforms } from 'fum_library/configs';
-import { triggerUpdate } from "../../redux/updateSlice";
-import { setPositionVaultStatus } from "../../redux/positionsSlice";
-import { addPositionToVault, removePositionFromVault } from "../../redux/vaultsSlice";
+import { transferPositionToVault, transferPositionFromVault } from "../../redux/vaultPositionActions";
 import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
 import { getTokenBySymbol } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
@@ -167,31 +165,14 @@ export default function PositionSelectionModal({
 
         await tx.wait();
 
-        // Update Redux store based on mode
+        // Update Redux store based on mode (single dispatch updates both slices)
         if (mode === 'add') {
-          dispatch(setPositionVaultStatus({
-            positionId,
-            inVault: true,
-            vaultAddress: vault.address
-          }));
-          dispatch(addPositionToVault({
-            vaultAddress: vault.address,
-            positionId
-          }));
+          dispatch(transferPositionToVault({ positionId, vaultAddress: vault.address }));
           showSuccess(`Successfully added position #${positionId} to vault`);
         } else {
-          dispatch(setPositionVaultStatus({
-            positionId,
-            inVault: false,
-            vaultAddress: null
-          }));
-          dispatch(removePositionFromVault({
-            vaultAddress: vault.address,
-            positionId
-          }));
+          dispatch(transferPositionFromVault({ positionId, vaultAddress: vault.address }));
           showSuccess(`Successfully removed position #${positionId} from vault`);
         }
-        dispatch(triggerUpdate(Date.now()));
         onHide();
       } catch (error) {
         // Check if user cancelled the transaction
@@ -263,27 +244,11 @@ export default function PositionSelectionModal({
 
             await tx.wait();
 
-            // Update Redux store based on mode
+            // Update Redux store based on mode (single dispatch updates both slices)
             if (mode === 'add') {
-              dispatch(setPositionVaultStatus({
-                positionId,
-                inVault: true,
-                vaultAddress: vault.address
-              }));
-              dispatch(addPositionToVault({
-                vaultAddress: vault.address,
-                positionId
-              }));
+              dispatch(transferPositionToVault({ positionId, vaultAddress: vault.address }));
             } else {
-              dispatch(setPositionVaultStatus({
-                positionId,
-                inVault: false,
-                vaultAddress: null
-              }));
-              dispatch(removePositionFromVault({
-                vaultAddress: vault.address,
-                positionId
-              }));
+              dispatch(transferPositionFromVault({ positionId, vaultAddress: vault.address }));
             }
           } catch (posError) {
             // Check if user cancelled
@@ -304,7 +269,6 @@ export default function PositionSelectionModal({
         // All transfers completed successfully
         setTransactionLoading(false);
         setCurrentTransactionStep(selectedPositions.length);
-        dispatch(triggerUpdate(Date.now()));
       } catch (error) {
         // Error already handled in per-position catch
         // Only need to handle if not already set
@@ -326,9 +290,6 @@ export default function PositionSelectionModal({
     setTransactionLoading(false);
     setTransactionError("");
     setTransactionWarning("");
-
-    // Trigger data refresh
-    dispatch(triggerUpdate(Date.now()));
 
     // Close the parent modal
     onHide();

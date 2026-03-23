@@ -1,5 +1,6 @@
 // redux/vaultsSlice.js - Updated with direct position IDs in vault objects
 import { createSlice } from "@reduxjs/toolkit";
+import { transferPositionToVault, transferPositionFromVault } from './vaultPositionActions';
 
 const vaultsSlice = createSlice({
   name: "vaults",
@@ -7,6 +8,7 @@ const vaultsSlice = createSlice({
     userVaults: [], // List of user's vaults with their details INCLUDING position IDs and metrics
     isLoadingVaults: false, // Loading state for vaults
     vaultError: null, // Any error during vault loading or operations
+    vaultsLastFetched: null, // Timestamp of last full vaults load
   },
   reducers: {
     setVaults: (state, action) => {
@@ -79,33 +81,6 @@ const vaultsSlice = createSlice({
 
       if (vaultIndex !== -1) {
         state.userVaults[vaultIndex].positions = positionIds;
-      }
-    },
-    // Add a single position to a vault
-    addPositionToVault: (state, action) => {
-      const { vaultAddress, positionId } = action.payload;
-      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
-
-      if (vaultIndex !== -1) {
-        // Initialize positions array if it doesn't exist
-        if (!state.userVaults[vaultIndex].positions) {
-          state.userVaults[vaultIndex].positions = [];
-        }
-
-        // Add position if not already present
-        if (!state.userVaults[vaultIndex].positions.includes(positionId)) {
-          state.userVaults[vaultIndex].positions.push(positionId);
-        }
-      }
-    },
-    // Remove a position from a vault
-    removePositionFromVault: (state, action) => {
-      const { vaultAddress, positionId } = action.payload;
-      const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
-
-      if (vaultIndex !== -1 && state.userVaults[vaultIndex].positions) {
-        state.userVaults[vaultIndex].positions = state.userVaults[vaultIndex].positions
-          .filter(id => id !== positionId);
       }
     },
     // Update multiple positions for a vault
@@ -231,6 +206,34 @@ const vaultsSlice = createSlice({
     setVaultError: (state, action) => {
       state.vaultError = action.payload;
     },
+
+    // Set timestamp for when full vaults list was last fetched
+    setVaultsLastFetched: (state, action) => {
+      state.vaultsLastFetched = action.payload;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(transferPositionToVault, (state, action) => {
+        const { positionId, vaultAddress } = action.payload;
+        const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+        if (vaultIndex !== -1) {
+          if (!state.userVaults[vaultIndex].positions) {
+            state.userVaults[vaultIndex].positions = [];
+          }
+          if (!state.userVaults[vaultIndex].positions.includes(positionId)) {
+            state.userVaults[vaultIndex].positions.push(positionId);
+          }
+        }
+      })
+      .addCase(transferPositionFromVault, (state, action) => {
+        const { positionId, vaultAddress } = action.payload;
+        const vaultIndex = state.userVaults.findIndex(v => v.address === vaultAddress);
+        if (vaultIndex !== -1 && state.userVaults[vaultIndex].positions) {
+          state.userVaults[vaultIndex].positions = state.userVaults[vaultIndex].positions
+            .filter(id => id !== positionId);
+        }
+      });
   },
 });
 
@@ -239,8 +242,6 @@ export const {
   addVault,
   updateVault,
   setVaultPositions,
-  addPositionToVault,
-  removePositionFromVault,
   updateVaultPositions,
   updateVaultTokenBalances,
   updateVaultMetrics,
@@ -249,7 +250,8 @@ export const {
   appendVaultTransaction,
   clearVaults,
   setLoadingVaults,
-  setVaultError
+  setVaultError,
+  setVaultsLastFetched
 } = vaultsSlice.actions;
 
 export default vaultsSlice.reducer;

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Modal, Button, Form, InputGroup, Spinner, Alert } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
-import { getAllTokens } from 'fum_library/helpers/tokenHelpers';
+import { getTokensByChain } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
 
@@ -119,30 +119,30 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Build token list including both native ETH and WETH as separate entries
-  const tokens = getAllTokens();
+  // Build token list from chain-filtered tokens, splitting native into native + wrapped
+  const chainTokens = getTokensByChain(chainId);
   const tokenList = [];
-  Object.values(tokens).forEach(token => {
+  chainTokens.forEach(token => {
     if (token.isNative) {
-      // Add native ETH entry
+      // Add native entry (ETH, AVAX, etc.)
       tokenList.push({
         ...token,
         address: null,
         isNativeEntry: true
       });
-      // Add WETH entry (virtual token from wethAddresses)
-      if (token.wethAddresses?.[chainId]) {
+      // Add wrapped entry (WETH, WAVAX, etc.)
+      if (token.wrappedAddresses?.[chainId]) {
         tokenList.push({
-          symbol: 'WETH',
-          name: 'Wrapped Ether',
-          displaySymbol: 'WETH',
-          decimals: 18,
-          address: token.wethAddresses[chainId],
-          logoURI: token.wethLogoURI || token.logoURI,
+          symbol: token.wrappedSymbol,
+          name: `Wrapped ${token.name}`,
+          displaySymbol: token.wrappedSymbol,
+          decimals: token.decimals,
+          address: token.wrappedAddresses[chainId],
+          logoURI: token.wrappedLogoURI,
           isNativeEntry: false
         });
       }
-    } else if (token.addresses[chainId]) {
+    } else {
       tokenList.push({
         ...token,
         address: token.addresses[chainId],

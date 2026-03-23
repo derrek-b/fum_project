@@ -1,10 +1,12 @@
 // redux/positionsSlice.js - Modified to support vault positions
 import { createSlice } from "@reduxjs/toolkit";
+import { transferPositionToVault, transferPositionFromVault } from './vaultPositionActions';
 
 const positionsSlice = createSlice({
   name: "positions",
   initialState: {
     positions: [], // Will include both direct wallet and vault positions
+    positionsLastFetched: null, // Timestamp of last full positions load (wallet + vault)
   },
   reducers: {
     setPositions: (state, action) => {
@@ -53,23 +55,78 @@ const positionsSlice = createSlice({
       });
     },
 
-    // Mark a position as being in a vault
-    setPositionVaultStatus: (state, action) => {
-      const { positionId, inVault, vaultAddress } = action.payload;
-      const position = state.positions.find(p => p.id === positionId);
+    // Update a single position's display data while preserving inVault/vaultAddress
+    updatePosition: (state, action) => {
+      const freshPosition = action.payload;
+      const existingIndex = state.positions.findIndex(p => p.id === freshPosition.id);
 
-      if (position) {
-        position.inVault = inVault;
-        position.vaultAddress = inVault ? vaultAddress : null;
+      if (existingIndex >= 0) {
+        // Preserve vault status from existing entry, update everything else
+        const existing = state.positions[existingIndex];
+        state.positions[existingIndex] = {
+          ...freshPosition,
+          inVault: existing.inVault,
+          vaultAddress: existing.vaultAddress
+        };
       }
     },
+
+    // Set timestamp for when full positions list was last fetched
+    setPositionsLastFetched: (state, action) => {
+      state.positionsLastFetched = action.payload;
+    },
+
+    // Add a single position to Redux (e.g., direct URL navigation)
+    addPosition: (state, action) => {
+      const newPosition = action.payload;
+      const existingIndex = state.positions.findIndex(p => p.id === newPosition.id);
+
+      if (existingIndex === -1) {
+        state.positions.push(newPosition);
+      } else {
+        const existing = state.positions[existingIndex];
+        state.positions[existingIndex] = {
+          ...newPosition,
+          inVault: existing.inVault,
+          vaultAddress: existing.vaultAddress
+        };
+      }
+    },
+
+    // Remove a position from Redux (e.g., after close/burn)
+    removePosition: (state, action) => {
+      state.positions = state.positions.filter(p => p.id !== action.payload);
+    },
+
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(transferPositionToVault, (state, action) => {
+        const { positionId, vaultAddress } = action.payload;
+        const position = state.positions.find(p => p.id === positionId);
+        if (position) {
+          position.inVault = true;
+          position.vaultAddress = vaultAddress;
+        }
+      })
+      .addCase(transferPositionFromVault, (state, action) => {
+        const { positionId } = action.payload;
+        const position = state.positions.find(p => p.id === positionId);
+        if (position) {
+          position.inVault = false;
+          position.vaultAddress = null;
+        }
+      });
   },
 });
 
 export const {
   setPositions,
   addVaultPositions,
-  setPositionVaultStatus
+  updatePosition,
+  addPosition,
+  removePosition,
+  setPositionsLastFetched
 } = positionsSlice.actions;
 
 export default positionsSlice.reducer;

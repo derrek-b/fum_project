@@ -2,7 +2,9 @@
 import React from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button, Form } from 'react-bootstrap';
-import { setAutoRefresh, triggerUpdate } from '../../redux/updateSlice';
+import { setAutoRefresh } from '../../redux/updateSlice';
+import { setPositionsLastFetched } from '../../redux/positionsSlice';
+import { setVaultsLastFetched } from '../../redux/vaultsSlice';
 import { useToast } from '../../context/ToastContext';
 import { clearPriceCache } from 'fum_library/services';
 
@@ -22,9 +24,10 @@ export default function RefreshControls() {
 
   const handleManualRefresh = () => {
     try {
-      // Clear price cache to force fresh prices on manual refresh
+      // Clear price cache and invalidate freshness timestamps
       clearPriceCache();
-      dispatch(triggerUpdate());
+      dispatch(setPositionsLastFetched(null));
+      dispatch(setVaultsLastFetched(null));
     } catch (error) {
       console.error("Error triggering manual refresh:", error);
       showError("Failed to refresh data. Please try again.");

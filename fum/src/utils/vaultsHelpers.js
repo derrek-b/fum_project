@@ -2,7 +2,7 @@
 import { useSelector } from 'react-redux';
 import { setPositions, addVaultPositions } from '../redux/positionsSlice';
 import { updateVaultPositions, updateVaultTokenBalances, updateVaultMetrics, updateVault, setVaults, updateVaultTrackerData } from '../redux/vaultsSlice';
-import { triggerUpdate } from '../redux/updateSlice';
+import { setPositionsLastFetched } from '../redux/positionsSlice';
 import { setAvailableStrategies, setStrategyAddress } from '../redux/strategiesSlice';
 import { ethers } from 'ethers';
 import { AdapterFactory } from 'fum_library/adapters';
@@ -581,7 +581,8 @@ export const loadVaultBasicInfo = async (vaultAddress, provider, addressToStrate
       strategyAddress: strategyAddress || null,
       hasActiveStrategy: strategyAddress && strategyAddress !== ethers.constants.AddressZero,
       strategy: strategy,
-      positions: [] // Initialize empty positions array
+      positions: [], // Initialize empty positions array
+      lastUpdated: Date.now()
     };
 
     // Update the vault in Redux
@@ -619,28 +620,32 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
   try {
     const allTokens = getAllTokens();
 
-    // Build token list including both native ETH and WETH as separate entries
+    // Build token list including both native tokens and their wrapped versions
     const tokenList = [];
     Object.values(allTokens).forEach(token => {
       if (token.isNative) {
-        // Add native ETH entry
+        // Only include native tokens on this chain
+        if (!token.addresses[chainId]) return;
+
+        // Add native entry (ETH, AVAX, etc.)
         tokenList.push({
           ...token,
           address: null,
           isNativeEntry: true
         });
-        // Add WETH entry (virtual token from wethAddresses)
-        if (token.wethAddresses?.[chainId]) {
+        // Add wrapped entry (WETH, WAVAX, etc.)
+        if (token.wrappedAddresses?.[chainId]) {
           tokenList.push({
-            symbol: 'WETH',
-            name: 'Wrapped Ether',
-            displaySymbol: 'WETH',
-            decimals: 18,
-            address: token.wethAddresses[chainId],
-            logoURI: token.wethLogoURI || token.logoURI,
-            coingeckoId: token.coingeckoId, // Same price as ETH
+            symbol: token.wrappedSymbol,
+            name: `Wrapped ${token.name}`,
+            displaySymbol: token.wrappedSymbol,
+            decimals: token.decimals,
+            address: token.wrappedAddresses[chainId],
+            logoURI: token.wrappedLogoURI,
+            coingeckoId: token.coingeckoId, // Same price as native
             isNativeEntry: false,
-            isWeth: true // Flag for withdraw modal to offer unwrap option
+            isWrappedNative: true, // Flag for withdraw modal to offer unwrap option
+            nativeSymbol: token.symbol // e.g., 'ETH' for WETH, 'AVAX' for WAVAX
           });
         }
       } else if (token.addresses[chainId]) {
@@ -652,8 +657,10 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
       }
     });
 
-    // First, get all token symbols for prefetching prices (ETH price works for both ETH and WETH)
-    const allSymbols = tokenList.map(token => token.symbol === 'WETH' ? 'ETH' : token.symbol);
+    // Get price symbols — wrapped native tokens use their native symbol for pricing (e.g., WETH→ETH, WAVAX→AVAX)
+    const wrappedToNative = {};
+    Object.values(allTokens).forEach(t => { if (t.wrappedSymbol) wrappedToNative[t.wrappedSymbol] = t.symbol; });
+    const allSymbols = tokenList.map(token => wrappedToNative[token.symbol] || token.symbol);
 
     // Fetch token prices with 30s cache (aligns with CoinGecko's server cache)
     let prices = {};
@@ -672,7 +679,7 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
           let formattedBalance;
 
           if (token.isNativeEntry) {
-            // Native ETH - use provider.getBalance
+            // Native - use provider.getBalance
             balance = await provider.getBalance(vaultAddress);
             formattedBalance = ethers.utils.formatEther(balance);
           } else {
@@ -687,8 +694,8 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
           // Skip tokens with 0 balance
           if (numericalBalance === 0) return null;
 
-          // Calculate USD value (WETH uses ETH price)
-          const priceKey = token.symbol === 'WETH' ? 'ETH' : token.symbol;
+          // Calculate USD value (wrapped native tokens use their native symbol for pricing)
+          const priceKey = wrappedToNative[token.symbol] || token.symbol;
           const price = prices[priceKey];
           if (!price) {
             console.error(`⚠️ No price available for token ${token.symbol} - setting tokenHasPartialData`);
@@ -727,7 +734,8 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
         decimals: token.decimals,
         logoURI: token.logoURI,
         isNativeEntry: token.isNativeEntry || false,
-        isWeth: token.isWeth || false, // Flag for withdraw modal to offer unwrap option
+        isWrappedNative: token.isWrappedNative || false, // Flag for withdraw modal to offer unwrap option
+        nativeSymbol: token.nativeSymbol || null, // e.g., 'ETH' for WETH, 'AVAX' for WAVAX
         address: token.address // Include address for withdrawals
       };
     });
@@ -1042,8 +1050,8 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
  */
 export const refreshAfterPositionCreation = async (vaultAddress, provider, chainId, dispatch, showSuccess, showError) => {
   try {
-    // 1. First trigger Redux update
-    dispatch(triggerUpdate());
+    // 1. Invalidate positions freshness — new position created
+    dispatch(setPositionsLastFetched(null));
 
     // 2. Simply reload the vault data, TVL calculation is done after
     const result = await getVaultData(vaultAddress, provider, chainId, dispatch, { showError });

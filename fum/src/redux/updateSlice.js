@@ -4,7 +4,6 @@ import { createSlice } from "@reduxjs/toolkit";
 const updateSlice = createSlice({
   name: "updates",
   initialState: {
-    lastUpdate: Date.now(),
     isUpdating: false,
     autoRefresh: {
       enabled: false,
@@ -18,9 +17,6 @@ const updateSlice = createSlice({
     }
   },
   reducers: {
-    triggerUpdate: (state) => {
-      state.lastUpdate = Date.now();
-    },
     setIsUpdating: (state, action) => {
       state.isUpdating = action.payload;
     },
@@ -41,7 +37,6 @@ const updateSlice = createSlice({
 });
 
 export const {
-  triggerUpdate,
   setIsUpdating,
   setResourceUpdating,
   setAutoRefresh,

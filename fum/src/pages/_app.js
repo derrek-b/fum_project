@@ -4,7 +4,9 @@ import { store } from "../redux/store";
 import { ErrorBoundary } from 'react-error-boundary';
 import { ToastProvider } from '../context/ToastContext';
 import { ProviderProvider } from '../contexts/ProviderContext';
-import { triggerUpdate, markAutoRefresh } from '../redux/updateSlice';
+import { markAutoRefresh } from '../redux/updateSlice';
+import { setPositionsLastFetched } from '../redux/positionsSlice';
+import { setVaultsLastFetched } from '../redux/vaultsSlice';
 import { useAutomationEvents } from '../hooks/useAutomationEvents';
 import { initFumLibrary } from 'fum_library';
 
@@ -50,12 +52,16 @@ function AutoRefreshHandler() {
       return;
     }
 
-    // Set up interval to trigger updates
+    // Immediate refresh on enable — invalidate all freshness timestamps
+    dispatch(setPositionsLastFetched(null));
+    dispatch(setVaultsLastFetched(null));
+    dispatch(markAutoRefresh());
+
+    // Set up interval to invalidate freshness — active page will re-fetch on next render
     const intervalId = setInterval(() => {
-      // Note: We don't clear cache here - let the 30s cache work naturally
-      // This reduces unnecessary API calls since CoinGecko caches for 30-60s anyway
+      dispatch(setPositionsLastFetched(null));
+      dispatch(setVaultsLastFetched(null));
       dispatch(markAutoRefresh());
-      dispatch(triggerUpdate());
     }, autoRefresh.interval);
 
     // Cleanup interval on unmount or when settings change

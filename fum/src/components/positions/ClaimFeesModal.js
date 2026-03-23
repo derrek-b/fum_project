@@ -10,7 +10,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 import { useToast } from '../../context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
 import { useModalData } from '../../hooks/useModalData';
-import { triggerUpdate } from '../../redux/updateSlice';
+import { updatePosition } from '../../redux/positionsSlice';
 
 export default function ClaimFeesModal({
   show,
@@ -96,9 +96,10 @@ export default function ClaimFeesModal({
       // Show success message
       showSuccess("Successfully claimed fees!", receipt.transactionHash);
 
-      // Close modal and refresh data
+      // Refresh this position's data and close modal
+      const freshPosition = await adapter.refreshPositionForDisplay(positionForAdapter.id, readProvider);
+      dispatch(updatePosition(freshPosition));
       onHide();
-      dispatch(triggerUpdate());
 
       setIsClaiming(false);
     } catch (error) {

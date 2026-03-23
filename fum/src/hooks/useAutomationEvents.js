@@ -1,27 +1,17 @@
 // hooks/useAutomationEvents.js
 import { useEffect, useCallback, useRef } from 'react';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import {
   setConnected,
   setDisconnected,
   setConnectionError,
   eventReceived
 } from '../redux/automationSlice';
-import { triggerUpdate } from '../redux/updateSlice';
 import { updateVault, appendVaultTransaction } from '../redux/vaultsSlice';
+import { useProvider } from '../contexts/ProviderContext';
+import { processSSEEvent } from '../utils/sseEventHandlers';
 
 const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL;
-
-// Events that should trigger a full data refresh
-const REFRESH_TRIGGER_EVENTS = [
-  'NewPositionCreated',     // New position minted
-  'PositionsClosed',        // Position(s) burned
-  'LiquidityAddedToPosition', // Liquidity added to existing position
-  'FeesCollected',          // Fees collected, token balances changed
-  'TokensSwapped',          // Tokens swapped, balances changed
-  'VaultUnrecoverable',     // Vault blacklisted
-  'ExecutorFundingRequired' // Executor needs funding
-];
 
 /**
  * Hook to connect to the automation service SSE stream
@@ -29,8 +19,20 @@ const REFRESH_TRIGGER_EVENTS = [
  */
 export function useAutomationEvents() {
   const dispatch = useDispatch();
+  const { readProvider } = useProvider();
+  const chainId = useSelector(state => state.wallet.chainId);
+  const positions = useSelector(state => state.positions.positions);
   const eventSourceRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+
+  // Refs for stable closure access inside SSE event listeners
+  const providerRef = useRef(null);
+  const chainIdRef = useRef(null);
+  const positionsRef = useRef([]);
+
+  useEffect(() => { providerRef.current = readProvider; }, [readProvider]);
+  useEffect(() => { chainIdRef.current = chainId; }, [chainId]);
+  useEffect(() => { positionsRef.current = positions; }, [positions]);
 
   const connect = useCallback(() => {
     // Don't create multiple connections
@@ -84,6 +86,8 @@ export function useAutomationEvents() {
         'LiquidityAddedToPosition',
         'FeesCollected',
         'TokensSwapped',
+        'NativeWrapped',
+        'NativeUnwrapped',
         'VaultBaselineCaptured',
         'MonitoringStarted',
         'VaultLoadFailed',
@@ -190,10 +194,13 @@ export function useAutomationEvents() {
               }));
             }
 
-            // Trigger data refresh for relevant events
-            if (REFRESH_TRIGGER_EVENTS.includes(eventName)) {
-              dispatch(triggerUpdate());
-            }
+            // Trigger targeted data fetches for data-changing events
+            processSSEEvent(eventName, payload.data, {
+              provider: providerRef.current,
+              chainId: chainIdRef.current,
+              dispatch,
+              getPositions: () => positionsRef.current
+            });
           } catch (err) {
             console.error(`[SSE] Error parsing ${eventName} event:`, err);
           }

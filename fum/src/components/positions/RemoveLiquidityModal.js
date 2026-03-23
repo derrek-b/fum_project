@@ -10,7 +10,7 @@ import { formatFeeDisplay } from 'fum_library/helpers/formatHelpers';
 import { useToast } from '../../context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
 import { useModalData } from '../../hooks/useModalData';
-import { triggerUpdate } from '../../redux/updateSlice';
+import { updatePosition } from '../../redux/positionsSlice';
 
 // CSS for custom slider styling and hiding number input spinners
 const sliderStyles = `
@@ -166,9 +166,10 @@ export default function RemoveLiquidityModal({
       // Show success message
       showSuccess(`Successfully removed ${percentage}% of liquidity!`, receipt.transactionHash);
 
-      // Close modal and refresh data
+      // Refresh this position's data and close modal
+      const freshPosition = await adapter.refreshPositionForDisplay(positionForAdapter.id, readProvider);
+      dispatch(updatePosition(freshPosition));
       onHide();
-      dispatch(triggerUpdate());
 
       setIsRemoving(false);
     } catch (error) {

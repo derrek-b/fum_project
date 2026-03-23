@@ -5,7 +5,6 @@ import { useSelector, useDispatch } from 'react-redux';
 import { Card, Form, Button, Alert, Spinner, Badge } from 'react-bootstrap';
 import StrategyDetailsSection from './StrategyDetailsSection';
 import { updateVaultStrategy, updateVault } from '../../redux/vaultsSlice';
-import { triggerUpdate } from '../../redux/updateSlice';
 import { useToast } from '@/context/ToastContext';
 import { useProviders } from '../../hooks/useProviders';
 import StrategyDeactivationModal from './StrategyDeactivationModal';
@@ -305,9 +304,6 @@ const StrategyConfigPanel = ({
           }
         }));
 
-        // Trigger data refresh
-        dispatch(triggerUpdate());
-
         // Show success message
         showSuccess("Strategy deactivated successfully");
         setShowTransactionModal(false);
@@ -371,9 +367,6 @@ const StrategyConfigPanel = ({
             lastUpdated: Date.now()
           }
         }));
-
-        // Trigger data refresh
-        dispatch(triggerUpdate());
 
         // Show success message
         showSuccess("Strategy deactivated successfully");
@@ -602,7 +595,7 @@ const StrategyConfigPanel = ({
 
     // Check token balances
     if (selectedTokens.length > 0 && vault?.tokenBalances && Object.keys(vault.tokenBalances).length > 0) {
-      const tokenValidation = validateTokensForStrategy(vault.tokenBalances, selectedTokens);
+      const tokenValidation = validateTokensForStrategy(vault.tokenBalances, selectedTokens, chainId);
       if (!tokenValidation.isValid) {
         warnings.push(...tokenValidation.warnings);
       }
@@ -623,7 +616,7 @@ const StrategyConfigPanel = ({
           syntheticPools[p.pool] = { token0: { symbol: t0 }, token1: { symbol: t1 } };
         }
       });
-      const positionValidation = validatePositionsForStrategy(vaultPositions, syntheticPools, selectedTokens);
+      const positionValidation = validatePositionsForStrategy(vaultPositions, syntheticPools, selectedTokens, chainId);
       if (!positionValidation.isValid) {
         warnings.push(...positionValidation.warnings);
       }
@@ -952,9 +945,6 @@ const StrategyConfigPanel = ({
         }
       }));
 
-      // Trigger a data refresh
-      dispatch(triggerUpdate());
-
       // Show success message
       showSuccess("Strategy configuration saved successfully");
 
@@ -1029,9 +1019,6 @@ const StrategyConfigPanel = ({
 
   // Close transaction modal
   const handleCloseTransactionModal = () => {
-    // Trigger data refresh to sync with blockchain state
-    dispatch(triggerUpdate());
-
     // Reset all change tracking flags
     setTemplateChanged(false);
     setTokensChanged(false);

@@ -6,8 +6,7 @@ import { Row, Col, Alert, Spinner, Button, Toast, ToastContainer } from "react-b
 import VaultCard from "./VaultCard";
 import CreateVaultModal from "./CreateVaultModal";
 import { createVault } from 'fum_library/blockchain/contracts';
-import { triggerUpdate } from "../../redux/updateSlice";
-import { setLoadingVaults, setVaultError } from '../../redux/vaultsSlice';
+import { setLoadingVaults, setVaultError, setVaultsLastFetched } from '../../redux/vaultsSlice';
 import { setResourceUpdating } from '../../redux/updateSlice';
 import { loadVaultData } from '../../utils/vaultsHelpers';
 
@@ -17,8 +16,7 @@ export default function VaultsContainer() {
   // Redux state
   const { isConnected, address, chainId } = useSelector((state) => state.wallet);
   const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
-  const { userVaults } = useSelector((state) => state.vaults);
-  const { lastUpdate } = useSelector((state) => state.updates);
+  const { userVaults, vaultsLastFetched } = useSelector((state) => state.vaults);
 
   // Local state
   const [isLoading, setIsLoading] = useState(true);
@@ -59,6 +57,13 @@ export default function VaultsContainer() {
       return;
     }
 
+    // Skip if vaults were loaded recently (within 30 seconds)
+    const isFresh = vaultsLastFetched && (Date.now() - vaultsLastFetched < 30000);
+    if (isFresh) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -75,6 +80,7 @@ export default function VaultsContainer() {
           setError(`Failed to load vaults: ${result.error}`);
           dispatch(setVaultError(`Failed to load vaults: ${result.error}`));
         } else {
+          dispatch(setVaultsLastFetched(Date.now()));
         }
       })
       .catch(error => {
@@ -90,10 +96,10 @@ export default function VaultsContainer() {
       });
   }
 
-  // Load data effect - runs when wallet connection state changes or manual refresh
+  // Load data effect - runs when wallet connection state changes
   useEffect(() => {
     loadData();
-  }, [isConnected, address, isReadReady, chainId, lastUpdate]);
+  }, [isConnected, address, isReadReady, chainId, vaultsLastFetched]);
 
   // Handle vault creation
   const handleCreateVault = async (vaultName, vaultDescription, strategyConfig) => {
@@ -164,7 +170,7 @@ export default function VaultsContainer() {
           <Button
             variant="outline-danger"
             size="sm"
-            onClick={() => dispatch(triggerUpdate(Date.now()))}
+            onClick={() => { dispatch(setVaultsLastFetched(null)); loadData(); }}
             className="mt-2"
           >
             Try Again
