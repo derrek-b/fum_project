@@ -7,7 +7,7 @@
 
 import { ethers } from 'ethers';
 import strategies from '../configs/strategies.js';
-import { getAllTokens, getStablecoins } from './tokenHelpers.js';
+import { getAllTokens, getStablecoins, getTokensByChain } from './tokenHelpers.js';
 
 /**
  * Validate ID string parameter using established validation pattern
@@ -889,7 +889,7 @@ export function formatParameterValue(value, paramConfig) {
  * // Returns: [] (no messages)
  * @since 1.0.0
  */
-export function validateTokensForStrategy (vaultTokens, strategyTokens) {
+export function validateTokensForStrategy (vaultTokens, strategyTokens, chainId) {
   // Early exit if no tokens in vault or no strategy config
   if (!vaultTokens || Object.keys(vaultTokens).length === 0 || !strategyTokens) {
     return { isValid: true, warnings: [] };
@@ -900,11 +900,23 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
     return { isValid: true, warnings: [] };
   }
 
-  // Check if each vault token is included in strategy tokens
+  // Build native ↔ wrapped equivalents map from chain tokens
+  const nativeEquivalents = {};
+  if (chainId) {
+    getTokensByChain(chainId).forEach(t => {
+      if (t.isNative) {
+        nativeEquivalents[t.symbol] = t.wrappedSymbol;
+        nativeEquivalents[t.wrappedSymbol] = t.symbol;
+      }
+    });
+  }
+
+  // Check if each vault token is included in strategy tokens (treating native ≡ wrapped)
   const vaultTokenSymbols = Object.keys(vaultTokens);
 
   const unmatchedTokens = vaultTokenSymbols.filter(symbol =>
-    !strategyTokens.includes(symbol)
+    !strategyTokens.includes(symbol) &&
+    !(nativeEquivalents[symbol] && strategyTokens.includes(nativeEquivalents[symbol]))
   );
 
   if (unmatchedTokens.length === 0) {
@@ -935,7 +947,7 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens) {
  * // Returns: ["The following positions will be closed immediately: Position #12345 (ETH/USDC uses non-strategy token ETH). These positions will be closed and tokens swapped into your strategy tokens."]
  * @since 1.0.0
  */
-export function validatePositionsForStrategy (vaultPositions, pools, strategyTokens) {
+export function validatePositionsForStrategy (vaultPositions, pools, strategyTokens, chainId) {
   // Early exit if no positions or no strategy tokens
   if (!vaultPositions || vaultPositions.length === 0) {
     return { isValid: true, warnings: [] };
@@ -947,6 +959,17 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
 
   if (!pools) {
     return { isValid: true, warnings: [] };
+  }
+
+  // Build native ↔ wrapped equivalents map from chain tokens
+  const nativeEquivalents = {};
+  if (chainId) {
+    getTokensByChain(chainId).forEach(t => {
+      if (t.isNative) {
+        nativeEquivalents[t.symbol] = t.wrappedSymbol;
+        nativeEquivalents[t.wrappedSymbol] = t.symbol;
+      }
+    });
   }
 
   // Check each position for token mismatches
@@ -998,9 +1021,11 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
       return;
     }
 
-    // Check if both tokens are in the strategy
-    const token0Match = strategyTokens.includes(token0Symbol);
-    const token1Match = strategyTokens.includes(token1Symbol);
+    // Check if both tokens are in the strategy (treating native ≡ wrapped)
+    const token0Match = strategyTokens.includes(token0Symbol) ||
+      (nativeEquivalents[token0Symbol] && strategyTokens.includes(nativeEquivalents[token0Symbol]));
+    const token1Match = strategyTokens.includes(token1Symbol) ||
+      (nativeEquivalents[token1Symbol] && strategyTokens.includes(nativeEquivalents[token1Symbol]));
 
     // If either token doesn't match, add to mismatched list
     if (!token0Match || !token1Match) {
