@@ -80,7 +80,7 @@ export default function VaultDetailPage() {
   const { chainId, address: userAddress, isConnected, isReconnecting } = useSelector((state) => state.wallet);
   const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const vaultFromRedux = useSelector((state) =>
-    state.vaults.userVaults.find(v => v.address === vaultAddress)
+    state.vaults.userVaults.find(v => v.address?.toLowerCase() === vaultAddress?.toLowerCase())
   );
   const vaultMetrics = vaultFromRedux?.metrics;
   const vaultTokens = vaultFromRedux?.tokenBalances;
@@ -89,8 +89,13 @@ export default function VaultDetailPage() {
   // Get strategy info from Redux store
   const { strategyConfigs, activeStrategies, strategyPerformance, executionHistory } = useSelector((state) => state.strategies);
 
-  // Component state
-  const [vault, setVault] = useState(null);
+  // Derive ownership from Redux (reactive — no local state needed)
+  const isOwner = useMemo(() => {
+    return userAddress &&
+      vaultFromRedux?.owner &&
+      userAddress.toLowerCase() === vaultFromRedux.owner.toLowerCase();
+  }, [userAddress, vaultFromRedux?.owner]);
+
   // Derive vault positions from Redux positionsSlice (reactive to transferPositionToVault/FromVault)
   const selectVaultPositions = useMemo(
     () => createSelector(
@@ -107,7 +112,6 @@ export default function VaultDetailPage() {
   const [isLoadingTokens, setIsLoadingTokens] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isOwner, setIsOwner] = useState(false);
   const [tokenPricesLoaded, setTokenPricesLoaded] = useState(false);
   const [totalTokenValue, setTotalTokenValue] = useState(0);
   const [automationEnabled, setAutomationEnabled] = useState(false);
@@ -127,6 +131,7 @@ export default function VaultDetailPage() {
   // History tab now uses transactionHistory from tracker data via vaultFromRedux
 
   // Load this specific vault's data (gated by freshness)
+  // getVaultData dispatches to Redux — vaultFromRedux updates reactively
   const loadData = useCallback(async () => {
     if (!vaultAddress || !isReadReady || !chainId) {
       return;
@@ -136,41 +141,23 @@ export default function VaultDetailPage() {
     const vaultLastUpdated = vaultFromRedux?.lastUpdated;
     const isFresh = vaultLastUpdated && (Date.now() - vaultLastUpdated < 30000);
     if (isFresh) {
-      // Hydrate local state from Redux if not already set (e.g., VaultsContainer loaded it)
-      if (!vault && vaultFromRedux) {
-        setVault(vaultFromRedux);
-        setIsOwner(
-          userAddress &&
-          vaultFromRedux.owner &&
-          userAddress.toLowerCase() === vaultFromRedux.owner.toLowerCase()
-        );
-        setIsLoading(false);
-      }
+      setIsLoading(false);
       return;
     }
 
-    if (!vault) {
+    if (!vaultFromRedux) {
       setIsLoading(true);
     }
 
     setError(null);
 
     try {
-      // Load just this vault's data (not all vaults)
       const result = await getVaultData(vaultAddress, readProvider, chainId, dispatch, {
         showError,
         showSuccess
       });
 
-      if (result.success) {
-        setVault(result.vault);
-
-        setIsOwner(
-          userAddress &&
-          result.vault.owner &&
-          userAddress.toLowerCase() === result.vault.owner.toLowerCase()
-        );
-      } else {
+      if (!result.success) {
         setError(result.error || "Failed to load vault data");
       }
     } catch (err) {
@@ -180,7 +167,7 @@ export default function VaultDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [vaultAddress, readProvider, isReadReady, chainId, userAddress, dispatch, showError, showSuccess, vaultFromRedux?.lastUpdated, vault]);
+  }, [vaultAddress, readProvider, isReadReady, chainId, dispatch, showError, showSuccess, vaultFromRedux?.lastUpdated]);
 
   // Call loadData when dependencies change
   useEffect(() => {
@@ -438,7 +425,7 @@ export default function VaultDetailPage() {
 
   // If loading OR should be loading (connected but no vault data yet)
   // This prevents flash during the gap between reconnect and data fetch
-  if (isLoading || (isConnected && !vault)) {
+  if (isLoading || (isConnected && !vaultFromRedux)) {
     return (
       <>
         <Navbar />
@@ -458,7 +445,7 @@ export default function VaultDetailPage() {
   }
 
   // If error or vault not found
-  if (!vault && !isLoading) {
+  if (!vaultFromRedux && !isLoading) {
     return (
       <>
         <Navbar />
@@ -484,7 +471,7 @@ export default function VaultDetailPage() {
       <Navbar />
       <Container className="py-4">
         <Head>
-          <title>{`${vault?.name || 'Vault Detail'} | DeFi Dashboard`}</title>
+          <title>{`${vaultFromRedux?.name || 'Vault Detail'} | DeFi Dashboard`}</title>
         </Head>
 
         <div className="mb-4 animate-fade-in d-flex justify-content-between align-items-center">
@@ -507,7 +494,7 @@ export default function VaultDetailPage() {
             <Card.Body>
               <div className="d-flex justify-content-between align-items-baseline">
                 <h1 className="mb-0 mt-0 d-flex align-items-center" style={{ fontSize: '2.5rem' }}>
-                  {vault.name}
+                  {vaultFromRedux.name}
               {vaultFromRedux.strategy?.strategyId ? (
                 (() => {
                   const strategyDetails = getStrategyDetails(vaultFromRedux?.strategy?.strategyId);
@@ -657,7 +644,7 @@ export default function VaultDetailPage() {
               {/* Created timestamp */}
               <div className="mb-3">
                 <small style={{ fontSize: '0.9rem', color: '#525252' }}>
-                  <strong>Created:</strong> {formatTimestamp(vault.creationTime)}
+                  <strong>Created:</strong> {formatTimestamp(vaultFromRedux.creationTime)}
                 </small>
               </div>
 
@@ -1009,6 +996,15 @@ export default function VaultDetailPage() {
                 isOwner={isOwner}
                 strategyConfig={strategyConfig}
                 performance={performance}
+                onSaveFailed={async () => {
+                  if (readProvider && chainId) {
+                    try {
+                      await getVaultData(vaultAddress, readProvider, chainId, dispatch);
+                    } catch (err) {
+                      console.error('Failed to refresh vault after save failure:', err.message);
+                    }
+                  }
+                }}
               />
             </Tab>
 
@@ -1060,7 +1056,7 @@ export default function VaultDetailPage() {
         <PositionSelectionModal
           show={showPositionModal}
           onHide={() => setShowPositionModal(false)}
-          vault={vault}
+          vault={vaultFromRedux}
           chainId={chainId}
           mode={positionModalMode}
         />

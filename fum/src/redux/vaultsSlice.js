@@ -54,13 +54,13 @@ const vaultsSlice = createSlice({
       };
       state.userVaults.push(newVault);
     },
-    // !!!!!UPDATED!!!!!
     updateVault: (state, action) => {
-      // Update a specific vault's details, preserving positions if not provided
+      // Upsert a vault — update if exists, add if not (supports direct URL navigation
+      // where getVaultData runs before loadVaultData has populated the array)
       const { vaultAddress, vaultData } = action.payload;
       const index = state.userVaults.findIndex(v => v.address === vaultAddress);
       if (index !== -1) {
-        // Keep existing positions, metrics, and tokenBalances if not included in update
+        // Update existing — preserve positions, metrics, and tokenBalances if not in update
         const existingPositions = state.userVaults[index].positions || [];
         const existingMetrics = state.userVaults[index].metrics || { tvl: 0, positionCount: 0 };
         const existingTokenBalances = state.userVaults[index].tokenBalances || {};
@@ -72,6 +72,24 @@ const vaultsSlice = createSlice({
           metrics: vaultData.metrics || existingMetrics,
           tokenBalances: vaultData.tokenBalances || existingTokenBalances
         };
+      } else {
+        // Vault not in Redux yet — add it with defaults for missing fields
+        state.userVaults.push({
+          address: vaultAddress,
+          positions: [],
+          metrics: { tvl: 0, positionCount: 0 },
+          tokenBalances: {},
+          isBlacklisted: false,
+          blacklistReason: null,
+          isFundingRequired: false,
+          fundingRequiredAt: null,
+          isRetrying: false,
+          retryError: null,
+          trackerMetadata: null,
+          transactionHistory: [],
+          trackerDataLoaded: false,
+          ...vaultData
+        });
       }
     },
     // Set or replace all positions for a vault

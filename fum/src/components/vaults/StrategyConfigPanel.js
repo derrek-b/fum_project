@@ -48,7 +48,8 @@ const StrategyConfigPanel = ({
   vaultAddress,
   isOwner,
   performance,
-  onStrategyToggle
+  onStrategyToggle,
+  onSaveFailed
 }) => {
   const dispatch = useDispatch();
   const { readProvider, getSigner, isWriteReady } = useProviders();
@@ -465,13 +466,11 @@ const StrategyConfigPanel = ({
       const newParams = { ...strategyParams, ...paramData.parameters };
       setStrategyParams(newParams);
 
-      // Check if parameters have changed from the current preset defaults (if using a preset)
-      // or from the initial vault state (if using custom or no preset)
-      const baseline = (activePreset && activePreset !== 'custom' && Object.keys(currentPresetDefaults).length > 0)
-        ? currentPresetDefaults
-        : initialParams;
-
-      const hasChanged = checkParametersChanged(newParams, baseline);
+      // Compare against what was loaded from the contract (initialParams), not preset defaults.
+      // Preset defaults are useful for UI display ("customized preset") but shouldn't trigger
+      // a save transaction — if the user saved range=1 with aggressive preset, reopening the
+      // panel shouldn't mark params as changed just because range=1 !== aggressive default of 3.
+      const hasChanged = checkParametersChanged(newParams, initialParams);
       setParamsChanged(hasChanged);
     }
 
@@ -547,8 +546,13 @@ const StrategyConfigPanel = ({
     if (shouldShowParamStep) {
       let description = `Configure the strategy parameters (preset: ${activePreset || 'none'})`;
 
-      // Add note about customizations if using preset with modifications
-      if (activePreset && activePreset !== 'custom' && paramsChanged) {
+      // Add note about customizations if params differ from the selected preset's defaults
+      // (paramsChanged means "differs from on-chain" for save purposes, but "custom modifications"
+      // means "differs from the preset defaults" — these are different questions)
+      const hasCustomMods = activePreset && activePreset !== 'custom' &&
+        Object.keys(currentPresetDefaults).length > 0 &&
+        checkParametersChanged(strategyParams, currentPresetDefaults);
+      if (hasCustomMods) {
         description += ' with custom modifications';
       }
 
@@ -1017,24 +1021,30 @@ const StrategyConfigPanel = ({
     setEditMode(false);
   };
 
-  // Close transaction modal
+  // Close transaction modal — revert to on-chain state on cancel/error
   const handleCloseTransactionModal = () => {
-    // Reset all change tracking flags
+    const hadError = transactionError || transactionWarning;
+
+    // Reset change tracking
     setTemplateChanged(false);
     setTokensChanged(false);
     setPlatformsChanged(false);
     setParamsChanged(false);
     setHasUnsavedChanges(false);
-
-    // Exit edit mode
     setEditMode(false);
 
-    // Clear error and warning messages
+    // Clear messages and close modal
     setTransactionError('');
     setTransactionWarning('');
-
-    // Close the modal
     setShowTransactionModal(false);
+
+    // If there was an error or cancellation, tell the parent to refresh vault data
+    // from chain. This handles partial saves (e.g. tokens succeeded but strategy
+    // params were cancelled) — fresh data flows back via Redux and the useEffect
+    // on vault resets component state from on-chain reality.
+    if (hadError && onSaveFailed) {
+      onSaveFailed();
+    }
   };
 
   // Access current strategy directly from vault for array comparisons
