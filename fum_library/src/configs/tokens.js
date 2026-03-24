@@ -112,7 +112,7 @@ const tokens = {
       43114: "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", // Avalanche
       1338: "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a"   // Local Avalanche fork
     },
-    logoURI: "/Token_Logos/AUSD.svg",
+    logoURI: "/Token_Logos/AUSD.png",
     isStablecoin: true
   },
 

@@ -75,7 +75,7 @@ const platforms = {
   traderjoeV2_2: {
     id: "traderjoeV2_2",
     name: "Trader Joe V2.2",
-    logo: "/Platform_Logos/traderjoe.svg",
+    logo: "/Platform_Logos/traderjoe.png",
     color: "#E53E3E",
     description: "Trader Joe V2.2 Liquidity Book positions",
     features: {
