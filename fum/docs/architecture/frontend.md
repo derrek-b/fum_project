@@ -347,8 +347,8 @@ Instead of invalidating freshness timestamps, SSE events trigger **targeted data
 
 | Event | Vault State Update |
 |---|---|
-| `VaultLoadFailed` | `isRetrying=true`, `retryError={message, attempts, lastAttempt}` |
-| `VaultLoadRecovered` | Clears `isRetrying`, `retryError`, `isBlacklisted` |
+| `VaultFailed` | `isRetrying=true`, `retryError={message, attempts, lastAttempt}` |
+| `VaultRecovered` | Clears `isRetrying`, `retryError`, `isBlacklisted` |
 | `VaultBlacklisted` | `isBlacklisted=true`, `blacklistReason` |
 | `VaultUnblacklisted` | `isBlacklisted=false`, `blacklistReason=null` |
 | `ExecutorFundingRequired` | `isFundingRequired=true`, `fundingRequiredAt` |
