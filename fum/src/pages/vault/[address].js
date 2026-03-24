@@ -30,7 +30,7 @@ import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { getExecutorXpub } from 'fum_library/helpers/chainHelpers';
 import { AlertTriangle, RefreshCw, Fuel } from 'lucide-react';
 import FundExecutorModal from '../../components/vaults/FundExecutorModal';
-import { getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
+import { getMaxExecutorBalance, getMinExecutorBalance } from 'fum_library/helpers/chainHelpers';
 import { getNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { getStrategyIcon } from '../../utils/strategyIcons';
 import ERC20ARTIFACT from "@openzeppelin/contracts/build/contracts/ERC20.json";
@@ -299,8 +299,14 @@ export default function VaultDetailPage() {
       if (isEnablingAutomation) {
         console.log('Setting executor...', pendingExecutorAddress);
 
-        // Call contract to set executor with initial gas funding
-        const fundingAmount = ethers.utils.parseEther(String(getMaxExecutorBalance(chainId)));
+        // Only fund executor if balance is below minimum threshold
+        let fundingAmount = ethers.BigNumber.from(0);
+        const currentBalance = await readProvider.getBalance(pendingExecutorAddress);
+        const minBalance = ethers.utils.parseEther(String(getMinExecutorBalance(chainId)));
+        if (currentBalance.lt(minBalance)) {
+          const maxBalance = ethers.utils.parseEther(String(getMaxExecutorBalance(chainId)));
+          fundingAmount = maxBalance.sub(currentBalance);
+        }
         const tx = await vaultContract.setExecutor(pendingExecutorAddress, { value: fundingAmount });
         await tx.wait();
 

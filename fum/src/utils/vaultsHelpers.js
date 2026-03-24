@@ -176,126 +176,6 @@ export const calculateVaultAPY = (trackerMetadata) => {
 };
 
 /**
- * Map OracleSource enum to string value
- * @param {number} enumValue - Enum value from contract
- * @returns {string} String representation
- */
-// const mapOracleSourceEnum = (enumValue) => {
-//   const sources = ['dex', 'chainlink', 'twap'];
-//   const index = parseInt(enumValue.toString());
-//   if (index >= 0 && index < sources.length) {
-//     return sources[index];
-//   }
-//   return 'unknown'; // Fallback for UI compatibility
-// };
-
-/**
- * Map PlatformSelectionCriteria enum to string value
- * @param {number} enumValue - Enum value from contract
- * @returns {string} String representation
- */
-// const mapPlatformCriteriaEnum = (enumValue) => {
-//   const criteria = ['highest_tvl', 'highest_volume', 'lowest_fees', 'highest_rewards'];
-//   const index = parseInt(enumValue.toString());
-//   if (index >= 0 && index < criteria.length) {
-//     return criteria[index];
-//   }
-//   return 'unknown'; // Fallback for UI compatibility
-// };
-
-/**
- * Map strategy parameters from contract return value to named objects
- * @param {string} strategyId - Strategy ID
- * @param {Array} params - Parameters array from contract
- * @returns {object} Named parameters
- */
-// const mapStrategyParameters = (strategyId, params) => {
-//   try {
-//     // Strategy-specific parameter mappings
-//     if (strategyId.toLowerCase() === 'bob') {
-//       return {
-//         // Range Parameters
-//         targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
-//         targetRangeLower: parseInt(params[1]) / 100,
-//         rebalanceThresholdUpper: parseInt(params[2]) / 100,
-//         rebalanceThresholdLower: parseInt(params[3]) / 100,
-
-//         // Fee Settings
-//         feeReinvestment: params[4],
-//         reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2), // Convert to dollars with 2 decimal places
-//         reinvestmentRatio: parseInt(params[6]) / 100,
-
-//         // Risk Management
-//         maxSlippage: parseInt(params[7]) / 100,
-//         emergencyExitTrigger: parseInt(params[8]) / 100,
-//         maxUtilization: parseInt(params[9]) / 100
-//       };
-//     }
-//     else if (strategyId.toLowerCase() === 'parris') {
-//       return {
-//         // Range Parameters
-//         targetRangeUpper: parseInt(params[0]) / 100, // Convert basis points to percent
-//         targetRangeLower: parseInt(params[1]) / 100,
-//         rebalanceThresholdUpper: parseInt(params[2]) / 100,
-//         rebalanceThresholdLower: parseInt(params[3]) / 100,
-
-//         // Fee Settings
-//         feeReinvestment: params[4],
-//         reinvestmentTrigger: ethers.utils.formatUnits(params[5], 2),
-//         reinvestmentRatio: parseInt(params[6]) / 100,
-
-//         // Risk Management
-//         maxSlippage: parseInt(params[7]) / 100,
-//         emergencyExitTrigger: parseInt(params[8]) / 100,
-//         maxVaultUtilization: parseInt(params[9]) / 100,
-
-//         // Adaptive Settings
-//         adaptiveRanges: params[10],
-//         rebalanceCountThresholdHigh: parseInt(params[11]),
-//         rebalanceCountThresholdLow: parseInt(params[12]),
-//         adaptiveTimeframeHigh: parseInt(params[13]),
-//         adaptiveTimeframeLow: parseInt(params[14]),
-//         rangeAdjustmentPercentHigh: parseInt(params[15]) / 100,
-//         thresholdAdjustmentPercentHigh: parseInt(params[16]) / 100,
-//         rangeAdjustmentPercentLow: parseInt(params[17]) / 100,
-//         thresholdAdjustmentPercentLow: parseInt(params[18]) / 100,
-
-//         // Oracle Settings
-//         oracleSource: parseInt(params[19]),
-//         priceDeviationTolerance: parseInt(params[20]) / 100,
-
-//         // Position Sizing
-//         maxPositionSizePercent: parseInt(params[21]) / 100,
-//         minPositionSize: ethers.utils.formatUnits(params[22], 2),
-//         targetUtilization: parseInt(params[23]) / 100,
-
-//         // Platform Settings
-//         platformSelectionCriteria: parseInt(params[24]),
-//         minPoolLiquidity: ethers.utils.formatUnits(params[25], 2)
-//       };
-//     }
-//     else if (strategyId.toLowerCase() === 'fed') {
-//       return {
-//         targetRange: parseInt(params[0]) / 100,
-//         rebalanceThreshold: parseInt(params[1]) / 100,
-//         feeReinvestment: params[2],
-//         maxSlippage: parseInt(params[3]) / 100
-//         // Add other Fed strategy parameters as needed
-//       };
-//     }
-
-//     // If we reach here, we don't know how to map this strategy
-//     console.warn(`No parameter mapping defined for strategy ${strategyId}`);
-//     return {};
-//   } catch (error) {
-//     console.error(`Error mapping strategy parameters for ${strategyId}:`, error);
-//     return {};
-//   }
-// };
-
-// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-/**
  * Fetch and map parameter values from a strategy contract
  * @param {string} strategyAddress - The strategy contract address
  * @param {string} strategyId - Strategy ID (e.g., "parris", "fed")
@@ -783,8 +663,6 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
   }
 };
 
-// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 /**
  * Load positions for a vault from all adapters
  * @param {string} vaultAddress - The vault address
@@ -870,8 +748,6 @@ export const loadVaultPositions = async (vaultAddress, provider, chainId, dispat
     return { success: false, error: error.message };
   }
 };
-
-// DONE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 /**
  * Calculate total TVL for a collection of display positions
@@ -967,17 +843,11 @@ export const getVaultData = async (vaultAddress, provider, chainId, dispatch, op
     // Store vault data for final result
     const vaultData = vaultInfoResult.vaultData;
 
-    // Step 3: Load token balances with silent mode if skipMetricsUpdate is true
-    const tokenResult = await loadVaultTokenBalances(
-      vaultAddress,
-      provider,
-      chainId,
-      dispatch,
-      { ...options, silent: skipMetricsUpdate }
-    );
-
-    // Step 4: Load positions
-    const positionsResult = await loadVaultPositions(vaultAddress, provider, chainId, dispatch, options);
+    // Steps 3 & 4: Load token balances and positions in parallel (independent data)
+    const [tokenResult, positionsResult] = await Promise.all([
+      loadVaultTokenBalances(vaultAddress, provider, chainId, dispatch, { ...options, silent: skipMetricsUpdate }),
+      loadVaultPositions(vaultAddress, provider, chainId, dispatch, options)
+    ]);
 
     if (positionsResult.success) {
       // Update vault with position IDs

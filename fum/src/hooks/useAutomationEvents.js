@@ -90,9 +90,8 @@ export function useAutomationEvents() {
         'NativeUnwrapped',
         'VaultBaselineCaptured',
         'MonitoringStarted',
-        'VaultLoadFailed',
-        'VaultLoadRecovered',
-        'VaultUnrecoverable',
+        'VaultFailed',
+        'VaultRecovered',
         'VaultBlacklisted',
         'VaultUnblacklisted',
         'FeeCollectionFailed',
@@ -115,7 +114,7 @@ export function useAutomationEvents() {
             }));
 
             // Handle vault state updates
-            if (eventName === 'VaultLoadFailed' && payload.data?.vaultAddress) {
+            if (eventName === 'VaultFailed' && payload.data?.vaultAddress) {
               // Vault is having trouble loading - show retry warning
               dispatch(updateVault({
                 vaultAddress: payload.data.vaultAddress,
@@ -128,7 +127,7 @@ export function useAutomationEvents() {
                   }
                 }
               }));
-            } else if (eventName === 'VaultLoadRecovered' && payload.data?.vaultAddress) {
+            } else if (eventName === 'VaultRecovered' && payload.data?.vaultAddress) {
               // Vault recovered - clear retry state and blacklist (backend unblacklists on recovery)
               dispatch(updateVault({
                 vaultAddress: payload.data.vaultAddress,
@@ -137,17 +136,6 @@ export function useAutomationEvents() {
                   retryError: null,
                   isBlacklisted: false,
                   blacklistReason: null
-                }
-              }));
-            } else if (eventName === 'VaultUnrecoverable' && payload.data?.vaultAddress) {
-              // Vault blacklisted - clear retry state, set blacklist state
-              dispatch(updateVault({
-                vaultAddress: payload.data.vaultAddress,
-                vaultData: {
-                  isBlacklisted: true,
-                  blacklistReason: payload.data.reason || 'Unknown error',
-                  isRetrying: false,
-                  retryError: null
                 }
               }));
             } else if (eventName === 'VaultBlacklisted' && payload.data?.vaultAddress) {
