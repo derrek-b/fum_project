@@ -443,6 +443,63 @@ class AutomationService {
 
     // Start heartbeat monitoring
     this.startHeartbeat();
+
+    // Diagnostic: WebSocket subscription debugging
+    // Enable with DEBUG_WS_EVENTS=true environment variable
+    if (process.env.DEBUG_WS_EVENTS === 'true') {
+      this.attachSubscriptionDiagnostics();
+    }
+  }
+
+  /**
+   * Attach diagnostic logging for WebSocket subscriptions.
+   * Logs eth_subscribe requests/responses and raw subscription events.
+   * Enable with DEBUG_WS_EVENTS=true environment variable.
+   * @private
+   */
+  attachSubscriptionDiagnostics() {
+    this.log('🔬 [WS-DIAG] WebSocket subscription diagnostics ENABLED');
+
+    // 1. Log eth_subscribe requests and confirmations via provider debug event
+    this.provider.on('debug', (info) => {
+      if (info.action === 'request' && info.request?.method === 'eth_subscribe') {
+        console.log(`🔬 [WS-DIAG] eth_subscribe SENT: ${JSON.stringify(info.request.params)}`);
+      }
+      if (info.action === 'response' && info.request?.method === 'eth_subscribe') {
+        console.log(`🔬 [WS-DIAG] eth_subscribe CONFIRMED — subId: ${info.response}`);
+      }
+    });
+
+    // 2. Log raw subscription events arriving over the WebSocket
+    if (this.provider._websocket) {
+      const originalOnMessage = this.provider._websocket.onmessage;
+      this.provider._websocket.onmessage = (messageEvent) => {
+        try {
+          const msg = JSON.parse(messageEvent.data);
+          if (msg.method === 'eth_subscription') {
+            const topicHash = msg.params?.result?.topics?.[0] || 'no-topics';
+            console.log(`🔬 [WS-DIAG] RAW subscription event received — subId: ${msg.params.subscription}, topic: ${topicHash.slice(0, 10)}..., address: ${msg.params?.result?.address || 'none'}`);
+          }
+        } catch {
+          // Ignore parse errors on non-JSON messages
+        }
+        // Call the original handler so ethers.js processes the message
+        if (originalOnMessage) {
+          originalOnMessage(messageEvent);
+        }
+      };
+      this.log('🔬 [WS-DIAG] Raw WebSocket message interceptor attached');
+    }
+
+    // 3. Log subscription state after a short delay (let async eth_subscribe complete)
+    setTimeout(() => {
+      const subCount = Object.keys(this.provider._subs || {}).length;
+      const subIdCount = Object.keys(this.provider._subIds || {}).length;
+      console.log(`🔬 [WS-DIAG] Subscription state: ${subCount} active subs, ${subIdCount} sub IDs`);
+      for (const [subId, sub] of Object.entries(this.provider._subs || {})) {
+        console.log(`🔬 [WS-DIAG]   subId=${subId} → tag=${sub.tag}`);
+      }
+    }, 3000);
   }
 
   /**
