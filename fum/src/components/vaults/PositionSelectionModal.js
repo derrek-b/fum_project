@@ -6,11 +6,12 @@ import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
 import { platforms } from 'fum_library/configs';
 import { transferPositionToVault, transferPositionFromVault } from "../../redux/vaultPositionActions";
-import { lookupPlatformById } from 'fum_library/helpers/platformHelpers';
-import { getTokenBySymbol } from 'fum_library/helpers/tokenHelpers';
+import { lookupPlatformById, getPlatformMetadata } from 'fum_library/helpers/platformHelpers';
+import { getTokenBySymbol, getNativeSymbol, getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
 import TransactionProgressModal from '../common/TransactionProgressModal';
+import StrategyValidationModal from './StrategyValidationModal';
 
 export default function PositionSelectionModal({
   show,
@@ -32,6 +33,10 @@ export default function PositionSelectionModal({
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
+
+  // State for strategy warning modal
+  const [showStrategyWarning, setShowStrategyWarning] = useState(false);
+  const [strategyWarnings, setStrategyWarnings] = useState([]);
 
   // State for progress modal
   const [transactionSteps, setTransactionSteps] = useState([]);
@@ -112,6 +117,67 @@ export default function PositionSelectionModal({
     });
   };
 
+  // Check selected positions against vault strategy (token + platform alignment)
+  const checkStrategyAlignment = () => {
+    const targets = vault?.strategy?.selectedTokens;
+    const targetPlatforms = vault?.strategy?.selectedPlatforms;
+    if (!targets || targets.length === 0) return []; // No strategy = no warnings
+
+    const nativeSymbol = getNativeSymbol(chainId);
+    const wrappedSymbol = getWrappedNativeSymbol(chainId);
+
+    const isTokenMatch = (symbol) => {
+      if (targets.includes(symbol)) return true;
+      if (symbol === nativeSymbol && targets.includes(wrappedSymbol)) return true;
+      if (symbol === wrappedSymbol && targets.includes(nativeSymbol)) return true;
+      return false;
+    };
+
+    const warnings = [];
+    const tokenMismatches = [];
+    const platformMismatches = [];
+
+    for (const posId of selectedPositions) {
+      const position = positions.find(p => p.id === posId);
+      if (!position?.tokenPair) continue;
+
+      const [t0, t1] = position.tokenPair.split('/');
+
+      // Token mismatch check
+      const nonMatching = [];
+      if (!isTokenMatch(t0)) nonMatching.push(t0);
+      if (!isTokenMatch(t1)) nonMatching.push(t1);
+      if (nonMatching.length > 0) {
+        tokenMismatches.push({
+          id: position.id,
+          tokenPair: position.tokenPair,
+          nonMatchingTokens: nonMatching
+        });
+      }
+
+      // Platform mismatch check
+      if (targetPlatforms && targetPlatforms.length > 0 && position.platform && !targetPlatforms.includes(position.platform)) {
+        const targetPlatformNames = targetPlatforms
+          .map(id => { try { return getPlatformMetadata(id).name; } catch { return id; } })
+          .join(', ');
+        platformMismatches.push({
+          id: position.id,
+          tokenPair: position.tokenPair,
+          platformName: position.platformName || position.platform,
+          targetPlatformNames
+        });
+      }
+    }
+
+    if (tokenMismatches.length > 0) {
+      warnings.push({ type: 'unmatchedPositions', count: tokenMismatches.length, items: tokenMismatches });
+    }
+    if (platformMismatches.length > 0) {
+      warnings.push({ type: 'unmatchedPlatform', count: platformMismatches.length, items: platformMismatches });
+    }
+    return warnings;
+  };
+
   // Handle position action (add or remove)
   const handleConfirm = async () => {
     if (selectedPositions.length === 0) {
@@ -121,6 +187,21 @@ export default function PositionSelectionModal({
 
     setError(""); // Clear any previous errors
 
+    // Strategy alignment check (only when adding positions to a vault with an active strategy)
+    if (mode === 'add') {
+      const warnings = checkStrategyAlignment();
+      if (warnings.length > 0) {
+        setStrategyWarnings(warnings);
+        setShowStrategyWarning(true);
+        return;
+      }
+    }
+
+    await executeTransfer();
+  };
+
+  // Execute the actual transfer (called directly or after warning confirmation)
+  const executeTransfer = async () => {
     // Conditional logic: single position = toast flow, multiple = progress modal flow
     if (selectedPositions.length === 1) {
       // Path A: Single position - simple toast-based flow
@@ -312,6 +393,7 @@ export default function PositionSelectionModal({
   };
 
   return (
+    <>
     <Modal
       show={show}
       onHide={onHide}
@@ -461,5 +543,23 @@ export default function PositionSelectionModal({
         title="Position Management"
       />
     </Modal>
+
+    <StrategyValidationModal
+      show={showStrategyWarning}
+      onHide={() => {
+        setShowStrategyWarning(false);
+        setStrategyWarnings([]);
+      }}
+      onConfirm={() => {
+        setShowStrategyWarning(false);
+        setStrategyWarnings([]);
+        executeTransfer();
+      }}
+      warnings={strategyWarnings}
+      title="Strategy Mismatch"
+      prompt="Do you still want to transfer this position to the vault?"
+      confirmLabel="Transfer Anyway"
+    />
+    </>
   );
 }

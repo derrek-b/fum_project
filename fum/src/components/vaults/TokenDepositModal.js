@@ -3,9 +3,10 @@ import React, { useState, useEffect } from "react";
 import { Modal, Button, Form, InputGroup, Spinner, Alert } from "react-bootstrap";
 import { useSelector } from "react-redux";
 import { ethers } from "ethers";
-import { getTokensByChain } from 'fum_library/helpers/tokenHelpers';
+import { getTokensByChain, getNativeSymbol, getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { useToast } from "../../context/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
+import StrategyValidationModal from './StrategyValidationModal';
 
 // CSS styles for the modal
 const modalStyles = `
@@ -108,6 +109,9 @@ const ERC20_ABI = [
 
 const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const { address: userAddress, chainId } = useSelector((state) => state.wallet);
+  const vault = useSelector(state =>
+    state.vaults.userVaults.find(v => v.address?.toLowerCase() === vaultAddress?.toLowerCase())
+  );
   const { readProvider, getSigner, isReadReady, isWriteReady } = useProviders();
   const { showSuccess, showError } = useToast();
 
@@ -118,6 +122,8 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showStrategyWarning, setShowStrategyWarning] = useState(false);
+  const [strategyWarnings, setStrategyWarnings] = useState([]);
 
   // Build token list from chain-filtered tokens, splitting native into native + wrapped
   const chainTokens = getTokensByChain(chainId);
@@ -225,7 +231,22 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
     return true;
   };
 
-  // Handle deposit
+  // Check if a token matches the vault's strategy targets (handles native ↔ wrapped equivalence)
+  const isTokenInStrategy = (tokenSymbol) => {
+    const targets = vault?.strategy?.selectedTokens;
+    if (!targets || targets.length === 0) return true; // No strategy = no warning
+    if (targets.includes(tokenSymbol)) return true;
+
+    // Check native ↔ wrapped equivalence (ETH ≡ WETH, AVAX ≡ WAVAX)
+    const nativeSymbol = getNativeSymbol(chainId);
+    const wrappedSymbol = getWrappedNativeSymbol(chainId);
+    if (tokenSymbol === nativeSymbol && targets.includes(wrappedSymbol)) return true;
+    if (tokenSymbol === wrappedSymbol && targets.includes(nativeSymbol)) return true;
+
+    return false;
+  };
+
+  // Handle deposit — checks strategy alignment, then executes transaction
   const handleDeposit = async () => {
     if (!selectedToken || !amount || !userAddress || !isWriteReady) {
       setError("Please select a token and enter an amount");
@@ -250,6 +271,22 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
       return;
     }
 
+    // Check strategy alignment before executing
+    if (!isTokenInStrategy(selectedToken.symbol)) {
+      setStrategyWarnings([{
+        type: 'unmatchedTokens',
+        count: 1,
+        items: [selectedToken.symbol]
+      }]);
+      setShowStrategyWarning(true);
+      return;
+    }
+
+    await executeDeposit();
+  };
+
+  // Execute the actual deposit transaction (called directly or after warning confirmation)
+  const executeDeposit = async () => {
     setIsSubmitting(true);
     setError("");
 
@@ -296,6 +333,7 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
   };
 
   return (
+    <>
     <Modal
       show={show}
       onHide={onHide}
@@ -404,6 +442,24 @@ const TokenDepositModal = ({ show, onHide, vaultAddress, onTokensUpdated }) => {
         </Button>
       </Modal.Footer>
     </Modal>
+
+    <StrategyValidationModal
+      show={showStrategyWarning}
+      onHide={() => {
+        setShowStrategyWarning(false);
+        setStrategyWarnings([]);
+      }}
+      onConfirm={() => {
+        setShowStrategyWarning(false);
+        setStrategyWarnings([]);
+        executeDeposit();
+      }}
+      warnings={strategyWarnings}
+      title="Strategy Mismatch"
+      prompt="Do you still want to deposit this token?"
+      confirmLabel="Deposit Anyway"
+    />
+    </>
   );
 };
 

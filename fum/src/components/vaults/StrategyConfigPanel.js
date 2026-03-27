@@ -13,6 +13,7 @@ import StrategyValidationModal from './StrategyValidationModal';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import contractData from 'fum_library/artifacts/contracts';
 import { lookupAvailableStrategies, getStrategyParameters, getTemplateDefaults, validateTokensForStrategy, validatePositionsForStrategy } from 'fum_library/helpers/strategyHelpers';
+import { getPlatformMetadata } from 'fum_library/helpers/platformHelpers';
 import { config } from 'dotenv';
 
 /**
@@ -623,6 +624,30 @@ const StrategyConfigPanel = ({
       const positionValidation = validatePositionsForStrategy(vaultPositions, syntheticPools, selectedTokens, chainId);
       if (!positionValidation.isValid) {
         warnings.push(...positionValidation.warnings);
+      }
+
+      // Check platform mismatches
+      if (selectedPlatforms.length > 0) {
+        const targetPlatformNames = selectedPlatforms
+          .map(id => { try { return getPlatformMetadata(id).name; } catch { return id; } })
+          .join(', ');
+
+        const platformMismatches = vaultPositions.filter(p =>
+          p.platform && !selectedPlatforms.includes(p.platform)
+        );
+
+        if (platformMismatches.length > 0) {
+          warnings.push({
+            type: 'unmatchedPlatform',
+            count: platformMismatches.length,
+            items: platformMismatches.map(p => ({
+              id: p.id,
+              tokenPair: p.tokenPair || 'Unknown',
+              platformName: p.platformName || p.platform,
+              targetPlatformNames
+            }))
+          });
+        }
       }
     }
 

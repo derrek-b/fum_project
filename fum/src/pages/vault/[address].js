@@ -118,6 +118,7 @@ export default function VaultDetailPage() {
   const [showAutomationModal, setShowAutomationModal] = useState(false);
   const [isEnablingAutomation, setIsEnablingAutomation] = useState(false);
   const [pendingExecutorAddress, setPendingExecutorAddress] = useState('');
+  const [pendingFundingAmount, setPendingFundingAmount] = useState(null);
   const [isProcessingAutomation, setIsProcessingAutomation] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [selectedWithdrawToken, setSelectedWithdrawToken] = useState(null);
@@ -207,7 +208,7 @@ export default function VaultDetailPage() {
   }, [isOwner, showError]);
 
   // Handle the automation toggle - memoized
-  const handleAutomationToggle = useCallback((enabled) => {
+  const handleAutomationToggle = useCallback(async (enabled) => {
     if (enabled) {
       // Derive per-vault executor address from xpub + executorIndex
       let executorXpub;
@@ -242,17 +243,34 @@ export default function VaultDetailPage() {
 
       // Check 3: Check positions fit strategy when transferring/creating is reinstated
 
+      // Calculate actual funding amount for modal display
+      try {
+        const currentBalance = await readProvider.getBalance(executorAddr);
+        const minBalance = ethers.utils.parseEther(String(getMinExecutorBalance(chainId)));
+        if (currentBalance.lt(minBalance)) {
+          const maxBalance = ethers.utils.parseEther(String(getMaxExecutorBalance(chainId)));
+          const fundingNeeded = maxBalance.sub(currentBalance);
+          setPendingFundingAmount(ethers.utils.formatEther(fundingNeeded));
+        } else {
+          setPendingFundingAmount(null);
+        }
+      } catch (err) {
+        // If balance check fails, show max as fallback
+        setPendingFundingAmount(String(getMaxExecutorBalance(chainId)));
+      }
+
       console.log('setting executor...');
       setPendingExecutorAddress(executorAddr);
       setIsEnablingAutomation(true);
     } else {
       console.log('removing executor...');
       setIsEnablingAutomation(false);
+      setPendingFundingAmount(null);
     }
 
     // Show the confirmation modal
     setShowAutomationModal(true);
-  }, [chainId, showError, vaultFromRedux]);
+  }, [chainId, showError, vaultFromRedux, readProvider]);
 
   // Add this new function to handle the actual transaction after confirmation - memoized
   const handleConfirmAutomation = useCallback(async () => {
@@ -1046,7 +1064,7 @@ export default function VaultDetailPage() {
           onHide={() => setShowAutomationModal(false)}
           isEnabling={isEnablingAutomation}
           executorAddress={pendingExecutorAddress}
-          fundingAmount={getMaxExecutorBalance(chainId)}
+          fundingAmount={pendingFundingAmount}
           nativeSymbol={getNativeSymbol(chainId)}
           onConfirm={handleConfirmAutomation}
           isLoading={isProcessingAutomation}

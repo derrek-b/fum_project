@@ -1,17 +1,17 @@
 {
   "version": "0.2.1",
-  "timestamp": "2026-03-25T13-06-20",
+  "timestamp": "2026-03-27T22-29-43",
   "network": {
     "name": "arbitrum",
     "chainId": 1337
   },
   "contracts": {
-    "VaultFactory": "0xd1A6d0ede1e39f2389460b9e2D2aD47f892f18fc",
-    "BabyStepsStrategy": "0x0044862adEA3c4c536A2Af586181B3A8b340A108",
-    "UniversalRouterValidator": "0x943AE256Cb626d44a686876F14E3d67C86ecc2bA",
-    "UniswapV3PositionValidator": "0x0AA92C352A7E8cc8195632E9C11198474d310b95",
-    "UniswapV4PositionValidator": "0x8C03B6102EFF205734E6442E3509787A8aE4642E",
-    "MerklIncentiveValidator": "0xbf2F24b34c163795E13eab964915bF420a6cfBa3"
+    "VaultFactory": "0xE3A045A384Dc13fe10EB6dD063231e17949Bc020",
+    "BabyStepsStrategy": "0x1aDABe4941e0f662976DC94B9C7e2050b5445664",
+    "UniversalRouterValidator": "0xf58a36e7C22e5e2F39D2eb92e1a2Fb767E9cAcA9",
+    "UniswapV3PositionValidator": "0xA3ba7b2BC497775A6462c64064251B997037838b",
+    "UniswapV4PositionValidator": "0xbE7A285543D2c295F5711f3ee668b5e671181143",
+    "MerklIncentiveValidator": "0x2951bFc136d18Cc1cF6Ed5D66A21b5337887f7B6"
   },
   "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 }

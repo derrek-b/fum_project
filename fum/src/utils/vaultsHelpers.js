@@ -500,7 +500,10 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
   try {
     const allTokens = getAllTokens();
 
-    // Build token list including both native tokens and their wrapped versions
+    // Build token list including both native tokens and their wrapped versions.
+    // Track wrapped native symbols to skip duplicates — getAllTokens() generates synthetic
+    // entries (WETH, WAVAX) that we already handle manually from wrappedAddresses below.
+    const wrappedNativeSymbols = new Set();
     const tokenList = [];
     Object.values(allTokens).forEach(token => {
       if (token.isNative) {
@@ -515,6 +518,7 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
         });
         // Add wrapped entry (WETH, WAVAX, etc.)
         if (token.wrappedAddresses?.[chainId]) {
+          wrappedNativeSymbols.add(token.wrappedSymbol);
           tokenList.push({
             symbol: token.wrappedSymbol,
             name: `Wrapped ${token.name}`,
@@ -529,6 +533,8 @@ export const loadVaultTokenBalances = async (vaultAddress, provider, chainId, di
           });
         }
       } else if (token.addresses[chainId]) {
+        // Skip wrapped natives — already added above from the native token's wrappedAddresses
+        if (wrappedNativeSymbols.has(token.symbol)) return;
         tokenList.push({
           ...token,
           address: token.addresses[chainId],
