@@ -58,6 +58,12 @@ constructor(chainId, platformId, platformName)
 
 Cannot be instantiated directly. Subclass constructors typically take `(chainId, provider)` and call `super(chainId, 'platformId', 'Platform Name')`.
 
+### Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `supportsNativePools` | `boolean` | `false` | Whether this platform has pools using native tokens directly (e.g., V4 ETH pools with `currency0 = AddressZero`). When `false`, all pools use wrapped native and the strategy wraps native upfront. When `true`, the strategy double-quotes native vs wrapped routes. V3/V4: `true`, TJ: `false`. |
+
 ### Required Methods — Grouped by Purpose
 
 #### Position Discovery & Data
