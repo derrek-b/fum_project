@@ -90,6 +90,22 @@ Conservative single-position strategy. `type = 'bob'`, `name = 'Baby Steps Strat
 - Position evaluation uses `inRange` only — no edge-threshold triggers. Positions near range edges are left alone until they go out of range.
 - Token preparation for deficit coverage logs warnings on remaining deficits but proceeds with available balances rather than throwing.
 
+### Token Preparation Phases (`prepareTokensForPosition`)
+
+Converts vault token balances into the two target tokens needed for a position. The flow adapts based on `adapter.supportsNativePools`:
+
+**Step A — Early Wrap** (platforms where `supportsNativePools = false`, e.g., TJ V2.2):
+Wraps ALL native tokens to wrapped native upfront. Since these platforms' routers wrap internally anyway, consolidating first eliminates batched-swap slippage when both native and wrapped would target the same pool. After Step A, native balance is zero and the wrapped balance is used for subsequent phases.
+
+**Step B — Combined Native/Wrapped Phase** (platforms where `supportsNativePools = true`, e.g., V3/V4):
+When the vault has native tokens AND there's a deficit in a non-native/non-wrapped target token, this phase consolidates native balance + any excess wrapped native from aligned targets into a single swap amount. It double-quotes both the native→target and wrapped→target routes via AlphaRouter and picks the better `amountOut`. The `combinedPhaseConsumed` tracker records how much excess aligned token was committed so Phase 2 doesn't double-spend it.
+
+**Phase 1 — Non-Aligned Token Swaps:**
+Swaps remaining non-aligned tokens (tokens that aren't target tokens) toward whichever target has the larger deficit.
+
+**Phase 2 — Excess Target Token Swaps:**
+If one target token has excess and the other still has a deficit, swaps the excess to cover it. Uses `adjustedAvailable` amounts that subtract `combinedPhaseConsumed` to prevent double-counting.
+
 ### Strategy Parameters
 
 Stored in `vault.strategy.parameters` (see [Cache Structures](./cache-structures.md)):
