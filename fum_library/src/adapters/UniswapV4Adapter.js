@@ -4047,15 +4047,16 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         tickSpacing,
         hooks,
         totalValueLockedUSD: pool.totalValueLockedUSD,
-        // Token metadata
+        // Token metadata — resolve symbols via fum_library config (not subgraph)
+        // to ensure canonical symbols (e.g., 'USD₮0' not on-chain 'USDT')
         token0: {
-          symbol: pool.token0.symbol,
+          symbol: this._resolveTokenSymbol(token0Address),
           address: token0Address,
           decimals: parseInt(pool.token0.decimals, 10),
           isNative: token0Address === ethers.constants.AddressZero
         },
         token1: {
-          symbol: pool.token1.symbol,
+          symbol: this._resolveTokenSymbol(token1Address),
           address: token1Address,
           decimals: parseInt(pool.token1.decimals, 10),
           isNative: token1Address === ethers.constants.AddressZero
