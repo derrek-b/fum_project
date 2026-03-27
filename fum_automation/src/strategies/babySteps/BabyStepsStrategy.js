@@ -2479,6 +2479,8 @@ export default class BabyStepsStrategy extends StrategyBase {
       const totalNative = nativeBalance + excessNativeFromAligned;
       const totalWrapped = wrappedBalance + excessWrappedFromAligned;
       const combinedBalance = totalNative + totalWrapped;
+      let remainingNative = totalNative;
+      let remainingWrapped = totalWrapped;
 
       if (combinedBalance > 0n && totalNative > 0n && totalWrapped > 0n) {
         const nativeTokenData = this.tokens[nativeSymbol];
@@ -2522,13 +2524,15 @@ export default class BabyStepsStrategy extends StrategyBase {
                   amount: winningQuote.amountIn, isAmountIn: true
                 });
 
-                // Track wrap/unwrap needed
+                // Track wrap/unwrap needed (decrement remaining to avoid undercounting across swaps)
                 if (winnerIsNative) {
-                  const unwrapNeeded = swapAmountIn > totalNative ? swapAmountIn - totalNative : 0n;
+                  const unwrapNeeded = swapAmountIn > remainingNative ? swapAmountIn - remainingNative : 0n;
                   if (unwrapNeeded > 0n) unwrapAmount += unwrapNeeded;
+                  remainingNative = swapAmountIn >= remainingNative ? 0n : remainingNative - swapAmountIn;
                 } else {
-                  const wrapNeeded = swapAmountIn > totalWrapped ? swapAmountIn - totalWrapped : 0n;
+                  const wrapNeeded = swapAmountIn > remainingWrapped ? swapAmountIn - remainingWrapped : 0n;
                   if (wrapNeeded > 0n) wrapAmount += wrapNeeded;
+                  remainingWrapped = swapAmountIn >= remainingWrapped ? 0n : remainingWrapped - swapAmountIn;
                 }
 
                 // Track excess aligned consumption for Phase 2
@@ -2592,11 +2596,13 @@ export default class BabyStepsStrategy extends StrategyBase {
                 });
 
                 if (winnerIsNative) {
-                  const unwrapNeeded = swapAmountIn > totalNative ? swapAmountIn - totalNative : 0n;
+                  const unwrapNeeded = swapAmountIn > remainingNative ? swapAmountIn - remainingNative : 0n;
                   if (unwrapNeeded > 0n) unwrapAmount += unwrapNeeded;
+                  remainingNative = swapAmountIn >= remainingNative ? 0n : remainingNative - swapAmountIn;
                 } else {
-                  const wrapNeeded = swapAmountIn > totalWrapped ? swapAmountIn - totalWrapped : 0n;
+                  const wrapNeeded = swapAmountIn > remainingWrapped ? swapAmountIn - remainingWrapped : 0n;
                   if (wrapNeeded > 0n) wrapAmount += wrapNeeded;
+                  remainingWrapped = swapAmountIn >= remainingWrapped ? 0n : remainingWrapped - swapAmountIn;
                 }
 
                 if (excessWrappedFromAligned > 0n && !winnerIsNative) {

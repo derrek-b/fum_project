@@ -989,16 +989,12 @@ class AutomationService {
 
       const results = {
         offboardResults: null,
-        removedFromBlacklist: false,
         errors: []
       };
 
-      // Remove from blacklist if present (revocation = clean slate)
-      if (this.isVaultBlacklisted(vaultAddress)) {
-        await this.unblacklistVault(vaultAddress);
-        results.removedFromBlacklist = true;
-        this.log(`Removed revoked vault from blacklist: ${vaultAddress}`);
-      }
+      // Note: blacklist is intentionally NOT cleared on revoke. The blacklist reason
+      // serves as diagnostic info for the user — they can read it, fix the issue,
+      // then re-enable automation which clears the blacklist via VaultAuthGranted.
 
       // Full cleanup: strategy state, listeners, locks, caches
       try {
@@ -1011,7 +1007,6 @@ class AutomationService {
       this.eventManager.emit('VaultOffboarded', {
         vaultAddress,
         ...results.offboardResults,
-        removedFromBlacklist: results.removedFromBlacklist,
         success: results.errors.length === 0,
         log: {
           level: results.errors.length === 0 ? 'info' : 'warn',
