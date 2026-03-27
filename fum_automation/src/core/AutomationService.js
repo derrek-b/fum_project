@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { getAdaptersForChain, getAllTokens, getContract, getActiveVaults, getVaultExecutorIndex, getVaultContract } from 'fum_library';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { retryRpcCall, retryWithBackoff } from '../utils/RetryHelper.js';
-import { UnrecoverableError, InsufficientGasError } from '../utils/errors.js';
+import { UnrecoverableError, InsufficientGasError, formatErrorForDisplay } from '../utils/errors.js';
 import { patchProviderFeeData } from '../utils/patchProviderFeeData.js';
 
 import EventManager from './EventManager.js';
@@ -251,7 +251,7 @@ class AutomationService {
       console.error('Failed to start AutomationService:', error);
 
       this.eventManager.emit('ServiceStartFailed', {
-        error: error.message,
+        error: formatErrorForDisplay(error),
         timestamp: Date.now(),
         log: {
           level: 'error',
@@ -1299,9 +1299,10 @@ class AutomationService {
     }
 
     // Emit event for visibility (SSE broadcast, tracking)
+    const displayReason = `EMERGENCY: ${formatErrorForDisplay(reason)}`;
     this.eventManager.emit('VaultBlacklisted', {
       vaultAddress,
-      reason: `EMERGENCY: ${reason}`,
+      reason: displayReason,
       emergency: true,
       cleanupResults: results,
       timestamp: Date.now(),
@@ -1400,7 +1401,7 @@ class AutomationService {
 
     this.eventManager.emit('VaultFailed', {
       vaultAddress,
-      error,
+      error: formatErrorForDisplay(error),
       source,
       attempts: this.failedVaults.get(vaultAddress).attempts,
       timestamp: Date.now(),
@@ -1475,25 +1476,26 @@ class AutomationService {
    */
   async blacklistVault(vaultAddress, reason) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+    const displayReason = formatErrorForDisplay(reason);
 
     // Full cleanup: strategy state, listeners, locks, caches
     const offboardResults = await this.offboardVault(normalizedAddress);
 
-    // Add to blacklist
+    // Add to blacklist (clean reason for display, raw stays in service logs)
     this.blacklistedVaults.set(normalizedAddress, {
       vaultAddress: normalizedAddress,
       blacklistedAt: Date.now(),
-      reason
+      reason: displayReason
     });
 
     this.eventManager.emit('VaultBlacklisted', {
       vaultAddress: normalizedAddress,
-      reason,
+      reason: displayReason,
       offboardResults,
       timestamp: Date.now(),
       log: {
         level: 'warn',
-        message: `Vault ${normalizedAddress} blacklisted: ${reason}`
+        message: `Vault ${normalizedAddress} blacklisted: ${displayReason}`
       }
     });
 
@@ -1831,7 +1833,7 @@ class AutomationService {
     } catch (error) {
       this.eventManager.emit('VaultSetupFailed', {
         vaultAddress: normalizedAddress,
-        error: error.message,
+        error: formatErrorForDisplay(error),
         step,
         timestamp: Date.now(),
         log: {
@@ -1988,7 +1990,7 @@ class AutomationService {
       this.eventManager.emit('SwapEventFailed', {
         vaultAddress,
         poolId,
-        error: error.message,
+        error: formatErrorForDisplay(error),
         recoverable: this.isRecoverableError(error),
         timestamp: Date.now(),
         log: {

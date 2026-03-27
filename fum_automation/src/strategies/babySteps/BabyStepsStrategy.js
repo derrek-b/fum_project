@@ -8,7 +8,7 @@ import { StrategyBase } from '../base/index.js';
 import { getStrategyDetails, getTransactionDeadlineMinutes, getVaultContract, fetchTokenPrices, CACHE_DURATIONS, getMinDeploymentForGas, getMinSwapValue } from 'fum_library';
 import { getWrappedNativeAddress, getWrappedNativeSymbol, getNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { retryRpcCall } from '../../utils/RetryHelper.js';
-import { UnrecoverableError } from '../../utils/errors.js';
+import { UnrecoverableError, formatErrorForDisplay } from '../../utils/errors.js';
 
 /**
  * Baby Steps Strategy - Conservative position management with single position per vault
@@ -171,7 +171,7 @@ export default class BabyStepsStrategy extends StrategyBase {
             fees: aggregatedFees,
             source: 'initialization',
             totalFailedUSD,
-            error: error.message,
+            error: formatErrorForDisplay(error),
             timestamp: Date.now(),
             log: {
               level: 'error',
@@ -648,7 +648,7 @@ export default class BabyStepsStrategy extends StrategyBase {
         fees: aggregatedFees,
         source: 'swap_threshold',
         totalFailedUSD,
-        error: error.message,
+        error: formatErrorForDisplay(error),
         timestamp: Date.now(),
         log: {
           level: 'error',
@@ -749,7 +749,7 @@ export default class BabyStepsStrategy extends StrategyBase {
             fees: aggregatedFees,
             source: 'rebalance',
             totalFailedUSD,
-            error: error.message,
+            error: formatErrorForDisplay(error),
             timestamp: Date.now(),
             log: {
               level: 'error',
@@ -2309,6 +2309,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     // Track which phases were used
     const phasesUsed = {
       wrapUnwrap: false,
+      combinedNativeWrapped: false,
       nonAlignedForDeficit: false,
       excessTargetTokens: false
     };
@@ -2345,7 +2346,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     let wrapAmount = 0n;    // native → wrapped native (e.g., ETH → WETH, AVAX → WAVAX)
     let unwrapAmount = 0n;  // wrapped native → native (e.g., WETH → ETH, WAVAX → AVAX)
 
-    // Pre-Phase: Handle native <-> wrapped native conversions before normal swap routing
+    // Native/wrapped native symbol detection
     const nativeSymbol = getNativeSymbol(this.chainId);
     const wrappedNativeSymbol = getWrappedNativeSymbol(this.chainId);
     const token0IsWrappedNative = token0Data.symbol === wrappedNativeSymbol;
@@ -2353,49 +2354,294 @@ export default class BabyStepsStrategy extends StrategyBase {
     const token0IsNative = token0Data.isNative === true;
     const token1IsNative = token1Data.isNative === true;
 
-    // Case 1: Non-aligned native, target token is wrapped native → wrap
-    if (nonAlignedTokens.includes(nativeSymbol) && (token0IsWrappedNative || token1IsWrappedNative)) {
-      const nativeBalance = remainingBalances[nativeSymbol] || 0n;
-      const wrappedNativeDeficit = token0IsWrappedNative ? remainingToken0Deficit : remainingToken1Deficit;
+    // Track how much the combined phase consumes from aligned target tokens
+    // so Phase 2 doesn't double-count excess
+    const combinedPhaseConsumed = { token0: 0n, token1: 0n };
 
-      if (nativeBalance > 0n && wrappedNativeDeficit > 0n) {
-        const amount = nativeBalance < wrappedNativeDeficit ? nativeBalance : wrappedNativeDeficit;
-        wrapAmount += amount;
+    // ===========================================================================
+    // Step A: Early Wrap (non-native-pool platforms only)
+    // ===========================================================================
+    // Platforms without native pools (TJ, etc.) wrap internally during swaps anyway.
+    // Wrapping all native upfront consolidates native + wrapped into one token,
+    // eliminating batched-swap slippage when both target the same pool.
+    if (!adapter.supportsNativePools && remainingBalances[nativeSymbol] > 0n) {
+      const nativeBalance = remainingBalances[nativeSymbol];
+      wrapAmount += nativeBalance;
+      delete remainingBalances[nativeSymbol];
 
-        remainingBalances[nativeSymbol] -= amount;
-        if (token0IsWrappedNative) remainingToken0Deficit -= amount;
-        else remainingToken1Deficit -= amount;
+      // Remove native from non-aligned list if present
+      const idx = nonAlignedTokens.indexOf(nativeSymbol);
+      if (idx > -1) nonAlignedTokens.splice(idx, 1);
 
-        if (remainingBalances[nativeSymbol] === 0n) {
-          delete remainingBalances[nativeSymbol];
-          const idx = nonAlignedTokens.indexOf(nativeSymbol);
-          if (idx > -1) nonAlignedTokens.splice(idx, 1);
+      // If wrapped native is a TARGET token, the wrap directly covers its deficit (1:1)
+      if (token0IsWrappedNative || token1IsWrappedNative) {
+        const wrappedDeficit = token0IsWrappedNative ? remainingToken0Deficit : remainingToken1Deficit;
+        const coverAmount = nativeBalance < wrappedDeficit ? nativeBalance : wrappedDeficit;
+        const remainder = nativeBalance - coverAmount;
+
+        if (coverAmount > 0n) {
+          if (token0IsWrappedNative) remainingToken0Deficit -= coverAmount;
+          else remainingToken1Deficit -= coverAmount;
+          this.log(`Step A: Wrapped ${ethers.utils.formatEther(coverAmount)} ${nativeSymbol} → ${wrappedNativeSymbol} (covers target deficit)`);
         }
-        phasesUsed.wrapUnwrap = true;
-        this.log(`Pre-phase: Wrapping ${ethers.utils.formatEther(amount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
+
+        // Any remainder goes to non-aligned wrapped balance for deficit swaps
+        if (remainder > 0n) {
+          remainingBalances[wrappedNativeSymbol] = (remainingBalances[wrappedNativeSymbol] || 0n) + remainder;
+          if (!nonAlignedTokens.includes(wrappedNativeSymbol)) {
+            nonAlignedTokens.push(wrappedNativeSymbol);
+          }
+          this.log(`Step A: Remaining ${ethers.utils.formatEther(remainder)} ${wrappedNativeSymbol} available for deficit swaps`);
+        }
+      } else {
+        // Wrapped native is NOT a target token — all wrapped balance is non-aligned
+        remainingBalances[wrappedNativeSymbol] = (remainingBalances[wrappedNativeSymbol] || 0n) + nativeBalance;
+        if (!nonAlignedTokens.includes(wrappedNativeSymbol)) {
+          nonAlignedTokens.push(wrappedNativeSymbol);
+        }
+        this.log(`Step A: Wrapped all ${ethers.utils.formatEther(nativeBalance)} ${nativeSymbol} → ${wrappedNativeSymbol} (non-aligned, for deficit swaps)`);
+      }
+
+      phasesUsed.wrapUnwrap = true;
+    }
+
+    // ===========================================================================
+    // Pre-Phase: Handle native <-> wrapped native conversions for target token deficits
+    // ===========================================================================
+    // Only relevant when the platform supports native pools — otherwise Step A
+    // already consolidated everything to wrapped.
+    if (adapter.supportsNativePools) {
+      // Case 1: Non-aligned native, target token is wrapped native → wrap to cover deficit
+      if (nonAlignedTokens.includes(nativeSymbol) && (token0IsWrappedNative || token1IsWrappedNative)) {
+        const nativeBalance = remainingBalances[nativeSymbol] || 0n;
+        const wrappedNativeDeficit = token0IsWrappedNative ? remainingToken0Deficit : remainingToken1Deficit;
+
+        if (nativeBalance > 0n && wrappedNativeDeficit > 0n) {
+          const amount = nativeBalance < wrappedNativeDeficit ? nativeBalance : wrappedNativeDeficit;
+          wrapAmount += amount;
+
+          remainingBalances[nativeSymbol] -= amount;
+          if (token0IsWrappedNative) remainingToken0Deficit -= amount;
+          else remainingToken1Deficit -= amount;
+
+          if (remainingBalances[nativeSymbol] === 0n) {
+            delete remainingBalances[nativeSymbol];
+            const idx = nonAlignedTokens.indexOf(nativeSymbol);
+            if (idx > -1) nonAlignedTokens.splice(idx, 1);
+          }
+          phasesUsed.wrapUnwrap = true;
+          this.log(`Pre-phase: Wrapping ${ethers.utils.formatEther(amount)} ${nativeSymbol} to ${wrappedNativeSymbol}`);
+        }
+      }
+
+      // Case 2: Non-aligned wrapped native, target token is native → unwrap to cover deficit
+      if (nonAlignedTokens.includes(wrappedNativeSymbol) && (token0IsNative || token1IsNative)) {
+        const wrappedNativeBalance = remainingBalances[wrappedNativeSymbol] || 0n;
+        const nativeDeficit = token0IsNative ? remainingToken0Deficit : remainingToken1Deficit;
+
+        if (wrappedNativeBalance > 0n && nativeDeficit > 0n) {
+          const amount = wrappedNativeBalance < nativeDeficit ? wrappedNativeBalance : nativeDeficit;
+          unwrapAmount += amount;
+
+          remainingBalances[wrappedNativeSymbol] -= amount;
+          if (token0IsNative) remainingToken0Deficit -= amount;
+          else remainingToken1Deficit -= amount;
+
+          if (remainingBalances[wrappedNativeSymbol] === 0n) {
+            delete remainingBalances[wrappedNativeSymbol];
+            const idx = nonAlignedTokens.indexOf(wrappedNativeSymbol);
+            if (idx > -1) nonAlignedTokens.splice(idx, 1);
+          }
+          phasesUsed.wrapUnwrap = true;
+          this.log(`Pre-phase: Unwrapping ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
+        }
       }
     }
 
-    // Case 2: Non-aligned wrapped native, target token is native → unwrap
-    if (nonAlignedTokens.includes(wrappedNativeSymbol) && (token0IsNative || token1IsNative)) {
-      const wrappedNativeBalance = remainingBalances[wrappedNativeSymbol] || 0n;
-      const nativeDeficit = token0IsNative ? remainingToken0Deficit : remainingToken1Deficit;
+    // ===========================================================================
+    // Step B: Combined Native/Wrapped Phase (native-pool platforms only)
+    // ===========================================================================
+    // When the platform supports native pools and we have BOTH native and wrapped
+    // native that would be swapped to the same target, consolidate into one swap.
+    // Quote both native and wrapped routes, pick the better one.
+    if (adapter.supportsNativePools && (remainingToken0Deficit > 0n || remainingToken1Deficit > 0n)) {
+      const nativeBalance = remainingBalances[nativeSymbol] || 0n;
+      let wrappedBalance = remainingBalances[wrappedNativeSymbol] || 0n;
 
-      if (wrappedNativeBalance > 0n && nativeDeficit > 0n) {
-        const amount = wrappedNativeBalance < nativeDeficit ? wrappedNativeBalance : nativeDeficit;
-        unwrapAmount += amount;
+      // Also check for excess aligned tokens that are native/wrapped native
+      let excessWrappedFromAligned = 0n;
+      let excessNativeFromAligned = 0n;
+      if (token0IsWrappedNative && availableToken0 > requiredToken0) excessWrappedFromAligned = availableToken0 - requiredToken0;
+      if (token1IsWrappedNative && availableToken1 > requiredToken1) excessWrappedFromAligned = availableToken1 - requiredToken1;
+      if (token0IsNative && availableToken0 > requiredToken0) excessNativeFromAligned = availableToken0 - requiredToken0;
+      if (token1IsNative && availableToken1 > requiredToken1) excessNativeFromAligned = availableToken1 - requiredToken1;
 
-        remainingBalances[wrappedNativeSymbol] -= amount;
-        if (token0IsNative) remainingToken0Deficit -= amount;
-        else remainingToken1Deficit -= amount;
+      const totalNative = nativeBalance + excessNativeFromAligned;
+      const totalWrapped = wrappedBalance + excessWrappedFromAligned;
+      const combinedBalance = totalNative + totalWrapped;
 
-        if (remainingBalances[wrappedNativeSymbol] === 0n) {
-          delete remainingBalances[wrappedNativeSymbol];
-          const idx = nonAlignedTokens.indexOf(wrappedNativeSymbol);
-          if (idx > -1) nonAlignedTokens.splice(idx, 1);
+      if (combinedBalance > 0n && totalNative > 0n && totalWrapped > 0n) {
+        const nativeTokenData = this.tokens[nativeSymbol];
+        const wrappedNativeTokenData = this.tokens[wrappedNativeSymbol];
+        let remainingCombined = combinedBalance;
+
+        this.log(`Step B: Combined native/wrapped phase — ${ethers.utils.formatEther(totalNative)} ${nativeSymbol} + ` +
+                 `${ethers.utils.formatEther(totalWrapped)} ${wrappedNativeSymbol} = ${ethers.utils.formatEther(combinedBalance)} combined`);
+
+        const nativePrice = prices[nativeSymbol.toUpperCase()];
+        const token0IsNativeOrWrapped = token0IsWrappedNative || token0IsNative;
+        const token1IsNativeOrWrapped = token1IsWrappedNative || token1IsNative;
+
+        // Process token0 deficit
+        if (remainingToken0Deficit > 0n && remainingCombined > 0n && !token0IsNativeOrWrapped) {
+          if (nativePrice && Number.isFinite(nativePrice)) {
+            const combinedUSD = parseFloat(ethers.utils.formatEther(remainingCombined)) * nativePrice;
+
+            if (combinedUSD >= minSwapValue) {
+              // Quote both directions, pick better output
+              const nativeQuote = await this.getDeficitSwapQuote(
+                adapter, nativeTokenData, token0Data, remainingCombined, remainingToken0Deficit
+              );
+              const wrappedQuote = await this.getDeficitSwapQuote(
+                adapter, wrappedNativeTokenData, token0Data, remainingCombined, remainingToken0Deficit
+              );
+
+              // Pick winner by amountOut (whichever gives more output tokens)
+              const nativeOut = nativeQuote ? BigInt(nativeQuote.amountOut) : 0n;
+              const wrappedOut = wrappedQuote ? BigInt(wrappedQuote.amountOut) : 0n;
+              const winningQuote = nativeOut >= wrappedOut ? nativeQuote : wrappedQuote;
+              const winnerIsNative = nativeOut >= wrappedOut && nativeQuote !== null;
+              const winnerTokenData = winnerIsNative ? nativeTokenData : wrappedNativeTokenData;
+              const winnerLabel = winnerIsNative ? 'native' : 'wrapped';
+
+              if (winningQuote) {
+                const swapAmountIn = BigInt(winningQuote.amountIn);
+
+                deficitSwapInstructions.push({
+                  tokenIn: winnerTokenData, tokenOut: token0Data,
+                  amount: winningQuote.amountIn, isAmountIn: true
+                });
+
+                // Track wrap/unwrap needed
+                if (winnerIsNative) {
+                  const unwrapNeeded = swapAmountIn > totalNative ? swapAmountIn - totalNative : 0n;
+                  if (unwrapNeeded > 0n) unwrapAmount += unwrapNeeded;
+                } else {
+                  const wrapNeeded = swapAmountIn > totalWrapped ? swapAmountIn - totalWrapped : 0n;
+                  if (wrapNeeded > 0n) wrapAmount += wrapNeeded;
+                }
+
+                // Track excess aligned consumption for Phase 2
+                if (excessWrappedFromAligned > 0n && !winnerIsNative) {
+                  const fromExcess = swapAmountIn > wrappedBalance ? swapAmountIn - wrappedBalance : 0n;
+                  const consumed = fromExcess < excessWrappedFromAligned ? fromExcess : excessWrappedFromAligned;
+                  if (token0IsWrappedNative) combinedPhaseConsumed.token0 += consumed;
+                  else if (token1IsWrappedNative) combinedPhaseConsumed.token1 += consumed;
+                }
+                if (excessNativeFromAligned > 0n && winnerIsNative) {
+                  const fromExcess = swapAmountIn > nativeBalance ? swapAmountIn - nativeBalance : 0n;
+                  const consumed = fromExcess < excessNativeFromAligned ? fromExcess : excessNativeFromAligned;
+                  if (token0IsNative) combinedPhaseConsumed.token0 += consumed;
+                  else if (token1IsNative) combinedPhaseConsumed.token1 += consumed;
+                }
+
+                remainingCombined -= swapAmountIn;
+                remainingToken0Deficit -= BigInt(winningQuote.amountOut);
+                if (remainingToken0Deficit < 0n) remainingToken0Deficit = 0n;
+
+                phasesUsed.combinedNativeWrapped = true;
+                nonAlignedTokensUsedForDeficit.add(nativeSymbol);
+                nonAlignedTokensUsedForDeficit.add(wrappedNativeSymbol);
+
+                this.log(`Step B: ${ethers.utils.formatEther(swapAmountIn)} ${winnerTokenData.symbol} (${winnerLabel}) → ` +
+                         `${ethers.utils.formatUnits(winningQuote.amountOut, token0Data.decimals)} ${token0Data.symbol} (token0 deficit)`);
+              }
+            } else {
+              this.log(`Step B: Skipping combined swap for ${token0Data.symbol}: $${combinedUSD.toFixed(2)} < $${minSwapValue} (dust)`);
+              totalSkippedDustUSD += combinedUSD;
+            }
+          }
         }
-        phasesUsed.wrapUnwrap = true;
-        this.log(`Pre-phase: Unwrapping ${ethers.utils.formatEther(amount)} ${wrappedNativeSymbol} to ${nativeSymbol}`);
+
+        // Process token1 deficit
+        if (remainingToken1Deficit > 0n && remainingCombined > 0n && !token1IsNativeOrWrapped) {
+          if (nativePrice && Number.isFinite(nativePrice)) {
+            const combinedUSD = parseFloat(ethers.utils.formatEther(remainingCombined)) * nativePrice;
+
+            if (combinedUSD >= minSwapValue) {
+              const nativeQuote = await this.getDeficitSwapQuote(
+                adapter, nativeTokenData, token1Data, remainingCombined, remainingToken1Deficit
+              );
+              const wrappedQuote = await this.getDeficitSwapQuote(
+                adapter, wrappedNativeTokenData, token1Data, remainingCombined, remainingToken1Deficit
+              );
+
+              const nativeOut = nativeQuote ? BigInt(nativeQuote.amountOut) : 0n;
+              const wrappedOut = wrappedQuote ? BigInt(wrappedQuote.amountOut) : 0n;
+              const winningQuote = nativeOut >= wrappedOut ? nativeQuote : wrappedQuote;
+              const winnerIsNative = nativeOut >= wrappedOut && nativeQuote !== null;
+              const winnerTokenData = winnerIsNative ? nativeTokenData : wrappedNativeTokenData;
+              const winnerLabel = winnerIsNative ? 'native' : 'wrapped';
+
+              if (winningQuote) {
+                const swapAmountIn = BigInt(winningQuote.amountIn);
+
+                deficitSwapInstructions.push({
+                  tokenIn: winnerTokenData, tokenOut: token1Data,
+                  amount: winningQuote.amountIn, isAmountIn: true
+                });
+
+                if (winnerIsNative) {
+                  const unwrapNeeded = swapAmountIn > totalNative ? swapAmountIn - totalNative : 0n;
+                  if (unwrapNeeded > 0n) unwrapAmount += unwrapNeeded;
+                } else {
+                  const wrapNeeded = swapAmountIn > totalWrapped ? swapAmountIn - totalWrapped : 0n;
+                  if (wrapNeeded > 0n) wrapAmount += wrapNeeded;
+                }
+
+                if (excessWrappedFromAligned > 0n && !winnerIsNative) {
+                  const fromExcess = swapAmountIn > wrappedBalance ? swapAmountIn - wrappedBalance : 0n;
+                  const consumed = fromExcess < excessWrappedFromAligned ? fromExcess : excessWrappedFromAligned;
+                  if (token0IsWrappedNative) combinedPhaseConsumed.token0 += consumed;
+                  else if (token1IsWrappedNative) combinedPhaseConsumed.token1 += consumed;
+                }
+                if (excessNativeFromAligned > 0n && winnerIsNative) {
+                  const fromExcess = swapAmountIn > nativeBalance ? swapAmountIn - nativeBalance : 0n;
+                  const consumed = fromExcess < excessNativeFromAligned ? fromExcess : excessNativeFromAligned;
+                  if (token0IsNative) combinedPhaseConsumed.token0 += consumed;
+                  else if (token1IsNative) combinedPhaseConsumed.token1 += consumed;
+                }
+
+                remainingCombined -= swapAmountIn;
+                remainingToken1Deficit -= BigInt(winningQuote.amountOut);
+                if (remainingToken1Deficit < 0n) remainingToken1Deficit = 0n;
+
+                phasesUsed.combinedNativeWrapped = true;
+                nonAlignedTokensUsedForDeficit.add(nativeSymbol);
+                nonAlignedTokensUsedForDeficit.add(wrappedNativeSymbol);
+
+                this.log(`Step B: ${ethers.utils.formatEther(swapAmountIn)} ${winnerTokenData.symbol} (${winnerLabel}) → ` +
+                         `${ethers.utils.formatUnits(winningQuote.amountOut, token1Data.decimals)} ${token1Data.symbol} (token1 deficit)`);
+              }
+            } else {
+              this.log(`Step B: Skipping combined swap for ${token1Data.symbol}: $${combinedUSD.toFixed(2)} < $${minSwapValue} (dust)`);
+              totalSkippedDustUSD += combinedUSD;
+            }
+          }
+        }
+
+        // Remove native and wrapped from non-aligned tokens (fully handled by combined phase)
+        const nativeIdx = nonAlignedTokens.indexOf(nativeSymbol);
+        if (nativeIdx > -1) nonAlignedTokens.splice(nativeIdx, 1);
+        const wrappedIdx = nonAlignedTokens.indexOf(wrappedNativeSymbol);
+        if (wrappedIdx > -1) nonAlignedTokens.splice(wrappedIdx, 1);
+        delete remainingBalances[nativeSymbol];
+        delete remainingBalances[wrappedNativeSymbol];
+
+        if (phasesUsed.combinedNativeWrapped) {
+          phasesUsed.wrapUnwrap = wrapAmount > 0n || unwrapAmount > 0n;
+          this.log(`Step B complete. Remaining combined: ${ethers.utils.formatEther(remainingCombined)}`);
+        }
       }
     }
 
@@ -2465,8 +2711,11 @@ export default class BabyStepsStrategy extends StrategyBase {
     }
 
     // Phase 2: Use excess target tokens if deficits remain (filter dust)
-    const excessToken0 = availableToken0 > requiredToken0 ? availableToken0 - requiredToken0 : 0n;
-    const excessToken1 = availableToken1 > requiredToken1 ? availableToken1 - requiredToken1 : 0n;
+    // Adjust available amounts by what the combined phase already consumed
+    const adjustedAvailableToken0 = availableToken0 - combinedPhaseConsumed.token0;
+    const adjustedAvailableToken1 = availableToken1 - combinedPhaseConsumed.token1;
+    const excessToken0 = adjustedAvailableToken0 > requiredToken0 ? adjustedAvailableToken0 - requiredToken0 : 0n;
+    const excessToken1 = adjustedAvailableToken1 > requiredToken1 ? adjustedAvailableToken1 - requiredToken1 : 0n;
 
     // Check if excess amounts are above swap minimum
     let swappableExcessToken0 = excessToken0;
@@ -2607,8 +2856,24 @@ export default class BabyStepsStrategy extends StrategyBase {
       chainId: this.chainId
     };
 
+    // 🔬 Log deficit swap instructions for debugging
+    for (let i = 0; i < deficitSwapInstructions.length; i++) {
+      const instr = deficitSwapInstructions[i];
+      this.log(`🔬 Deficit swap ${i + 1}/${deficitSwapInstructions.length}: ` +
+        `${instr.tokenIn.symbol} (isNative=${instr.tokenIn.isNative}, addr=${instr.tokenIn.address}) → ` +
+        `${instr.tokenOut.symbol} (isNative=${instr.tokenOut.isNative}, addr=${instr.tokenOut.address}), ` +
+        `amount=${ethers.utils.formatUnits(instr.amount, instr.tokenIn.decimals)}, isAmountIn=${instr.isAmountIn}`);
+    }
+
     const { transactions: deficitSwaps, metadata: deficitMetadata } =
       await adapter.batchSwapTransactions(deficitSwapInstructions, swapOptions);
+
+    // 🔬 Log generated swap transactions for debugging
+    for (let i = 0; i < deficitSwaps.length; i++) {
+      const tx = deficitSwaps[i];
+      this.log(`🔬 Swap tx ${i + 1}/${deficitSwaps.length}: ` +
+        `to=${tx.to}, value=${tx.value || '0'}, dataLen=${tx.data?.length || 0}`);
+    }
 
     // Build wrap/unwrap result
     const wrapUnwrapResult = {

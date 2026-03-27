@@ -77,7 +77,7 @@ describe('AutomationService Initialization - TJ V2.2 Position Demotion + addToPo
             tokenX: 'USDC',
             tokenY: 'WAVAX',
             binStep: 10,
-            percentOfAssets: 20,
+            percentOfAssets: 15,
             binRange: { type: 'centered', spacing: 10 }
           },
           // Aligned position 2: shifted — will be DEMOTED (centeredness ~0.15)
@@ -85,7 +85,7 @@ describe('AutomationService Initialization - TJ V2.2 Position Demotion + addToPo
             tokenX: 'USDC',
             tokenY: 'WAVAX',
             binStep: 10,
-            percentOfAssets: 20,
+            percentOfAssets: 15,
             binRange: { type: 'shifted', spacing: 10, offset: 7 }
           },
           // Non-aligned position: USDT not in target tokens
@@ -93,7 +93,7 @@ describe('AutomationService Initialization - TJ V2.2 Position Demotion + addToPo
             tokenX: 'USDC',
             tokenY: USDT,
             binStep: 1,
-            percentOfAssets: 30,
+            percentOfAssets: 25,
             binRange: { type: 'centered', spacing: 10 }
           }
         ],
@@ -357,7 +357,7 @@ describe('AutomationService Initialization - TJ V2.2 Position Demotion + addToPo
       expect(event.capturePoint).toBe('pre_initialization');
       expect(event.strategyId).toBe('bob');
       expect(typeof event.timestamp).toBe('number');
-      expect(event.timestamp).toBeGreaterThan(Date.now() - 60000);
+      expect(event.timestamp).toBeGreaterThan(Date.now() - 180000); // 5 min window — BS-2100 setup takes ~3 min
     });
   });
 

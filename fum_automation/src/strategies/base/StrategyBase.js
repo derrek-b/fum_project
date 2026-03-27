@@ -145,6 +145,29 @@ export default class StrategyBase {
     const signer = this.getVaultSigner(vault);
     const vaultContractWithSigner = vaultContract.connect(signer);
 
+    // Pre-check with callStatic for swap type to get detailed revert reasons
+    // (estimateGas wraps reverts in a generic error, callStatic preserves them)
+    if (type === 'swap') {
+      try {
+        await vaultContractWithSigner.callStatic.swap(targets, calldatas, values);
+      } catch (staticError) {
+        const reason = staticError.reason || staticError.message;
+        this.log(`🔬 [callStatic] Batch swap pre-check FAILED: ${reason}`);
+
+        // Isolate which swap in the batch fails
+        for (let i = 0; i < targets.length; i++) {
+          try {
+            await vaultContractWithSigner.callStatic.swap([targets[i]], [calldatas[i]], [values[i]]);
+            this.log(`🔬 [callStatic] Swap ${i + 1}/${targets.length} individually: OK`);
+          } catch (individualError) {
+            this.log(`🔬 [callStatic] Swap ${i + 1}/${targets.length} individually FAILED: ${individualError.reason || individualError.message}`);
+          }
+        }
+
+        throw new Error(`Swap callStatic pre-check failed for ${operationType}: ${reason}`);
+      }
+    }
+
     // Estimate gas before execution
     let gasEstimated = '0';
     try {

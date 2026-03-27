@@ -368,6 +368,30 @@ export async function setupTraderJoeTestVault(hardhat, contracts, deployedContra
 
     const createPositionData = await adapter.generateCreatePositionData(createPositionParams);
 
+    // callStatic first to get detailed revert reason if mint fails
+    try {
+      await testVault.callStatic.mint(
+        [createPositionData.to],
+        [createPositionData.data],
+        [createPositionData.value]
+      );
+    } catch (staticError) {
+      console.log(`    🔬 callStatic mint FAILED: ${staticError.reason || staticError.message}`);
+      // Try calling TJPositionManager directly to get the actual revert
+      try {
+        await hardhat.provider.call({
+          to: createPositionData.to,
+          data: createPositionData.data,
+          from: vaultAddress,
+          value: createPositionData.value || 0
+        });
+        console.log(`    🔬 Direct call to TJPositionManager succeeded — vault validation issue`);
+      } catch (directError) {
+        console.log(`    🔬 Direct call to TJPositionManager FAILED: ${directError.reason || directError.message}`);
+      }
+      throw staticError;
+    }
+
     // Execute position creation through vault
     const mintTx = await testVault.mint(
       [createPositionData.to],

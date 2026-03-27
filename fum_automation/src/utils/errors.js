@@ -65,3 +65,60 @@ export function isInsufficientFundsError(error) {
   const message = (error.message || '').toLowerCase();
   return message.includes("doesn't have enough funds to send tx");
 }
+
+/**
+ * Extract a human-readable error message from an ethers.js error or any Error.
+ *
+ * ethers.js errors dump the full transaction calldata, nested RPC responses,
+ * and hex-encoded revert data into error.message. This function extracts only
+ * the parts a user can understand.
+ *
+ * Priority:
+ * 1. Solidity revert reason (e.g., "PositionVault: swap failed")
+ * 2. ethers.js reason field (e.g., "transaction reverted")
+ * 3. First line of message, capped at 200 chars
+ *
+ * Use this for any error message that leaves the service toward the user:
+ * SSE events, blacklist reasons, tracker entries.
+ *
+ * @param {Error|string} error - The error to clean
+ * @returns {string} Human-readable error message
+ */
+export function formatErrorForDisplay(error) {
+  if (typeof error === 'string') {
+    // Already a string — might be a pre-formatted message wrapping a raw error
+    // Try to extract the revert reason if embedded
+    const revertMatch = error.match(/reverted with reason string '([^']+)'/);
+    if (revertMatch) return revertMatch[1];
+
+    // Take first line, cap length
+    const firstLine = error.split('\n')[0];
+    return firstLine.length > 200 ? firstLine.slice(0, 200) + '...' : firstLine;
+  }
+
+  if (!error) return 'Unknown error';
+
+  // ethers.js nests the Solidity revert reason in error.reason
+  // Format: 'Error: VM Exception while processing transaction: reverted with reason string "X"'
+  // or just the reason string directly
+  if (error.reason) {
+    const revertMatch = error.reason.match(/reverted with reason string '([^']+)'/);
+    if (revertMatch) return revertMatch[1];
+    return error.reason;
+  }
+
+  // Some nested ethers errors have the revert reason deeper
+  if (error.error?.message) {
+    const revertMatch = error.error.message.match(/reverted with reason string '([^']+)'/);
+    if (revertMatch) return revertMatch[1];
+  }
+
+  // Fall back to message, but extract revert reason if embedded in the dump
+  const message = error.message || String(error);
+  const revertMatch = message.match(/reverted with reason string '([^']+)'/);
+  if (revertMatch) return revertMatch[1];
+
+  // Last resort: first line, capped
+  const firstLine = message.split('\n')[0];
+  return firstLine.length > 200 ? firstLine.slice(0, 200) + '...' : firstLine;
+}
