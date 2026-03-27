@@ -139,7 +139,7 @@ async function main() {
   console.log('Swapping 100 WAVAX for USDC...');
   await (await lbRouter.swapExactTokensForTokens(
     ethers.utils.parseEther('100'), 0,
-    { pairBinSteps: [20], versions: [2], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
+    { pairBinSteps: [10], versions: [3], tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS] },
     signer.address, deadline
   )).wait();
 
@@ -147,8 +147,8 @@ async function main() {
   await (await lbRouter.swapExactTokensForTokens(
     ethers.utils.parseEther('100'), 0,
     {
-      pairBinSteps: [20, 1],
-      versions: [2, 3],
+      pairBinSteps: [10, 1],
+      versions: [3, 3],
       tokenPath: [WAVAX_ADDRESS, USDC_ADDRESS, USDT_ADDRESS],
     },
     signer.address, deadline

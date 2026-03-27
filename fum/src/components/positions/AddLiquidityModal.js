@@ -150,17 +150,16 @@ export default function AddLiquidityModal({
   const [transactionError, setTransactionError] = useState('');
   const [transactionWarning, setTransactionWarning] = useState('');
 
-  // Get adapter for the selected platform
+  // Get adapter for the selected platform (only when modal is visible)
   const adapter = useMemo(() => {
-    if (!readProvider || !selectedPlatform || !chainId) return null;
+    if (!show || !readProvider || !selectedPlatform || !chainId) return null;
     try {
       return AdapterFactory.getAdapter(selectedPlatform, chainId);
     } catch (error) {
       console.error(`Failed to get adapter for platform ${selectedPlatform}:`, error);
-      showError(`Failed to initialize ${selectedPlatform} adapter. Please try a different platform.`);
       return null;
     }
-  }, [selectedPlatform, chainId, readProvider, showError]);
+  }, [show, selectedPlatform, chainId, readProvider]);
 
   // Calculate USD values if token prices are available
   // Use tokenPrices prop if provided, otherwise use localTokenPrices (fetched for new positions)
