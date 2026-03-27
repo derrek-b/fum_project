@@ -58,6 +58,7 @@
  * | getIncentivePreCloseTransactions    | Strategy (close position)      | OPTIONAL  |
  * | getIncentivePostCreateTransactions  | Strategy (create position)     | OPTIONAL  |
  * | getIncentiveClaimTransactions       | Strategy (fee collection)      | OPTIONAL  |
+ * | supportsNativePools (property)      | Strategy (prepareTokens)       | OPTIONAL  |
  * =============================================================================
  */
 export default class PlatformAdapter {
@@ -88,6 +89,12 @@ export default class PlatformAdapter {
     if (!this.platformName) {
       throw new Error("platformName must be defined");
     }
+
+    // Whether this platform has pools that use native tokens directly (e.g., V4 ETH pools
+    // with currency0 = AddressZero). When false, all pools use the wrapped native token
+    // and the router wraps internally — the strategy can safely wrap native upfront.
+    // Subclasses override in their constructor if they support native pools.
+    this.supportsNativePools = false;
   }
 
   /**

@@ -50,6 +50,9 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
     // ERC20 ABI and interface for approval checks
     this.erc20ABI = ERC20ABI;
     this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
+
+    // TJ V2.2 pools use WAVAX/WETH — no native token pools. Router wraps internally.
+    // supportsNativePools = false (inherited from PlatformAdapter)
   }
 
   // =============================================================================
@@ -467,8 +470,8 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
           const uncollectedFees0 = Number(totalFeesX) / Math.pow(10, token0Data.decimals);
           const uncollectedFees1 = Number(totalFeesY) / Math.pow(10, token1Data.decimals);
 
-          // Fee percentage (base fee only)
-          const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100;
+          // Fee percentage (base fee only), rounded to avoid IEEE 754 float noise
+          const fee = Math.round(poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100 * 1e6) / 1e6;
 
           positions[pos.id] = {
             // Identity
@@ -609,8 +612,8 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       const uncollectedFees0 = Number(totalFeesX) / Math.pow(10, token0Data.decimals);
       const uncollectedFees1 = Number(totalFeesY) / Math.pow(10, token1Data.decimals);
 
-      // Fee percentage
-      const fee = poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100;
+      // Fee percentage (base fee only), rounded to avoid IEEE 754 float noise
+      const fee = Math.round(poolData.feeParameters.baseFactor * poolData.binStep / 1e8 * 100 * 1e6) / 1e6;
 
       return {
         id: String(positionId),

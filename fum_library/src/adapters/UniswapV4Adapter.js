@@ -114,6 +114,9 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
     const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
     this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
+
+    // V4 supports native ETH pools (currency0 = AddressZero)
+    this.supportsNativePools = true;
   }
 
   // ===========================================================================
