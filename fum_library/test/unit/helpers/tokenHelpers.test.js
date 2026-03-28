@@ -168,6 +168,51 @@ describe('Token Helpers', () => {
         expect(() => getTokenBySymbol('')).toThrow('Token symbol cannot be empty');
       });
     });
+
+    describe('Wrapped Symbol Fallback', () => {
+      it('should resolve WETH via wrappedSymbol fallback', () => {
+        const result = getTokenBySymbol('WETH');
+
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('WETH');
+        expect(result.name).toBe('Wrapped Ether');
+        expect(result.decimals).toBe(18);
+        expect(result.isNative).toBe(false);
+        expect(result.addresses).toBeDefined();
+        // Wrapped address should NOT be ADDRESS_ZERO (native uses zero, wrapped uses real address)
+        expect(result.addresses[42161]).toBeDefined();
+        expect(result.addresses[42161]).not.toBe('0x0000000000000000000000000000000000000000');
+      });
+
+      it('should resolve WAVAX via wrappedSymbol fallback', () => {
+        const result = getTokenBySymbol('WAVAX');
+
+        expect(result).toBeDefined();
+        expect(result.symbol).toBe('WAVAX');
+        expect(result.name).toBe('Wrapped Avalanche');
+        expect(result.decimals).toBe(18);
+        expect(result.isNative).toBe(false);
+        expect(result.addresses).toBeDefined();
+        expect(result.addresses[43114]).toBeDefined();
+        expect(result.addresses[43114]).not.toBe('0x0000000000000000000000000000000000000000');
+      });
+
+      it('should still throw for truly unknown symbols', () => {
+        expect(() => getTokenBySymbol('WDOGE')).toThrow('Token WDOGE not found');
+      });
+
+      it('should return different object from native token lookup', () => {
+        const eth = getTokenBySymbol('ETH');
+        const weth = getTokenBySymbol('WETH');
+
+        expect(eth.symbol).toBe('ETH');
+        expect(weth.symbol).toBe('WETH');
+        expect(eth.isNative).toBe(true);
+        expect(weth.isNative).toBe(false);
+        // Addresses should differ — native uses ADDRESS_ZERO, wrapped uses real contract
+        expect(eth.addresses[42161]).not.toBe(weth.addresses[42161]);
+      });
+    });
   });
 
   describe('getTokenAddress', () => {

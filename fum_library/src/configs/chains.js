@@ -130,7 +130,7 @@ const chains = {
         lbFactoryAddress: "0xb43120c4745967fa9b93E79C149E66B0f2D6Fe0c",
         lbRouterAddress: "0x18556DA13313f3532c54711497A8FedAC273220E",
         lbQuoterAddress: "0x9A550a522BBaDFB69019b0432800Ed17855A51C3",
-        positionManagerAddress: "0x17f4B55A352Be71CC03856765Ad04147119Aa09B",  // Populated per test run after TJPositionManager deployment
+        positionManagerAddress: "0xCBd482597a26c0255a5F38B3360bE2015D628187",  // Populated per test run after TJPositionManager deployment
         liquidityHelperAddress: "0xA5c68C9E55Dde3505e60c4B5eAe411e2977dfB35",
       },
     },

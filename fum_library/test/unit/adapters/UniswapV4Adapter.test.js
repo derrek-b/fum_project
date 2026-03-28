@@ -163,6 +163,10 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         expect(adapter.platformName).toBe('Uniswap V4');
       });
 
+      it('should support native pools', () => {
+        expect(adapter.supportsNativePools).toBe(true);
+      });
+
       it('should cache platform addresses', () => {
         expect(adapter.addresses).toBeDefined();
         expect(adapter.addresses).toBeTypeOf('object');

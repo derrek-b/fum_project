@@ -125,6 +125,10 @@ describe('TraderJoeV2_2Adapter', () => {
       expect(adapter.chainConfig).toBeDefined();
       expect(adapter.chainConfig.name).toBe('Forked Avalanche'); // 1338 config
     });
+
+    it('should not support native pools', () => {
+      expect(adapter.supportsNativePools).toBe(false);
+    });
   });
 
   describe('sortTokens', () => {

@@ -900,6 +900,13 @@ export function validateTokensForStrategy (vaultTokens, strategyTokens, chainId)
     return { isValid: true, warnings: [] };
   }
 
+  // Validate optional chainId if provided
+  if (chainId !== undefined && chainId !== null) {
+    if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId <= 0) {
+      throw new Error('chainId must be a positive integer');
+    }
+  }
+
   // Build native ↔ wrapped equivalents map from chain tokens
   const nativeEquivalents = {};
   if (chainId) {
@@ -959,6 +966,13 @@ export function validatePositionsForStrategy (vaultPositions, pools, strategyTok
 
   if (!pools) {
     return { isValid: true, warnings: [] };
+  }
+
+  // Validate optional chainId if provided
+  if (chainId !== undefined && chainId !== null) {
+    if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId <= 0) {
+      throw new Error('chainId must be a positive integer');
+    }
   }
 
   // Build native ↔ wrapped equivalents map from chain tokens

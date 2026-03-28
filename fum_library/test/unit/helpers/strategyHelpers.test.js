@@ -2560,6 +2560,94 @@ describe('Strategy Helpers', () => {
         expect(result.warnings[0].items).not.toContain('USDC');
       });
     });
+
+    describe('Native/Wrapped Equivalence (chainId)', () => {
+      it('should treat ETH as equivalent to WETH when chainId is provided (Arbitrum)', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        const result = validateTokensForStrategy(vaultTokens, strategyTokens, 42161);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should treat WETH as equivalent to ETH when chainId is provided (bidirectional)', () => {
+        const vaultTokens = { WETH: 1 };
+        const strategyTokens = ['ETH'];
+        const result = validateTokensForStrategy(vaultTokens, strategyTokens, 42161);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should treat AVAX as equivalent to WAVAX when chainId is provided (Avalanche)', () => {
+        const vaultTokens = { AVAX: 1 };
+        const strategyTokens = ['WAVAX'];
+        const result = validateTokensForStrategy(vaultTokens, strategyTokens, 43114);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should NOT treat ETH as equivalent to WETH without chainId (backward compat)', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        const result = validateTokensForStrategy(vaultTokens, strategyTokens);
+        expect(result.isValid).toBe(false);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0].items).toContain('ETH');
+      });
+
+      it('should only match native/wrapped — other unmatched tokens still flagged', () => {
+        const vaultTokens = { ETH: 1, USDC: 500, LINK: 100 };
+        const strategyTokens = ['WETH', 'USDC'];
+        const result = validateTokensForStrategy(vaultTokens, strategyTokens, 42161);
+        expect(result.isValid).toBe(false);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0].count).toBe(1);
+        expect(result.warnings[0].items).toContain('LINK');
+        expect(result.warnings[0].items).not.toContain('ETH');
+      });
+    });
+
+    describe('chainId Validation', () => {
+      it('should throw for string chainId', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, 'abc'))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should throw for negative chainId', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, -1))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should throw for float chainId', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, 3.5))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should throw for zero chainId', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, 0))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should not throw for undefined chainId (optional param)', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, undefined)).not.toThrow();
+      });
+
+      it('should not throw for null chainId (optional param)', () => {
+        const vaultTokens = { ETH: 1 };
+        const strategyTokens = ['WETH'];
+        expect(() => validateTokensForStrategy(vaultTokens, strategyTokens, null)).not.toThrow();
+      });
+    });
   });
 
   describe('validatePositionsForStrategy', () => {
@@ -2921,6 +3009,65 @@ describe('Strategy Helpers', () => {
         const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
         expect(result.isValid).toBe(true);
         expect(result.warnings).toHaveLength(0);
+      });
+    });
+
+    describe('Native/Wrapped Equivalence (chainId)', () => {
+      it('should treat ETH/USDC position as matching WETH/USDC strategy with chainId', () => {
+        const vaultPositions = [{ id: '12345', pool: '0xabc' }];
+        const pools = {
+          '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
+        };
+        const strategyTokens = ['WETH', 'USDC'];
+        const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens, 42161);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should NOT treat ETH/USDC position as matching WETH/USDC strategy without chainId', () => {
+        const vaultPositions = [{ id: '12345', pool: '0xabc' }];
+        const pools = {
+          '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
+        };
+        const strategyTokens = ['WETH', 'USDC'];
+        const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens);
+        expect(result.isValid).toBe(false);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings[0].items[0].nonMatchingTokens).toContain('ETH');
+      });
+
+      it('should treat AVAX/USDC position as matching WAVAX/USDC strategy with chainId', () => {
+        const vaultPositions = [{ id: '12345', pool: '0xabc' }];
+        const pools = {
+          '0xabc': { token0: { symbol: 'AVAX' }, token1: { symbol: 'USDC' } }
+        };
+        const strategyTokens = ['WAVAX', 'USDC'];
+        const result = validatePositionsForStrategy(vaultPositions, pools, strategyTokens, 43114);
+        expect(result.isValid).toBe(true);
+        expect(result.warnings).toHaveLength(0);
+      });
+    });
+
+    describe('chainId Validation', () => {
+      const vaultPositions = [{ id: '12345', pool: '0xabc' }];
+      const pools = {
+        '0xabc': { token0: { symbol: 'ETH' }, token1: { symbol: 'USDC' } }
+      };
+      const strategyTokens = ['WETH', 'USDC'];
+
+      it('should throw for string chainId', () => {
+        expect(() => validatePositionsForStrategy(vaultPositions, pools, strategyTokens, 'abc'))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should throw for negative chainId', () => {
+        expect(() => validatePositionsForStrategy(vaultPositions, pools, strategyTokens, -1))
+          .toThrow('chainId must be a positive integer');
+      });
+
+      it('should throw for zero chainId', () => {
+        expect(() => validatePositionsForStrategy(vaultPositions, pools, strategyTokens, 0))
+          .toThrow('chainId must be a positive integer');
       });
     });
   });
