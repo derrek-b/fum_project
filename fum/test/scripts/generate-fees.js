@@ -1,283 +1,125 @@
-// test/scripts/generate-fees.js
-// Simple script to generate fees by performing multiple swaps on a Uniswap V3 pool
-// NOTE: This script is for local Hardhat testing only
-//
-// Usage: node generate-fees.js [--token=SYMBOL] [--swaps=N] [--fee=FEE_TIER]
-// Example: node generate-fees.js --token=WETH --swaps=10 --fee=3000
-// Default: USDC/USDT swaps on 0.01% pool
-//
-// Fee tiers: 100 (0.01%), 500 (0.05%), 3000 (0.3%), 10000 (1%)
+/**
+ * test/scripts/generate-fees.js
+ *
+ * NOTE: This script is for local Hardhat testing only
+ *
+ * Generates trading fees on liquidity positions by performing round-trip swaps.
+ * Each round-trip (buy then sell) generates fees without net price movement.
+ * Uses hardhat_setStorageAt to mint tokens — no pool interaction for token acquisition.
+ *
+ * Default: WETH/USDC (V3) or ETH/USDC (V4) — matches seed script positions.
+ * With --token: swaps against WETH (V3) or ETH (V4) paired pools.
+ *
+ * Usage:
+ *   npm run generate-fees                          # V3 WETH/USDC (default)
+ *   npm run generate-fees:usdt                     # V3 WETH/USDT
+ *   npm run generate-fees:wbtc                     # V3 WETH/WBTC 0.05%
+ *   npm run generate-fees:link                     # V3 WETH/LINK 0.3%
+ *   npm run generate-fees:v4                       # V4 ETH/USDC
+ *   npm run generate-fees -- --platform=v4 --token=LINK  # V4 ETH/LINK 0.3%
+ *   npm run generate-fees -- --swaps=20            # More round-trips
+ *
+ * Token pools:
+ *   WETH (default) — WETH/USDC 0.05% (V3) or ETH/USDC 0.05% (V4)
+ *   USDT           — WETH/USDT 0.05% (V3) or ETH/USDT 0.05% (V4)
+ *   WBTC           — WETH/WBTC 0.05% (V3) or ETH/WBTC 0.05% (V4)
+ *   LINK           — WETH/LINK 0.30% (V3) or ETH/LINK 0.30% (V4)
+ */
 
 import { ethers } from 'ethers';
 
-// Define token addresses and pool configuration
-// All tokens are on Arbitrum mainnet (forked)
+// =============================================================================
+// Configuration
+// =============================================================================
+
+const RPC_URL = 'http://localhost:8545';
+const PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'; // Hardhat account #0
+
+// Token addresses (Arbitrum fork)
+const NATIVE_ETH = ethers.constants.AddressZero;
+const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+const USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+const WBTC_ADDRESS = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
+const LINK_ADDRESS = '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4';
+
+// ERC20 balance storage slots (auto-discovered by backtest/discover-slots.js)
+const TOKEN_BALANCE_SLOTS = {
+  [USDC_ADDRESS.toLowerCase()]: 9,
+  [WBTC_ADDRESS.toLowerCase()]: 51,
+  [WETH_ADDRESS.toLowerCase()]: 51,
+  [LINK_ADDRESS.toLowerCase()]: 51,
+  [USDT_ADDRESS.toLowerCase()]: 51,
+};
+
+// Token metadata and pool configuration
 const TOKENS = {
-  USDC: {
-    address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    decimals: 6,
-    symbol: 'USDC',
-    poolFeeWithUsdc: null // Base token
+  WETH: {
+    address: WETH_ADDRESS, decimals: 18, symbol: 'WETH',
+    quoteAddress: USDC_ADDRESS, quoteSymbol: 'USDC', quoteDecimals: 6,
+    fee: 500, swapAmountEth: '1',
   },
   USDT: {
-    address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-    decimals: 6,
-    symbol: 'USDT',
-    poolFeeWithUsdc: 100 // 0.01% - stablecoin pool
-  },
-  WETH: {
-    address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-    decimals: 18,
-    symbol: 'WETH',
-    poolFeeWithUsdc: 500 // 0.05%
+    address: USDT_ADDRESS, decimals: 6, symbol: 'USDT',
+    quoteAddress: USDT_ADDRESS, quoteSymbol: 'USDT', quoteDecimals: 6,
+    fee: 500, swapAmountEth: '1',
   },
   WBTC: {
-    address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
-    decimals: 8,
-    symbol: 'WBTC',
-    poolFeeWithUsdc: 500 // 0.05%
+    address: WBTC_ADDRESS, decimals: 8, symbol: 'WBTC',
+    quoteAddress: WBTC_ADDRESS, quoteSymbol: 'WBTC', quoteDecimals: 8,
+    fee: 500, swapAmountEth: '1',
   },
   LINK: {
-    address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4',
-    decimals: 18,
-    symbol: 'LINK',
-    poolFeeWithUsdc: 3000 // 0.3%
+    address: LINK_ADDRESS, decimals: 18, symbol: 'LINK',
+    quoteAddress: LINK_ADDRESS, quoteSymbol: 'LINK', quoteDecimals: 18,
+    fee: 3000, swapAmountEth: '1',
   }
 };
 
-// Define contract ABIs (minimal versions)
+// V3 addresses
+const V3_SWAP_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+
+// V4 addresses
+const UNIVERSAL_ROUTER = '0xa51afafe0263b40edaef0df8781ea9aa03e381a3';
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+// V4 action types
+const Actions = {
+  SWAP_EXACT_IN_SINGLE: 6,
+  SETTLE: 11,
+  TAKE: 14
+};
+
+const POOL_KEY_STRUCT = '(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)';
+const SWAP_EXACT_IN_SINGLE_STRUCT = `(${POOL_KEY_STRUCT} poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)`;
+
+// =============================================================================
+// ABIs
+// =============================================================================
+
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) external returns (bool)',
   'function balanceOf(address owner) external view returns (uint256)',
-  'function decimals() external view returns (uint8)',
-  'function symbol() external view returns (string)'
 ];
 
-const WETH_ABI = [
-  ...ERC20_ABI,
-  'function deposit() external payable'
-];
-
-// Note: Fees are distributed across ALL LPs proportionally, so we need large volumes
-// to generate meaningful fees for a single position
-const DEFAULT_SWAP_AMOUNT = '10000'; // 10k USDC per swap for most pairs
-const SWAP_AMOUNTS = {
-  USDT: '250000'  // 250k USDC per swap (stablecoin)
-};
-
-const ROUTER_ABI = [
+const V3_ROUTER_ABI = [
   'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external returns (uint256)'
 ];
 
-// Main function to perform swaps
-async function performSwaps(numSwaps = 5, targetSymbol = 'USDT', feeOverride = null) {
-  // Validate target token
-  const targetToken = TOKENS[targetSymbol.toUpperCase()];
-  if (!targetToken) {
-    console.error(`Unknown token: ${targetSymbol}`);
-    console.error(`Available tokens: ${Object.keys(TOKENS).filter(t => t !== 'USDC').join(', ')}`);
-    process.exit(1);
-  }
-  if (targetSymbol.toUpperCase() === 'USDC') {
-    console.error('Cannot swap USDC with itself. Please specify a different token.');
-    process.exit(1);
-  }
+const PERMIT2_ABI = [
+  'function approve(address token, address spender, uint160 amount, uint48 expiration) external'
+];
 
-  // Use fee override if provided, otherwise use token's default
-  const poolFee = feeOverride || targetToken.poolFeeWithUsdc;
-  const poolFeePercent = (poolFee / 10000).toFixed(2);
-  const swapAmount = SWAP_AMOUNTS[targetSymbol.toUpperCase()] || DEFAULT_SWAP_AMOUNT;
+// =============================================================================
+// Helpers
+// =============================================================================
 
-  console.log(`\n=== Starting generate-fees script ===`);
-  console.log(`Will perform ${numSwaps} round-trip swaps on USDC/${targetToken.symbol} ${poolFeePercent}% pool`);
-
-  // Setup provider - hardcoded for local Hardhat testing
-  const rpcUrl = "http://localhost:8545";
-  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
-  console.log(`Connected to local Hardhat: ${rpcUrl}`);
-
-  // Setup signer (wallet)
-  // WARNING: This is using the first Hardhat test account private key
-  // NEVER use this in production - it's only for local development
-  const PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-  console.log(`Using wallet address: ${wallet.address}`);
-
-  // Setup contract instances
-  const wethContract = new ethers.Contract(TOKENS.WETH.address, WETH_ABI, wallet);
-  const usdcContract = new ethers.Contract(TOKENS.USDC.address, ERC20_ABI, wallet);
-  const targetContract = new ethers.Contract(targetToken.address, ERC20_ABI, wallet);
-  const ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564'; // Uniswap V3 Router
-  const router = new ethers.Contract(ROUTER_ADDRESS, ROUTER_ABI, wallet);
-
-  // Get initial token balances
-  let usdcBalance = await usdcContract.balanceOf(wallet.address);
-  let targetBalance = await targetContract.balanceOf(wallet.address);
-  console.log(`\nInitial USDC balance: ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
-  console.log(`Initial ${targetToken.symbol} balance: ${ethers.utils.formatUnits(targetBalance, targetToken.decimals)} ${targetToken.symbol}`);
-
-  const usdcSwapAmount = ethers.utils.parseUnits(swapAmount, 6);
-
-  // Only acquire more USDC if we don't have enough for swaps
-  // Calculate minimum required based on swap amount * number of swaps with buffer
-  const minRequiredUsdc = usdcSwapAmount.mul(numSwaps + 2);
-
-  // Check if we need to acquire USDC
-  if (usdcBalance.lt(minRequiredUsdc)) {
-    console.log(`\n--- Acquiring USDC for swaps ---`);
-
-    // Calculate how much WETH we need (~$3k per ETH)
-    const wethNeeded = ethers.utils.parseEther("200"); // 200 WETH (~$600k)
-
-    // Check ETH balance and wrap if needed
-    const ethBalance = await provider.getBalance(wallet.address);
-    let wethBalance = await wethContract.balanceOf(wallet.address);
-
-    if (wethBalance.lt(wethNeeded)) {
-      const ethToWrap = wethNeeded.sub(wethBalance);
-      if (ethBalance.lt(ethToWrap)) {
-        // Fund the wallet with more ETH using Hardhat's hardhat_setBalance
-        console.log("Funding wallet with ETH...");
-        await provider.send('evm_setAccountBalance', [
-          wallet.address,
-          ethers.utils.hexValue(ethers.utils.parseEther("10000"))
-        ]);
-      }
-      console.log(`Wrapping ${ethers.utils.formatEther(ethToWrap)} ETH to WETH...`);
-      const wrapTx = await wethContract.deposit({ value: ethToWrap });
-      await wrapTx.wait();
-      wethBalance = await wethContract.balanceOf(wallet.address);
-    }
-
-    // Approve router to spend WETH
-    console.log("Approving router to spend WETH...");
-    const approveTx = await wethContract.approve(ROUTER_ADDRESS, ethers.constants.MaxUint256);
-    await approveTx.wait();
-
-    // Swap WETH for USDC (using 0.05% pool)
-    const wethForUsdc = ethers.utils.parseEther("100"); // ~$300k worth
-    console.log(`Swapping ${ethers.utils.formatEther(wethForUsdc)} WETH for USDC...`);
-
-    const usdcAcquireParams = {
-      tokenIn: TOKENS.WETH.address,
-      tokenOut: TOKENS.USDC.address,
-      fee: 500, // 0.05% WETH/USDC pool
-      recipient: wallet.address,
-      deadline: Math.floor(Date.now() / 1000) + 60 * 20,
-      amountIn: wethForUsdc,
-      amountOutMinimum: 0,
-      sqrtPriceLimitX96: 0
-    };
-    const tx1 = await router.exactInputSingle(usdcAcquireParams, { gasLimit: 500000 });
-    await tx1.wait();
-    usdcBalance = await usdcContract.balanceOf(wallet.address);
-    console.log(`  USDC balance: ${ethers.utils.formatUnits(usdcBalance, 6)}`);
-  }
-
-  // Approve router to spend tokens
-  console.log(`\nApproving router to spend USDC and ${targetToken.symbol}...`);
-  const approveUsdc = await usdcContract.approve(ROUTER_ADDRESS, ethers.constants.MaxUint256);
-  await approveUsdc.wait();
-  const approveTarget = await targetContract.approve(ROUTER_ADDRESS, ethers.constants.MaxUint256);
-  await approveTarget.wait();
-  console.log("Approvals complete");
-
-  // Record starting balances for summary
-  const startingUsdc = await usdcContract.balanceOf(wallet.address);
-  const startingTarget = await targetContract.balanceOf(wallet.address);
-
-  // Perform round-trip swaps to generate fees
-  console.log(`\n=== Performing ${numSwaps} round-trip swaps on USDC/${targetToken.symbol} ${poolFeePercent}% pool ===`);
-  console.log(`Swap amount: ${swapAmount} USDC per direction`);
-
-  for (let i = 0; i < numSwaps; i++) {
-    try {
-      console.log(`\n--- Round-trip ${i + 1}/${numSwaps} ---`);
-
-      // Swap 1: USDC → Target Token
-      console.log(`  USDC -> ${targetToken.symbol} (${swapAmount} USDC)...`);
-      const swap1Params = {
-        tokenIn: TOKENS.USDC.address,
-        tokenOut: targetToken.address,
-        fee: poolFee,
-        recipient: wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20,
-        amountIn: usdcSwapAmount,
-        amountOutMinimum: 0,
-        sqrtPriceLimitX96: 0
-      };
-      const tx1 = await router.exactInputSingle(swap1Params, { gasLimit: 500000 });
-      await tx1.wait();
-
-      // Get the target token balance to use for return swap
-      const targetBalanceAfterSwap = await targetContract.balanceOf(wallet.address);
-      console.log(`  OK USDC -> ${targetToken.symbol} complete (received ${ethers.utils.formatUnits(targetBalanceAfterSwap.sub(targetBalance), targetToken.decimals)} ${targetToken.symbol})`);
-
-      // Calculate amount to swap back (use what we just received)
-      const targetSwapAmount = targetBalanceAfterSwap.sub(targetBalance);
-      targetBalance = targetBalanceAfterSwap;
-
-      // Small delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Swap 2: Target Token → USDC
-      console.log(`  ${targetToken.symbol} -> USDC (${ethers.utils.formatUnits(targetSwapAmount, targetToken.decimals)} ${targetToken.symbol})...`);
-      const swap2Params = {
-        tokenIn: targetToken.address,
-        tokenOut: TOKENS.USDC.address,
-        fee: poolFee,
-        recipient: wallet.address,
-        deadline: Math.floor(Date.now() / 1000) + 60 * 20,
-        amountIn: targetSwapAmount,
-        amountOutMinimum: 0,
-        sqrtPriceLimitX96: 0
-      };
-      const tx2 = await router.exactInputSingle(swap2Params, { gasLimit: 500000 });
-      await tx2.wait();
-      targetBalance = await targetContract.balanceOf(wallet.address);
-      console.log(`  OK ${targetToken.symbol} -> USDC complete`);
-
-    } catch (error) {
-      console.error(`  Error in round-trip ${i + 1}:`, error.message);
-    }
-
-    // Delay between round-trips
-    if (i < numSwaps - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-
-  // Get final token balances
-  const finalUsdc = await usdcContract.balanceOf(wallet.address);
-  const finalTarget = await targetContract.balanceOf(wallet.address);
-
-  console.log("\n=== Swap Summary ===");
-  console.log(`Starting USDC: ${ethers.utils.formatUnits(startingUsdc, 6)}`);
-  console.log(`Final USDC:    ${ethers.utils.formatUnits(finalUsdc, 6)}`);
-  console.log(`USDC Change:   ${ethers.utils.formatUnits(finalUsdc.sub(startingUsdc), 6)}`);
-
-  console.log(`Starting ${targetToken.symbol}: ${ethers.utils.formatUnits(startingTarget, targetToken.decimals)}`);
-  console.log(`Final ${targetToken.symbol}:    ${ethers.utils.formatUnits(finalTarget, targetToken.decimals)}`);
-  console.log(`${targetToken.symbol} Change:   ${ethers.utils.formatUnits(finalTarget.sub(startingTarget), targetToken.decimals)}`);
-
-  // Calculate approximate fees generated
-  const swapAmountNum = parseFloat(swapAmount);
-  const totalVolume = swapAmountNum * 2 * numSwaps;
-  const feePercent = poolFee / 1000000; // Convert from basis points
-  const approxFees = totalVolume * feePercent;
-  console.log(`\nApproximate fees generated: $${approxFees.toFixed(2)}`);
-  console.log(`(Based on ${numSwaps} round-trips x 2 swaps x $${swapAmount} x ${poolFeePercent}% fee)`);
-
-  console.log("\n=== Fee generation complete ===");
-  console.log(`Your USDC/${targetToken.symbol} liquidity positions should now have accrued fees.`);
-}
-
-// Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
-  let numSwaps = 5; // default
-  let targetToken = 'USDT'; // default
-  let fee = null; // null = use token's default pool fee
+  let numSwaps = 5;
+  let targetToken = 'WETH';
+  let fee = null;
+  let platform = 'v3';
 
   for (const arg of args) {
     if (arg.startsWith('--swaps=')) {
@@ -290,25 +132,325 @@ function parseArgs() {
       targetToken = arg.split('=')[1].toUpperCase();
     } else if (arg.startsWith('--fee=')) {
       fee = parseInt(arg.split('=')[1], 10);
-      if (isNaN(fee) || ![100, 500, 3000, 10000].includes(fee)) {
-        console.error('Invalid --fee value. Must be 100, 500, 3000, or 10000.');
-        console.error('  100   = 0.01% (stablecoins)');
-        console.error('  500   = 0.05%');
-        console.error('  3000  = 0.3%');
-        console.error('  10000 = 1%');
-        process.exit(1);
-      }
+    } else if (arg.startsWith('--platform=')) {
+      platform = arg.split('=')[1].toLowerCase();
     }
   }
 
-  return { numSwaps, targetToken, fee };
+  if (!['v3', 'v4'].includes(platform)) {
+    console.error('Invalid platform. Must be v3 or v4.');
+    process.exit(1);
+  }
+
+  return { numSwaps, targetToken, fee, platform };
 }
 
-// Run the script
-const { numSwaps, targetToken, fee } = parseArgs();
-performSwaps(numSwaps, targetToken, fee)
+function createDeadline(minutes = 20) {
+  return Math.floor(Date.now() / 1000) + (minutes * 60);
+}
+
+function buildV4PoolKey(currency0, currency1, fee) {
+  const sorted = currency0.toLowerCase() < currency1.toLowerCase();
+  const tickSpacing = fee === 3000 ? 60 : 10;
+  return {
+    currency0: sorted ? currency0 : currency1,
+    currency1: sorted ? currency1 : currency0,
+    fee,
+    tickSpacing,
+    hooks: ethers.constants.AddressZero
+  };
+}
+
+/**
+ * Mint ERC20 tokens directly into a wallet using hardhat_setStorageAt.
+ */
+async function mintToken(provider, tokenAddress, walletAddress, amountBN) {
+  const slot = TOKEN_BALANCE_SLOTS[tokenAddress.toLowerCase()];
+  if (slot === undefined) {
+    throw new Error(`No storage slot found for token ${tokenAddress}`);
+  }
+
+  const storageSlot = ethers.utils.solidityKeccak256(
+    ['uint256', 'uint256'],
+    [walletAddress, slot]
+  );
+
+  await provider.send('hardhat_setStorageAt', [
+    tokenAddress,
+    storageSlot,
+    ethers.utils.hexZeroPad(amountBN.toHexString(), 32)
+  ]);
+}
+
+// =============================================================================
+// V4 Swap
+// =============================================================================
+
+async function executeV4Swap(signer, poolKey, tokenIn, tokenOut, amountIn) {
+  const zeroForOne = tokenIn.toLowerCase() < tokenOut.toLowerCase();
+  const amountInBN = ethers.BigNumber.from(amountIn);
+
+  const swapEncoded = ethers.utils.defaultAbiCoder.encode(
+    [SWAP_EXACT_IN_SINGLE_STRUCT],
+    [[
+      [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks],
+      zeroForOne,
+      amountInBN.toString(),
+      '0',
+      '0x'
+    ]]
+  );
+
+  const settleEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'uint256', 'bool'],
+    [tokenIn, 0, true]
+  );
+
+  const takeEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint256'],
+    [tokenOut, signer.address, 0]
+  );
+
+  const actionBytes = ethers.utils.hexlify([
+    Actions.SWAP_EXACT_IN_SINGLE,
+    Actions.SETTLE,
+    Actions.TAKE
+  ]);
+
+  const v4SwapPayload = ethers.utils.defaultAbiCoder.encode(
+    ['bytes', 'bytes[]'],
+    [actionBytes, [swapEncoded, settleEncoded, takeEncoded]]
+  );
+
+  const commands = ethers.utils.hexlify([0x10]);
+  const routerInterface = new ethers.utils.Interface([
+    'function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable'
+  ]);
+  const calldata = routerInterface.encodeFunctionData('execute', [
+    commands, [v4SwapPayload], createDeadline()
+  ]);
+
+  const isNativeIn = tokenIn === NATIVE_ETH;
+  const tx = await signer.sendTransaction({
+    to: UNIVERSAL_ROUTER,
+    data: calldata,
+    value: isNativeIn ? amountInBN : 0
+  });
+  return tx.wait();
+}
+
+// =============================================================================
+// V3 Fee Generation
+// =============================================================================
+
+async function generateFeesV3(wallet, numSwaps, targetSymbol, feeOverride) {
+  const token = TOKENS[targetSymbol];
+  if (!token) {
+    console.error(`Unknown token: ${targetSymbol}. Available: ${Object.keys(TOKENS).join(', ')}`);
+    process.exit(1);
+  }
+
+  const isBasePair = targetSymbol === 'WETH';
+  const poolFee = feeOverride || token.fee;
+  const poolFeePercent = (poolFee / 10000).toFixed(2);
+  const ethPerLeg = token.swapAmountEth;
+  const wethSwapAmount = ethers.utils.parseEther(ethPerLeg);
+
+  // For WETH token: pair is WETH/USDC. For others: pair is WETH/TOKEN.
+  const pairTokenAddress = isBasePair ? USDC_ADDRESS : token.address;
+  const pairTokenSymbol = isBasePair ? 'USDC' : token.symbol;
+  const pairTokenDecimals = isBasePair ? 6 : token.decimals;
+
+  console.log(`Pool: WETH/${pairTokenSymbol} ${poolFeePercent}%`);
+  console.log(`Swap amount: ${ethPerLeg} WETH per leg\n`);
+
+  const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, wallet);
+  const pairContract = new ethers.Contract(pairTokenAddress, ERC20_ABI, wallet);
+  const router = new ethers.Contract(V3_SWAP_ROUTER, V3_ROUTER_ABI, wallet);
+
+  // Mint WETH via storage slot
+  const wethNeeded = wethSwapAmount.mul(numSwaps + 2);
+  console.log(`Minting ${ethers.utils.formatEther(wethNeeded)} WETH via storage slot...`);
+  await mintToken(wallet.provider, WETH_ADDRESS, wallet.address, wethNeeded);
+
+  // Approve router for both tokens
+  console.log('Approving tokens...');
+  await (await wethContract.approve(V3_SWAP_ROUTER, ethers.constants.MaxUint256)).wait();
+  await (await pairContract.approve(V3_SWAP_ROUTER, ethers.constants.MaxUint256)).wait();
+
+  const startingWeth = await wethContract.balanceOf(wallet.address);
+  const startingPair = await pairContract.balanceOf(wallet.address);
+
+  console.log(`\n=== Performing ${numSwaps} round-trip swaps ===`);
+
+  for (let i = 0; i < numSwaps; i++) {
+    try {
+      console.log(`\n--- Round-trip ${i + 1}/${numSwaps} ---`);
+
+      // Leg 1: WETH → pair token
+      console.log(`  WETH -> ${pairTokenSymbol} (${ethPerLeg} WETH)...`);
+      const pairBefore = await pairContract.balanceOf(wallet.address);
+      await (await router.exactInputSingle({
+        tokenIn: WETH_ADDRESS, tokenOut: pairTokenAddress, fee: poolFee,
+        recipient: wallet.address, deadline: createDeadline(),
+        amountIn: wethSwapAmount, amountOutMinimum: 0, sqrtPriceLimitX96: 0
+      }, { gasLimit: 500000 })).wait();
+      const pairAfter = await pairContract.balanceOf(wallet.address);
+      const received = pairAfter.sub(pairBefore);
+      console.log(`  Received ${ethers.utils.formatUnits(received, pairTokenDecimals)} ${pairTokenSymbol}`);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Leg 2: pair token → WETH (swap back what we received)
+      console.log(`  ${pairTokenSymbol} -> WETH (${ethers.utils.formatUnits(received, pairTokenDecimals)} ${pairTokenSymbol})...`);
+      await (await router.exactInputSingle({
+        tokenIn: pairTokenAddress, tokenOut: WETH_ADDRESS, fee: poolFee,
+        recipient: wallet.address, deadline: createDeadline(),
+        amountIn: received, amountOutMinimum: 0, sqrtPriceLimitX96: 0
+      }, { gasLimit: 500000 })).wait();
+      console.log(`  Round-trip complete`);
+
+    } catch (error) {
+      console.error(`  Error in round-trip ${i + 1}:`, error.message);
+    }
+
+    if (i < numSwaps - 1) await new Promise(r => setTimeout(r, 500));
+  }
+
+  // Summary
+  const finalWeth = await wethContract.balanceOf(wallet.address);
+  const finalPair = await pairContract.balanceOf(wallet.address);
+  const ethValue = parseFloat(ethPerLeg) * 3000;
+  const totalVolume = ethValue * 2 * numSwaps;
+  const approxFees = totalVolume * (poolFee / 1000000);
+
+  console.log('\n=== Summary ===');
+  console.log(`WETH: ${ethers.utils.formatEther(startingWeth)} → ${ethers.utils.formatEther(finalWeth)} (${ethers.utils.formatEther(finalWeth.sub(startingWeth))})`);
+  console.log(`${pairTokenSymbol}: ${ethers.utils.formatUnits(startingPair, pairTokenDecimals)} → ${ethers.utils.formatUnits(finalPair, pairTokenDecimals)}`);
+  console.log(`Volume: ~$${totalVolume.toLocaleString()} (${numSwaps} round-trips x 2 x ~$${ethValue.toLocaleString()})`);
+  console.log(`Approximate fees generated: ~$${approxFees.toFixed(2)} (${poolFeePercent}% fee tier)`);
+}
+
+// =============================================================================
+// V4 Fee Generation
+// =============================================================================
+
+async function generateFeesV4(wallet, numSwaps, targetSymbol, feeOverride) {
+  const token = TOKENS[targetSymbol];
+  if (!token) {
+    console.error(`Unknown token: ${targetSymbol}. Available: ${Object.keys(TOKENS).join(', ')}`);
+    process.exit(1);
+  }
+
+  const isBasePair = targetSymbol === 'WETH';
+  const poolFee = feeOverride || token.fee;
+  const poolFeePercent = (poolFee / 10000).toFixed(2);
+  const ethPerLeg = token.swapAmountEth;
+  const ethSwapAmount = ethers.utils.parseEther(ethPerLeg);
+
+  // For WETH token: pair is ETH/USDC. For others: pair is ETH/TOKEN.
+  const pairTokenAddress = isBasePair ? USDC_ADDRESS : token.address;
+  const pairTokenSymbol = isBasePair ? 'USDC' : token.symbol;
+  const pairTokenDecimals = isBasePair ? 6 : token.decimals;
+
+  const poolKey = buildV4PoolKey(NATIVE_ETH, pairTokenAddress, poolFee);
+
+  console.log(`Pool: ETH/${pairTokenSymbol} ${poolFeePercent}% (V4)`);
+  console.log(`Swap amount: ${ethPerLeg} ETH per leg\n`);
+
+  const pairContract = new ethers.Contract(pairTokenAddress, ERC20_ABI, wallet);
+
+  // Ensure wallet has enough ETH
+  const ethNeeded = ethSwapAmount.mul(numSwaps + 5);
+  const ethBalance = await wallet.provider.getBalance(wallet.address);
+  if (ethBalance.lt(ethNeeded)) {
+    console.log('Funding wallet with ETH...');
+    await wallet.provider.send('hardhat_setBalance', [
+      wallet.address, ethers.utils.hexValue(ethers.utils.parseEther('1000'))
+    ]);
+  }
+
+  // Setup Permit2 for pair token → Universal Router (needed for leg 2)
+  console.log(`Setting up Permit2 approvals for ${pairTokenSymbol}...`);
+  await (await pairContract.approve(PERMIT2_ADDRESS, ethers.constants.MaxUint256)).wait();
+  const permit2 = new ethers.Contract(PERMIT2_ADDRESS, PERMIT2_ABI, wallet);
+  const maxAmount = ethers.BigNumber.from(2).pow(160).sub(1);
+  const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365;
+  await (await permit2.approve(pairTokenAddress, UNIVERSAL_ROUTER, maxAmount, expiration)).wait();
+
+  const startingEth = await wallet.provider.getBalance(wallet.address);
+  const startingPair = await pairContract.balanceOf(wallet.address);
+
+  console.log(`\n=== Performing ${numSwaps} round-trip swaps ===`);
+
+  for (let i = 0; i < numSwaps; i++) {
+    try {
+      console.log(`\n--- Round-trip ${i + 1}/${numSwaps} ---`);
+
+      // Leg 1: ETH → pair token
+      const pairBefore = await pairContract.balanceOf(wallet.address);
+      console.log(`  ETH -> ${pairTokenSymbol} (${ethPerLeg} ETH)...`);
+      await executeV4Swap(wallet, poolKey, NATIVE_ETH, pairTokenAddress, ethSwapAmount);
+      const pairAfter = await pairContract.balanceOf(wallet.address);
+      const received = pairAfter.sub(pairBefore);
+      console.log(`  Received ${ethers.utils.formatUnits(received, pairTokenDecimals)} ${pairTokenSymbol}`);
+
+      await new Promise(r => setTimeout(r, 500));
+
+      // Leg 2: pair token → ETH (swap back what we received)
+      console.log(`  ${pairTokenSymbol} -> ETH (${ethers.utils.formatUnits(received, pairTokenDecimals)} ${pairTokenSymbol})...`);
+      await executeV4Swap(wallet, poolKey, pairTokenAddress, NATIVE_ETH, received);
+      console.log(`  Round-trip complete`);
+
+    } catch (error) {
+      console.error(`  Error in round-trip ${i + 1}:`, error.message);
+    }
+
+    if (i < numSwaps - 1) await new Promise(r => setTimeout(r, 500));
+  }
+
+  // Summary
+  const finalEth = await wallet.provider.getBalance(wallet.address);
+  const finalPair = await pairContract.balanceOf(wallet.address);
+  const ethValue = parseFloat(ethPerLeg) * 3000;
+  const totalVolume = ethValue * 2 * numSwaps;
+  const approxFees = totalVolume * (poolFee / 1000000);
+
+  console.log('\n=== Summary ===');
+  console.log(`ETH: ${ethers.utils.formatEther(startingEth)} → ${ethers.utils.formatEther(finalEth)}`);
+  console.log(`${pairTokenSymbol}: ${ethers.utils.formatUnits(startingPair, pairTokenDecimals)} → ${ethers.utils.formatUnits(finalPair, pairTokenDecimals)}`);
+  console.log(`Volume: ~$${totalVolume.toLocaleString()} (${numSwaps} round-trips x 2 x ~$${ethValue.toLocaleString()})`);
+  console.log(`Approximate fees generated: ~$${approxFees.toFixed(2)} (${poolFeePercent}% fee tier)`);
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+async function main() {
+  const { numSwaps, targetToken, fee, platform } = parseArgs();
+
+  console.log('='.repeat(60));
+  console.log(`Fee Generation Script (${platform.toUpperCase()})`);
+  console.log('='.repeat(60));
+
+  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+  const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+  console.log(`Using wallet: ${wallet.address}`);
+
+  if (platform === 'v4') {
+    await generateFeesV4(wallet, numSwaps, targetToken, fee);
+  } else {
+    await generateFeesV3(wallet, numSwaps, targetToken, fee);
+  }
+
+  console.log('\n=== Fee generation complete ===');
+  console.log('Your liquidity positions should now have accrued fees.');
+}
+
+main()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.error("Error running generate-fees script:", error);
+    console.error('Error:', error);
     process.exit(1);
   });

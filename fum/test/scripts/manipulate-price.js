@@ -3,14 +3,30 @@
  *
  * NOTE: This script is for local Hardhat testing only
  *
- * Manipulates the USDC/USDT pool price in the Hardhat sandbox for testing
- * position rebalancing.
+ * Manipulates pool prices to push positions out of range for testing rebalancing.
+ * Computes swap amounts from pool liquidity to move price ~0.1% per swap.
+ * Uses hardhat_setStorageAt to mint tokens — no pool interaction for token acquisition.
  *
- * Usage: npm run manipulate-price -- --direction=<up|down>
+ * Default: WETH/USDC (V3) or ETH/USDC (V4) — matches seed script positions.
+ * With --token: targets WETH-paired pools (V3) or ETH-paired pools (V4).
+ *
+ * Usage:
+ *   npm run manipulate-price:up                              # V3 WETH/USDC (default)
+ *   npm run manipulate-price:down
+ *   npm run manipulate-price:v4:up                           # V4 ETH/USDC
+ *   npm run manipulate-price:v4:down
+ *   npm run manipulate-price:up -- --token=LINK              # V3 WETH/LINK
+ *   npm run manipulate-price:up -- --platform=v4 --token=WBTC # V4 ETH/WBTC
  *
  * Directions:
- *   up   - Buy USDC with USDT (pushes USDC price up relative to USDT)
- *   down - Sell USDC for USDT (pushes USDC price down relative to USDT)
+ *   up   - Buy the base token (push its price up relative to the quote)
+ *   down - Sell the base token (push its price down relative to the quote)
+ *
+ * Token pools:
+ *   (default) — WETH/USDC 0.05% (V3) or ETH/USDC 0.05% (V4)
+ *   USDT      — WETH/USDT 0.05% (V3) or ETH/USDT 0.05% (V4)
+ *   WBTC      — WETH/WBTC 0.05% (V3) or ETH/WBTC 0.05% (V4)
+ *   LINK      — WETH/LINK 0.30% (V3) or ETH/LINK 0.30% (V4)
  */
 
 import { ethers } from 'ethers';
@@ -20,66 +36,57 @@ import { ethers } from 'ethers';
 // =============================================================================
 
 const RPC_URL = 'http://localhost:8545';
-const CHAIN_ID = 1337;
 
 // Token addresses (Arbitrum fork)
+const NATIVE_ETH = ethers.constants.AddressZero;
+const WETH_ADDRESS = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+const USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+const WBTC_ADDRESS = '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f';
+const LINK_ADDRESS = '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4';
+
+// ERC20 balance storage slots (auto-discovered by backtest/discover-slots.js)
+const TOKEN_BALANCE_SLOTS = {
+  [USDC_ADDRESS.toLowerCase()]: 9,
+  [WBTC_ADDRESS.toLowerCase()]: 51,
+  [WETH_ADDRESS.toLowerCase()]: 51,
+  [LINK_ADDRESS.toLowerCase()]: 51,
+  [USDT_ADDRESS.toLowerCase()]: 51,
+};
+
+// Token metadata — quote tokens that pair with WETH (V3) or ETH (V4)
 const TOKENS = {
-  WETH: {
-    address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-    decimals: 18
-  },
-  USDC: {
-    address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    decimals: 6
-  },
-  USDT: {
-    address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-    decimals: 6
-  }
+  USDC: { address: USDC_ADDRESS, decimals: 6, symbol: 'USDC', fee: 500 },
+  USDT: { address: USDT_ADDRESS, decimals: 6, symbol: 'USDT', fee: 500 },
+  WBTC: { address: WBTC_ADDRESS, decimals: 8, symbol: 'WBTC', fee: 500 },
+  LINK: { address: LINK_ADDRESS, decimals: 18, symbol: 'LINK', fee: 3000 },
 };
 
-// Uniswap V3 addresses
-const UNISWAP = {
-  router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e'
+// V3 addresses
+const V3_SWAP_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+const V3_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
+
+// V4 addresses
+const UNIVERSAL_ROUTER = '0xa51afafe0263b40edaef0df8781ea9aa03e381a3';
+const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+const STATE_VIEW_ADDRESS = '0x76fd297e2d437cd7f76d50f01afe6160f86e9990';
+
+// V4 action types
+const Actions = {
+  SWAP_EXACT_IN_SINGLE: 6,
+  SETTLE: 11,
+  TAKE: 14
 };
 
-// Fee tiers
-const FEE_TIERS = {
-  STABLECOIN: 100,  // 0.01% - typical for stablecoin pairs
-  LOW: 500,         // 0.05%
-  MEDIUM: 3000,     // 0.3%
-  HIGH: 10000       // 1%
-};
+const POOL_KEY_STRUCT = '(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks)';
+const SWAP_EXACT_IN_SINGLE_STRUCT = `(${POOL_KEY_STRUCT} poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)`;
 
 // Swap configuration
 const CONFIG = {
-  // Amount of ETH to fund the swapper wallet with
-  INITIAL_ETH_FUNDING: '2000',
-
-  // Amount of WETH to swap for stablecoins (total)
-  // Need enough to cover 5 swaps of 30k each = 150k stables
-  WETH_TO_SWAP_FOR_STABLES: '60', // ~$180k worth at $3k ETH
-
-  // Amount per swap in the USDC/USDT pool (in token units)
-  SWAP_AMOUNT_USDC: '30000',  // 30k USDC per swap
-  SWAP_AMOUNT_USDT: '30000',  // 30k USDT per swap
-
-  // Number of swaps to perform
+  INITIAL_ETH_FUNDING: '5000',
+  TARGET_PRICE_MOVE: 0.001,  // 0.1% per swap
   NUM_SWAPS: 5,
-
-  // Delay between swaps (ms)
   SWAP_DELAY: 500,
-
-  // Slippage tolerance (100 = accept any price for aggressive price movement)
-  SLIPPAGE_TOLERANCE: 100,
-
-  // Fee tier for USDC/USDT pool
-  USDC_USDT_FEE: FEE_TIERS.STABLECOIN,
-
-  // Fee tier for WETH/stablecoin pools
-  WETH_STABLE_FEE: FEE_TIERS.LOW
 };
 
 // =============================================================================
@@ -89,379 +96,473 @@ const CONFIG = {
 const ERC20_ABI = [
   'function approve(address spender, uint256 amount) external returns (bool)',
   'function balanceOf(address owner) external view returns (uint256)',
-  'function decimals() external view returns (uint8)',
-  'function symbol() external view returns (string)'
 ];
 
 const WETH_ABI = [
   ...ERC20_ABI,
   'function deposit() external payable',
-  'function withdraw(uint256 amount) external'
 ];
 
-const ROUTER_ABI = [
+const V3_ROUTER_ABI = [
   'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut)'
 ];
 
-const QUOTER_ABI = [
-  'function quoteExactInputSingle(tuple(address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)'
-];
-
-const POOL_ABI = [
+const V3_POOL_ABI = [
   'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
   'function liquidity() external view returns (uint128)',
   'function token0() external view returns (address)',
   'function token1() external view returns (address)'
 ];
 
-const FACTORY_ABI = [
+const V3_FACTORY_ABI = [
   'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)'
 ];
 
+const STATE_VIEW_ABI = [
+  'function getSlot0(bytes32 poolId) external view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)',
+  'function getLiquidity(bytes32 poolId) external view returns (uint128)'
+];
+
+const PERMIT2_ABI = [
+  'function approve(address token, address spender, uint160 amount, uint48 expiration) external'
+];
+
 // =============================================================================
-// Helper Functions
+// Helpers
 // =============================================================================
 
 function parseArgs() {
   const args = process.argv.slice(2);
   let direction = null;
+  let platform = 'v3';
+  let token = 'USDC';
 
   for (const arg of args) {
     if (arg.startsWith('--direction=')) {
       direction = arg.split('=')[1].toLowerCase();
+    } else if (arg.startsWith('--platform=')) {
+      platform = arg.split('=')[1].toLowerCase();
+    } else if (arg.startsWith('--token=')) {
+      token = arg.split('=')[1].toUpperCase();
     }
   }
 
   if (!direction || !['up', 'down'].includes(direction)) {
-    console.error('Usage: npm run manipulate-price -- --direction=<up|down>');
-    console.error('  up   - Push USDC price up (buy USDC with USDT)');
-    console.error('  down - Push USDC price down (sell USDC for USDT)');
+    console.error('Usage: node manipulate-price.js --direction=<up|down> [--platform=v3|v4] [--token=USDC|USDT|WBTC|LINK]');
+    console.error('  up   - Push WETH/ETH price up (buy WETH/ETH with quote token)');
+    console.error('  down - Push WETH/ETH price down (sell WETH/ETH for quote token)');
     process.exit(1);
   }
 
-  return { direction };
+  if (!['v3', 'v4'].includes(platform)) {
+    console.error('Invalid platform. Must be v3 or v4.');
+    process.exit(1);
+  }
+
+  if (!TOKENS[token]) {
+    console.error(`Unknown token: ${token}. Available: ${Object.keys(TOKENS).join(', ')}`);
+    process.exit(1);
+  }
+
+  return { direction, platform, token };
 }
 
 function createDeadline(minutes = 20) {
   return Math.floor(Date.now() / 1000) + (minutes * 60);
 }
 
-async function getPoolInfo(provider, token0, token1, fee) {
-  const factory = new ethers.Contract(UNISWAP.factory, FACTORY_ABI, provider);
-  const poolAddress = await factory.getPool(token0, token1, fee);
+function tickToPrice(tick, token0Decimals, token1Decimals) {
+  return Math.pow(1.0001, tick) * Math.pow(10, token0Decimals - token1Decimals);
+}
 
-  if (poolAddress === ethers.constants.AddressZero) {
-    return null;
+function buildV4PoolKey(currency0, currency1, fee) {
+  const sorted = currency0.toLowerCase() < currency1.toLowerCase();
+  const tickSpacing = fee === 3000 ? 60 : 10;
+  return {
+    currency0: sorted ? currency0 : currency1,
+    currency1: sorted ? currency1 : currency0,
+    fee,
+    tickSpacing,
+    hooks: ethers.constants.AddressZero
+  };
+}
+
+function computeV4PoolId(poolKey) {
+  const encoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint24', 'int24', 'address'],
+    [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks]
+  );
+  return ethers.utils.keccak256(encoded);
+}
+
+/**
+ * Compute the amount of token needed to move price by targetPct.
+ *
+ * For a concentrated liquidity pool:
+ *   amount1 = L * (sqrtPrice_new - sqrtPrice_current)  [to move price UP = buy token0 with token1]
+ *   amount0 = L * (1/sqrtPrice_new - 1/sqrtPrice_current)  [to move price DOWN = sell token0 for token1]
+ *
+ * Where sqrtPrice_new = sqrtPrice_current * sqrt(1 + targetPct) for UP
+ *   and sqrtPrice_new = sqrtPrice_current * sqrt(1 - targetPct) for DOWN
+ *
+ * @param {BigNumber} sqrtPriceX96 - Current sqrtPriceX96 from pool
+ * @param {BigNumber} liquidity - Active liquidity from pool
+ * @param {number} targetPct - Target price move as decimal (0.001 = 0.1%)
+ * @param {string} direction - 'up' or 'down'
+ * @param {boolean} wethIsToken0 - Whether WETH/ETH is token0 in the pool
+ * @returns {BigNumber} Amount of input token needed (in token's smallest units)
+ */
+function computeSwapAmount(sqrtPriceX96, liquidity, targetPct, direction, wethIsToken0) {
+  // Convert sqrtPriceX96 to a float for the calculation
+  // sqrtPriceX96 = sqrtPrice * 2^96
+  const Q96 = 2 ** 96;
+  const sqrtPrice = Number(sqrtPriceX96.toString()) / Q96;
+
+  const L = Number(liquidity.toString());
+
+  if (direction === 'up') {
+    // Price up = WETH/ETH gets more expensive
+    if (wethIsToken0) {
+      // token0 = WETH, token1 = quote. Price up means sqrtPrice increases.
+      // We're buying token0 with token1: amount1 = L * (sqrtPrice_new - sqrtPrice_current)
+      const sqrtPriceNew = sqrtPrice * Math.sqrt(1 + targetPct);
+      const amount1 = L * (sqrtPriceNew - sqrtPrice);
+      return ethers.BigNumber.from(Math.ceil(amount1).toLocaleString('fullwide', { useGrouping: false }));
+    } else {
+      // token0 = quote, token1 = WETH. Price of WETH (token1) up means sqrtPrice decreases.
+      // We're selling token0 (quote) to buy token1 (WETH): amount0 = L * (1/sqrtPrice_new - 1/sqrtPrice_current)
+      const sqrtPriceNew = sqrtPrice * Math.sqrt(1 / (1 + targetPct));
+      const amount0 = L * (1 / sqrtPriceNew - 1 / sqrtPrice);
+      return ethers.BigNumber.from(Math.ceil(amount0).toLocaleString('fullwide', { useGrouping: false }));
+    }
+  } else {
+    // Price down = WETH/ETH gets cheaper
+    if (wethIsToken0) {
+      // token0 = WETH, token1 = quote. Price down means sqrtPrice decreases.
+      // We're selling token0 (WETH) for token1: amount0 = L * (1/sqrtPrice_new - 1/sqrtPrice_current)
+      const sqrtPriceNew = sqrtPrice * Math.sqrt(1 - targetPct);
+      const amount0 = L * (1 / sqrtPriceNew - 1 / sqrtPrice);
+      return ethers.BigNumber.from(Math.ceil(amount0).toLocaleString('fullwide', { useGrouping: false }));
+    } else {
+      // token0 = quote, token1 = WETH. Price of WETH (token1) down means sqrtPrice increases.
+      // We're selling token1 (WETH): amount1 = L * (sqrtPrice_new - sqrtPrice_current)
+      const sqrtPriceNew = sqrtPrice * Math.sqrt(1 / (1 - targetPct));
+      const amount1 = L * (sqrtPriceNew - sqrtPrice);
+      return ethers.BigNumber.from(Math.ceil(amount1).toLocaleString('fullwide', { useGrouping: false }));
+    }
+  }
+}
+
+/**
+ * Mint ERC20 tokens directly into a wallet using hardhat_setStorageAt.
+ */
+async function mintToken(provider, tokenAddress, walletAddress, amountBN) {
+  const slot = TOKEN_BALANCE_SLOTS[tokenAddress.toLowerCase()];
+  if (slot === undefined) {
+    throw new Error(`No storage slot found for token ${tokenAddress}`);
   }
 
-  const pool = new ethers.Contract(poolAddress, POOL_ABI, provider);
-  const [slot0, liquidity, poolToken0, poolToken1] = await Promise.all([
-    pool.slot0(),
-    pool.liquidity(),
-    pool.token0(),
-    pool.token1()
+  const storageSlot = ethers.utils.solidityKeccak256(
+    ['uint256', 'uint256'],
+    [walletAddress, slot]
+  );
+
+  await provider.send('hardhat_setStorageAt', [
+    tokenAddress,
+    storageSlot,
+    ethers.utils.hexZeroPad(amountBN.toHexString(), 32)
   ]);
+}
+
+// =============================================================================
+// V3 Functions
+// =============================================================================
+
+async function getV3PoolState(provider, quoteToken, poolFee) {
+  const factory = new ethers.Contract(V3_FACTORY, V3_FACTORY_ABI, provider);
+  const poolAddress = await factory.getPool(WETH_ADDRESS, quoteToken.address, poolFee);
+
+  if (poolAddress === ethers.constants.AddressZero) return null;
+
+  const pool = new ethers.Contract(poolAddress, V3_POOL_ABI, provider);
+  const [slot0, liquidity, token0] = await Promise.all([
+    pool.slot0(), pool.liquidity(), pool.token0()
+  ]);
+
+  const tick = Number(slot0.tick);
+  const wethIsToken0 = token0.toLowerCase() === WETH_ADDRESS.toLowerCase();
+  const t0Decimals = wethIsToken0 ? 18 : quoteToken.decimals;
+  const t1Decimals = wethIsToken0 ? quoteToken.decimals : 18;
+  const rawPrice = tickToPrice(tick, t0Decimals, t1Decimals);
+  const wethPrice = wethIsToken0 ? rawPrice : 1 / rawPrice;
 
   return {
     address: poolAddress,
+    tick,
+    wethPrice,
     sqrtPriceX96: slot0.sqrtPriceX96,
-    tick: slot0.tick,
-    liquidity: liquidity,
-    token0: poolToken0,
-    token1: poolToken1
+    liquidity,
+    wethIsToken0
   };
 }
 
-function tickToPrice(tick, token0Decimals, token1Decimals) {
-  // Price = 1.0001^tick * 10^(token0Decimals - token1Decimals)
-  const price = Math.pow(1.0001, tick) * Math.pow(10, token0Decimals - token1Decimals);
-  return price;
-}
-
-async function logPoolState(provider, label) {
-  console.log(`\n${label}`);
-  console.log('='.repeat(50));
-
-  const poolInfo = await getPoolInfo(
-    provider,
-    TOKENS.USDC.address,
-    TOKENS.USDT.address,
-    CONFIG.USDC_USDT_FEE
-  );
-
-  if (!poolInfo) {
-    console.log('Pool not found!');
-    return null;
-  }
-
-  // Determine which token is token0 vs token1
-  const usdcIsToken0 = poolInfo.token0.toLowerCase() === TOKENS.USDC.address.toLowerCase();
-
-  const price = tickToPrice(poolInfo.tick, 6, 6); // Both have 6 decimals
-  const displayPrice = usdcIsToken0 ? price : 1 / price;
-
-  console.log(`Pool Address: ${poolInfo.address}`);
-  console.log(`Current Tick: ${poolInfo.tick}`);
-  console.log(`USDC/USDT Price: ${displayPrice.toFixed(6)}`);
-  console.log(`Liquidity: ${ethers.utils.formatUnits(poolInfo.liquidity, 0)}`);
-
-  return poolInfo;
-}
-
-// =============================================================================
-// Main Functions
-// =============================================================================
-
-async function fundWallet(provider, wallet) {
-  console.log('\n--- Funding Wallet ---');
-
-  // Use Hardhat's hardhat_setBalance to fund the wallet
-  const balanceHex = ethers.utils.hexValue(
-    ethers.utils.parseEther(CONFIG.INITIAL_ETH_FUNDING)
-  );
-
-  await provider.send('evm_setAccountBalance', [wallet.address, balanceHex]);
-
-  const balance = await provider.getBalance(wallet.address);
-  console.log(`Wallet ${wallet.address} funded with ${ethers.utils.formatEther(balance)} ETH`);
-}
-
-async function wrapEth(wallet, amount) {
-  console.log(`\nWrapping ${amount} ETH to WETH...`);
-
-  const weth = new ethers.Contract(TOKENS.WETH.address, WETH_ABI, wallet);
-  const tx = await weth.deposit({ value: ethers.utils.parseEther(amount) });
-  await tx.wait();
-
-  const balance = await weth.balanceOf(wallet.address);
-  console.log(`WETH balance: ${ethers.utils.formatEther(balance)}`);
-}
-
-async function approveTokens(wallet) {
-  console.log('\nApproving tokens for router...');
-
-  const maxApproval = ethers.constants.MaxUint256;
-
-  const weth = new ethers.Contract(TOKENS.WETH.address, ERC20_ABI, wallet);
-  const usdc = new ethers.Contract(TOKENS.USDC.address, ERC20_ABI, wallet);
-  const usdt = new ethers.Contract(TOKENS.USDT.address, ERC20_ABI, wallet);
-
-  // Send sequentially to avoid nonce conflicts
-  const tx1 = await weth.approve(UNISWAP.router, maxApproval);
-  await tx1.wait();
-  console.log('  WETH approved');
-
-  const tx2 = await usdc.approve(UNISWAP.router, maxApproval);
-  await tx2.wait();
-  console.log('  USDC approved');
-
-  const tx3 = await usdt.approve(UNISWAP.router, maxApproval);
-  await tx3.wait();
-  console.log('  USDT approved');
-}
-
-async function swapWethForStables(wallet, direction) {
-  console.log('\n--- Acquiring Stablecoins ---');
-
-  const router = new ethers.Contract(UNISWAP.router, ROUTER_ABI, wallet);
-  const wethAmount = ethers.utils.parseEther(CONFIG.WETH_TO_SWAP_FOR_STABLES);
-
-  // Determine which stablecoin to acquire based on direction
-  // IMPORTANT: We acquire the INPUT token for price manipulation, NOT the output
-  // up   = need USDT to buy USDC (USDT -> USDC pushes USDC price up)
-  // down = need USDC to sell for USDT (USDC -> USDT pushes USDC price down)
-
-  const wethStableFee = FEE_TIERS.LOW; // 500 = 0.05% for WETH pools
-
-  const usdc = new ethers.Contract(TOKENS.USDC.address, ERC20_ABI, wallet);
-  const usdt = new ethers.Contract(TOKENS.USDT.address, ERC20_ABI, wallet);
-
-  if (direction === 'up') {
-    // For "up": swap WETH directly to USDT
-    console.log(`Acquiring USDT for price-up manipulation...`);
-    console.log(`Swapping ${ethers.utils.formatEther(wethAmount)} WETH for USDT...`);
-
-    const params = {
-      tokenIn: TOKENS.WETH.address,
-      tokenOut: TOKENS.USDT.address,
-      fee: wethStableFee,
-      recipient: wallet.address,
-      deadline: createDeadline(),
-      amountIn: wethAmount,
-      amountOutMinimum: 0,
-      sqrtPriceLimitX96: 0
-    };
-    const tx = await router.exactInputSingle(params, { gasLimit: 500000 });
-    await tx.wait();
-    console.log(`  WETH->USDT swap complete`);
-
-    const usdtBalance = await usdt.balanceOf(wallet.address);
-    console.log(`\nReady for manipulation with ${ethers.utils.formatUnits(usdtBalance, 6)} USDT`);
-
-  } else {
-    // For "down": swap WETH directly to USDC in single swap
-    console.log(`Acquiring USDC for price-down manipulation...`);
-    console.log(`Swapping ${ethers.utils.formatEther(wethAmount)} WETH for USDC in single swap...`);
-
-    const params = {
-      tokenIn: TOKENS.WETH.address,
-      tokenOut: TOKENS.USDC.address,
-      fee: wethStableFee,
-      recipient: wallet.address,
-      deadline: createDeadline(),
-      amountIn: wethAmount,
-      amountOutMinimum: 0,
-      sqrtPriceLimitX96: 0
-    };
-    const tx = await router.exactInputSingle(params, { gasLimit: 500000 });
-    await tx.wait();
-    console.log(`  WETH->USDC swap complete`);
-
-    const usdcBalance = await usdc.balanceOf(wallet.address);
-    console.log(`\nReady for manipulation with ${ethers.utils.formatUnits(usdcBalance, 6)} USDC`);
-  }
-}
-
-async function executeSwap(wallet, tokenIn, tokenOut, amountIn, swapNumber) {
-  const router = new ethers.Contract(UNISWAP.router, ROUTER_ABI, wallet);
-
-  const tokenInSymbol = tokenIn === TOKENS.USDC.address ? 'USDC' : 'USDT';
-  const tokenOutSymbol = tokenOut === TOKENS.USDC.address ? 'USDC' : 'USDT';
-
-  console.log(`  Swap ${swapNumber}: ${ethers.utils.formatUnits(amountIn, 6)} ${tokenInSymbol} -> ${tokenOutSymbol}`);
-
-  const params = {
-    tokenIn: tokenIn,
-    tokenOut: tokenOut,
-    fee: CONFIG.USDC_USDT_FEE,
+async function executeV3Swap(wallet, tokenIn, tokenOut, amountIn, poolFee) {
+  const router = new ethers.Contract(V3_SWAP_ROUTER, V3_ROUTER_ABI, wallet);
+  const tx = await router.exactInputSingle({
+    tokenIn, tokenOut,
+    fee: poolFee,
     recipient: wallet.address,
     deadline: createDeadline(),
-    amountIn: amountIn,
-    amountOutMinimum: 0, // Accept any price for maximum price impact
+    amountIn,
+    amountOutMinimum: 0,
     sqrtPriceLimitX96: 0
-  };
-
-  // Use manual gas limit to avoid estimation timeout
-  const tx = await router.exactInputSingle(params, { gasLimit: 500000 });
-  const receipt = await tx.wait();
-
-  return receipt;
-}
-
-async function manipulatePrice(wallet, direction) {
-  console.log(`\n--- Manipulating Price (${direction.toUpperCase()}) ---`);
-
-  const usdcAmount = ethers.utils.parseUnits(CONFIG.SWAP_AMOUNT_USDC, 6);
-  const usdtAmount = ethers.utils.parseUnits(CONFIG.SWAP_AMOUNT_USDT, 6);
-  const minSwapAmount = ethers.utils.parseUnits('1000', 6); // Minimum 1000 tokens to bother swapping
-
-  const usdc = new ethers.Contract(TOKENS.USDC.address, ERC20_ABI, wallet);
-  const usdt = new ethers.Contract(TOKENS.USDT.address, ERC20_ABI, wallet);
-
-  for (let i = 0; i < CONFIG.NUM_SWAPS; i++) {
-    let tokenIn, tokenOut, targetAmount;
-
-    if (direction === 'up') {
-      // Buy USDC with USDT (USDT -> USDC)
-      tokenIn = TOKENS.USDT.address;
-      tokenOut = TOKENS.USDC.address;
-      targetAmount = usdtAmount;
-    } else {
-      // Sell USDC for USDT (USDC -> USDT)
-      tokenIn = TOKENS.USDC.address;
-      tokenOut = TOKENS.USDT.address;
-      targetAmount = usdcAmount;
-    }
-
-    // Check balance and adjust amount if needed
-    const tokenContract = tokenIn === TOKENS.USDC.address ? usdc : usdt;
-    const balance = await tokenContract.balanceOf(wallet.address);
-
-    if (balance.lt(minSwapAmount)) {
-      const tokenSymbol = tokenIn === TOKENS.USDC.address ? 'USDC' : 'USDT';
-      console.log(`  Stopping: ${tokenSymbol} balance (${ethers.utils.formatUnits(balance, 6)}) below minimum swap amount`);
-      break;
-    }
-
-    // Use available balance if less than target amount
-    const amountIn = balance.lt(targetAmount) ? balance : targetAmount;
-
-    try {
-      await executeSwap(wallet, tokenIn, tokenOut, amountIn, i + 1);
-    } catch (error) {
-      console.error(`  Swap ${i + 1} failed: ${error.message}`);
-      const usdcBal = await usdc.balanceOf(wallet.address);
-      const usdtBal = await usdt.balanceOf(wallet.address);
-      console.log(`  Current balances - USDC: ${ethers.utils.formatUnits(usdcBal, 6)}, USDT: ${ethers.utils.formatUnits(usdtBal, 6)}`);
-      break;
-    }
-
-    if (CONFIG.SWAP_DELAY > 0 && i < CONFIG.NUM_SWAPS - 1) {
-      await new Promise(resolve => setTimeout(resolve, CONFIG.SWAP_DELAY));
-    }
-  }
+  }, { gasLimit: 500000 });
+  return tx.wait();
 }
 
 // =============================================================================
-// Main Entry Point
+// V4 Functions
+// =============================================================================
+
+async function getV4PoolState(provider, poolKey, quoteToken) {
+  const poolId = computeV4PoolId(poolKey);
+  const stateView = new ethers.Contract(STATE_VIEW_ADDRESS, STATE_VIEW_ABI, provider);
+  const [slot0, liquidity] = await Promise.all([
+    stateView.getSlot0(poolId),
+    stateView.getLiquidity(poolId)
+  ]);
+
+  const tick = Number(slot0.tick);
+  const rawPrice = tickToPrice(tick, 18, quoteToken.decimals);
+
+  return {
+    poolId,
+    tick,
+    wethPrice: rawPrice,
+    sqrtPriceX96: slot0.sqrtPriceX96,
+    liquidity,
+    wethIsToken0: true // ETH (AddressZero) is always currency0
+  };
+}
+
+async function executeV4Swap(signer, poolKey, tokenIn, tokenOut, amountIn) {
+  const zeroForOne = tokenIn.toLowerCase() < tokenOut.toLowerCase();
+  const amountInBN = ethers.BigNumber.from(amountIn);
+
+  const swapEncoded = ethers.utils.defaultAbiCoder.encode(
+    [SWAP_EXACT_IN_SINGLE_STRUCT],
+    [[
+      [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks],
+      zeroForOne,
+      amountInBN.toString(),
+      '0',
+      '0x'
+    ]]
+  );
+
+  const settleEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'uint256', 'bool'],
+    [tokenIn, 0, true]
+  );
+
+  const takeEncoded = ethers.utils.defaultAbiCoder.encode(
+    ['address', 'address', 'uint256'],
+    [tokenOut, signer.address, 0]
+  );
+
+  const actionBytes = ethers.utils.hexlify([
+    Actions.SWAP_EXACT_IN_SINGLE,
+    Actions.SETTLE,
+    Actions.TAKE
+  ]);
+
+  const v4SwapPayload = ethers.utils.defaultAbiCoder.encode(
+    ['bytes', 'bytes[]'],
+    [actionBytes, [swapEncoded, settleEncoded, takeEncoded]]
+  );
+
+  const commands = ethers.utils.hexlify([0x10]);
+  const routerInterface = new ethers.utils.Interface([
+    'function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable'
+  ]);
+  const calldata = routerInterface.encodeFunctionData('execute', [
+    commands, [v4SwapPayload], createDeadline()
+  ]);
+
+  const isNativeIn = tokenIn === NATIVE_ETH;
+  const tx = await signer.sendTransaction({
+    to: UNIVERSAL_ROUTER,
+    data: calldata,
+    value: isNativeIn ? amountInBN : 0
+  });
+  return tx.wait();
+}
+
+// =============================================================================
+// Pool State Logging
+// =============================================================================
+
+async function getPoolState(provider, platform, quoteToken, poolFee, poolKey) {
+  if (platform === 'v3') {
+    return getV3PoolState(provider, quoteToken, poolFee);
+  } else {
+    return getV4PoolState(provider, poolKey, quoteToken);
+  }
+}
+
+function logPoolState(state, platform, quoteToken, label) {
+  console.log(`\n${label}`);
+  console.log('='.repeat(50));
+  const baseSymbol = platform === 'v3' ? 'WETH' : 'ETH';
+
+  if (platform === 'v3') {
+    console.log(`Pool: ${state.address}`);
+  } else {
+    console.log(`Pool ID: ${state.poolId.slice(0, 18)}...`);
+  }
+  console.log(`Tick: ${state.tick}`);
+  console.log(`${baseSymbol}/${quoteToken.symbol}: ${state.wethPrice}`);
+  console.log(`Liquidity: ${state.liquidity.toString()}`);
+}
+
+// =============================================================================
+// Main
 // =============================================================================
 
 async function main() {
-  const { direction } = parseArgs();
+  const { direction, platform, token } = parseArgs();
+  const quoteToken = TOKENS[token];
+  const poolFee = quoteToken.fee;
+  const baseSymbol = platform === 'v3' ? 'WETH' : 'ETH';
+  const poolKey = platform === 'v4' ? buildV4PoolKey(NATIVE_ETH, quoteToken.address, poolFee) : null;
 
   console.log('='.repeat(60));
-  console.log('USDC/USDT Price Manipulation Script');
-  console.log(`Direction: ${direction.toUpperCase()}`);
+  console.log(`${baseSymbol}/${quoteToken.symbol} Price Manipulation (${platform.toUpperCase()})`);
+  console.log(`Direction: ${direction.toUpperCase()} (${direction === 'up' ? `buy ${baseSymbol}` : `sell ${baseSymbol}`})`);
+  console.log(`Target: ${(CONFIG.TARGET_PRICE_MOVE * 100).toFixed(1)}% per swap x ${CONFIG.NUM_SWAPS} swaps = ${(CONFIG.TARGET_PRICE_MOVE * 100 * CONFIG.NUM_SWAPS).toFixed(1)}% total`);
   console.log('='.repeat(60));
 
-  // Setup provider and wallet
   const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-
-  // Create a new random wallet for swapping
   const wallet = ethers.Wallet.createRandom().connect(provider);
   console.log(`\nSwapper wallet: ${wallet.address}`);
 
-  // Log initial pool state
-  const initialPool = await logPoolState(provider, 'INITIAL POOL STATE');
-  if (!initialPool) {
-    console.error('USDC/USDT pool not found. Make sure the pool exists.');
+  // Get initial pool state
+  const initialState = await getPoolState(provider, platform, quoteToken, poolFee, poolKey);
+  if (!initialState) {
+    console.error(`${baseSymbol}/${quoteToken.symbol} pool not found. Is the Hardhat fork running?`);
     process.exit(1);
   }
+  logPoolState(initialState, platform, quoteToken, 'INITIAL POOL STATE');
 
-  // Fund the wallet
-  await fundWallet(provider, wallet);
+  // Fund wallet with ETH for gas (and V4 native swaps for direction=down)
+  console.log('\n--- Funding Wallet ---');
+  await provider.send('hardhat_setBalance', [
+    wallet.address,
+    ethers.utils.hexValue(ethers.utils.parseEther(CONFIG.INITIAL_ETH_FUNDING))
+  ]);
+  console.log(`Funded with ${CONFIG.INITIAL_ETH_FUNDING} ETH`);
 
-  // Wrap ETH to WETH (add 10% buffer)
-  const wethToWrap = Math.ceil(parseFloat(CONFIG.WETH_TO_SWAP_FOR_STABLES) * 1.1).toString();
-  await wrapEth(wallet, wethToWrap);
+  // Setup approvals once
+  if (platform === 'v3') {
+    await setupV3Approvals(wallet, quoteToken, direction);
+  } else {
+    await setupV4Approvals(wallet, quoteToken, direction);
+  }
 
-  // Approve tokens
-  await approveTokens(wallet);
+  // Execute swaps — recompute amount each iteration from fresh pool state
+  console.log(`\n--- Manipulating Price (${direction.toUpperCase()}) ---`);
 
-  // Swap WETH for stablecoins
-  await swapWethForStables(wallet, direction);
+  for (let i = 0; i < CONFIG.NUM_SWAPS; i++) {
+    // Get fresh pool state for accurate swap amount
+    const currentState = await getPoolState(provider, platform, quoteToken, poolFee, poolKey);
+    const swapAmount = computeSwapAmount(
+      currentState.sqrtPriceX96,
+      currentState.liquidity,
+      CONFIG.TARGET_PRICE_MOVE,
+      direction,
+      currentState.wethIsToken0
+    );
 
-  // Log pool state after acquiring stables (WETH swaps might have used different pools)
-  await logPoolState(provider, 'POOL STATE BEFORE MANIPULATION');
+    // Determine input token and format
+    let tokenIn, tokenOut, inputSymbol, formattedAmount;
+    if (direction === 'up') {
+      // Buy WETH/ETH with quote token
+      tokenIn = platform === 'v3' ? quoteToken.address : quoteToken.address;
+      tokenOut = platform === 'v3' ? WETH_ADDRESS : NATIVE_ETH;
+      inputSymbol = quoteToken.symbol;
+      formattedAmount = ethers.utils.formatUnits(swapAmount, quoteToken.decimals);
 
-  // Execute price manipulation
-  await manipulatePrice(wallet, direction);
+      // Mint the quote tokens we need for this swap
+      await mintToken(provider, quoteToken.address, wallet.address, swapAmount);
+    } else {
+      // Sell WETH/ETH for quote token
+      tokenIn = platform === 'v3' ? WETH_ADDRESS : NATIVE_ETH;
+      tokenOut = platform === 'v3' ? quoteToken.address : quoteToken.address;
+      inputSymbol = baseSymbol;
+      formattedAmount = ethers.utils.formatEther(swapAmount);
+
+      if (platform === 'v3') {
+        // Mint WETH for this swap
+        await mintToken(provider, WETH_ADDRESS, wallet.address, swapAmount);
+      }
+      // V4 direction=down uses native ETH from hardhat_setBalance — already funded
+    }
+
+    console.log(`  Swap ${i + 1}/${CONFIG.NUM_SWAPS}: ${formattedAmount} ${inputSymbol} → ${direction === 'up' ? baseSymbol : quoteToken.symbol} (~${(CONFIG.TARGET_PRICE_MOVE * 100).toFixed(1)}%)`);
+
+    if (platform === 'v3') {
+      await executeV3Swap(wallet, tokenIn, tokenOut, swapAmount, poolFee);
+    } else {
+      await executeV4Swap(wallet, poolKey, tokenIn, tokenOut, swapAmount);
+    }
+
+    if (CONFIG.SWAP_DELAY > 0 && i < CONFIG.NUM_SWAPS - 1) {
+      await new Promise(r => setTimeout(r, CONFIG.SWAP_DELAY));
+    }
+  }
 
   // Log final pool state
-  await logPoolState(provider, 'FINAL POOL STATE');
+  const finalState = await getPoolState(provider, platform, quoteToken, poolFee, poolKey);
+  logPoolState(finalState, platform, quoteToken, 'FINAL POOL STATE');
 
-  // Log final balances
-  console.log('\n--- Final Wallet Balances ---');
-  const usdc = new ethers.Contract(TOKENS.USDC.address, ERC20_ABI, wallet);
-  const usdt = new ethers.Contract(TOKENS.USDT.address, ERC20_ABI, wallet);
-  const [usdcBal, usdtBal] = await Promise.all([
-    usdc.balanceOf(wallet.address),
-    usdt.balanceOf(wallet.address)
-  ]);
-  console.log(`USDC: ${ethers.utils.formatUnits(usdcBal, 6)}`);
-  console.log(`USDT: ${ethers.utils.formatUnits(usdtBal, 6)}`);
+  const tickDelta = finalState.tick - initialState.tick;
+  const priceDelta = finalState.wethPrice - initialState.wethPrice;
+  const pctChange = (priceDelta / initialState.wethPrice) * 100;
+  console.log(`\nTick change: ${tickDelta > 0 ? '+' : ''}${tickDelta}`);
+  console.log(`Price: ${initialState.wethPrice} → ${finalState.wethPrice}`);
+  console.log(`Price delta: ${priceDelta}`);
+  console.log(`Percent change: ${pctChange}%`);
 
   console.log('\nDone!');
+}
+
+// =============================================================================
+// Approval Setup
+// =============================================================================
+
+async function setupV3Approvals(wallet, quoteToken, direction) {
+  console.log('\nApproving tokens for V3 router...');
+  if (direction === 'up') {
+    const quoteContract = new ethers.Contract(quoteToken.address, ERC20_ABI, wallet);
+    await (await quoteContract.approve(V3_SWAP_ROUTER, ethers.constants.MaxUint256)).wait();
+  } else {
+    const wethContract = new ethers.Contract(WETH_ADDRESS, ERC20_ABI, wallet);
+    await (await wethContract.approve(V3_SWAP_ROUTER, ethers.constants.MaxUint256)).wait();
+  }
+}
+
+async function setupV4Approvals(wallet, quoteToken, direction) {
+  if (direction === 'up') {
+    // Approve quote token via Permit2 → Universal Router
+    const quoteContract = new ethers.Contract(quoteToken.address, ERC20_ABI, wallet);
+    console.log(`\nSetting up Permit2 approvals for ${quoteToken.symbol}...`);
+    await (await quoteContract.approve(PERMIT2_ADDRESS, ethers.constants.MaxUint256)).wait();
+    const permit2 = new ethers.Contract(PERMIT2_ADDRESS, PERMIT2_ABI, wallet);
+    const maxAmount = ethers.BigNumber.from(2).pow(160).sub(1);
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365;
+    await (await permit2.approve(quoteToken.address, UNIVERSAL_ROUTER, maxAmount, expiration)).wait();
+  }
+  // V4 direction=down uses native ETH — no approval needed
 }
 
 main().catch((error) => {

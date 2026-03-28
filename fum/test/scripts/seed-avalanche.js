@@ -206,8 +206,8 @@ async function main() {
     const usdcData = { address: USDC_ADDRESS, symbol: 'USDC', decimals: 6 };
     const { sortedToken0, sortedToken1, tokensSwapped } = adapter.sortTokens(wavaxData, usdcData);
 
-    const token0Amount = tokensSwapped ? wavaxForPosition : usdcForPosition;
-    const token1Amount = tokensSwapped ? usdcForPosition : wavaxForPosition;
+    const token0Amount = tokensSwapped ? usdcForPosition : wavaxForPosition;
+    const token1Amount = tokensSwapped ? wavaxForPosition : usdcForPosition;
 
     // Approve TJPositionManager to pull tokens from vault
     const approvalTxs = await adapter.getRequiredApprovals(
