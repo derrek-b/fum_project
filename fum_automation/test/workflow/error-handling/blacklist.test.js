@@ -518,9 +518,9 @@ describe('Blacklist Management', () => {
     }, 60000);
 
     // ------------------------------------------------------------------------
-    // Test 5: Auth Revocation → Unblacklist
+    // Test 5: Auth Revocation → Blacklist Preserved
     // ------------------------------------------------------------------------
-    it('should unblacklist vault on auth revocation (VaultAuthRevoked)', async () => {
+    it('should preserve blacklist on auth revocation (VaultAuthRevoked)', async () => {
       await createTestService(3304);
       const events = setupEventTracking(service);
 
@@ -548,15 +548,9 @@ describe('Blacklist Management', () => {
       });
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Verify vault is unblacklisted
-      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+      // Verify vault is still blacklisted (blacklist preserved on revoke for diagnostic visibility)
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
       console.log(`🔍 Vault blacklisted after revocation: ${service.isVaultBlacklisted(testVault.vaultAddress)}`);
-
-      // Verify VaultUnblacklisted event was emitted
-      const unblacklistEvent = events.vaultUnblacklisted.find(
-        e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
-      );
-      expect(unblacklistEvent).toBeDefined();
 
       // Verify VaultOffboarded event was emitted
       const offboardEvent = events.vaultOffboarded.find(
