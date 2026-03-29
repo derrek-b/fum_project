@@ -1,4 +1,4 @@
-<!-- Source: scripts/deploy.js, scripts/sync-contracts-to-ecosystem.js, scripts/extract-abis.js, scripts/extract-bytecode.js, test/scripts/start-hardhat.js, test/scripts/start-hardhat-avalanche.js, test/scripts/seed.js, test/scripts/seed-v4.js, test/scripts/seed-avalanche.js, test/scripts/generate-fees.js, test/scripts/manipulate-price.js -->
+<!-- Source: scripts/deploy.js, scripts/sync-contracts-to-ecosystem.js, scripts/extract-abis.js, scripts/extract-bytecode.js, test/scripts/start-hardhat.js, test/scripts/start-hardhat-avalanche.js, test/scripts/seed.js, test/scripts/seed-v4.js, test/scripts/seed-avalanche.js, test/scripts/generate-fees.js, test/scripts/generate-fees-avalanche.js, test/scripts/manipulate-price.js, test/scripts/manipulate-price-avalanche.js -->
 # Scripts Pipeline
 
 How contracts move from source code in `fum/contracts/` through compilation, extraction, and deployment to reach all four subprojects. Reference this before modifying any script or debugging cross-project sync issues.
@@ -291,36 +291,58 @@ For V3/V4, the position stays on the wallet by default (for transfer testing) an
 
 ### generate-fees.js
 
-**Command:** `npm run generate-fees [--token=SYMBOL] [--swaps=N] [--fee=FEE_TIER]`
+**Command:** `npm run generate-fees [--platform=v3|v4] [--token=SYMBOL] [--swaps=N]`
 
-Performs round-trip swaps to generate trading fees on Uniswap V3 pools.
+Performs round-trip swaps to generate trading fees without net price movement. Supports V3 and V4 via `--platform` flag (default: v3). Uses `hardhat_setStorageAt` to mint tokens directly — no pool interaction for token acquisition.
 
-**Token configs:**
+**Default pair:** WETH/USDC (V3) or ETH/USDC (V4). With `--token`, targets WETH-paired pools (V3) or ETH-paired pools (V4):
 
-| Token | Pool Fee with USDC | Default Swap Amount |
-|---|---|---|
-| USDT | 100 (0.01%) | 250,000 USDC |
-| WETH | 500 (0.05%) | 10,000 USDC |
-| WBTC | 500 (0.05%) | 10,000 USDC |
-| LINK | 3000 (0.3%) | 10,000 USDC |
+| Token | V3 Pool | V4 Pool | Fee |
+|---|---|---|---|
+| (default) | WETH/USDC | ETH/USDC | 0.05% |
+| USDT | WETH/USDT | ETH/USDT | 0.05% |
+| WBTC | WETH/WBTC | ETH/WBTC | 0.05% |
+| LINK | WETH/LINK | ETH/LINK | 0.30% |
 
-**Execution pattern:** For each round-trip: swap USDC → Token, then Token → USDC. Creates volume that accrues fees to LP positions.
+**Execution pattern:** For each round-trip: swap 1 WETH → token, then token → WETH. Creates volume that accrues fees to LP positions.
 
 **Convenience scripts:**
-- `npm run generate-fees:weth` — WETH/USDC
-- `npm run generate-fees:wbtc` — WBTC/USDC
-- `npm run generate-fees:link` — LINK/USDC
+- `npm run generate-fees` — V3 WETH/USDC (default)
+- `npm run generate-fees:usdt` — V3 WETH/USDT
+- `npm run generate-fees:wbtc` — V3 WETH/WBTC
+- `npm run generate-fees:link` — V3 WETH/LINK
+- `npm run generate-fees:v4` — V4 ETH/USDC
+
+### generate-fees-avalanche.js
+
+**Command:** `npm run generate-fees:av [--token=USDT|AUSD] [--swaps=N]`
+
+Performs round-trip swaps on Trader Joe V2.2 pools. Uses `hardhat_setStorageAt` to mint tokens (including AUSD via ERC-7201 namespaced storage).
+
+**Default pair:** WAVAX/USDC (10 WAVAX per leg). With `--token`: USDC/USDT or USDC/AUSD (1000 USDC per leg).
 
 ### manipulate-price.js
 
-**Commands:** `npm run manipulate-price:up` / `npm run manipulate-price:down`
+**Command:** `npm run manipulate-price:<up|down> [--platform=v3|v4] [--token=SYMBOL]`
 
-Shifts USDC/USDT pool price to trigger position rebalancing.
+Moves pool price to push positions out of range for testing rebalancing. Computes swap amounts from pool liquidity (V3) or bin reserves (TJ) to move price ~0.1% per swap. Uses `hardhat_setStorageAt` to mint tokens.
 
-- **Up:** Buy USDC with USDT → pushes USDC price up
-- **Down:** Sell USDC for USDT → pushes USDC price down
+**Default pair:** WETH/USDC (V3) or ETH/USDC (V4). Supports same `--token` options as generate-fees.
 
-Configuration: 5 swaps of 30,000 tokens each, 500ms delay between swaps, USDC/USDT 0.01% pool.
+- **Up:** Buy WETH/ETH with quote token → pushes price up
+- **Down:** Sell WETH/ETH for quote token → pushes price down
+
+**Convenience scripts:**
+- `npm run manipulate-price:up` / `npm run manipulate-price:down` — V3 WETH/USDC
+- `npm run manipulate-price:v4:up` / `npm run manipulate-price:v4:down` — V4 ETH/USDC
+
+### manipulate-price-avalanche.js
+
+**Command:** `npm run manipulate-price:av:<up|down> [--token=USDT|AUSD]`
+
+Moves Trader Joe V2.2 pool price by draining active bins. Each run drains 2 bins (~0.2% for binStep=10 WAVAX/USDC). Seed position range is ±10 bins, so ~5 runs pushes out of range.
+
+**Default pair:** WAVAX/USDC (binStep=10). With `--token`: USDC/USDT or USDC/AUSD (binStep=1).
 
 ---
 

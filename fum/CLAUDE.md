@@ -16,9 +16,11 @@ npm run contracts:test:coverage # Sync + run Hardhat coverage in fum_testing
 npm run hardhat                # Start Arbitrum fork (chain 1337, port 8545) + deploy + update fum_library
 npm run hardhat:av             # Start Avalanche fork (chain 1338, port 8546) + deploy + update fum_library
 npm run seed-localhost         # Create V3 vault + seed tokens (see variants below)
-npm run manipulate-price:up    # Push test token prices up (for testing rebalances)
-npm run manipulate-price:down  # Push test token prices down
-npm run generate-fees          # Generate trading fees on test positions
+npm run manipulate-price:up    # Push WETH/USDC price up (V3, supports --platform=v4 --token=SYMBOL)
+npm run manipulate-price:down  # Push WETH/USDC price down
+npm run manipulate-price:av:up # Push WAVAX/USDC price up (TJ V2.2, supports --token=USDT|AUSD)
+npm run generate-fees          # Generate fees on WETH/USDC (V3, supports --platform=v4 --token=SYMBOL)
+npm run generate-fees:av       # Generate fees on WAVAX/USDC (TJ V2.2, supports --token=USDT|AUSD)
 ```
 
 **Seed script variants** — each platform has a base script plus opt-in flags via `ENABLE_STRATEGY`, `ENABLE_AUTOMATION`, and `ENABLE_POSITION` (TJ only):
