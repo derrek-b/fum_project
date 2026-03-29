@@ -1761,7 +1761,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       } catch (error) {
         retryCount++;
         if (retryCount > maxRetries) {
-          throw new UnrecoverableError(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
+          throw new Error(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
         }
 
         this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);
@@ -2072,7 +2072,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       } catch (error) {
         retryCount++;
         if (retryCount > maxRetries) {
-          throw new UnrecoverableError(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
+          throw new Error(`Deficit swaps failed after ${maxRetries} retry(s): ${error.message}`);
         }
 
         this.log(`⚠️ Deficit swaps failed, attempting retry ${retryCount}/${maxRetries}...`);

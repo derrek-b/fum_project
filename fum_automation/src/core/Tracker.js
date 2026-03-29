@@ -329,7 +329,7 @@ export default class Tracker {
         effectiveGasPrice: data.effectiveGasPrice,
         gasNative,
         gasUSD,
-        txHash: transactionHash,
+        transactionHash,
         timestamp
       });
 
@@ -996,7 +996,7 @@ export default class Tracker {
         effectiveGasPrice,
         gasNative,
         gasUSD,
-        txHash: transactionHash,
+        transactionHash,
         timestamp
       });
 
@@ -1388,14 +1388,14 @@ export default class Tracker {
       const nativePriceUSD = prices[wrappedNativeSymbol] || 0;
 
       if (nativePriceUSD === 0) {
-        this.log(`${wrappedNativeSymbol} price unavailable, gas cost will be 0`);
-        return 0;
+        this.log(`${wrappedNativeSymbol} price unavailable, gas USD will be null`);
+        return null;
       }
 
       return gasNative * nativePriceUSD;
     } catch (error) {
       console.error('Failed to calculate gas cost in USD:', error.message);
-      return 0;
+      return null;
     }
   }
 
