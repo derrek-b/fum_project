@@ -86,7 +86,7 @@ const CONFIG = {
   INITIAL_ETH_FUNDING: '5000',
   TARGET_PRICE_MOVE: 0.001,  // 0.1% per swap
   NUM_SWAPS: 5,
-  SWAP_DELAY: 500,
+  SWAP_DELAY: 3000,
 };
 
 // =============================================================================

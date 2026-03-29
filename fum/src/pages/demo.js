@@ -7,7 +7,7 @@ import { ethers } from "ethers";
 import Navbar from "../components/common/Navbar";
 import TransactionList from "../components/transactions/TransactionList";
 import { fetchVaultTrackerData, calculateVaultAPY } from '../utils/vaultsHelpers';
-import { updateVaultTrackerData } from '../redux/vaultsSlice';
+
 import { formatTimestamp } from "fum_library/helpers";
 import { getStrategyDetails } from "fum_library/helpers";
 import { getChainConfig, getChainRpcUrls } from "fum_library/helpers/chainHelpers";
@@ -144,13 +144,6 @@ export default function DemoPage() {
             trackerMetadata: data.trackerMetadata,
             transactionHistory: data.transactionHistory
           }));
-
-          // Also update Redux for real-time updates
-          dispatch(updateVaultTrackerData({
-            vaultAddress: selectedVaultAddress,
-            trackerMetadata: data.trackerMetadata,
-            transactionHistory: data.transactionHistory
-          }));
         }
       } catch (e) {
         console.error("Error loading tracker data:", e);
@@ -160,22 +153,30 @@ export default function DemoPage() {
     loadTrackerData();
   }, [selectedVaultAddress, vaults, dispatch]);
 
-  // Listen for real-time transaction updates from Redux
-  const vaultFromRedux = useSelector((state) =>
-    state.vaults.userVaults?.find(v => v.address === selectedVaultAddress)
-  );
+  // Listen for real-time transaction updates via SSE lastEvent
+  // This works regardless of whether the demo vault is in the connected wallet's userVaults
+  const lastEvent = useSelector((state) => state.automation?.lastEvent);
 
-  // Sync Redux updates to local state
   useEffect(() => {
-    if (vaultFromRedux?.transactionHistory) {
-      setSelectedVault(prev => ({
+    if (!lastEvent || !selectedVaultAddress) return;
+    if (lastEvent.event !== 'TransactionLogged') return;
+    if (lastEvent.data?.vaultAddress !== selectedVaultAddress) return;
+
+    setSelectedVault(prev => {
+      if (!prev) return prev;
+      const history = prev.transactionHistory || [];
+      // Deduplicate by type + timestamp
+      const isDuplicate = history.some(
+        t => t.type === lastEvent.data.type && t.timestamp === lastEvent.data.timestamp
+      );
+      if (isDuplicate) return prev;
+
+      return {
         ...prev,
-        transactionHistory: vaultFromRedux.transactionHistory,
-        trackerMetadata: vaultFromRedux.trackerMetadata
-      }));
-      setTrackerMetadata(vaultFromRedux.trackerMetadata);
-    }
-  }, [vaultFromRedux?.transactionHistory, vaultFromRedux?.trackerMetadata]);
+        transactionHistory: [lastEvent.data, ...history]
+      };
+    });
+  }, [lastEvent, selectedVaultAddress]);
 
   // Handle vault selection change
   const handleVaultChange = (e) => {

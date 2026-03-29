@@ -210,8 +210,14 @@ const vaultsSlice = createSlice({
         if (!state.userVaults[vaultIndex].transactionHistory) {
           state.userVaults[vaultIndex].transactionHistory = [];
         }
-        // Prepend new transaction (most recent first)
-        state.userVaults[vaultIndex].transactionHistory.unshift(transaction);
+        // Deduplicate: skip if a transaction with the same type and timestamp already exists
+        const isDuplicate = state.userVaults[vaultIndex].transactionHistory.some(
+          t => t.type === transaction.type && t.timestamp === transaction.timestamp
+        );
+        if (!isDuplicate) {
+          // Prepend new transaction (most recent first)
+          state.userVaults[vaultIndex].transactionHistory.unshift(transaction);
+        }
       }
     },
     clearVaults: (state) => {

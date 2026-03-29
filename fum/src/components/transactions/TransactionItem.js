@@ -10,12 +10,16 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  Fuel
+  Fuel,
+  AlertTriangle,
+  Send,
+  Repeat
 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { formatTimestamp } from 'fum_library/helpers';
 import { getAllTokens } from 'fum_library/helpers';
 import { getChainConfig } from 'fum_library/helpers/chainHelpers';
+import { getNativeSymbol, getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 
 // Build token decimals lookup map once
 const tokenConfigs = getAllTokens();
@@ -87,6 +91,30 @@ const getTransactionTypeConfig = (type) => {
       color: '#8b5cf6', // purple
       bgColor: 'rgba(139, 92, 246, 0.1)',
       label: 'Rebalanced'
+    },
+    VaultBlacklisted: {
+      icon: AlertTriangle,
+      color: '#dc3545', // red
+      bgColor: 'rgba(220, 53, 69, 0.1)',
+      label: 'Blacklisted'
+    },
+    FeesDistributed: {
+      icon: Send,
+      color: '#10b981', // emerald
+      bgColor: 'rgba(16, 185, 129, 0.1)',
+      label: 'Fees Sent to Owner'
+    },
+    NativeWrapped: {
+      icon: Repeat,
+      color: '#6366f1', // indigo
+      bgColor: 'rgba(99, 102, 241, 0.1)',
+      label: 'Wrapped'
+    },
+    NativeUnwrapped: {
+      icon: Repeat,
+      color: '#6366f1', // indigo
+      bgColor: 'rgba(99, 102, 241, 0.1)',
+      label: 'Unwrapped'
     }
   };
 
@@ -122,7 +150,7 @@ const formatSmallNumber = (value, decimals = 6) => {
 /**
  * Generate summary text based on transaction type
  */
-const generateSummary = (transaction) => {
+const generateSummary = (transaction, chainId) => {
   const { type } = transaction;
 
   switch (type) {
@@ -177,6 +205,33 @@ const generateSummary = (transaction) => {
 
     case 'PositionRebalanced': {
       return 'Position rebalanced';
+    }
+
+    case 'VaultBlacklisted': {
+      const { reason } = transaction;
+      return reason;
+    }
+
+    case 'FeesDistributed': {
+      const { totalDistributedUSD } = transaction;
+      if (totalDistributedUSD) {
+        return `Distributed ${formatCurrency(totalDistributedUSD)} to owner`;
+      }
+      return 'Fees sent to owner';
+    }
+
+    case 'NativeWrapped': {
+      const { amountFormatted } = transaction;
+      const native = getNativeSymbol(chainId);
+      const wrapped = getWrappedNativeSymbol(chainId);
+      return `Wrapped ${parseFloat(amountFormatted).toFixed(6)} ${native} to ${wrapped}`;
+    }
+
+    case 'NativeUnwrapped': {
+      const { amountFormatted } = transaction;
+      const native = getNativeSymbol(chainId);
+      const wrapped = getWrappedNativeSymbol(chainId);
+      return `Unwrapped ${parseFloat(amountFormatted).toFixed(6)} ${wrapped} to ${native}`;
     }
 
     default:
@@ -290,32 +345,82 @@ const TransactionDetails = ({ transaction, chainId }) => {
     }
 
     case 'FeesCollected': {
-      const {
-        token0Symbol, token1Symbol,
-        token0Collected, token1Collected,
-        token0USD, token1USD, totalUSD
-      } = transaction;
+      const { fees, totalUSD } = transaction;
 
       return (
         <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '4px' }}>
-          {token0Collected !== undefined && token0Symbol && (
-            <div className="d-flex justify-content-between">
-              <span className="text-muted">{token0Symbol}:</span>
-              <span>{formatTokenAmount(token0Collected, token0Symbol)} ({formatCurrency(token0USD)})</span>
+          {fees && fees.map((fee, idx) => (
+            <div key={idx} className="d-flex justify-content-between">
+              <span className="text-muted">{fee.token}:</span>
+              <span>{parseFloat(fee.amountFormatted).toFixed(6)} ({formatCurrency(fee.usd)})</span>
             </div>
-          )}
-          {token1Collected !== undefined && token1Symbol && (
-            <div className="d-flex justify-content-between">
-              <span className="text-muted">{token1Symbol}:</span>
-              <span>{formatTokenAmount(token1Collected, token1Symbol)} ({formatCurrency(token1USD)})</span>
-            </div>
-          )}
+          ))}
           {totalUSD && (
             <div className="d-flex justify-content-between mt-1 pt-1" style={{ borderTop: '1px solid rgba(0,0,0,0.1)' }}>
               <span className="text-muted">Total:</span>
               <span className="text-crimson fw-bold">{formatCurrency(totalUSD)}</span>
             </div>
           )}
+        </div>
+      );
+    }
+
+    case 'VaultBlacklisted': {
+      const { reason } = transaction;
+
+      return (
+        <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(220, 53, 69, 0.05)', borderRadius: '4px', border: '1px solid rgba(220, 53, 69, 0.2)' }}>
+          <div className="text-danger">
+            <small>{reason}</small>
+          </div>
+        </div>
+      );
+    }
+
+    case 'FeesDistributed': {
+      const { distributions, totalDistributedUSD } = transaction;
+
+      return (
+        <div className="mt-2">
+          {distributions && distributions.map((dist, idx) => (
+            <div key={idx} className="mb-2 p-2" style={{ backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '4px' }}>
+              <div className="d-flex justify-content-between">
+                <span className="text-muted">{dist.token}{dist.asNativeToken ? ' (as native)' : ''}:</span>
+                <span>{parseFloat(dist.amountFormatted).toFixed(6)}</span>
+              </div>
+              {dist.transactionHash && (
+                <div className="mt-1">
+                  <small className="text-muted">
+                    TX: <code style={{ fontSize: '0.85em' }}>{dist.transactionHash}</code>
+                  </small>
+                </div>
+              )}
+            </div>
+          ))}
+          {totalDistributedUSD && (
+            <div className="d-flex justify-content-between mt-1 p-2" style={{ backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '4px' }}>
+              <span className="text-muted">Total Distributed:</span>
+              <span className="text-crimson fw-bold">{formatCurrency(totalDistributedUSD)}</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'NativeWrapped':
+    case 'NativeUnwrapped': {
+      const { amountFormatted, amountUSD } = transaction;
+      const native = getNativeSymbol(chainId);
+      const wrapped = getWrappedNativeSymbol(chainId);
+      const fromSymbol = type === 'NativeWrapped' ? native : wrapped;
+      const toSymbol = type === 'NativeWrapped' ? wrapped : native;
+
+      return (
+        <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '4px' }}>
+          <div className="d-flex justify-content-between">
+            <span className="text-muted">{fromSymbol} → {toSymbol}:</span>
+            <span>{parseFloat(amountFormatted).toFixed(6)} ({formatCurrency(amountUSD)})</span>
+          </div>
         </div>
       );
     }
@@ -350,10 +455,10 @@ export default function TransactionItem({ transaction, chainId }) {
 
   if (!transaction) return null;
 
-  const { type, timestamp, gasETH, gasUSD, transactionHash, success } = transaction;
+  const { type, timestamp, gasNative, gasUSD, transactionHash, success } = transaction;
   const typeConfig = getTransactionTypeConfig(type);
   const Icon = typeConfig.icon;
-  const summary = generateSummary(transaction);
+  const summary = generateSummary(transaction, chainId);
   const explorerUrl = getExplorerUrl(transactionHash, chainId);
 
   return (
@@ -389,18 +494,20 @@ export default function TransactionItem({ transaction, chainId }) {
 
           {/* Right: Gas + Actions */}
           <div className="d-flex align-items-center">
-            {/* Gas Cost */}
-            {(gasETH || gasUSD) && (
+            {/* Gas Cost — hide when no gas (e.g., FeesCollected during rebalance, VaultBlacklisted) */}
+            {gasNative > 0 && (
               <div className="text-end me-3" style={{ minWidth: 80 }}>
                 <div className="d-flex align-items-center justify-content-end text-muted">
                   <Fuel size={12} className="me-1" />
-                  <small>{formatCurrency(gasUSD)}</small>
-                </div>
-                {gasETH && (
-                  <small className="text-muted" style={{ fontSize: '0.75em' }}>
-                    {formatSmallNumber(gasETH, 6)} ETH
+                  <small>
+                    {gasUSD === null ? 'Err' :
+                     gasUSD > 0 && gasUSD < 0.01 ? '<$0.01' :
+                     formatCurrency(gasUSD)}
                   </small>
-                )}
+                </div>
+                <small className="text-muted" style={{ fontSize: '0.75em' }}>
+                  {formatSmallNumber(gasNative, 6)} ETH
+                </small>
               </div>
             )}
 
