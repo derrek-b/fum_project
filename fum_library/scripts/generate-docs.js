@@ -167,8 +167,6 @@ function generateMarkdown(modules) {
 
 This document provides a comprehensive reference of all modules, their files, imports, and exports.
 
-Generated on: ${new Date().toISOString()}
-
 ## Table of Contents
 
 `;
