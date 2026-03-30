@@ -319,6 +319,15 @@ Strategy.collectFees()
   → adapter.parseCollectReceipt(receipt, metadata)
 ```
 
+## Swap Routing Infrastructure
+
+Both UniswapV3Adapter and UniswapV4Adapter use Uniswap's `AlphaRouter` (`@uniswap/smart-order-router`) for swap quoting and route finding. The AlphaRouter is initialized differently depending on the chain:
+
+- **Production chains** (42161, etc.) — AlphaRouter connects to a real RPC provider and uses subgraph-based pool discovery. This is the default behavior.
+- **Hardhat fork** (chainId 1337) — AlphaRouter uses the local fork provider (`http://localhost:8545`) with `StaticV3SubgraphProvider` for on-chain pool discovery, `StaticGasPriceProvider` for gas pricing, and a stubbed `arbitrumGasDataProvider` to avoid calling the `ArbGasInfo` precompile (address `0x6C`) which doesn't exist on Hardhat forks. The chainId is mapped to 42161 so Uniswap contract addresses resolve correctly.
+
+This ensures swap quotes on the fork reflect the fork's pool state (including any price manipulation from test scripts) rather than live mainnet prices.
+
 ## Adding a New Adapter
 
 ### 1. Create the adapter class
