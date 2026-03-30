@@ -114,6 +114,13 @@ export function processSSEEvent(eventName, data, { provider, chainId, dispatch, 
       refreshTokenBalances(vaultAddress, provider, chainId, dispatch);
       break;
 
+    // Fees distributed to owner — tokens left the vault
+    case 'FeesDistributed':
+    // Executor funded — native tokens left the vault
+    case 'ExecutorFunded':
+      refreshTokenBalances(vaultAddress, provider, chainId, dispatch);
+      break;
+
     // PositionRebalanced — skip (component events PositionsClosed + TokensSwapped + NewPositionCreated cover it)
     case 'PositionRebalanced':
       break;

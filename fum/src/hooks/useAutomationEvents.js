@@ -94,10 +94,11 @@ export function useAutomationEvents() {
         'VaultRecovered',
         'VaultBlacklisted',
         'VaultUnblacklisted',
-        'FeeCollectionFailed',
         'TransactionLogged',
         'ExecutorFundingRequired',
-        'ExecutorFundingCleared'
+        'ExecutorFundingCleared',
+        'FeesDistributed',
+        'ExecutorFunded'
       ];
 
       automationEvents.forEach(eventName => {

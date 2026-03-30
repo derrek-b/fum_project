@@ -13,7 +13,9 @@ import {
   Fuel,
   AlertTriangle,
   Send,
-  Repeat
+  Repeat,
+  Wallet,
+  XOctagon
 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { formatTimestamp } from 'fum_library/helpers';
@@ -115,6 +117,24 @@ const getTransactionTypeConfig = (type) => {
       color: '#6366f1', // indigo
       bgColor: 'rgba(99, 102, 241, 0.1)',
       label: 'Unwrapped'
+    },
+    ExecutorFunded: {
+      icon: Wallet,
+      color: '#0ea5e9', // sky blue
+      bgColor: 'rgba(14, 165, 233, 0.1)',
+      label: 'Executor Funded'
+    },
+    FeeDistributionFailed: {
+      icon: XOctagon,
+      color: '#ef4444', // red
+      bgColor: 'rgba(239, 68, 68, 0.1)',
+      label: 'Fee Distribution Failed'
+    },
+    ExecutorTopUpFailed: {
+      icon: XOctagon,
+      color: '#ef4444', // red
+      bgColor: 'rgba(239, 68, 68, 0.1)',
+      label: 'Top-Up Failed'
     }
   };
 
@@ -232,6 +252,28 @@ const generateSummary = (transaction, chainId) => {
       const native = getNativeSymbol(chainId);
       const wrapped = getWrappedNativeSymbol(chainId);
       return `Unwrapped ${parseFloat(amountFormatted).toFixed(6)} ${wrapped} to ${native}`;
+    }
+
+    case 'ExecutorFunded': {
+      const { amount, fundingAmountUSD } = transaction;
+      if (fundingAmountUSD) {
+        return `Funded executor ${formatCurrency(fundingAmountUSD)}`;
+      }
+      return `Funded executor ${parseFloat(amount).toFixed(6)} ${getNativeSymbol(chainId)}`;
+    }
+
+    case 'FeeDistributionFailed': {
+      const { totalFailedUSD, source } = transaction;
+      const sourceLabel = source === 'initialization' ? '(during initialization)' :
+                         source === 'rebalance' ? '(during rebalance)' : '';
+      if (totalFailedUSD) {
+        return `Failed to distribute ${formatCurrency(totalFailedUSD)} in fees ${sourceLabel}`.trim();
+      }
+      return `Fee distribution failed ${sourceLabel}`.trim();
+    }
+
+    case 'ExecutorTopUpFailed': {
+      return 'Executor top-up failed';
     }
 
     default:
@@ -420,6 +462,62 @@ const TransactionDetails = ({ transaction, chainId }) => {
           <div className="d-flex justify-content-between">
             <span className="text-muted">{fromSymbol} → {toSymbol}:</span>
             <span>{parseFloat(amountFormatted).toFixed(6)} ({formatCurrency(amountUSD)})</span>
+          </div>
+        </div>
+      );
+    }
+
+    case 'ExecutorFunded': {
+      const { executorAddress, amount, fundingAmountUSD } = transaction;
+      const native = getNativeSymbol(chainId);
+
+      return (
+        <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '4px' }}>
+          <div className="d-flex justify-content-between">
+            <span className="text-muted">Amount:</span>
+            <span>{parseFloat(amount).toFixed(6)} {native} ({formatCurrency(fundingAmountUSD)})</span>
+          </div>
+          {executorAddress && (
+            <div className="d-flex justify-content-between">
+              <span className="text-muted">Executor:</span>
+              <code style={{ fontSize: '0.85em' }}>{executorAddress}</code>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'FeeDistributionFailed': {
+      const { error, source, totalFailedUSD } = transaction;
+
+      return (
+        <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+          {totalFailedUSD && (
+            <div className="d-flex justify-content-between">
+              <span className="text-muted">Failed Amount:</span>
+              <span className="text-danger fw-bold">{formatCurrency(totalFailedUSD)}</span>
+            </div>
+          )}
+          {source && (
+            <div className="d-flex justify-content-between">
+              <span className="text-muted">Source:</span>
+              <span>{source}</span>
+            </div>
+          )}
+          <div className="text-danger mt-1">
+            <small>{error}</small>
+          </div>
+        </div>
+      );
+    }
+
+    case 'ExecutorTopUpFailed': {
+      const { error } = transaction;
+
+      return (
+        <div className="mt-2 p-2" style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+          <div className="text-danger">
+            <small>{error}</small>
           </div>
         </div>
       );
