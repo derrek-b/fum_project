@@ -268,9 +268,7 @@ export async function configureStrategyParameters(testEnv, vaultAddress, vault, 
   const {
     targetRangeUpper = 25,    // 0.25%
     targetRangeLower = 25,    // 0.25%
-    rebalanceThresholdUpper = 150, // 1.5%
-    rebalanceThresholdLower = 150, // 1.5%
-    maxSlippage = 500,        // 5%
+    maxSlippage = 50,        // 0.5%
     emergencyExitTrigger = 50, // 0.5%
     feeReinvestment = true,
     reinvestmentTrigger = 100, // $1.00

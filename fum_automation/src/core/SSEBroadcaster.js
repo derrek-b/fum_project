@@ -68,13 +68,12 @@ export default class SSEBroadcaster {
       'VaultRecovered',
       'VaultBlacklisted',
       'VaultUnblacklisted',
-      'FeeCollectionFailed',
       'TransactionLogged',
       'VaultAuthEventFailed',
-      'TrackerFailure',
-      'TrackerFailureCleared',
       'ExecutorFundingRequired',
-      'ExecutorFundingCleared'
+      'ExecutorFundingCleared',
+      'FeesDistributed',
+      'ExecutorFunded'
     ];
 
     this.unsubscribeFunctions = [];

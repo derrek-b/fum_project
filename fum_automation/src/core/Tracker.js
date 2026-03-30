@@ -1258,11 +1258,9 @@ export default class Tracker {
   async saveMetadata(vaultAddress, metadata) {
     const vaultDir = await this.getVaultDirectory(vaultAddress);
     const metadataPath = path.join(vaultDir, 'metadata.json');
-    const tempPath = `${metadataPath}.tmp`;
 
     try {
-      await fs.writeFile(tempPath, JSON.stringify(metadata, null, 2), 'utf-8');
-      await fs.rename(tempPath, metadataPath);
+      await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
     } catch (error) {
       console.error(`Failed to save metadata for vault ${vaultAddress}:`, error.message);
     }
