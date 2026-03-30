@@ -118,6 +118,24 @@ Test setup flow:
 
 This differs from Uniswap V3/V4 where positions are ERC721 NFTs that can be transferred after creation. TJ's proxy-per-position architecture binds ownership at creation — there's no `safeTransferFrom` on TJPositionManager.
 
+## Testing: Bin-Draining Price Manipulation
+
+Used by `fum/test/scripts/manipulate-price-avalanche.js` — not project source code.
+
+**Bin depletion mechanics**: Unlike V3 where swapping any amount moves the tick continuously, TJ bins hold discrete reserves. The active bin only shifts when one side is **fully drained**. Swapping 0.1% of a bin's reserve does nothing to the active bin — you must drain the entire X (or Y) side to shift it.
+
+To move price up (increase tokenX price): drain X reserves from the active bin by buying X with Y. When X is depleted, active bin shifts up. To drain N bins, sum the X reserves across all N bins, convert to Y value using the bin price, and swap that total.
+
+**Overshoot control**: After draining N bins, add 5% of the (N+1)th bin's reserve as overshoot to land solidly in it — using the actual landing bin's reserves prevents overshooting through low-liquidity bins.
+
+**AUSD ERC-7201 storage**: AUSD token (`0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a`) uses ERC-7201 namespaced storage. Standard `hardhat_setStorageAt` slot discovery fails. Base slot: `0x455730fed596673e69db1907be2e521374ba893f1a04cc5f5dd931616cd6b700`. Balance is packed as `(uint248 balance << 8) | bool isFrozen`. Mapping key: `keccak256(abi.encode(uint256(address), baseSlot))`.
+
+**Token balance storage slots** (Avalanche, for `hardhat_setStorageAt` minting):
+- WAVAX (`0xB31f...`): slot 3
+- USDC (`0xB97E...`): slot 9
+- USDT (`0x9702...`): slot 51
+- AUSD: ERC-7201 (see above)
+
 ## Gotcha Summary
 
 1. Version 3 = V2.2 (counterintuitive naming)
@@ -128,3 +146,4 @@ This differs from Uniswap V3/V4 where positions are ERC721 NFTs that can be tran
 6. Per-bin tracking — fee baselines and liquidity are arrays, not single values
 7. **`LBPair__ZeroAmount(uint24)`** — `LBPair.burn` reverts on *any* zero amount in the burn array (selector `0x6996a925`). A 21-bin position with fees in 1 bin has 20 zero feeShares — must filter to non-zero entries before calling `removeLiquidity`.
 8. **Hardhat Avalanche fork** — `eth_call` against the fork block fails with "No known hardfork for execution on historical block". Fix: mine a local block with `evm_mine` after starting the node (or deploy contracts, which mines blocks). The `chains: { 43114: { hardforkHistory: { cancun: 0 } } }` config alone is not sufficient.
+9. **Bin draining ≠ percentage swaps** — Swapping X% of a bin's reserves does NOT move the active bin by X%. The bin only shifts when one side is fully depleted. See "Testing: Bin-Draining Price Manipulation" above.
