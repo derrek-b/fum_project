@@ -334,6 +334,8 @@ Instead of invalidating freshness timestamps, SSE events trigger **targeted data
 | `LiquidityAddedToPosition` | `refreshTokenBalances` | `refreshSinglePosition` |
 | `FeesCollected` | `refreshTokenBalances` | `refreshSinglePosition` per positionId |
 | `PositionsClosed` | `refreshTokenBalances` | `removePosition` + `updateVaultPositions(remove)` |
+| `FeesDistributed` | `refreshTokenBalances` | — |
+| `ExecutorFunded` | `refreshTokenBalances` | — |
 | `PositionRebalanced` | — | — (covered by PositionsClosed + TokensSwapped + NewPositionCreated) |
 
 **Helpers in `sseEventHandlers.js`:**
