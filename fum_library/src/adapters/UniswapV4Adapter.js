@@ -31,7 +31,7 @@ import { getTokenByAddress, getTokenBySymbol, getWrappedNativeAddress, getWrappe
 import { discoverV4Pools, getV4PositionsByOwner } from "../services/theGraph.js";
 import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Token, Percent, CurrencyAmount, TradeType, Ether } from '@uniswap/sdk-core';
-import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
+import { AlphaRouter, SwapType, StaticV3SubgraphProvider, UniswapMulticallProvider, V3PoolProvider, StaticGasPriceProvider } from '@uniswap/smart-order-router';
 import { Protocol } from '@uniswap/router-sdk';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import { SqrtPriceMath, TickMath, tickToPrice } from '@uniswap/v3-sdk';
@@ -109,11 +109,42 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     this.poolKeyCache = new Map();
 
     // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
-    // For test chain (1337), route through real Arbitrum; otherwise use the adapter's own chain
+    // For test chain (1337), use the local fork provider with on-chain-only pool discovery
+    // (StaticV3SubgraphProvider) so quotes reflect the fork's pool state, not mainnet.
+    // For real chains, use a dedicated RPC provider with default subgraph-based discovery.
     this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
-    const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
-    const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
-    this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
+
+    if (chainId === 1337) {
+      const localRpcUrl = getChainRpcUrls(chainId)[0]; // http://localhost:8545
+      const localProvider = new ethers.providers.JsonRpcProvider(localRpcUrl);
+      const multicallProvider = new UniswapMulticallProvider(this.alphaRouterChainId, localProvider);
+      const v3PoolProvider = new V3PoolProvider(this.alphaRouterChainId, multicallProvider);
+      // Static gas price avoids calling Arbitrum's ArbGasInfo precompile (0x6C)
+      // which doesn't exist on the Hardhat fork
+      const gasPriceProvider = new StaticGasPriceProvider(ethers.BigNumber.from(100000000)); // 0.1 gwei
+      // Stub arbitrumGasDataProvider to avoid ArbGasInfo precompile calls.
+      // Values must be non-zero — AlphaRouter's gas model divides by perArbGasTotal.
+      const arbitrumGasDataProvider = {
+        getGasData: async () => ({
+          perL2TxFee: ethers.BigNumber.from(1),
+          perL1CalldataFee: ethers.BigNumber.from(1),
+          perArbGasTotal: ethers.BigNumber.from(1),
+        })
+      };
+      this.alphaRouter = new AlphaRouter({
+        chainId: this.alphaRouterChainId,
+        provider: localProvider,
+        multicall2Provider: multicallProvider,
+        v3SubgraphProvider: new StaticV3SubgraphProvider(this.alphaRouterChainId, v3PoolProvider),
+        v3PoolProvider,
+        gasPriceProvider,
+        arbitrumGasDataProvider,
+      });
+    } else {
+      const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
+      const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
+      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
+    }
 
     // V4 supports native ETH pools (currency0 = AddressZero)
     this.supportsNativePools = true;

@@ -18,7 +18,7 @@ import { getTokenByAddress, getTokenBySymbol, getTokenAddress, getWrappedNativeA
 import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signature } from "../helpers/Permit2Helper.js";
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
-import { AlphaRouter, SwapType } from '@uniswap/smart-order-router';
+import { AlphaRouter, SwapType, StaticV3SubgraphProvider, UniswapMulticallProvider, V3PoolProvider, StaticGasPriceProvider } from '@uniswap/smart-order-router';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import JSBI from "jsbi";
 
@@ -95,11 +95,42 @@ export default class UniswapV3Adapter extends PlatformAdapter {
     this.erc20Interface = new ethers.utils.Interface(this.erc20ABI);
 
     // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
-    // For test chain (1337), route through real Arbitrum; otherwise use the adapter's own chain
+    // For test chain (1337), use the local fork provider with on-chain-only pool discovery
+    // (StaticV3SubgraphProvider) so quotes reflect the fork's pool state, not mainnet.
+    // For real chains, use a dedicated RPC provider with default subgraph-based discovery.
     this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
-    const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
-    const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
-    this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
+
+    if (chainId === 1337) {
+      const localRpcUrl = getChainRpcUrls(chainId)[0]; // http://localhost:8545
+      const localProvider = new ethers.providers.JsonRpcProvider(localRpcUrl);
+      const multicallProvider = new UniswapMulticallProvider(this.alphaRouterChainId, localProvider);
+      const v3PoolProvider = new V3PoolProvider(this.alphaRouterChainId, multicallProvider);
+      // Static gas price avoids calling Arbitrum's ArbGasInfo precompile (0x6C)
+      // which doesn't exist on the Hardhat fork
+      const gasPriceProvider = new StaticGasPriceProvider(ethers.BigNumber.from(100000000)); // 0.1 gwei
+      // Stub arbitrumGasDataProvider to avoid ArbGasInfo precompile calls.
+      // Values must be non-zero — AlphaRouter's gas model divides by perArbGasTotal.
+      const arbitrumGasDataProvider = {
+        getGasData: async () => ({
+          perL2TxFee: ethers.BigNumber.from(1),
+          perL1CalldataFee: ethers.BigNumber.from(1),
+          perArbGasTotal: ethers.BigNumber.from(1),
+        })
+      };
+      this.alphaRouter = new AlphaRouter({
+        chainId: this.alphaRouterChainId,
+        provider: localProvider,
+        multicall2Provider: multicallProvider,
+        v3SubgraphProvider: new StaticV3SubgraphProvider(this.alphaRouterChainId, v3PoolProvider),
+        v3PoolProvider,
+        gasPriceProvider,
+        arbitrumGasDataProvider,
+      });
+    } else {
+      const rpcUrls = getChainRpcUrls(this.alphaRouterChainId);
+      const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
+      this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
+    }
 
     // AlphaRouter can route through V4 native ETH pools — treat as native-pool capable
     this.supportsNativePools = true;
@@ -5577,6 +5608,26 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       ),
       poolCount: rwvq.route.pools?.length || rwvq.route.pairs?.length || 1,
     }));
+
+    // 🔬 Diagnostic: Log AlphaRouter quote and route details
+    if (process.env.DEBUG_SWAP_DIAG) {
+      const routeDetails = (routeResult.route.route || []).map(rwvq => {
+        const pools = rwvq.route.pools || [];
+        return pools.map(p => ({
+          fee: p.fee,
+          liquidity: p.liquidity?.toString(),
+          sqrtRatioX96: p.sqrtRatioX96?.toString(),
+          tickCurrent: p.tickCurrent
+        }));
+      });
+      console.log(`🔬 [SWAP-DIAG] AlphaRouter result for ${tokenIn.symbol}→${tokenOut.symbol}:`);
+      console.log(`🔬 [SWAP-DIAG]   quotedAmountIn=${routeResult.amountIn}, quotedAmountOut=${routeResult.amountOut}`);
+      console.log(`🔬 [SWAP-DIAG]   slippageTolerance=${slippageTolerance}%, isAmountIn=${isAmountIn}`);
+      console.log(`🔬 [SWAP-DIAG]   route count: ${routes.length}, route pools: ${JSON.stringify(routeDetails)}`);
+      if (routeResult.route.estimatedGasUsed) {
+        console.log(`🔬 [SWAP-DIAG]   estimatedGasUsed=${routeResult.route.estimatedGasUsed.toString()}`);
+      }
+    }
 
     // 2. Branch: native ETH input skips Permit2
     if (tokenIn.isNative) {
