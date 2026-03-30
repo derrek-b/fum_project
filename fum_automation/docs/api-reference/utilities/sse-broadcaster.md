@@ -51,8 +51,10 @@ Events streamed to connected SSE clients (19 total):
 **Swaps:** TokensSwapped
 **Native:** ETHWrapped, ETHUnwrapped
 **Vaults:** VaultBaselineCaptured, MonitoringStarted, VaultFailed, VaultRecovered, VaultBlacklisted, VaultUnblacklisted
-**Errors:** FeeCollectionFailed, VaultAuthEventFailed
-**Tracking:** TransactionLogged, TrackerFailure, TrackerFailureCleared
+**Distributions:** FeesDistributed, ExecutorFunded
+**Errors:** VaultAuthEventFailed
+**Tracking:** TransactionLogged
+**Executor:** ExecutorFundingRequired, ExecutorFundingCleared
 
 ## Data Sanitization
 
