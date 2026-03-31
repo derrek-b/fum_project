@@ -94,9 +94,11 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     try {
       // Setup V4 test environment with Hardhat fork
       // This includes: ETH→USDC swap, Permit2 approvals, pool data fetch
+      // Port must be 8545 — adapter constructor creates its own AlphaRouter provider
+      // from chain config (localhost:8545 for chainId 1337)
       env = await setupV4TestEnvironment({
         deployContracts: true,
-        port: 8547,
+        port: 8545,
       });
 
       // Use the adapter from the V4 environment
@@ -2461,6 +2463,8 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       }, 180000);
 
       it('should collect non-zero fees after swap through position', async () => {
+        // Recreate adapter with fresh AlphaRouter provider (evm_revert cycles corrupt provider state)
+        adapter = new UniswapV4Adapter(1337);
         const { ethers } = require('ethers');
 
         // Get signer for swap execution and vault address for claim
@@ -4299,7 +4303,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 
     // Mock pool data for validation tests (not used in success tests)
-    // Success tests use real pool data from _fetchPoolData
+    // Success tests use real pool data from fetchPoolDataForTesting
     const mockPoolKey = {
       currency0: NATIVE_ETH,  // ETH is always currency0 (lowest address)
       currency1: USDC,
@@ -4679,7 +4683,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
 
       beforeAll(async () => {
         // Fetch real pool data for native ETH/USDC 500 fee tier pool
-        const fetchedPoolData = await adapter._fetchPoolData(
+        const fetchedPoolData = await adapter.fetchPoolDataForTesting(
           NATIVE_ETH,
           USDC,
           FEE,
@@ -6415,6 +6419,14 @@ describe('UniswapV4Adapter - Unit Tests', () => {
     // Use WETH address for ERC20 tests (Arbitrum WETH)
     const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 
+    // Recreate adapter with a fresh AlphaRouter provider.
+    // After many evm_revert cycles, the AlphaRouter's internal provider accumulates
+    // stale block state that causes "invalid block tag" errors on multicall eth_calls.
+    // Creating a fresh adapter resets this state.
+    beforeAll(() => {
+      adapter = new UniswapV4Adapter(1337);
+    });
+
     describe('Success Cases', () => {
       it('should return best quote using AlphaRouter with EXACT_INPUT', async () => {
         const quoteParams = {
@@ -6771,6 +6783,11 @@ describe('UniswapV4Adapter - Unit Tests', () => {
   });
 
   describe('batchSwapTransactions', () => {
+    // Recreate adapter with fresh AlphaRouter provider (evm_revert cycles corrupt provider state)
+    beforeAll(() => {
+      adapter = new UniswapV4Adapter(1337);
+    });
+
     describe('Validation Error Cases', () => {
       const mockSigner = { _signTypedData: () => Promise.resolve('0x') };
 
@@ -6844,11 +6861,113 @@ describe('UniswapV4Adapter - Unit Tests', () => {
       });
     });
 
-    // Note: Full integration tests for batchSwapTransactions require:
-    // - Real token balances
-    // - Valid Permit2 approval
-    // - Real swap routes
-    // These are covered in fum_automation integration tests
+    describe('Success Cases', () => {
+      it('should generate a single native ETH swap transaction (no Permit2)', async () => {
+        const signer = env.signers[0];
+        const swapInstructions = [{
+          tokenIn: { symbol: 'ETH', decimals: 18, isNative: true },
+          tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+          amount: ethers.utils.parseEther('0.01').toString(),
+          isAmountIn: true
+        }];
+
+        const result = await adapter.batchSwapTransactions(swapInstructions, {
+          signer,
+          provider: env.provider,
+          chainId: 1337,
+          recipient: env.testVault.address,
+          slippageTolerance: 1
+        });
+
+        // Verify structure
+        expect(result).toHaveProperty('transactions');
+        expect(result).toHaveProperty('metadata');
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        // Verify transaction shape
+        const tx = result.transactions[0];
+        expect(tx.to).toBeTypeOf('string');
+        expect(tx.data).toBeTypeOf('string');
+        expect(tx.data.startsWith('0x')).toBe(true);
+        // Native ETH swap should have non-zero value
+        expect(BigInt(tx.value)).toBeGreaterThan(0n);
+
+        // Verify metadata shape
+        const meta = result.metadata[0];
+        expect(meta.tokenInSymbol).toBe('ETH');
+        expect(meta.tokenOutSymbol).toBe('USDC');
+        expect(meta.quotedAmountIn).toBeTypeOf('string');
+        expect(meta.quotedAmountOut).toBeTypeOf('string');
+        expect(meta.isAmountIn).toBe(true);
+      }, 60000);
+
+      it('should generate an ERC20 swap transaction with Permit2', async () => {
+        const signer = env.signers[0];
+        const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const swapInstructions = [{
+          tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+          tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+          amount: ethers.utils.parseEther('0.01').toString(),
+          isAmountIn: true
+        }];
+
+        const result = await adapter.batchSwapTransactions(swapInstructions, {
+          signer,
+          provider: env.provider,
+          chainId: 1337,
+          recipient: env.testVault.address,
+          slippageTolerance: 1
+        });
+
+        expect(result.transactions).toHaveLength(1);
+        expect(result.metadata).toHaveLength(1);
+
+        const tx = result.transactions[0];
+        expect(tx.data).toBeTypeOf('string');
+        expect(tx.data.startsWith('0x')).toBe(true);
+
+        const meta = result.metadata[0];
+        expect(meta.tokenInSymbol).toBe('WETH');
+        expect(meta.tokenOutSymbol).toBe('USDC');
+        expect(meta.tokenInAddress).toBe(WETH);
+      }, 60000);
+
+      it('should batch multiple swaps with incrementing Permit2 nonces', async () => {
+        const signer = env.signers[0];
+        const WETH = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
+        const swapInstructions = [
+          {
+            tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+            tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+            amount: ethers.utils.parseEther('0.005').toString(),
+            isAmountIn: true
+          },
+          {
+            tokenIn: { address: WETH, symbol: 'WETH', decimals: 18 },
+            tokenOut: { address: env.usdcAddress, symbol: 'USDC', decimals: 6 },
+            amount: ethers.utils.parseEther('0.005').toString(),
+            isAmountIn: true
+          }
+        ];
+
+        const result = await adapter.batchSwapTransactions(swapInstructions, {
+          signer,
+          provider: env.provider,
+          chainId: 1337,
+          recipient: env.testVault.address,
+          slippageTolerance: 1
+        });
+
+        expect(result.transactions).toHaveLength(2);
+        expect(result.metadata).toHaveLength(2);
+
+        // Different nonces should produce different calldata
+        expect(result.transactions[0].data).not.toBe(result.transactions[1].data);
+        expect(result.metadata[0].tokenInSymbol).toBe('WETH');
+        expect(result.metadata[1].tokenInSymbol).toBe('WETH');
+      }, 90000);
+    });
   });
 
   describe('selectBestPool', () => {
@@ -7757,7 +7876,7 @@ describe('UniswapV4Adapter - Unit Tests', () => {
         const allCount = Object.keys(beforeResult.positions).length;
 
         // Close the position (remove all liquidity)
-        // Use env.poolData which includes poolKey (from _fetchPoolData)
+        // Use env.poolData which includes poolKey (from fetchPoolDataForTesting)
         const removeTxData = await adapter.generateRemoveLiquidityData({
           position: {
             id: env.positionTokenId,

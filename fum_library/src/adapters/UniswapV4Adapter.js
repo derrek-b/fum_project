@@ -112,6 +112,10 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     // For test chain (1337), use the local fork provider with on-chain-only pool discovery
     // (StaticV3SubgraphProvider) so quotes reflect the fork's pool state, not mainnet.
     // For real chains, use a dedicated RPC provider with default subgraph-based discovery.
+    // AlphaRouter requires real chain infrastructure (multicall contracts, subgraphs)
+    // For test chain (1337), use the local fork provider with on-chain-only pool discovery
+    // (StaticV3SubgraphProvider) so quotes reflect the fork's pool state, not mainnet.
+    // For real chains, use a dedicated RPC provider with default subgraph-based discovery.
     this.alphaRouterChainId = chainId === 1337 ? 42161 : chainId;
 
     if (chainId === 1337) {
@@ -226,10 +230,8 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @private
    */
   _createTokenInstance(tokenAddress) {
+    // getTokenByAddress throws if token not found — no guard needed
     const tokenConfig = getTokenByAddress(tokenAddress, this.chainId);
-    if (!tokenConfig) {
-      throw new Error(`Token ${tokenAddress} not found in config for chain ${this.chainId}`);
-    }
     return new Token(
       this.alphaRouterChainId,
       tokenAddress,
@@ -4424,9 +4426,10 @@ export default class UniswapV4Adapter extends PlatformAdapter {
    * @param {string} hooks - Hooks contract address (use ethers.constants.AddressZero for no hooks)
    * @param {Object} provider - Ethers provider
    * @returns {Promise<Object>} Pool state data including poolKey and poolId
-   * @private
+   * NOTE: Not used in production source code — only called from test setup
+   * and test helpers across fum_library and fum_automation.
    */
-  async _fetchPoolData(token0Address, token1Address, fee, tickSpacing, hooks, provider) {
+  async fetchPoolDataForTesting(token0Address, token1Address, fee, tickSpacing, hooks, provider) {
     // Validate token0 address
     if (token0Address === null || token0Address === undefined) {
       throw new Error("Token0 address parameter is required");

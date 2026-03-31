@@ -439,6 +439,58 @@ describe('contracts.js - Unit Tests', () => {
         ).rejects.toThrow('Vault name cannot be empty');
       });
 
+      it('should throw error for whitespace-only vault name', async () => {
+        const signer = env.signers[0];
+
+        await expect(
+          createVault('   ', signer)
+        ).rejects.toThrow('Vault name cannot be empty');
+
+        await expect(
+          createVault('\t\n', signer)
+        ).rejects.toThrow('Vault name cannot be empty');
+      });
+
+      it('should format CALL_EXCEPTION errors with reason', async () => {
+        const signer = env.signers[0];
+        const spy = vi.spyOn(signer, 'sendTransaction').mockRejectedValueOnce(
+          Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION', reason: 'test revert reason' })
+        );
+
+        await expect(createVault('Test Vault', signer)).rejects.toThrow('Failed to create vault: test revert reason');
+        spy.mockRestore();
+      });
+
+      it('should format CALL_EXCEPTION errors falling back to message when no reason', async () => {
+        const signer = env.signers[0];
+        const spy = vi.spyOn(signer, 'sendTransaction').mockRejectedValueOnce(
+          Object.assign(new Error('call exception detail'), { code: 'CALL_EXCEPTION' })
+        );
+
+        await expect(createVault('Test Vault', signer)).rejects.toThrow('Failed to create vault: call exception detail');
+        spy.mockRestore();
+      });
+
+      it('should format TRANSACTION_REPLACED errors', async () => {
+        const signer = env.signers[0];
+        const spy = vi.spyOn(signer, 'sendTransaction').mockRejectedValueOnce(
+          Object.assign(new Error('transaction was replaced'), { code: 'TRANSACTION_REPLACED' })
+        );
+
+        await expect(createVault('Test Vault', signer)).rejects.toThrow('Transaction failed: transaction was replaced');
+        spy.mockRestore();
+      });
+
+      it('should format NETWORK_ERROR errors', async () => {
+        const signer = env.signers[0];
+        const spy = vi.spyOn(signer, 'sendTransaction').mockRejectedValueOnce(
+          Object.assign(new Error('could not detect network'), { code: 'NETWORK_ERROR' })
+        );
+
+        await expect(createVault('Test Vault', signer)).rejects.toThrow('Network error while creating vault: could not detect network');
+        spy.mockRestore();
+      });
+
       it('should throw error for invalid signer types', async () => {
         const vaultName = 'Test Vault';
 
@@ -1277,48 +1329,29 @@ describe('contracts.js - Unit Tests', () => {
 
   describe('getContractInfoByAddress', () => {
     describe('Success Cases', () => {
-      it('should return contract info for valid strategy addresses', () => {
-        // Test with known strategy addresses from contract data
-        // Note: These would be real addresses from your contract artifacts
-        const testCases = [
-          // These are valid Ethereum addresses that won't be in our contract data
-          { address: '0x742d35Cc6634C0532925a3b8d7d566dd8f4Da4d1', expectedName: 'bob', expectedChain: 1 },
-          { address: '0xa0B86A33e6411fBDD1B6644280bF6f4AE6E862Ca', expectedName: 'parris', expectedChain: 137 }
-        ];
+      it('should return contract info for deployed VaultFactory address', () => {
+        const result = getContractInfoByAddress(env.contractAddresses.VaultFactory);
 
-        // Since we don't have access to actual contract data in tests,
-        // we'll test the function logic with mock scenarios
-        testCases.forEach(({ address, expectedName, expectedChain }) => {
-          try {
-            const result = getContractInfoByAddress(address);
-            expect(result).toHaveProperty('contractName');
-            expect(result).toHaveProperty('chainId');
-            expect(typeof result.contractName).toBe('string');
-            expect(typeof result.chainId).toBe('number');
-          } catch (error) {
-            // If address not found in current contract data, that's expected
-            expect(error.message).toMatch(/Invalid address|not found in contract data/);
-          }
-        });
+        expect(result.contractName).toBe('VaultFactory');
+        expect(result.chainId).toBe(1337);
+      });
+
+      it('should return contract info for deployed BabyStepsStrategy address', () => {
+        const result = getContractInfoByAddress(env.contractAddresses.BabyStepsStrategy);
+
+        expect(result.contractName).toBe('bob');
+        expect(result.chainId).toBe(1337);
       });
 
       it('should handle case-insensitive address lookup', () => {
-        // Test with mixed case addresses
-        const mixedCaseAddresses = [
-          '0x742D35CC6634C0532925A3B8D7D566DD8F4DA4D1',
-          '0xa0b86a33e6411fbdd1b6644280bf6f4ae6e862ca'
-        ];
+        const address = env.contractAddresses.VaultFactory;
 
-        mixedCaseAddresses.forEach(address => {
-          try {
-            const result = getContractInfoByAddress(address);
-            expect(result).toHaveProperty('contractName');
-            expect(result).toHaveProperty('chainId');
-          } catch (error) {
-            // Address not found is acceptable for test
-            expect(error.message).toContain('not found in contract data');
-          }
-        });
+        const lowercaseResult = getContractInfoByAddress(address.toLowerCase());
+        const checksummedResult = getContractInfoByAddress(ethers.utils.getAddress(address));
+
+        expect(lowercaseResult).toEqual(checksummedResult);
+        expect(lowercaseResult.contractName).toBe('VaultFactory');
+        expect(lowercaseResult.chainId).toBe(1337);
       });
     });
 

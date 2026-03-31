@@ -237,10 +237,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @private
    */
   _createTokenInstance(tokenAddress) {
+    // getTokenByAddress throws if token not found — no guard needed
     const tokenConfig = getTokenByAddress(tokenAddress, this.chainId);
-    if (!tokenConfig) {
-      throw new Error(`Token ${tokenAddress} not found in config for chain ${this.chainId}`);
-    }
     return new Token(
       this.alphaRouterChainId,
       tokenAddress,

@@ -138,6 +138,30 @@ describe('Wallet - Unit Tests', () => {
         const httpProvider = await createJsonRpcProvider('http://localhost:8545');
         expect(httpProvider).toBeInstanceOf(ethers.providers.JsonRpcProvider);
       });
+
+      it('should succeed after a transient getNetwork failure on first retry', async () => {
+        let callCount = 0;
+        const originalGetNetwork = ethers.providers.JsonRpcProvider.prototype.getNetwork;
+
+        // Spy on getNetwork to fail once, then delegate to the real implementation
+        const spy = vi.spyOn(ethers.providers.JsonRpcProvider.prototype, 'getNetwork')
+          .mockImplementation(function () {
+            callCount++;
+            if (callCount === 1) {
+              return Promise.reject(new Error('Transient network error'));
+            }
+            // Restore and call the real implementation for subsequent calls
+            spy.mockRestore();
+            return originalGetNetwork.call(this);
+          });
+
+        const provider = await createJsonRpcProvider('http://localhost:8545');
+
+        expect(provider).toBeInstanceOf(ethers.providers.JsonRpcProvider);
+        // Verify it's actually connected by calling a real RPC method
+        const network = await provider.getNetwork();
+        expect(network.chainId).toBe(1337);
+      });
     });
 
     describe('Error Cases', () => {

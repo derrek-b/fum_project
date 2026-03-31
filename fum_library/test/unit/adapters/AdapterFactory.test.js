@@ -1,10 +1,33 @@
 /**
  * AdapterFactory Unit Tests
  *
- * Tests for the AdapterFactory.getAdaptersForChain method
+ * Tests for AdapterFactory methods: getAdaptersForChain, getAdapter,
+ * getSupportedPlatforms, hasAdapter
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Mock chainHelpers at module scope (vi.mock is hoisted by vitest).
+// Only intercepts the synthetic chain 88888; all real chains pass through.
+vi.mock('../../../src/helpers/chainHelpers.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    lookupChainPlatformIds: (chainId) => {
+      if (chainId === 88888) {
+        return ['failing', 'mock', 'unregistered'];
+      }
+      return actual.lookupChainPlatformIds(chainId);
+    },
+    getChainConfig: (chainId) => {
+      if (chainId === 88888) {
+        return { name: 'Test Chain' };
+      }
+      return actual.getChainConfig(chainId);
+    }
+  };
+});
+
 import AdapterFactory from '../../../src/adapters/AdapterFactory.js';
 import UniswapV3Adapter from '../../../src/adapters/UniswapV3Adapter.js';
 import UniswapV4Adapter from '../../../src/adapters/UniswapV4Adapter.js';
@@ -12,7 +35,7 @@ import TraderJoeV2_2Adapter from '../../../src/adapters/TraderJoeV2_2Adapter.js'
 
 // Create a failing adapter class for testing error handling
 class FailingAdapter {
-  constructor(chainId) {
+  constructor() {
     throw new Error("Adapter creation failed");
   }
 }
@@ -138,44 +161,17 @@ describe('AdapterFactory - Unit Tests', () => {
       });
 
       it('should track failures when adapter creation fails', () => {
-        // First, we need to mock lookupChainPlatformIds to return a failing platform
-        // Since we can't easily modify the real chain config, we'll temporarily register
-        // a failing adapter and manually test the failure tracking
-
-        // Mock setup for failure tracking test
-
-        // Mock the chainHelpers to return our test platform
-        vi.mock('../../../src/helpers/chainHelpers.js', async (importOriginal) => {
-          const actual = await importOriginal();
-          return {
-            ...actual,
-            lookupChainPlatformIds: (chainId) => {
-              if (chainId === 88888) {
-                return ['failing', 'mock'];
-              }
-              return actual.lookupChainPlatformIds(chainId);
-            },
-            getChainConfig: (chainId) => {
-              if (chainId === 88888) {
-                return { name: 'Test Chain' };
-              }
-              return actual.getChainConfig(chainId);
-            }
-          };
-        });
-
-        // Register adapters
+        // Uses mock chain 88888 which returns ['failing', 'mock', 'unregistered']
         AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
         AdapterFactory.registerAdapterForTestingOnly('mock', MockAdapter);
 
-        // Test with our special test chain
         const result = AdapterFactory.getAdaptersForChain(88888);
 
         // Should get the working adapter
         expect(result.adapters.length).toBe(1);
         expect(result.adapters[0]).toBeInstanceOf(MockAdapter);
 
-        // Should track the failure
+        // Should track the failure for 'failing' adapter
         expect(result.failures.length).toBe(1);
         expect(result.failures[0]).toEqual({
           platformId: 'failing',
@@ -183,6 +179,24 @@ describe('AdapterFactory - Unit Tests', () => {
           errorDetails: expect.any(Error)
         });
         expect(result.failures[0].errorDetails.message).toBe('Adapter creation failed');
+      });
+
+      it('should silently skip platform IDs with no registered adapter class', () => {
+        // Mock chain 88888 returns ['failing', 'mock', 'unregistered'].
+        // 'unregistered' has no adapter class — should be skipped, not a failure.
+        AdapterFactory.registerAdapterForTestingOnly('failing', FailingAdapter);
+        AdapterFactory.registerAdapterForTestingOnly('mock', MockAdapter);
+
+        const result = AdapterFactory.getAdaptersForChain(88888);
+
+        // 'unregistered' should NOT appear in failures — it's silently skipped
+        const unregisteredFailure = result.failures.find(f => f.platformId === 'unregistered');
+        expect(unregisteredFailure).toBeUndefined();
+
+        // Only 'failing' should be in failures, 'mock' in adapters
+        expect(result.adapters.length).toBe(1);
+        expect(result.failures.length).toBe(1);
+        expect(result.failures[0].platformId).toBe('failing');
       });
     });
 
@@ -274,6 +288,16 @@ describe('AdapterFactory - Unit Tests', () => {
         expect(adapter.chainId).toBe(42161);
         expect(adapter.platformId).toBe('uniswapV3');
         expect(adapter.platformName).toBe('Uniswap V3');
+      });
+
+      it('should return UniswapV4Adapter for valid platform and chain', () => {
+        const adapter = AdapterFactory.getAdapter('uniswapV4', 42161);
+
+        expect(adapter).toBeDefined();
+        expect(adapter).toBeInstanceOf(UniswapV4Adapter);
+        expect(adapter.chainId).toBe(42161);
+        expect(adapter.platformId).toBe('uniswapV4');
+        expect(adapter.platformName).toBe('Uniswap V4');
       });
 
       it('should return adapter for test chain', () => {

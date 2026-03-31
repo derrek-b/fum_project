@@ -64,8 +64,8 @@ async function setupV4Environment(coreEnv) {
   const vaultAbi = contractData.PositionVault.abi;
   const testVault = new ethers.Contract(vaultAddress, vaultAbi, owner);
 
-  // Create V4 adapter
-  const adapter = new UniswapV4Adapter(1337, provider);
+  // Create V4 adapter — constructor creates its own providers internally
+  const adapter = new UniswapV4Adapter(1337);
 
   // Get chain config
   const chainConfig = chains[1337];
@@ -120,7 +120,7 @@ async function setupV4Environment(coreEnv) {
   const FEE = 500;
   const TICK_SPACING = 10;
 
-  const poolData = await adapter._fetchPoolData(
+  const poolData = await adapter.fetchPoolDataForTesting(
     NATIVE_ETH,
     usdcAddress,
     FEE,

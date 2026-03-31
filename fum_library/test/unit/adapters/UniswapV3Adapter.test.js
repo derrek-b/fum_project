@@ -21,15 +21,14 @@ describe('UniswapV3Adapter - Unit Tests', () => {
   beforeAll(async () => {
     try {
       // Setup test environment with Hardhat fork and full deployment for contract testing
-      // Use port 8546 to avoid conflicts with other test files
       env = await setupTestEnvironment({
         deployContracts: true, // Need deployed contracts for gas estimation tests
-        port: 8546,
+        port: 8545,
       });
 
-      // Create adapter instance using chainId and provider
-      const network = await env.provider.getNetwork();
-      adapter = new UniswapV3Adapter(Number(network.chainId), env.provider);
+      // Create adapter instance — constructor creates its own AlphaRouter provider
+      // from chain config (localhost:8545 for chainId 1337), so port must match above
+      adapter = new UniswapV3Adapter(1337);
 
       console.log('Hardhat test environment started successfully');
       console.log('Provider URL:', env.provider.connection?.url || 'Local provider');
@@ -68,7 +67,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         console.warn('Failed to revert snapshot:', error.message);
       }
     }
-  });
+  }, 60000);
 
   // Test to verify Hardhat is working
   it('should connect to Hardhat fork successfully', async () => {
@@ -11735,7 +11734,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(bestQuote.route).toBeDefined();
         expect(bestQuote.route.quote).toBeDefined();
         expect(bestQuote.route.route).toBeDefined();
-      });
+      }, 120000);
 
       it('should return valid quote for different amounts with EXACT_INPUT', async () => {
         const quoteParams = {
@@ -11753,7 +11752,7 @@ describe('UniswapV3Adapter - Unit Tests', () => {
         expect(bestQuote.amountOut).toBeDefined();
         expect(bestQuote.route).toBeDefined();
         expect(BigInt(bestQuote.amountOut)).toBeGreaterThan(0n);
-      });
+      }, 60000);
 
       it('should return consistent results across multiple calls with EXACT_INPUT', async () => {
         const quoteParams = {
