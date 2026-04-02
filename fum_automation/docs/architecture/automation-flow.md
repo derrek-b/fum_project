@@ -123,8 +123,30 @@ handleSwapEvent(data)
 │       ├── Rebalance check (position out of range?)
 │       └── Fee collection check (accrued fees above threshold?)
 │
+├── Check pendingOffboards (auth revoked while locked?) → offboard if pending
 ├── Apply any pending config updates (processPendingConfigUpdates)
 └── unlockVault(vaultAddress)
+```
+
+## Auth Revocation Flow
+
+When a vault's executor is removed on-chain, the service offboards the vault. If the vault is locked (operation in progress), offboarding is deferred to prevent concurrent state mutation:
+
+```
+VaultAuthRevoked event
+│
+├── If vault is locked (operation in progress):
+│   └── Add to pendingOffboards Set, return immediately
+│       (offboard runs when VaultUnlocked fires — see unlock flow above)
+│
+├── If vault is unlocked:
+│   └── offboardVault() immediately:
+│       ├── Strategy cleanup (emergencyExitBaseline, position checks)
+│       ├── Remove all vault listeners
+│       ├── Remove from failedVaults and tripHistory
+│       └── Remove from VaultDataService cache
+│
+└── Emit VaultOffboarded (deferred: true/false)
 ```
 
 ## Config Update Flow
