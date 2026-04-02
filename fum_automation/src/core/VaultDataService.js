@@ -353,9 +353,6 @@ class VaultDataService {
       'vaultLoading',
       'vaultLoaded',
       'vaultLoadError',
-      'positionsRefreshing',
-      'positionsRefreshed',
-      'positionsRefreshError',
       'cacheCleared',
       'targetTokensUpdated',
       'targetPlatformsUpdated'
@@ -403,49 +400,6 @@ class VaultDataService {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
     const vault = this.#vaults.get(normalizedAddress);
     return vault?.strategy?.strategyId || null;
-  }
-
-  /**
-   * Refresh positions and token balances for a vault
-   * @param {string} vaultAddress - Vault address to refresh
-   * @returns {Promise<boolean>} True if refresh successful
-   */
-  async refreshPositionsAndTokens(vaultAddress) {
-    this.ensureInitialized();
-
-    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
-
-    this.eventManager.emit('positionsRefreshing', normalizedAddress);
-
-    try {
-      const vault = this.#vaults.get(normalizedAddress);
-      if (!vault) {
-        throw new Error(`Vault ${normalizedAddress} not found in cache`);
-      }
-
-      // Use chain-filtered tokens instead of getAllTokenSymbols()
-      const tokenSymbols = Object.keys(this.tokens || {});
-      if (tokenSymbols.length === 0) {
-        throw new Error(`No tokens configured for chain ${this.chainId}. Cannot refresh positions.`);
-      }
-      const [allTokenBalances, currentPositions] = await Promise.all([
-        this.fetchTokenBalances(normalizedAddress, tokenSymbols),
-        this.fetchPositions(normalizedAddress)
-      ]);
-
-      vault.tokens = allTokenBalances;
-      vault.positions = currentPositions;
-      vault.lastUpdated = Date.now();
-      this.#vaults.set(normalizedAddress, vault);
-
-      this.eventManager.emit('positionsRefreshed', normalizedAddress, Object.values(currentPositions));
-      return true;
-    } catch (error) {
-      const detailedMessage = `Error refreshing positions for vault ${normalizedAddress}: ${error.message}`;
-      console.error(detailedMessage, error);
-      this.eventManager.emit('positionsRefreshError', normalizedAddress, detailedMessage);
-      throw new Error(detailedMessage);
-    }
   }
 
   /**

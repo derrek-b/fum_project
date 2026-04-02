@@ -123,7 +123,7 @@ describe('BS-0100: Cross-Platform Position Closure (V3 vault with V4 position)',
     await setupPermit2Approval(usdcContract, uniswapV4.positionManagerAddress, owner);
 
     // Fetch V4 ETH/USDC pool data (ETH = AddressZero, sorted before any ERC-20)
-    const poolData = await v4Adapter._fetchPoolData(
+    const poolData = await v4Adapter.fetchPoolDataForTesting(
       NATIVE_ETH,
       usdcAddress,
       500,

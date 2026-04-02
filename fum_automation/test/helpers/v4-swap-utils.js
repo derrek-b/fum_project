@@ -320,7 +320,7 @@ function buildV4SwapActions(poolKey, zeroForOne, amountIn, amountOutMinimum, tok
  */
 export async function getV4PoolData(testEnv, token0, token1, fee = 500, tickSpacing = 10) {
   const adapter = new UniswapV4Adapter(1337, testEnv.hardhatServer.provider);
-  return adapter._fetchPoolData(
+  return adapter.fetchPoolDataForTesting(
     token0,
     token1,
     fee,

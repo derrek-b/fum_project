@@ -218,7 +218,7 @@ export default class BabyStepsStrategy extends StrategyBase {
     } else {
       // availableDeployment <= 0
       if (assetValues.totalVaultValue === 0) {
-        throw new Error(`Empty vault cannot be managed: no tokens or positions (vault: ${vault.address})`);
+        throw new UnrecoverableError(`Empty vault cannot be managed: no tokens or positions (vault: ${vault.address})`);
       } else {
         // No available tokens above minimum threshold - all value is in positions
         this.log('No available capital to deploy (all value in positions or below minimum)');

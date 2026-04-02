@@ -11,6 +11,7 @@ import {
   retryRpcCall,
   retryBatchOperations
 } from '../../src/utils/RetryHelper.js';
+import { UnrecoverableError } from '../../src/utils/errors.js';
 
 describe('RetryHelper', () => {
   // Mock timers for delay testing
@@ -198,6 +199,26 @@ describe('RetryHelper', () => {
         mainError.cause = causeError;
 
         expect(isRetryableError(mainError)).toBe(false);
+      });
+    });
+
+    describe('UnrecoverableError handling', () => {
+      it('should return false for UnrecoverableError instance', () => {
+        const error = new UnrecoverableError('fatal failure');
+        expect(isRetryableError(error)).toBe(false);
+      });
+
+      it('should return false for error with isUnrecoverable flag', () => {
+        const error = new Error('custom fatal');
+        error.isUnrecoverable = true;
+        expect(isRetryableError(error)).toBe(false);
+      });
+
+      it('should return false when UnrecoverableError is in cause chain', () => {
+        const cause = new UnrecoverableError('deep fatal');
+        const wrapper = new Error('wrapper');
+        wrapper.cause = cause;
+        expect(isRetryableError(wrapper)).toBe(false);
       });
     });
   });
@@ -809,6 +830,43 @@ describe('RetryHelper', () => {
         expect(mockLogger.log).toHaveBeenCalledWith(
           expect.stringContaining('Successfully recovered')
         );
+      });
+
+      it('should return empty results for empty operations array', async () => {
+        const operationFn = vi.fn();
+        const result = await retryBatchOperations([], operationFn);
+
+        expect(result.successes).toEqual([]);
+        expect(result.finalFailures).toEqual([]);
+        expect(operationFn).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('UnrecoverableError in retryWithBackoff', () => {
+      it('should throw immediately without retrying for UnrecoverableError', async () => {
+        const fn = vi.fn().mockRejectedValue(new UnrecoverableError('fatal'));
+        const silentLogger = { log: vi.fn(), error: vi.fn() };
+
+        await expect(
+          retryWithBackoff(fn, { logger: silentLogger, maxRetries: 3, baseDelay: 100 })
+        ).rejects.toThrow('fatal');
+
+        expect(fn).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('retryWithBackoff with maxRetries=0', () => {
+      it('should attempt once and throw on failure', async () => {
+        const error = new Error('network error');
+        error.code = 'NETWORK_ERROR';
+        const fn = vi.fn().mockRejectedValue(error);
+        const silentLogger = { log: vi.fn(), error: vi.fn() };
+
+        await expect(
+          retryWithBackoff(fn, { logger: silentLogger, maxRetries: 0, baseDelay: 100 })
+        ).rejects.toThrow('network error');
+
+        expect(fn).toHaveBeenCalledTimes(1);
       });
     });
   });

@@ -114,9 +114,15 @@ class EventManager {
       return;
     }
 
-    // Call handlers - let them handle their own errors
+    // Call handlers - handlers are expected to catch their own errors.
+    // try/catch is a safety net: prevents one throwing handler from blocking
+    // delivery to subsequent subscribers.
     for (const handler of this.eventHandlers[event]) {
-      handler(...args);
+      try {
+        handler(...args);
+      } catch (error) {
+        console.error(`[EventManager] Handler threw on event "${event}":`, error);
+      }
     }
   }
 
@@ -235,35 +241,6 @@ class EventManager {
     }
   }
 
-  /**
-   * Register an interval for periodic execution
-   * @param {Object} options - Registration options
-   * @returns {string} Interval key for future reference
-   */
-  registerInterval({ callback, intervalMs, vaultAddress, eventType, chainId, additionalId }) {
-    const key = this.generateListenerKey({ id: vaultAddress, eventType, chainId, additionalId });
-
-    const existingListener = this.listeners[key];
-    if (existingListener && existingListener.isRemoved) {
-      delete existingListener.isRemoved;
-      this.log(`Reactivated zombie interval listener: ${key}`);
-      this.clearFailedRemoval(key);
-      return key;
-    }
-
-    const intervalId = setInterval(callback, intervalMs);
-
-    this.listeners[key] = {
-      type: 'interval',
-      intervalId,
-      vaultAddress,
-      chainId
-    };
-
-    this.log(`Registered interval: ${key} with ${intervalMs}ms`);
-    return key;
-  }
-
   //#endregion
 
   //#region Listener Removal
@@ -298,9 +275,6 @@ class EventManager {
           setTimeout(resolve, 10);
         });
         this.log(`Removed filter listener: ${key}`);
-      } else if (listener.type === 'interval') {
-        clearInterval(listener.intervalId);
-        this.log(`Removed interval: ${key}`);
       } else {
         throw new Error(`Unknown listener type: ${listener.type}`);
       }
@@ -814,16 +788,10 @@ class EventManager {
         if (isAuthorized) {
           // Grant: verify this executor belongs to our HD tree
           // Read executorIndex from VaultFactory, derive our address, compare
-          let executorIndex;
-          try {
-            executorIndex = await retryRpcCall(
-              () => getVaultExecutorIndex(vaultAddress, provider),
-              'getVaultExecutorIndex(authEvent)'
-            );
-          } catch (indexError) {
-            this.log(`Could not read executorIndex for vault ${vaultAddress}: ${indexError.message}`);
-            return;
-          }
+          const executorIndex = await retryRpcCall(
+            () => getVaultExecutorIndex(vaultAddress, provider),
+            'getVaultExecutorIndex(authEvent)'
+          );
 
           const derivedAddress = hdNode.derivePath(
             "m/44'/60'/0'/0/" + executorIndex

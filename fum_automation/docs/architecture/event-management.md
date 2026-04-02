@@ -63,10 +63,6 @@ Registers a handler on a provider event filter (`provider.on(filter, handler)`).
 - Swap event monitoring on pool contracts
 - Authorization events (`ExecutorChanged` on VaultFactory)
 
-### registerInterval({ callback, intervalMs, vaultAddress, eventType, chainId, additionalId })
-
-Registers a `setInterval` for periodic tasks. Used for retry timers and heartbeat checks.
-
 ### Listener Key Generation
 
 All registration methods generate a unique key via `generateListenerKey({ id, eventType, chainId, additionalId })`. Format: `{id}:{eventType}:{chainId}:{additionalId}`.

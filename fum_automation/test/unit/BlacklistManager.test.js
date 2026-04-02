@@ -263,4 +263,97 @@ describe('Blacklist Management', () => {
       expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
     });
   });
+
+  describe('getBlacklistData', () => {
+    it('should return empty object when no vaults blacklisted', () => {
+      service = new AutomationService(createServiceConfig({
+        dataDir: tempDir
+      }));
+
+      const data = service.getBlacklistData();
+      expect(data).toEqual({});
+    });
+
+    it('should return correct shape for populated blacklist', () => {
+      service = new AutomationService(createServiceConfig({
+        dataDir: tempDir
+      }));
+
+      const vaultAddress = '0x8888888888888888888888888888888888888888';
+      service.blacklistedVaults.set(vaultAddress, {
+        vaultAddress,
+        blacklistedAt: 12345,
+        reason: 'test reason'
+      });
+
+      const data = service.getBlacklistData();
+      expect(data[vaultAddress]).toBeDefined();
+      expect(data[vaultAddress].reason).toBe('test reason');
+      expect(data[vaultAddress].blacklistedAt).toBe(12345);
+    });
+  });
+
+  describe('blacklistVault event emission', () => {
+    it('should emit VaultBlacklisted event', async () => {
+      service = new AutomationService(createServiceConfig({
+        dataDir: tempDir
+      }));
+      await service.loadBlacklist();
+
+      const emitSpy = vi.spyOn(service.eventManager, 'emit');
+
+      const vaultAddress = '0x9999999999999999999999999999999999999999';
+      await service.blacklistVault(vaultAddress, 'test blacklist');
+
+      const blacklistCall = emitSpy.mock.calls.find(c => c[0] === 'VaultBlacklisted');
+      expect(blacklistCall).toBeDefined();
+      expect(blacklistCall[1].reason).toContain('test blacklist');
+    });
+  });
+
+  describe('unblacklistVault event emission', () => {
+    it('should emit VaultUnblacklisted event', async () => {
+      service = new AutomationService(createServiceConfig({
+        dataDir: tempDir
+      }));
+
+      const vaultAddress = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const { ethers } = await import('ethers');
+      const normalized = ethers.utils.getAddress(vaultAddress);
+
+      // Pre-populate blacklist
+      service.blacklistedVaults.set(normalized, {
+        vaultAddress: normalized,
+        blacklistedAt: Date.now(),
+        reason: 'test'
+      });
+      await service.saveBlacklist();
+
+      const emitSpy = vi.spyOn(service.eventManager, 'emit');
+
+      await service.unblacklistVault(vaultAddress);
+
+      const unblacklistCall = emitSpy.mock.calls.find(c => c[0] === 'VaultUnblacklisted');
+      expect(unblacklistCall).toBeDefined();
+      expect(unblacklistCall[1].vaultAddress).toBe(normalized);
+    });
+  });
+
+  describe('address normalization', () => {
+    it('should find blacklisted vault regardless of case', async () => {
+      service = new AutomationService(createServiceConfig({
+        dataDir: tempDir
+      }));
+      await service.loadBlacklist();
+
+      const lowercase = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      await service.blacklistVault(lowercase, 'test');
+
+      const { ethers } = await import('ethers');
+      const checksummed = ethers.utils.getAddress(lowercase);
+
+      // Check with checksummed version
+      expect(service.isVaultBlacklisted(checksummed)).toBe(true);
+    });
+  });
 });

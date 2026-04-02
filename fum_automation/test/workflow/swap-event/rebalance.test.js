@@ -250,6 +250,15 @@ describe('Position Rebalancing', () => {
     expect(newPosition.tickLower).not.toBe(initialTickLower);
     expect(newPosition.tickUpper).not.toBe(initialTickUpper);
 
+    // Verify swap listeners maintained after rebalance
+    // refreshSwapListeners fires asynchronously via the PositionRebalanced handler;
+    // give it time to complete its remove+resubscribe cycle
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const poolAddress = newPosition.pool;
+    const swapListenerKey = `${poolAddress.toLowerCase()}-swap-1337-uniswapV3`;
+    expect(service.eventManager.listeners[swapListenerKey]).toBeDefined();
+    expect(service.eventManager.poolToVaults[poolAddress]).toContain(testVault.vaultAddress);
+
     console.log('Lower threshold rebalance test passed');
   }, 180000);
 

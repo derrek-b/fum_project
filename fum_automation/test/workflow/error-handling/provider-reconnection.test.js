@@ -247,6 +247,63 @@ describe('Provider Reconnection', () => {
       console.log('Successful reconnection test passed');
     }, 120000);
 
+    it('should trigger reconnection when heartbeat detects silent disconnect', async () => {
+      await createTestService(3504);
+
+      const events = {
+        providerDisconnected: [],
+        providerReconnected: []
+      };
+
+      service.eventManager.subscribe('ProviderDisconnected', (data) => {
+        console.log(`  [EVENT] ProviderDisconnected: code=${data.code}, reason=${data.reason}`);
+        events.providerDisconnected.push(data);
+      });
+
+      service.eventManager.subscribe('ProviderReconnected', (data) => {
+        console.log(`  [EVENT] ProviderReconnected`);
+        events.providerReconnected.push(data);
+      });
+
+      // Use a short heartbeat interval so we don't wait 30s
+      service.heartbeatIntervalMs = 2000;
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+      console.log('Service started with 2s heartbeat interval');
+
+      // Mock getBlockNumber to throw — simulates a silent disconnect where the
+      // WebSocket stays open but the node stops responding
+      vi.spyOn(service.provider, 'getBlockNumber').mockImplementation(async () => {
+        throw new Error('TIMEOUT: provider request timed out');
+      });
+
+      console.log('Mocked getBlockNumber to fail — waiting for heartbeat to detect...');
+
+      // Wait for reconnection (heartbeat fires at 2s, retries add a few more seconds)
+      await waitForCondition(
+        () => events.providerReconnected.length > 0,
+        30000,
+        500
+      );
+
+      // Heartbeat triggered disconnect with code 1006
+      expect(events.providerDisconnected.length).toBe(1);
+      expect(events.providerDisconnected[0].code).toBe(1006);
+      expect(events.providerDisconnected[0].reason).toBe('Heartbeat failed');
+
+      // Reconnection succeeded
+      expect(events.providerReconnected.length).toBe(1);
+
+      // Vault state preserved
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+
+      // Provider references updated
+      expect(service.vaultDataService.provider).toBe(service.provider);
+
+      console.log('Heartbeat disconnect detection test passed');
+    }, 60000);
+
     it('should preserve failedVaults queue across reconnection', async () => {
       await createTestService(3502);
 

@@ -35,9 +35,11 @@ vi.mock('../../src/utils/RetryHelper.js', () => ({
 }));
 
 import VaultHealth from '../../src/core/VaultHealth.js';
-import { getMinExecutorBalance, getMaxExecutorBalance } from 'fum_library/helpers/chainHelpers';
+import { getVaultContract } from 'fum_library';
+import { getMinExecutorBalance, getMaxExecutorBalance, getChainConfig } from 'fum_library/helpers/chainHelpers';
 import { fetchTokenPrices } from 'fum_library/services/coingecko';
-import { getNativeSymbol } from 'fum_library/helpers/tokenHelpers';
+import { getNativeSymbol, getWrappedNativeSymbol, getWrappedNativeAddress } from 'fum_library/helpers/tokenHelpers';
+import { retryRpcCall } from '../../src/utils/RetryHelper.js';
 
 // Helpers
 const VAULT_A = '0x1111111111111111111111111111111111111111';
@@ -497,6 +499,404 @@ describe('VaultHealth', () => {
       expect(vh.balanceCheckInterval).toBe(null);
 
       vh.stop();
+    });
+  });
+
+  // ============================================================================
+  // quoteSwapAmount
+  // ============================================================================
+  describe('quoteSwapAmount', () => {
+    let vh;
+
+    beforeEach(() => {
+      vh = createVaultHealth();
+      vh.setProvider(createMockProvider());
+    });
+
+    it('should return exact amount when token balance covers full deficit', async () => {
+      const deficit = ethers.utils.parseEther('0.003');
+      const token = { address: '0xtoken', decimals: 6, symbol: 'USDC', balance: ethers.utils.parseUnits('100', 6).toString() };
+      const adapter = {
+        getBestSwapQuote: vi.fn().mockResolvedValue({
+          amountIn: ethers.utils.parseUnits('9', 6).toString(), // 9 USDC needed
+          minAmountOut: deficit.toString()
+        })
+      };
+
+      const result = await vh.quoteSwapAmount(adapter, token, deficit);
+      expect(result).not.toBeNull();
+      expect(result.amount).toBe(ethers.utils.parseUnits('9', 6).toString());
+      expect(result.estimatedOutput).toBe(deficit.toString());
+    });
+
+    it('should return partial when balance >= 25% of required', async () => {
+      const deficit = ethers.utils.parseEther('0.003');
+      const tokenBalance = ethers.utils.parseUnits('5', 6).toString(); // 5 USDC
+      const token = { address: '0xtoken', decimals: 6, symbol: 'USDC', balance: tokenBalance };
+      const adapter = {
+        getBestSwapQuote: vi.fn().mockResolvedValue({
+          amountIn: ethers.utils.parseUnits('12', 6).toString(), // 12 USDC needed, have 5 (41%)
+          minAmountOut: deficit.toString()
+        })
+      };
+
+      const result = await vh.quoteSwapAmount(adapter, token, deficit);
+      expect(result).not.toBeNull();
+      expect(result.amount).toBe(tokenBalance); // full balance
+    });
+
+    it('should return null when balance < 25% of required (dust)', async () => {
+      const deficit = ethers.utils.parseEther('0.003');
+      const token = { address: '0xtoken', decimals: 6, symbol: 'USDC', balance: ethers.utils.parseUnits('1', 6).toString() }; // 1 USDC
+      const adapter = {
+        getBestSwapQuote: vi.fn().mockResolvedValue({
+          amountIn: ethers.utils.parseUnits('100', 6).toString(), // 100 USDC needed, have 1 (1%)
+          minAmountOut: deficit.toString()
+        })
+      };
+
+      const result = await vh.quoteSwapAmount(adapter, token, deficit);
+      expect(result).toBeNull();
+    });
+  });
+
+  // ============================================================================
+  // getAdaptersForVault
+  // ============================================================================
+  describe('getAdaptersForVault', () => {
+    let vh;
+
+    beforeEach(() => {
+      vh = createVaultHealth();
+      const adaptersMap = new Map();
+      adaptersMap.set('uniswapV3', { platformId: 'uniswapV3' });
+      adaptersMap.set('uniswapV4', { platformId: 'uniswapV4' });
+      vh.setAdapters(adaptersMap);
+    });
+
+    it('should return adapters matching vault platforms', () => {
+      const result = vh.getAdaptersForVault({ address: VAULT_A, targetPlatforms: ['uniswapV3'] });
+      expect(result).toHaveLength(1);
+      expect(result[0].platformId).toBe('uniswapV3');
+    });
+
+    it('should throw when vault has no targetPlatforms', () => {
+      expect(() => vh.getAdaptersForVault({ address: VAULT_A, targetPlatforms: [] }))
+        .toThrow('no target platforms configured');
+    });
+
+    it('should throw when targetPlatforms is undefined', () => {
+      expect(() => vh.getAdaptersForVault({ address: VAULT_A }))
+        .toThrow('no target platforms configured');
+    });
+
+    it('should throw when no adapters match any platform', () => {
+      expect(() => vh.getAdaptersForVault({ address: VAULT_A, targetPlatforms: ['traderJoeV2_2'] }))
+        .toThrow('No adapters found');
+    });
+  });
+
+  // ============================================================================
+  // getStatus / getFundingRequiredData
+  // ============================================================================
+  describe('getStatus', () => {
+    it('should return correct shape with populated data', () => {
+      const vh = createVaultHealth();
+      const normalizedA = ethers.utils.getAddress(VAULT_A);
+      const normalizedB = ethers.utils.getAddress(VAULT_B);
+
+      vh.managedVaults.add(normalizedA);
+      vh.managedVaults.add(normalizedB);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: 1000 });
+      vh.fundingRequired.set(normalizedB, { enteredAt: 2000 });
+
+      const status = vh.getStatus();
+      expect(status.managedVaults).toBe(2);
+      expect(status.activeHoldbacks).toBe(1);
+      expect(status.holdbacks[normalizedA].amountNative).toBe(0.003);
+      expect(status.fundingRequired[normalizedB].enteredAt).toBe(2000);
+    });
+  });
+
+  describe('getFundingRequiredData', () => {
+    it('should convert Map to plain object', () => {
+      const vh = createVaultHealth();
+      const normalizedA = ethers.utils.getAddress(VAULT_A);
+      vh.fundingRequired.set(normalizedA, { enteredAt: 12345 });
+
+      const result = vh.getFundingRequiredData();
+      expect(result[normalizedA]).toEqual({ enteredAt: 12345 });
+    });
+
+    it('should return empty object when no funding required', () => {
+      const vh = createVaultHealth();
+      expect(vh.getFundingRequiredData()).toEqual({});
+    });
+  });
+
+  // ============================================================================
+  // attemptTopUp branches
+  // ============================================================================
+  describe('attemptTopUp', () => {
+    let vh, eventManager, vds, normalizedA;
+
+    beforeEach(() => {
+      eventManager = createMockEventManager();
+      vh = createVaultHealth({ eventManager });
+      normalizedA = ethers.utils.getAddress(VAULT_A);
+      vh.setProvider(createMockProvider());
+      vh.setHdNode(createMockHdNode());
+      vh.subscribeToExecutorFundedEvent = vi.fn();
+      vh.lockVault = vi.fn().mockReturnValue(true);
+      vh.unlockVault = vi.fn();
+      vh.managedVaults.add(normalizedA);
+
+      getChainConfig.mockReturnValue({ nativeCurrency: { decimals: 18 } });
+    });
+
+    it('should return early and unlock when no holdback exists', async () => {
+      // No holdback set
+      await vh.attemptTopUp(normalizedA);
+      expect(vh.unlockVault).toHaveBeenCalledWith(normalizedA);
+    });
+
+    it('should return early and unlock when vault not in cache', async () => {
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vds = createMockVaultDataService([]); // empty — vault not found
+      vh.setVaultDataService(vds);
+
+      await vh.attemptTopUp(normalizedA);
+      expect(vh.unlockVault).toHaveBeenCalledWith(normalizedA);
+    });
+
+    it('should enter fundingRequired on InsufficientFundsError', async () => {
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vds = createMockVaultDataService([
+        { address: VAULT_A, executorIndex: 0, tokens: { ETH: '0' } }
+      ]);
+      vh.setVaultDataService(vds);
+
+      // Mock deriveVaultSigner to avoid ethers Wallet provider validation
+      vh.deriveVaultSigner = vi.fn().mockReturnValue({});
+      vh.deriveExecutorAddress = vi.fn().mockReturnValue('0xexecutor');
+
+      vh.provider.getBalance = vi.fn().mockResolvedValue(ethers.utils.parseEther('0.003'));
+
+      const insufficientError = new Error('insufficient funds for gas');
+      insufficientError.code = 'INSUFFICIENT_FUNDS';
+
+      getVaultContract.mockReturnValue({
+        connect: () => ({
+          fundExecutor: vi.fn().mockRejectedValue(insufficientError)
+        })
+      });
+
+      getNativeSymbol.mockReturnValue('ETH');
+      getWrappedNativeSymbol.mockReturnValue('WETH');
+
+      await vh.attemptTopUp(normalizedA);
+
+      expect(vh.fundingRequired.has(normalizedA)).toBe(true);
+      // Lock should NOT be released on InsufficientFundsError
+      expect(vh.unlockVault).not.toHaveBeenCalled();
+    });
+
+    it('should emit ExecutorTopUpFailed and unlock on non-gas error', async () => {
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vds = createMockVaultDataService([
+        { address: VAULT_A, executorIndex: 0, tokens: { ETH: '0' } }
+      ]);
+      vh.setVaultDataService(vds);
+
+      vh.deriveVaultSigner = vi.fn().mockReturnValue({});
+      vh.deriveExecutorAddress = vi.fn().mockReturnValue('0xexecutor');
+
+      vh.provider.getBalance = vi.fn().mockResolvedValue(ethers.utils.parseEther('0.003'));
+
+      getVaultContract.mockReturnValue({
+        connect: () => ({
+          fundExecutor: vi.fn().mockRejectedValue(new Error('revert: some error'))
+        })
+      });
+
+      getNativeSymbol.mockReturnValue('ETH');
+      getWrappedNativeSymbol.mockReturnValue('WETH');
+
+      await vh.attemptTopUp(normalizedA);
+
+      expect(vh.unlockVault).toHaveBeenCalledWith(normalizedA);
+      const topUpFailed = eventManager.emit.mock.calls.find(c => c[0] === 'ExecutorTopUpFailed');
+      expect(topUpFailed).toBeDefined();
+    });
+
+    it('should unlock without funding when vault has insufficient balance', async () => {
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vds = createMockVaultDataService([
+        { address: VAULT_A, executorIndex: 0, tokens: { ETH: '0', WETH: '0' } }
+      ]);
+      vh.setVaultDataService(vds);
+
+      // Final balance check returns 0
+      vh.provider.getBalance = vi.fn().mockResolvedValue(ethers.BigNumber.from(0));
+
+      getNativeSymbol.mockReturnValue('ETH');
+      getWrappedNativeSymbol.mockReturnValue('WETH');
+      getMinExecutorBalance.mockReturnValue(0.002);
+      getChainConfig.mockReturnValue({ nativeCurrency: { decimals: 18 } });
+
+      await vh.attemptTopUp(normalizedA);
+
+      expect(vh.unlockVault).toHaveBeenCalledWith(normalizedA);
+      // fundExecutor should not have been called
+      expect(getVaultContract).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================================
+  // setupEventSubscriptions handler tests
+  // ============================================================================
+  describe('setupEventSubscriptions', () => {
+    let vh, eventManager, normalizedA;
+
+    beforeEach(() => {
+      eventManager = createMockEventManager();
+      vh = createVaultHealth({ eventManager });
+      normalizedA = ethers.utils.getAddress(VAULT_A);
+      vh.setProvider(createMockProvider());
+      vh.setHdNode(createMockHdNode());
+      vh.subscribeToExecutorFundedEvent = vi.fn();
+      vh.lockVault = vi.fn().mockReturnValue(true);
+      vh.unlockVault = vi.fn();
+      vh.attemptTopUp = vi.fn();
+    });
+
+    it('should set pendingTopUp when state-changing event fires for managed vault with holdback', () => {
+      vh.managedVaults.add(normalizedA);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+
+      eventManager.emit('PositionRebalanced', { vaultAddress: normalizedA });
+
+      expect(vh.pendingTopUp.has(normalizedA)).toBe(true);
+    });
+
+    it('should NOT set pendingTopUp for non-managed vault', () => {
+      // Don't add to managedVaults
+      eventManager.emit('PositionRebalanced', { vaultAddress: normalizedA });
+
+      expect(vh.pendingTopUp.has(normalizedA)).toBe(false);
+    });
+
+    it('should NOT set pendingTopUp when no holdback exists', () => {
+      vh.managedVaults.add(normalizedA);
+      // No holdback set
+
+      eventManager.emit('FeesCollected', { vaultAddress: normalizedA });
+
+      expect(vh.pendingTopUp.has(normalizedA)).toBe(false);
+    });
+
+    it('should re-lock vault on VaultUnlocked when in fundingRequired state', () => {
+      vh.managedVaults.add(normalizedA);
+      vh.fundingRequired.set(normalizedA, { enteredAt: Date.now() });
+
+      eventManager.emit('VaultUnlocked', { vaultAddress: normalizedA });
+
+      expect(vh.lockVault).toHaveBeenCalledWith(normalizedA);
+      expect(vh.attemptTopUp).not.toHaveBeenCalled();
+    });
+
+    it('should call attemptTopUp on VaultUnlocked when pendingTopUp is set', async () => {
+      vh.managedVaults.add(normalizedA);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vh.pendingTopUp.add(normalizedA);
+
+      eventManager.emit('VaultUnlocked', { vaultAddress: normalizedA });
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(vh.attemptTopUp).toHaveBeenCalledWith(normalizedA);
+      expect(vh.pendingTopUp.has(normalizedA)).toBe(false);
+    });
+
+    it('should NOT call attemptTopUp on VaultUnlocked without pendingTopUp', () => {
+      vh.managedVaults.add(normalizedA);
+
+      eventManager.emit('VaultUnlocked', { vaultAddress: normalizedA });
+
+      expect(vh.attemptTopUp).not.toHaveBeenCalled();
+    });
+
+    it('should call attemptTopUp on VaultSetupComplete when lock available', async () => {
+      vh.managedVaults.add(normalizedA);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+
+      eventManager.emit('VaultSetupComplete', { vaultAddress: normalizedA });
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(vh.attemptTopUp).toHaveBeenCalledWith(normalizedA);
+    });
+
+    it('should set pendingTopUp on VaultSetupComplete when lock is held', async () => {
+      vh.managedVaults.add(normalizedA);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+      vh.lockVault = vi.fn().mockReturnValue(false); // lock held by someone else
+
+      eventManager.emit('VaultSetupComplete', { vaultAddress: normalizedA });
+
+      expect(vh.pendingTopUp.has(normalizedA)).toBe(true);
+      expect(vh.attemptTopUp).not.toHaveBeenCalled();
+    });
+
+    it('should log error when handler receives invalid data (validates C2 fix)', () => {
+      vh.managedVaults.add(normalizedA);
+      vh.holdbacks.set(normalizedA, { amountNative: 0.003, amountUsd: 9.0, setAt: Date.now() });
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Emit with undefined vaultAddress — getAddress will throw
+      eventManager.emit('PositionRebalanced', { vaultAddress: undefined });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[VaultHealth]'),
+        expect.any(Error)
+      );
+      consoleSpy.mockRestore();
+    });
+  });
+
+  // ============================================================================
+  // resubscribeOnChainListeners
+  // ============================================================================
+  describe('resubscribeOnChainListeners', () => {
+    it('should do nothing when no listeners exist', () => {
+      const vh = createVaultHealth();
+      vh.resubscribeOnChainListeners(); // should not throw
+      expect(vh.onChainListeners.size).toBe(0);
+    });
+
+    it('should tear down old listeners and re-create them', () => {
+      const normalizedA = ethers.utils.getAddress(VAULT_A);
+      const vh = createVaultHealth();
+      vh.setProvider(createMockProvider());
+
+      const mockCleanup = vi.fn();
+      vh.onChainListeners.set(normalizedA, mockCleanup);
+
+      // Mock getVaultContract for re-subscription
+      const mockFilter = {};
+      const mockContract = {
+        filters: { ExecutorFunded: () => mockFilter },
+        on: vi.fn(),
+        off: vi.fn()
+      };
+      getVaultContract.mockReturnValue(mockContract);
+
+      vh.resubscribeOnChainListeners();
+
+      // Old cleanup should have been called
+      expect(mockCleanup).toHaveBeenCalled();
+      // New listener should be registered
+      expect(mockContract.on).toHaveBeenCalled();
+      expect(vh.onChainListeners.has(normalizedA)).toBe(true);
     });
   });
 });

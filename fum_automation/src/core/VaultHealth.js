@@ -573,10 +573,14 @@ class VaultHealth {
     const stateChangingEvents = ['PositionRebalanced', 'FeesCollected', 'NewPositionCreated', 'LiquidityAddedToPosition'];
     for (const eventName of stateChangingEvents) {
       this.eventManager.subscribe(eventName, (data) => {
-        const normalized = ethers.utils.getAddress(data.vaultAddress);
-        if (!this.managedVaults.has(normalized)) return;
-        if (!this.holdbacks.has(normalized)) return;  // no top-up needed
-        this.pendingTopUp.add(normalized);
+        try {
+          const normalized = ethers.utils.getAddress(data.vaultAddress);
+          if (!this.managedVaults.has(normalized)) return;
+          if (!this.holdbacks.has(normalized)) return;  // no top-up needed
+          this.pendingTopUp.add(normalized);
+        } catch (error) {
+          console.error(`[VaultHealth] Error in ${eventName} handler:`, error);
+        }
       });
     }
 
@@ -586,25 +590,29 @@ class VaultHealth {
     // This prevents the infinite loop where failed top-ups unlock → VaultUnlocked →
     // re-attempt → fail → unlock → repeat (Issue 4).
     this.eventManager.subscribe('VaultUnlocked', async (data) => {
-      const normalized = ethers.utils.getAddress(data.vaultAddress);
-      if (!this.managedVaults.has(normalized)) return;
+      try {
+        const normalized = ethers.utils.getAddress(data.vaultAddress);
+        if (!this.managedVaults.has(normalized)) return;
 
-      if (this.fundingRequired.has(normalized)) {
-        // Vault just had InsufficientGasError. AutomationService released lock.
-        // Re-acquire and hold until user funds executor via fundExecutor().
-        // (On-chain ExecutorFunded listener already set up by enterFundingRequired.)
-        this.lockVault(normalized);
-        return;
-      }
+        if (this.fundingRequired.has(normalized)) {
+          // Vault just had InsufficientGasError. AutomationService released lock.
+          // Re-acquire and hold until user funds executor via fundExecutor().
+          // (On-chain ExecutorFunded listener already set up by enterFundingRequired.)
+          this.lockVault(normalized);
+          return;
+        }
 
-      if (this.pendingTopUp.has(normalized) && this.holdbacks.has(normalized)) {
-        // A state-changing event signaled new resources are available.
-        // Clear the flag BEFORE attempting (prevents re-entry on failure).
-        this.pendingTopUp.delete(normalized);
-        if (!this.lockVault(normalized)) return;  // someone else grabbed it
-        await this.attemptTopUp(normalized);
-        // attemptTopUp releases lock on success or non-gas error
-        // attemptTopUp enters fundingRequired on insufficient funds (keeps lock)
+        if (this.pendingTopUp.has(normalized) && this.holdbacks.has(normalized)) {
+          // A state-changing event signaled new resources are available.
+          // Clear the flag BEFORE attempting (prevents re-entry on failure).
+          this.pendingTopUp.delete(normalized);
+          if (!this.lockVault(normalized)) return;  // someone else grabbed it
+          await this.attemptTopUp(normalized);
+          // attemptTopUp releases lock on success or non-gas error
+          // attemptTopUp enters fundingRequired on insufficient funds (keeps lock)
+        }
+      } catch (error) {
+        console.error('[VaultHealth] Error in VaultUnlocked handler:', error);
       }
     });
 
@@ -615,17 +623,21 @@ class VaultHealth {
     // VaultUnlocked from the caller's finally block will catch it (via pendingTopUp
     // being set by VaultSetupComplete, which IS a state-changing event for new vaults).
     this.eventManager.subscribe('VaultSetupComplete', async (data) => {
-      const normalized = ethers.utils.getAddress(data.vaultAddress);
-      if (!this.managedVaults.has(normalized)) return;
-      if (!this.holdbacks.has(normalized)) return;     // no top-up needed
-      if (!this.lockVault(normalized)) {
-        // Lock held by caller — set pendingTopUp so VaultUnlocked picks it up
-        this.pendingTopUp.add(normalized);
-        return;
+      try {
+        const normalized = ethers.utils.getAddress(data.vaultAddress);
+        if (!this.managedVaults.has(normalized)) return;
+        if (!this.holdbacks.has(normalized)) return;     // no top-up needed
+        if (!this.lockVault(normalized)) {
+          // Lock held by caller — set pendingTopUp so VaultUnlocked picks it up
+          this.pendingTopUp.add(normalized);
+          return;
+        }
+        await this.attemptTopUp(normalized);
+        // attemptTopUp releases lock on success or non-gas error
+        // attemptTopUp enters fundingRequired on insufficient funds (keeps lock)
+      } catch (error) {
+        console.error('[VaultHealth] Error in VaultSetupComplete handler:', error);
       }
-      await this.attemptTopUp(normalized);
-      // attemptTopUp releases lock on success or non-gas error
-      // attemptTopUp enters fundingRequired on insufficient funds (keeps lock)
     });
   }
 

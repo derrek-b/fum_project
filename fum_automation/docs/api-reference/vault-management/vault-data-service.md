@@ -32,7 +32,6 @@ See [Cache Structures](../../architecture/cache-structures.md) for the complete 
 
 | Method | Description |
 |---|---|
-| `refreshPositionsAndTokens(vaultAddress)` | Refresh both positions and token balances |
 | `refreshTokens(vaultAddress)` | Refresh only token balances |
 | `updatePosition(vaultAddress, positionData, poolData)` | Update a single position's data |
 | `fetchAssetValues(vault, cacheDuration?)` | Calculate USD values for all vault assets. Default: 30s cache. |

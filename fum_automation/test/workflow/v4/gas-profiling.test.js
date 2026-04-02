@@ -176,7 +176,7 @@ describe('Uniswap V4 Gas Profiling — Tick Width Scaling', () => {
 
       it('should create position and measure gas', async () => {
         // Fetch pool data
-        const poolData = await adapter._fetchPoolData(
+        const poolData = await adapter.fetchPoolDataForTesting(
           NATIVE_ETH, usdcAddress, FEE, TICK_SPACING, ethers.constants.AddressZero, provider
         );
         const currentTick = poolData.tick;
@@ -240,7 +240,7 @@ describe('Uniswap V4 Gas Profiling — Tick Width Scaling', () => {
         expect(tokenId).toBeDefined();
 
         // Get fresh pool data and vault balances
-        const poolData = await adapter._fetchPoolData(
+        const poolData = await adapter.fetchPoolDataForTesting(
           NATIVE_ETH, usdcAddress, FEE, TICK_SPACING, ethers.constants.AddressZero, provider
         );
         const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, provider);
@@ -311,7 +311,7 @@ describe('Uniswap V4 Gas Profiling — Tick Width Scaling', () => {
         }
 
         // Fetch fresh pool data for collect
-        const poolData = await adapter._fetchPoolData(
+        const poolData = await adapter.fetchPoolDataForTesting(
           NATIVE_ETH, usdcAddress, FEE, TICK_SPACING, ethers.constants.AddressZero, provider
         );
 
@@ -341,7 +341,7 @@ describe('Uniswap V4 Gas Profiling — Tick Width Scaling', () => {
         expect(tokenId).toBeDefined();
 
         // Fetch fresh pool data
-        const poolData = await adapter._fetchPoolData(
+        const poolData = await adapter.fetchPoolDataForTesting(
           NATIVE_ETH, usdcAddress, FEE, TICK_SPACING, ethers.constants.AddressZero, provider
         );
 

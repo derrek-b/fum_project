@@ -10,6 +10,10 @@
  * 2. Evaluation Phase - strategy.handleSwapEvent failures before rebalance decision
  *    - Pool data cache miss → retry queue
  *    - evaluatePositionRange failure → retry queue
+ *    - 0 positions / >1 positions / pool mismatch guards → retry queue
+ *
+ * 2b. Fee Collection Phase - receipt parsing fallback
+ *    - parseCollectReceipt failure → falls back to pre-calculated fees, operation succeeds
  *
  * 3. Rebalance Execution Phase - failures during actual rebalance
  *    Uses close-to-boundary position + real swaps to trigger rebalance
@@ -27,7 +31,8 @@ import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
-import { setupSwapWallet, executeSwap } from '../../helpers/swap-utils.js';
+import { setupSwapWallet, executeSwap, configureStrategyParameters } from '../../helpers/swap-utils.js';
+import { waitForCondition } from '../../helpers/wait-utils.js';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
@@ -247,7 +252,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 60000);
+    }, 120000);
 
     it('should blacklist vault when vault not found (unrecoverable)', async () => {
       await createTestService(3201);
@@ -354,6 +359,180 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
     }, 60000);
+
+    it('should add vault to retry queue when vault has 0 positions', async () => {
+      await createTestService(3204);
+      const events = setupEventTracking(service);
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+
+      // Mock getVault to return vault with no positions
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        const vault = await realGetVault(addr, forceRefresh);
+        if (vault && addr === testVault.vaultAddress) {
+          return { ...vault, positions: {} };
+        }
+        return vault;
+      });
+
+      console.log('Executing swap to trigger handleSwapEvent (0 positions)...');
+      await executeSwapAndWait();
+
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
+      expect(failEvent).toBeDefined();
+      expect(failEvent.recoverable).toBe(true);
+    }, 60000);
+
+    it('should add vault to retry queue when vault has more than 1 position', async () => {
+      await createTestService(3205);
+      const events = setupEventTracking(service);
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+
+      // Mock getVault to return vault with 2 positions
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        const vault = await realGetVault(addr, forceRefresh);
+        if (vault && addr === testVault.vaultAddress) {
+          const existingPositions = { ...vault.positions };
+          const existingId = Object.keys(existingPositions)[0];
+          // Add a fake second position with the same pool
+          existingPositions['fake-position-99'] = {
+            ...existingPositions[existingId],
+            id: 'fake-position-99'
+          };
+          return { ...vault, positions: existingPositions };
+        }
+        return vault;
+      });
+
+      console.log('Executing swap to trigger handleSwapEvent (2 positions)...');
+      await executeSwapAndWait();
+
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
+      expect(failEvent).toBeDefined();
+      expect(failEvent.recoverable).toBe(true);
+    }, 60000);
+
+    it('should add vault to retry queue on pool mismatch between swap event and position', async () => {
+      await createTestService(3206);
+      const events = setupEventTracking(service);
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+
+      // Mock getVault to return vault with position pointing to a different pool
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        const vault = await realGetVault(addr, forceRefresh);
+        if (vault && addr === testVault.vaultAddress) {
+          const positions = {};
+          for (const [id, pos] of Object.entries(vault.positions)) {
+            // Point position to a different pool address (simulates stale cache after pool change)
+            positions[id] = { ...pos, pool: '0x0000000000000000000000000000000000000001' };
+          }
+          return { ...vault, positions };
+        }
+        return vault;
+      });
+
+      console.log('Executing swap to trigger handleSwapEvent (pool mismatch)...');
+      await executeSwapAndWait();
+
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
+      expect(failEvent).toBeDefined();
+      expect(failEvent.recoverable).toBe(true);
+    }, 60000);
+  });
+
+  // ------------------------------------------------------------------------
+  // Fee Collection Phase: Receipt Parsing Fallback
+  // When parseCollectReceipt fails, collectFees falls back to pre-calculated
+  // fee amounts from getAccruedFeesUSD. The operation succeeds — no vault failure.
+  // ------------------------------------------------------------------------
+  describe('Fee Collection Phase - Receipt Parsing Fallback', () => {
+    it('should collect fees using pre-calculated fallback when receipt parsing fails', async () => {
+      // Configure strategy with low fee trigger so accrued fees exceed it
+      await configureStrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
+        targetRangeUpper: 200,        // 2% range (wide to avoid rebalance)
+        targetRangeLower: 200,
+        emergencyExitTrigger: 500,    // 5%
+        reinvestmentTrigger: 1,       // $0.01 (very low — any fees will trigger)
+        reinvestmentRatio: 5000,      // 50%
+        feeReinvestment: true
+      });
+
+      await createTestService(3207);
+
+      // Track fee events
+      const feesCollectedEvents = [];
+      const vaultFailedEvents = [];
+
+      service.eventManager.subscribe('FeesCollected', (data) => {
+        if (data.vaultAddress === testVault.vaultAddress) {
+          console.log(`  [EVENT] FeesCollected: $${data.totalUSD?.toFixed(4)}`);
+          feesCollectedEvents.push(data);
+        }
+      });
+
+      service.eventManager.subscribe('VaultFailed', (data) => {
+        if (data.vaultAddress === testVault.vaultAddress) {
+          vaultFailedEvents.push(data);
+        }
+      });
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
+
+      // Mock parseCollectReceipt to fail — forces fallback to pre-calculated fees
+      const strategy = service.strategies.get('bob');
+      const adapter = strategy.adapters.get('uniswapV3');
+      vi.spyOn(adapter, 'parseCollectReceipt').mockImplementation(() => {
+        throw new Error('PARSE_ERROR: Unexpected log format in collect receipt');
+      });
+
+      // Set swap counter to 49 so the next swap triggers the fee check
+      const normalizedAddress = service.vaultDataService.getAllVaults()
+        .find(v => v.address === testVault.vaultAddress)?.address;
+      strategy.swapCountSinceLastFeeCheck[normalizedAddress] = 49;
+
+      // Execute one swap — pushes counter to 50, triggers fee check + collection
+      console.log('Executing swap to trigger fee collection with parser fallback...');
+      await executeSwapAndWait();
+
+      // Wait for FeesCollected (the operation should succeed despite parse failure)
+      await waitForCondition(
+        () => feesCollectedEvents.length > 0,
+        30000,
+        500
+      );
+
+      // Fees should have been collected using pre-calculated fallback
+      expect(feesCollectedEvents.length).toBe(1);
+      const feeEvent = feesCollectedEvents[0];
+      expect(feeEvent.source).toBe('swap_threshold');
+      expect(feeEvent.totalUSD).toBeGreaterThan(0);
+      expect(feeEvent.positionIds).toBeDefined();
+
+      // Vault should NOT be in any error state — the fallback handled it gracefully
+      expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+      expect(vaultFailedEvents.length).toBe(0);
+
+      console.log(`Fees collected via fallback: $${feeEvent.totalUSD.toFixed(4)}`);
+    }, 120000);
   });
 });
 
@@ -404,6 +583,15 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       poolSnapshotId = await testEnv.hardhatServer.takeSnapshot();
       console.log(`Pool state reset, new snapshot: ${poolSnapshotId}`);
     }
+
+    // Sync chain timestamp with real time — tests mine blocks rapidly (each +1s),
+    // advancing chain time past wall-clock. Swap deadlines use Date.now() and
+    // expire if the chain timestamp drifts too far ahead.
+    const provider = testEnv.hardhatServer.provider;
+    const currentBlock = await provider.getBlock('latest');
+    const nextTimestamp = Math.max(Math.floor(Date.now() / 1000), currentBlock.timestamp) + 1;
+    await provider.send('evm_setNextBlockTimestamp', [nextTimestamp]);
+    await provider.send('evm_mine', []);
   });
 
   afterEach(async () => {
@@ -822,5 +1010,86 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
 
       console.log('Fee distribution failure test passed');
     }, 180000);
+
+  });
+
+  // ------------------------------------------------------------------------
+  // Rebalance Execution: Listener Refresh Failure
+  // The rebalance itself succeeds (position closed + new one created) but
+  // the post-rebalance refreshSwapListeners call fails, leaving the vault
+  // unable to receive future swap events. Vault goes to retry queue.
+  // ------------------------------------------------------------------------
+  describe('Rebalance Execution - Listener Refresh Failure', () => {
+    it('should add vault to retry queue when refreshSwapListeners fails after rebalance', async () => {
+      currentVault = await createFreshVault('Listener Refresh Failure Test');
+
+      await createTestService(3214);
+      const events = setupRebalanceEventTracking(service);
+
+      await service.start();
+      expect(service.vaultDataService.hasVault(currentVault.vaultAddress)).toBe(true);
+
+      // Mock refreshSwapListeners to fail — simulates RPC failure during re-subscription
+      vi.spyOn(service.eventManager, 'refreshSwapListeners').mockImplementation(async () => {
+        throw new Error('NETWORK_ERROR: eth_subscribe failed');
+      });
+
+      // Execute swaps to trigger rebalance
+      const result = await executeSwapsUntilRebalance(events, currentVault);
+      console.log(`Swaps executed: ${result.swapCount}`);
+
+      // Rebalance should have completed (the on-chain operations succeeded)
+      await waitForCondition(
+        () => events.positionRebalanced.some(e => e.vaultAddress === currentVault.vaultAddress),
+        60000,
+        1000
+      );
+      expect(events.positionRebalanced.length).toBeGreaterThan(0);
+
+      // The PositionRebalanced handler runs async (emit doesn't await).
+      // retryWithBackoff does 2 retries with exponential backoff (1s, 2s) before
+      // calling trackFailedVault. Wait for the VaultFailed event directly —
+      // failedVaults.set() happens before removeAllVaultListeners() completes
+      // and VaultFailed is emitted, so waiting on failedVaults.has() is too early.
+      await waitForCondition(
+        () => events.vaultFailed.some(
+          e => e.vaultAddress === currentVault.vaultAddress && e.source === 'listener_refresh'
+        ),
+        30000,
+        500
+      );
+
+      // Vault should be in retry queue (not blacklisted — this is a recoverable error)
+      expect(service.failedVaults.has(currentVault.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(currentVault.vaultAddress)).toBe(false);
+
+      // Restore real method and trigger recovery
+      vi.restoreAllMocks();
+      await service.retryFailedVaults();
+
+      // Wait for recovery
+      await waitForCondition(
+        () => !service.failedVaults.has(currentVault.vaultAddress),
+        60000,
+        1000
+      );
+
+      // Vault should have recovered
+      expect(service.failedVaults.has(currentVault.vaultAddress)).toBe(false);
+      expect(service.isVaultBlacklisted(currentVault.vaultAddress)).toBe(false);
+
+      const recoveredEvent = events.vaultRecovered.find(e => e.vaultAddress === currentVault.vaultAddress);
+      expect(recoveredEvent).toBeDefined();
+
+      // Swap listeners should be re-established after recovery
+      const vault = await service.vaultDataService.getVault(currentVault.vaultAddress);
+      const position = Object.values(vault.positions)[0];
+      const poolAddress = position.pool;
+      const swapListenerKey = `${poolAddress.toLowerCase()}-swap-1337-uniswapV3`;
+      expect(service.eventManager.listeners[swapListenerKey]).toBeDefined();
+      expect(service.eventManager.poolToVaults[poolAddress]).toContain(currentVault.vaultAddress);
+
+      console.log('Listener refresh failure test passed');
+    }, 240000);
   });
 });

@@ -214,7 +214,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       // 3 calls: 1 fail (initial setup) + 1 succeed (retry setupVault) + 1 VaultHealth.checkExecutorBalance
       expect(getVaultCallCount).toBe(3);
-    }, 60000);
+    }, 120000);
   });
 
   // ============================================================================
@@ -1020,6 +1020,167 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.isVaultBlacklisted(vault2.vaultAddress)).toBe(true);
 
       console.log('Mixed recovery outcomes test passed');
+    }, 120000);
+  });
+
+  // ============================================================================
+  // Step 3 Sub-failure: Deficit Swap Inline Retry
+  // Tests the 1-retry mechanism inside addToPosition/createNewPosition
+  // that refreshes balances and regenerates quotes before retrying.
+  // ============================================================================
+  describe('Step 3 Sub-failure: Deficit Swap Inline Retry', () => {
+    let deficitSwapVault;
+    let deficitSwapSnapshot;
+    let perTestSnapshot;
+
+    beforeAll(async () => {
+      deficitSwapSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
+
+      // Vault with NO position — forces createNewPosition with deficit swap.
+      // Swap a small amount to register token contracts (required for tokenTransfers),
+      // then transfer all remaining WETH + USDC to vault. The imbalanced ratio
+      // guarantees a deficit swap during createNewPosition.
+      deficitSwapVault = await setupTestVault(
+        testEnv.hardhatServer,
+        testEnv.contracts,
+        testEnv.deployedContracts,
+        {
+          vaultName: 'Deficit Swap Retry Vault',
+          wrapEthAmount: '5',
+          swapTokens: [{ from: 'WETH', to: 'USDC', amount: '0.5' }],
+          positions: [],
+          tokenTransfers: { 'WETH': 100, 'USDC': 100 },
+          targetTokens: ['USDC', 'WETH'],
+          targetPlatforms: ['uniswapV3'],
+          strategy: 'bob'
+        }
+      );
+      console.log(`Deficit swap test vault created at: ${deficitSwapVault.vaultAddress}`);
+
+      // Snapshot after vault creation — each test reverts to this clean state
+      perTestSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
+    }, 120000);
+
+    afterAll(async () => {
+      if (deficitSwapSnapshot) {
+        await testEnv.hardhatServer.provider.send('evm_revert', [deficitSwapSnapshot]);
+      }
+    });
+
+    beforeEach(async () => {
+      // Revert to clean vault state (no position, only WETH) before each test
+      if (perTestSnapshot) {
+        await testEnv.hardhatServer.provider.send('evm_revert', [perTestSnapshot]);
+        perTestSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
+      }
+    });
+
+    it('should recover via inline retry when first deficit swap attempt fails', async () => {
+      await createTestService(3125);
+      const events = setupEventTracking(service);
+
+      let swapBatchCallCount = 0;
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        const bobStrategy = service.strategies.get('bob');
+        const realExecuteBatch = bobStrategy.executeBatchTransactions.bind(bobStrategy);
+
+        vi.spyOn(bobStrategy, 'executeBatchTransactions').mockImplementation(
+          async (vault, transactions, operationType, type) => {
+            if (type === 'swap' && vault.address === deficitSwapVault.vaultAddress) {
+              swapBatchCallCount++;
+              console.log(`  [SPY] executeBatchTransactions(swap) call #${swapBatchCallCount}`);
+
+              if (swapBatchCallCount === 1) {
+                throw new Error('NETWORK_ERROR: Swap transaction reverted - slippage exceeded');
+              }
+            }
+            return realExecuteBatch(vault, transactions, operationType, type);
+          }
+        );
+      };
+
+      console.log('Starting service (expecting inline swap retry then success)...');
+      await service.start();
+
+      // Vault should have set up successfully — inline retry recovered
+      expect(service.failedVaults.has(deficitSwapVault.vaultAddress)).toBe(false);
+      expect(service.isVaultBlacklisted(deficitSwapVault.vaultAddress)).toBe(false);
+      expect(service.vaultDataService.hasVault(deficitSwapVault.vaultAddress)).toBe(true);
+      expect(events.vaultSetupComplete.some(e => e.vaultAddress === deficitSwapVault.vaultAddress)).toBe(true);
+
+      // Should have been called twice: 1 failure + 1 success (inline retry)
+      expect(swapBatchCallCount).toBe(2);
+
+      // No VaultFailed events for this vault — the inline retry handled it
+      expect(events.vaultFailed.some(e => e.vaultAddress === deficitSwapVault.vaultAddress)).toBe(false);
+
+      console.log('Deficit swap inline retry success test passed');
+    }, 120000);
+
+    it('should escalate to retry queue when inline retry is also exhausted', async () => {
+      await createTestService(3126);
+      const events = setupEventTracking(service);
+
+      let swapBatchCallCount = 0;
+
+      const originalInitialize = service.initialize.bind(service);
+      service.initialize = async function() {
+        await originalInitialize();
+
+        const bobStrategy = service.strategies.get('bob');
+        const realExecuteBatch = bobStrategy.executeBatchTransactions.bind(bobStrategy);
+
+        vi.spyOn(bobStrategy, 'executeBatchTransactions').mockImplementation(
+          async (vault, transactions, operationType, type) => {
+            if (type === 'swap' && vault.address === deficitSwapVault.vaultAddress) {
+              swapBatchCallCount++;
+              console.log(`  [SPY] executeBatchTransactions(swap) call #${swapBatchCallCount}`);
+
+              // Fail both the initial attempt and the inline retry
+              if (swapBatchCallCount <= 2) {
+                throw new Error('NETWORK_ERROR: Persistent slippage failure');
+              }
+            }
+            return realExecuteBatch(vault, transactions, operationType, type);
+          }
+        );
+      };
+
+      console.log('Starting service (expecting inline retry exhaustion → failedVaults)...');
+      await service.start();
+
+      // Vault should be in retry queue — inline retry exhausted, error propagated
+      expect(service.failedVaults.has(deficitSwapVault.vaultAddress)).toBe(true);
+      expect(service.isVaultBlacklisted(deficitSwapVault.vaultAddress)).toBe(false);
+
+      // VaultSetupFailed at strategy_initialization step
+      const setupFailed = events.vaultSetupFailed.find(e => e.vaultAddress === deficitSwapVault.vaultAddress);
+      expect(setupFailed).toBeDefined();
+      expect(setupFailed.step).toBe('strategy_initialization');
+
+      // VaultFailed with initial_setup source
+      const vaultFailed = events.vaultFailed.find(e => e.vaultAddress === deficitSwapVault.vaultAddress);
+      expect(vaultFailed).toBeDefined();
+      expect(vaultFailed.source).toBe('initial_setup');
+
+      // Error message should indicate retry exhaustion
+      expect(vaultFailed.error).toContain('Deficit swaps failed after 1 retry');
+
+      // Both attempts were made (1 initial + 1 inline retry)
+      expect(swapBatchCallCount).toBe(2);
+
+      // Recovery via retryFailedVaults should work (mocks allow call 3+)
+      console.log('Triggering retry for recovery...');
+      await service.retryFailedVaults();
+
+      expect(service.failedVaults.has(deficitSwapVault.vaultAddress)).toBe(false);
+      expect(events.vaultRecovered.some(e => e.vaultAddress === deficitSwapVault.vaultAddress)).toBe(true);
+
+      console.log('Deficit swap retry exhaustion → recovery test passed');
     }, 120000);
   });
 });

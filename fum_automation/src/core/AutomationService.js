@@ -88,6 +88,7 @@ class AutomationService {
     this.blacklistedVaults = new Map();
     this.vaultTripHistory = new Map(); // Track retry trips: { trips: [{timestamp, source}], firstTripAt }
     this.pendingConfigUpdates = new Map(); // vaultAddress -> [{type, data, timestamp}]
+    this.pendingOffboards = new Set(); // vaultAddresses awaiting unlock to offboard
 
     // Core dependencies
     this.eventManager = new EventManager();
@@ -335,6 +336,7 @@ class AutomationService {
     this.vaultDataService.clearCache();
     this.vaultLocks = {};
     this.pendingConfigUpdates.clear();
+    this.pendingOffboards.clear();
 
     // Note: isShuttingDown stays TRUE after stop
     this.log('AutomationService stopped');
@@ -913,8 +915,42 @@ class AutomationService {
       await this.handleConfigUpdate(data.vaultAddress, 'params', data.paramName);
     });
 
-    // Process pending config updates when vault unlocks
+    // Process pending offboards or config updates when vault unlocks
     this.eventManager.subscribe('VaultUnlocked', async ({ vaultAddress }) => {
+      const normalized = ethers.utils.getAddress(vaultAddress);
+
+      // Pending offboard takes priority — auth was revoked while vault was locked.
+      // Re-lock immediately to prevent stale queued swap events from processing.
+      if (this.pendingOffboards.has(normalized)) {
+        this.lockVault(vaultAddress);
+        this.pendingOffboards.delete(normalized);
+        this.log(`Processing deferred offboard for ${vaultAddress}`);
+
+        const results = { offboardResults: null, errors: [] };
+        try {
+          results.offboardResults = await this.offboardVault(vaultAddress);
+        } catch (error) {
+          results.errors.push(`Deferred offboard failed: ${error.message}`);
+        }
+
+        this.eventManager.emit('VaultOffboarded', {
+          vaultAddress,
+          ...results.offboardResults,
+          deferred: true,
+          success: results.errors.length === 0,
+          log: {
+            level: results.errors.length === 0 ? 'info' : 'warn',
+            message: `Vault offboarded (deferred): ${vaultAddress} - ${results.errors.length === 0 ? 'success' : `${results.errors.length} error(s)`}`
+          }
+        });
+
+        this.sendTelegramMessage(
+          `Vault authorization revoked: ${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}`
+        ).catch(err => console.error('Telegram notification error:', err));
+
+        return; // Skip config updates — vault is being removed
+      }
+
       await this.processPendingConfigUpdates(vaultAddress);
     });
 
@@ -987,16 +1023,25 @@ class AutomationService {
 
       this.log(`Vault authorization revoked: ${vaultAddress}`);
 
+      // Note: blacklist is intentionally NOT cleared on revoke. The blacklist reason
+      // serves as diagnostic info for the user — they can read it, fix the issue,
+      // then re-enable automation which clears the blacklist via VaultAuthGranted.
+
+      // If vault is locked (operation in progress), defer offboard until unlock.
+      // Processing concurrently would rip out state mid-operation.
+      const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+      if (this.vaultLocks[normalizedAddress]) {
+        this.pendingOffboards.add(normalizedAddress);
+        this.log(`Vault ${vaultAddress} locked, deferring offboard until unlock`);
+        return;
+      }
+
+      // Full cleanup: strategy state, listeners, locks, caches
       const results = {
         offboardResults: null,
         errors: []
       };
 
-      // Note: blacklist is intentionally NOT cleared on revoke. The blacklist reason
-      // serves as diagnostic info for the user — they can read it, fix the issue,
-      // then re-enable automation which clears the blacklist via VaultAuthGranted.
-
-      // Full cleanup: strategy state, listeners, locks, caches
       try {
         results.offboardResults = await this.offboardVault(vaultAddress);
       } catch (error) {
@@ -1020,26 +1065,16 @@ class AutomationService {
     });
 
     // Handle ExecutorChanged event processing failures
+    // VaultAuthEventFailed only fires when a grant event's RPC call to fetch the
+    // executor index fails (revocation path has no async operations that can fail).
+    // Since executor indices are immutable and assigned at vault creation, the only
+    // scenario is a new vault authorization where we couldn't verify ownership.
     this.eventManager.subscribe('VaultAuthEventFailed', async (data) => {
       try {
         const { vaultAddress, error } = data;
-        const isManaged = this.vaultDataService.hasVault(vaultAddress);
-
-        if (isManaged) {
-          // User was trying to DISABLE automation but event processing failed
-          // Blacklist to ensure we don't act on a vault that may have revoked us
-          // Note: blacklistVault() handles listener cleanup internally
-          this.log(`VaultAuthEventFailed for managed vault ${vaultAddress} - blacklisting for safety`);
-          await this.blacklistVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`);
-        } else {
-          // User was trying to ENABLE automation but event processing failed
-          // Track for retry - the retry system will attempt to set up the vault
-          this.log(`VaultAuthEventFailed for unmanaged vault ${vaultAddress} - tracking for retry`);
-          await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
-        }
+        this.log(`VaultAuthEventFailed for vault ${vaultAddress} - tracking for retry`);
+        await this.trackFailedVault(vaultAddress, `ExecutorChanged event processing failed: ${error}`, 'auth_event');
       } catch (handlerError) {
-        // Handler failure means we couldn't blacklist or track the vault
-        // Emergency cleanup to prevent acting on a vault with unknown auth state
         console.error(`VaultAuthEventFailed handler error for ${data.vaultAddress}:`, handlerError.message);
         await this.emergencyVaultCleanup(data.vaultAddress, `VaultAuthEventFailed handler error: ${handlerError.message}`);
       }
@@ -1336,12 +1371,13 @@ class AutomationService {
       results.cleanupResults = { listenersRemoved: 'unknown', strategyCleanedUp: false, errors: [] };
     }
 
-    // 3. Remove from retry queue if present
+    // 3. Remove from retry queue and trip history if present
     // Note: failedVaults uses checksummed addresses as keys (via trackFailedVault)
     if (this.failedVaults.has(normalizedAddress)) {
       this.failedVaults.delete(normalizedAddress);
       results.removedFromRetryQueue = true;
     }
+    this.vaultTripHistory.delete(normalizedAddress);
 
     // 4. Remove from VaultDataService cache
     results.removedFromCache = this.vaultDataService.removeVault(normalizedAddress);
@@ -1674,6 +1710,10 @@ class AutomationService {
       } catch (error) {
         console.error(`Failed to verify vault ${vaultAddress} ownership:`, error.message);
         results.failed.push({ vaultAddress, error: `ownership verification: ${error.message}` });
+        // Blacklist: we can't confirm this vault is ours, and adding to the retry queue
+        // without ownership verification risks managing someone else's vault.
+        // User can re-authorize to clear the blacklist once RPC recovers.
+        await this.blacklistVault(vaultAddress, `Ownership verification failed: ${error.message}`);
         continue;
       }
 

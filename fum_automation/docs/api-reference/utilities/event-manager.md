@@ -26,7 +26,6 @@ No arguments. Dependencies injected via `setPoolData()`, `setAdapters()`, `setVa
 |---|---|
 | `registerContractListener({contract, eventName, handler, vaultAddress, eventType, chainId, additionalId})` | Register handler on contract event. Returns listener key. |
 | `registerFilterListener({provider, filter, handler, address, eventType, chainId, additionalId})` | Register handler on provider event filter. Returns listener key. |
-| `registerInterval({callback, intervalMs, vaultAddress, eventType, chainId, additionalId})` | Register periodic interval. Returns listener key. |
 
 ## Listener Removal
 

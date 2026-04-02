@@ -218,6 +218,15 @@ describe('Fee Collection Trigger', () => {
     expect(distEvent.totalTokensFailed).toBe(0);
     console.log(`Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`)
 
+    // Verify swap counter was reset after fee collection
+    // Max 55 swaps, collection triggers at 50, so at most ~5 swaps after reset
+    const strategy = service.strategies.get('bob');
+    const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+    const swapCount = strategy.swapCountSinceLastFeeCheck[normalizedAddress];
+    expect(swapCount).toBeDefined();
+    expect(swapCount).toBeLessThanOrEqual(10);
+    console.log(`Swap counter after fee collection: ${swapCount}`);
+
     console.log('Fee collection test passed');
   }, 180000);
 
@@ -235,7 +244,7 @@ describe('Fee Collection Trigger', () => {
       expect(swapThresholdTx.gasEstimated).toBeDefined();
       expect(swapThresholdTx.gasNative).toBeGreaterThan(0);
       expect(swapThresholdTx.gasUSD).toBeGreaterThan(0);
-      expect(swapThresholdTx.txHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(swapThresholdTx.transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
     });
 
     it('should have FeesDistributed with gas data from withdrawal txs', async () => {

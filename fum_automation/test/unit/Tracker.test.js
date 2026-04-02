@@ -34,7 +34,7 @@ vi.mock('fum_library/helpers/tokenHelpers', () => ({
 
 import Tracker from '../../src/core/Tracker.js';
 import EventManager from '../../src/core/EventManager.js';
-import { fetchTokenPrices } from 'fum_library';
+import { fetchTokenPrices, getTokenBySymbol } from 'fum_library';
 import { getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 
 const VAULT_ADDRESS = ethers.utils.getAddress('0x1234567890abcdef1234567890abcdef12345678');
@@ -618,22 +618,22 @@ describe('Tracker.calculateGasUSD', () => {
     expect(result).toBe(30); // 0.01 * 3000
   });
 
-  it('should return 0 when price is 0 (unavailable)', async () => {
+  it('should return null when price is 0 (unavailable)', async () => {
     vi.mocked(getWrappedNativeSymbol).mockReturnValue('WETH');
     vi.mocked(fetchTokenPrices).mockResolvedValue({ WETH: 0 });
 
     const result = await tracker.calculateGasUSD(0.01);
 
-    expect(result).toBe(0);
+    expect(result).toBeNull();
   });
 
-  it('should return 0 when fetchTokenPrices throws', async () => {
+  it('should return null when fetchTokenPrices throws', async () => {
     vi.mocked(getWrappedNativeSymbol).mockReturnValue('WETH');
     vi.mocked(fetchTokenPrices).mockRejectedValue(new Error('CoinGecko rate limit'));
 
     const result = await tracker.calculateGasUSD(0.01);
 
-    expect(result).toBe(0);
+    expect(result).toBeNull();
   });
 
   it('should call getWrappedNativeSymbol with the tracker chainId', async () => {
@@ -643,5 +643,639 @@ describe('Tracker.calculateGasUSD', () => {
     await tracker.calculateGasUSD(0.5);
 
     expect(getWrappedNativeSymbol).toHaveBeenCalledWith(1337);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Part 4: Constructor validation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Tracker constructor validation', () => {
+  it('should throw when vaultDataDir is missing', () => {
+    expect(() => new Tracker({ eventManager: new EventManager(), chainId: 1337, trackingFailuresFilePath: '/tmp/tf.json' }))
+      .toThrow('vaultDataDir is required');
+  });
+
+  it('should throw when eventManager is missing', () => {
+    expect(() => new Tracker({ vaultDataDir: '/tmp/v', chainId: 1337, trackingFailuresFilePath: '/tmp/tf.json' }))
+      .toThrow('eventManager is required');
+  });
+
+  it('should throw when chainId is missing', () => {
+    expect(() => new Tracker({ vaultDataDir: '/tmp/v', eventManager: new EventManager(), trackingFailuresFilePath: '/tmp/tf.json' }))
+      .toThrow('chainId is required');
+  });
+
+  it('should throw when trackingFailuresFilePath is missing', () => {
+    expect(() => new Tracker({ vaultDataDir: '/tmp/v', eventManager: new EventManager(), chainId: 1337 }))
+      .toThrow('trackingFailuresFilePath is required');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Part 5: getTrackingFailuresData, updateSnapshot, shutdown, getTransactions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Tracker utility methods', () => {
+  let tempDir;
+  let tracker;
+  let eventManager;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracker-util-test-'));
+    eventManager = new EventManager();
+    tracker = new Tracker({
+      vaultDataDir: path.join(tempDir, 'vaults'),
+      eventManager,
+      chainId: 1337,
+      debug: false,
+      trackingFailuresFilePath: path.join(tempDir, 'tracking-failures', 'tracking-failures.json')
+    });
+    await tracker.initialize();
+  });
+
+  afterEach(async () => {
+    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  async function seedVault(address = VAULT_ADDRESS, aggregateOverrides = {}) {
+    const metadata = createSeedMetadata(address, Date.now(), aggregateOverrides);
+    tracker.vaultMetadata.set(address, metadata);
+    const vaultDir = path.join(tracker.vaultDataDir, address);
+    await fs.mkdir(vaultDir, { recursive: true });
+    return metadata;
+  }
+
+  describe('getTrackingFailuresData', () => {
+    it('should return empty object when no failures', () => {
+      expect(tracker.getTrackingFailuresData()).toEqual({});
+    });
+
+    it('should return correct shape after trackFailure', async () => {
+      await tracker.trackFailure(VAULT_ADDRESS, 'FeesCollected', 'network error');
+
+      const data = tracker.getTrackingFailuresData();
+      expect(data[VAULT_ADDRESS]).toBeDefined();
+      expect(data[VAULT_ADDRESS].vaultAddress).toBe(VAULT_ADDRESS);
+      expect(data[VAULT_ADDRESS].eventType).toBe('FeesCollected');
+      expect(data[VAULT_ADDRESS].error).toBe('network error');
+      expect(data[VAULT_ADDRESS].attempts).toBe(1);
+    });
+  });
+
+  describe('updateSnapshot', () => {
+    it('should update lastSnapshot and lastUpdated', async () => {
+      await seedVault();
+      const ts = Date.now();
+
+      await tracker.updateSnapshot(VAULT_ADDRESS, 2500, ts);
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.lastSnapshot.value).toBe(2500);
+      expect(metadata.lastSnapshot.timestamp).toBe(ts);
+      expect(metadata.metadata.lastUpdated).toBe(ts);
+    });
+
+    it('should do nothing for untracked vault', async () => {
+      const unknownAddr = ethers.utils.getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+      await tracker.updateSnapshot(unknownAddr, 1000, Date.now());
+      expect(tracker.getMetadata(unknownAddr)).toBeNull();
+    });
+  });
+
+  describe('getTransactions with time filtering', () => {
+    it('should filter transactions by time range', async () => {
+      await seedVault();
+
+      const t1 = 1000;
+      const t2 = 2000;
+      const t3 = 3000;
+
+      eventManager.emit('PositionRebalanced', { vaultAddress: VAULT_ADDRESS, oldPositionId: '1', newPositionId: '2', reason: 'out_of_range', timestamp: t1 });
+      await new Promise(r => setTimeout(r, 50));
+
+      eventManager.emit('PositionRebalanced', { vaultAddress: VAULT_ADDRESS, oldPositionId: '2', newPositionId: '3', reason: 'out_of_range', timestamp: t2 });
+      await new Promise(r => setTimeout(r, 50));
+
+      eventManager.emit('PositionRebalanced', { vaultAddress: VAULT_ADDRESS, oldPositionId: '3', newPositionId: '4', reason: 'out_of_range', timestamp: t3 });
+      await new Promise(r => setTimeout(r, 50));
+
+      const filtered = await tracker.getTransactions(VAULT_ADDRESS, 1500, 2500);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].timestamp).toBe(t2);
+    });
+  });
+
+  describe('shutdown', () => {
+    it('should persist all metadata and tracking failures to disk', async () => {
+      await seedVault();
+      await tracker.trackFailure(VAULT_ADDRESS, 'FeesCollected', 'test error');
+
+      await tracker.shutdown();
+
+      // Verify metadata was written
+      const metadataPath = path.join(tracker.vaultDataDir, VAULT_ADDRESS, 'metadata.json');
+      const metadataRaw = await fs.readFile(metadataPath, 'utf-8');
+      const savedMetadata = JSON.parse(metadataRaw);
+      expect(savedMetadata.vaultAddress).toBe(VAULT_ADDRESS);
+
+      // Verify tracking failures were written
+      const failuresRaw = await fs.readFile(tracker.trackingFailuresFilePath, 'utf-8');
+      const savedFailures = JSON.parse(failuresRaw);
+      expect(savedFailures[VAULT_ADDRESS]).toBeDefined();
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Part 6: Event handler coverage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Tracker event handlers', () => {
+  let tempDir;
+  let tracker;
+  let eventManager;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tracker-handler-test-'));
+    eventManager = new EventManager();
+    tracker = new Tracker({
+      vaultDataDir: path.join(tempDir, 'vaults'),
+      eventManager,
+      chainId: 1337,
+      debug: false,
+      trackingFailuresFilePath: path.join(tempDir, 'tracking-failures', 'tracking-failures.json')
+    });
+    await tracker.initialize();
+
+    // Default mocks for handlers that call calculateGasUSD / fetchTokenPrices
+    vi.mocked(getWrappedNativeSymbol).mockReturnValue('WETH');
+    vi.mocked(fetchTokenPrices).mockResolvedValue({ WETH: 3000, USDC: 1, WBTC: 60000 });
+    vi.mocked(getTokenBySymbol).mockImplementation((symbol) => {
+      const map = { WETH: { decimals: 18 }, USDC: { decimals: 6 }, WBTC: { decimals: 8 } };
+      if (map[symbol]) return map[symbol];
+      return { decimals: 18 };
+    });
+  });
+
+  afterEach(async () => {
+    vi.mocked(getWrappedNativeSymbol).mockReset();
+    vi.mocked(fetchTokenPrices).mockReset();
+    vi.mocked(getTokenBySymbol).mockReset();
+    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  async function seedVault(address = VAULT_ADDRESS, aggregateOverrides = {}) {
+    const metadata = createSeedMetadata(address, Date.now(), aggregateOverrides);
+    tracker.vaultMetadata.set(address, metadata);
+    const vaultDir = path.join(tracker.vaultDataDir, address);
+    await fs.mkdir(vaultDir, { recursive: true });
+    return metadata;
+  }
+
+  // Standard gas fields for handlers that need them
+  const GAS_USED = ethers.BigNumber.from(200000).toString();
+  const GAS_PRICE = ethers.utils.parseUnits('0.1', 'gwei').toString();
+
+  // ─── handleBaselineCapture ─────────────────────────────────────────
+
+  describe('handleBaselineCapture (VaultBaselineCaptured)', () => {
+    it('should create metadata with correct aggregate structure', async () => {
+      const ts = Date.now();
+      eventManager.emit('VaultBaselineCaptured', {
+        vaultAddress: VAULT_ADDRESS,
+        totalVaultValue: 5000,
+        tokenValue: 2000,
+        positionValue: 3000,
+        timestamp: ts,
+        capturePoint: 'initialization',
+        strategyId: 'babysteps-1'
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata).not.toBeNull();
+      expect(metadata.baseline.value).toBe(5000);
+      expect(metadata.baseline.tokenValue).toBe(2000);
+      expect(metadata.baseline.positionValue).toBe(3000);
+      expect(metadata.baseline.capturePoint).toBe('initialization');
+      expect(metadata.aggregates.rebalanceCount).toBe(0);
+      expect(metadata.aggregates.cumulativeFeesUSD).toBe(0);
+      expect(metadata.metadata.strategyId).toBe('babysteps-1');
+    });
+
+    it('should preserve blacklistCount and retryCount from prior metadata', async () => {
+      // Pre-seed metadata with prior counts
+      await seedVault(VAULT_ADDRESS, { blacklistCount: 2, retryCount: 3 });
+
+      eventManager.emit('VaultBaselineCaptured', {
+        vaultAddress: VAULT_ADDRESS,
+        totalVaultValue: 5000,
+        tokenValue: 2000,
+        positionValue: 3000,
+        timestamp: Date.now(),
+        capturePoint: 'retry_recovery'
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.blacklistCount).toBe(2);
+      expect(metadata.aggregates.retryCount).toBe(3);
+      // Other aggregates should be reset to 0
+      expect(metadata.aggregates.rebalanceCount).toBe(0);
+    });
+  });
+
+  // ─── handleFeesCollected ───────────────────────────────────────────
+
+  describe('handleFeesCollected (FeesCollected)', () => {
+    it('should update fee and gas aggregates when gas fields are present', async () => {
+      await seedVault();
+
+      eventManager.emit('FeesCollected', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0xabc',
+        timestamp: Date.now(),
+        totalUSD: 25.50,
+        positionIds: ['pos1'],
+        source: 'rebalance',
+        fees: { WETH: '0.01' },
+        reinvestmentRatio: 80,
+        gasUsed: GAS_USED,
+        effectiveGasPrice: GAS_PRICE
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.cumulativeFeesUSD).toBe(25.50);
+      expect(metadata.aggregates.cumulativeFeesReinvestedUSD).toBeCloseTo(25.50 * 0.80);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+    });
+
+    it('should not update gas aggregates when gas fields are absent', async () => {
+      await seedVault();
+
+      eventManager.emit('FeesCollected', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0xabc',
+        timestamp: Date.now(),
+        totalUSD: 10,
+        positionIds: ['pos1'],
+        source: 'rebalance',
+        fees: { WETH: '0.005' },
+        reinvestmentRatio: 50
+        // no gasUsed, no effectiveGasPrice
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.cumulativeFeesUSD).toBe(10);
+      expect(metadata.aggregates.cumulativeGasNative).toBe(0);
+      expect(metadata.aggregates.cumulativeGasUSD).toBe(0);
+    });
+
+    it('should increment feeCollectionCount when source is swap_threshold', async () => {
+      await seedVault();
+
+      eventManager.emit('FeesCollected', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0xdef',
+        timestamp: Date.now(),
+        totalUSD: 5,
+        positionIds: ['pos1'],
+        source: 'swap_threshold',
+        fees: { USDC: '5' },
+        reinvestmentRatio: 100
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.feeCollectionCount).toBe(1);
+    });
+  });
+
+  // ─── handleFeesDistributed ─────────────────────────────────────────
+
+  describe('handleFeesDistributed (FeesDistributed)', () => {
+    it('should update distribution aggregates', async () => {
+      await seedVault();
+
+      eventManager.emit('FeesDistributed', {
+        vaultAddress: VAULT_ADDRESS,
+        timestamp: Date.now(),
+        distributions: [
+          { tokenSymbol: 'WETH', amount: '0.01', gasUsed: GAS_USED, effectiveGasPrice: GAS_PRICE },
+          { tokenSymbol: 'USDC', amount: '50', gasUsed: GAS_USED, effectiveGasPrice: GAS_PRICE }
+        ],
+        reinvestmentRatio: 80,
+        totalDistributedUSD: 75.50
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.cumulativeFeesWithdrawnUSD).toBe(75.50);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+    });
+  });
+
+  // ─── handlePositionRebalanced ──────────────────────────────────────
+
+  describe('handlePositionRebalanced (PositionRebalanced)', () => {
+    it('should increment rebalanceCount and append transaction', async () => {
+      await seedVault();
+
+      eventManager.emit('PositionRebalanced', {
+        vaultAddress: VAULT_ADDRESS,
+        oldPositionId: '100',
+        newPositionId: '101',
+        reason: 'out_of_range',
+        timestamp: Date.now()
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.rebalanceCount).toBe(1);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      const tx = txs.find(t => t.type === 'PositionRebalanced');
+      expect(tx.oldPositionId).toBe('100');
+      expect(tx.newPositionId).toBe('101');
+      expect(tx.reason).toBe('out_of_range');
+    });
+  });
+
+  // ─── handlePositionsClosed ─────────────────────────────────────────
+
+  describe('handlePositionsClosed (PositionsClosed)', () => {
+    it('should calculate gas and record closed positions', async () => {
+      await seedVault();
+
+      eventManager.emit('PositionsClosed', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0x111',
+        timestamp: Date.now(),
+        closedCount: 2,
+        closedPositions: [{ id: 'p1' }, { id: 'p2' }],
+        gasUsed: GAS_USED,
+        effectiveGasPrice: GAS_PRICE,
+        success: true
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      const tx = txs.find(t => t.type === 'PositionsClosed');
+      expect(tx.closedCount).toBe(2);
+    });
+  });
+
+  // ─── handleTokensSwapped ───────────────────────────────────────────
+
+  describe('handleTokensSwapped (TokensSwapped)', () => {
+    it('should enrich swaps with USD values and slippage (isAmountIn=true)', async () => {
+      await seedVault();
+
+      const amountIn = ethers.utils.parseEther('1').toString();
+      const amountOut = ethers.utils.parseUnits('3000', 6).toString(); // 3000 USDC
+
+      eventManager.emit('TokensSwapped', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0x222',
+        timestamp: Date.now(),
+        swapCount: 1,
+        swapType: 'deficit',
+        swaps: [{
+          tokenInSymbol: 'WETH',
+          tokenOutSymbol: 'USDC',
+          quotedAmountIn: amountIn,
+          quotedAmountOut: amountOut,
+          actualAmountIn: amountIn,
+          actualAmountOut: ethers.utils.parseUnits('2970', 6).toString(), // 1% slippage
+          isAmountIn: true
+        }],
+        gasUsed: GAS_USED,
+        effectiveGasPrice: GAS_PRICE,
+        success: true
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.swapCount).toBe(1);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      const tx = txs.find(t => t.type === 'TokensSwapped');
+      expect(tx.swaps[0].slippagePercent).toBeCloseTo(1.0, 0);
+      expect(tx.swaps[0].priceInUSD).toBe(3000);
+      expect(tx.swaps[0].priceOutUSD).toBe(1);
+    });
+  });
+
+  // ─── handleNewPositionCreated ──────────────────────────────────────
+
+  describe('handleNewPositionCreated (NewPositionCreated)', () => {
+    it('should enrich with USD values and calculate difference', async () => {
+      await seedVault();
+
+      const target0 = ethers.utils.parseEther('0.5').toString();
+      const target1 = ethers.utils.parseUnits('1500', 6).toString();
+
+      eventManager.emit('NewPositionCreated', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0x333',
+        timestamp: Date.now(),
+        positionId: '200',
+        poolAddress: '0xpool',
+        targetToken0: target0,
+        targetToken1: target1,
+        actualToken0: target0,
+        actualToken1: target1,
+        tokenSymbols: ['WETH', 'USDC'],
+        gasUsed: GAS_USED,
+        effectiveGasPrice: GAS_PRICE,
+        position: { tickLower: -100, tickUpper: 100 },
+        current: { sqrtPrice: '1234' },
+        platform: 'uniswapV3'
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      const tx = txs.find(t => t.type === 'NewPositionCreated');
+      expect(tx.totalTargetUSD).toBeGreaterThan(0);
+      expect(tx.differencePercent).toBe(0); // target === actual
+    });
+  });
+
+  // ─── handleLiquidityAddedToPosition ────────────────────────────────
+
+  describe('handleLiquidityAddedToPosition (LiquidityAddedToPosition)', () => {
+    it('should update aggregates and append transaction', async () => {
+      await seedVault();
+
+      const target0 = ethers.utils.parseEther('0.5').toString();
+      const target1 = ethers.utils.parseUnits('1500', 6).toString();
+
+      eventManager.emit('LiquidityAddedToPosition', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0x444',
+        timestamp: Date.now(),
+        positionId: '200',
+        poolAddress: '0xpool',
+        targetToken0: target0,
+        targetToken1: target1,
+        actualToken0: target0,
+        actualToken1: target1,
+        tokenSymbols: ['WETH', 'USDC'],
+        gasUsed: GAS_USED,
+        effectiveGasPrice: GAS_PRICE,
+        position: { tickLower: -100, tickUpper: 100 },
+        current: { sqrtPrice: '1234' },
+        platform: 'uniswapV3'
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      expect(txs.find(t => t.type === 'LiquidityAddedToPosition')).toBeDefined();
+    });
+  });
+
+  // ─── handleAssetValuesFetched ──────────────────────────────────────
+
+  describe('handleAssetValuesFetched (AssetValuesFetched)', () => {
+    it('should update lastSnapshot via updateSnapshot', async () => {
+      await seedVault();
+
+      const ts = Date.now();
+      eventManager.emit('AssetValuesFetched', {
+        vaultAddress: VAULT_ADDRESS,
+        totalVaultValue: 7500,
+        timestamp: ts
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.lastSnapshot.value).toBe(7500);
+      expect(metadata.lastSnapshot.timestamp).toBe(ts);
+    });
+  });
+
+  // ─── handleWrapUnwrap ──────────────────────────────────────────────
+
+  describe('handleWrapUnwrap (NativeWrapped/NativeUnwrapped)', () => {
+    it('should track wrap event with gas and amount USD', async () => {
+      await seedVault();
+
+      eventManager.emit('NativeWrapped', {
+        vaultAddress: VAULT_ADDRESS,
+        transactionHash: '0x555',
+        timestamp: Date.now(),
+        amount: ethers.utils.parseEther('0.5').toString(),
+        amountFormatted: '0.5',
+        gasUsed: GAS_USED,
+        gasEstimated: '250000',
+        effectiveGasPrice: GAS_PRICE,
+        success: true
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.wrapUnwrapCount).toBe(1);
+      expect(metadata.aggregates.transactionCount).toBe(1);
+      expect(metadata.aggregates.cumulativeGasNative).toBeGreaterThan(0);
+
+      const txs = await tracker.getTransactions(VAULT_ADDRESS);
+      const tx = txs.find(t => t.type === 'NativeWrapped');
+      expect(tx).toBeDefined();
+      expect(tx.amountUSD).toBeGreaterThan(0); // 0.5 * 3000 = 1500
+    });
+  });
+
+  // ─── handleVaultBlacklisted ────────────────────────────────────────
+
+  describe('handleVaultBlacklisted (VaultBlacklisted)', () => {
+    it('should create metadata for never-seen vault with blacklistCount=1', async () => {
+      const newVault = ethers.utils.getAddress('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+      // Ensure vault dir exists for append
+      const vaultDir = path.join(tracker.vaultDataDir, newVault);
+      await fs.mkdir(vaultDir, { recursive: true });
+
+      eventManager.emit('VaultBlacklisted', {
+        vaultAddress: newVault,
+        reason: 'unrecoverable error',
+        timestamp: Date.now()
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(newVault);
+      expect(metadata).not.toBeNull();
+      expect(metadata.baseline).toBeNull();
+      expect(metadata.aggregates.blacklistCount).toBe(1);
+    });
+
+    it('should increment blacklistCount for existing vault', async () => {
+      await seedVault(VAULT_ADDRESS, { blacklistCount: 1 });
+
+      eventManager.emit('VaultBlacklisted', {
+        vaultAddress: VAULT_ADDRESS,
+        reason: 'yo-yo detection',
+        timestamp: Date.now()
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.blacklistCount).toBe(2);
+    });
+  });
+
+  // ─── handleVaultRetryQueued ────────────────────────────────────────
+
+  describe('handleVaultRetryQueued (VaultFailed)', () => {
+    it('should create metadata for never-seen vault with retryCount=1', async () => {
+      const newVault = ethers.utils.getAddress('0xcccccccccccccccccccccccccccccccccccccccc');
+      const vaultDir = path.join(tracker.vaultDataDir, newVault);
+      await fs.mkdir(vaultDir, { recursive: true });
+
+      eventManager.emit('VaultFailed', {
+        vaultAddress: newVault,
+        error: 'setup failed',
+        attempts: 1,
+        source: 'initial_setup',
+        timestamp: Date.now()
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(newVault);
+      expect(metadata).not.toBeNull();
+      expect(metadata.baseline).toBeNull();
+      expect(metadata.aggregates.retryCount).toBe(1);
+    });
+
+    it('should increment retryCount for existing vault', async () => {
+      await seedVault(VAULT_ADDRESS, { retryCount: 2 });
+
+      eventManager.emit('VaultFailed', {
+        vaultAddress: VAULT_ADDRESS,
+        error: 'strategy error',
+        attempts: 3,
+        source: 'retry_attempt',
+        timestamp: Date.now()
+      });
+      await new Promise(r => setTimeout(r, 50));
+
+      const metadata = tracker.getMetadata(VAULT_ADDRESS);
+      expect(metadata.aggregates.retryCount).toBe(3);
+    });
   });
 });

@@ -82,4 +82,27 @@ describe('patchProviderFeeData', () => {
       expect(feeData.maxPriorityFeePerGas.toString()).toBe('1000');
     });
   });
+
+  describe('lastBaseFeePerGas null branch', () => {
+    it('should leave maxFeePerGas unchanged when lastBaseFeePerGas is null', async () => {
+      const hardcodedPriority = ethers.utils.parseUnits('1.5', 'gwei');
+      const originalMaxFee = ethers.BigNumber.from(2000);
+      const provider = {
+        getFeeData: async () => ({
+          gasPrice: ethers.BigNumber.from(1000),
+          lastBaseFeePerGas: null,
+          maxFeePerGas: originalMaxFee,
+          maxPriorityFeePerGas: hardcodedPriority,
+        }),
+      };
+
+      patchProviderFeeData(provider, 1337); // Arbitrum, priority=0
+      const feeData = await provider.getFeeData();
+
+      // maxPriorityFeePerGas should still be overridden
+      expect(feeData.maxPriorityFeePerGas.toString()).toBe('0');
+      // maxFeePerGas should be unchanged (no baseFee to recalculate from)
+      expect(feeData.maxFeePerGas.toString()).toBe(originalMaxFee.toString());
+    });
+  });
 });

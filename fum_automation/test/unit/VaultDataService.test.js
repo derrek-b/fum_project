@@ -598,6 +598,23 @@ describe('VaultDataService', () => {
 
       expect(result).toBe(true);
     });
+
+    it('should throw when no tokens configured', async () => {
+      const mockProvider = { getNetwork: vi.fn() };
+      vaultDataService.initialize(mockProvider, 1337);
+      vaultDataService.setTokens({}); // empty tokens
+
+      vaultDataService._setVaultForTesting(VAULT_ADDRESS_1, {
+        address: VAULT_ADDRESS_1,
+        tokens: {},
+        positions: {},
+        lastUpdated: 0
+      });
+
+      await expect(
+        vaultDataService.refreshTokens(VAULT_ADDRESS_1)
+      ).rejects.toThrow('No tokens configured');
+    });
   });
 
   describe('updatePosition', () => {

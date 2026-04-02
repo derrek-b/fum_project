@@ -255,7 +255,7 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
     const tickSpacing = positionConfig.tickSpacing || 10;
 
     // Fetch pool data via adapter
-    const poolData = await adapter._fetchPoolData(
+    const poolData = await adapter.fetchPoolDataForTesting(
       sortedToken0,
       sortedToken1,
       fee,
