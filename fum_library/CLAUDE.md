@@ -69,6 +69,12 @@ The library exports test utilities for consumers:
 
 These are used by fum_automation's test suite to spin up consistent test environments.
 
+### Adapter test gotchas
+
+- **Port must be 8545.** V3 and V4 adapters create internal AlphaRouter providers using `getChainRpcUrls(1337)` which returns `http://localhost:8545`. The test's Hardhat node must run on that same port or the AlphaRouter will connect to the wrong (or no) node.
+- **V4 AlphaRouter needs fresh adapter before late-running tests.** After many `evm_revert` cycles, the AlphaRouter's `JsonRpcProvider` accumulates stale internal block state that causes "invalid block tag N+1" errors. Fix: add `beforeAll(() => { adapter = new UniswapV4Adapter(1337); })` before describe blocks that call `getBestSwapQuote`, `batchSwapTransactions`, or any method that invokes `alphaRouter.route()`. V3 is not affected due to test ordering.
+- **`vi.mock` must be at module scope.** Vitest hoists `vi.mock()` calls to the top of the file regardless of where they appear. Placing them inside a test case or describe block causes them to affect all tests in the file. Use module-level `vi.mock` with conditional logic for test-specific chains, or use `vi.spyOn` for test-scoped mocking.
+
 ## Key Details
 
 - **ethers.js v5** is a peer dependency — all blockchain code uses v5 API

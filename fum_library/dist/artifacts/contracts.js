@@ -710,8 +710,8 @@
       }
     ],
     "addresses": {
-      "1337": "0x2951bFc136d18Cc1cF6Ed5D66A21b5337887f7B6",
-      "1338": "0x1E53bea57Dd5dDa7bFf1a1180a2f64a5c9e222f5",
+      "1337": "0x6C942D6B9f70F37368505d1D2c5687A1A2992A32",
+      "1338": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C",
       "42161": "0xeAdA21fc37F548d4813b74C9f0a2eA66ff9fef27"
     }
   },
@@ -2342,8 +2342,8 @@
       }
     ],
     "addresses": {
-      "1337": "0xbE7A285543D2c295F5711f3ee668b5e671181143",
-      "1338": "0x633a7eB9b8912b22f3616013F3153de687F96074",
+      "1337": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
+      "1338": "0xa9672a817618Ae03A8A342d004e3b53f50798948",
       "42161": "0x31709a06fB0B7DAe79B35f94cDc9D74FB348103B"
     }
   },
@@ -3017,7 +3017,7 @@
     ],
     "addresses": {
       "1337": "0x13B15CCD923853eB9322C3aBBb91b7A93E3a8B6e",
-      "1338": "0x17f4B55A352Be71CC03856765Ad04147119Aa09B"
+      "1338": "0xCBd482597a26c0255a5F38B3360bE2015D628187"
     }
   },
   "TJPositionProxy": {
@@ -3486,7 +3486,7 @@
     ],
     "addresses": {
       "1337": "0x27998b19Ea0fcedDBa50915dE46692Ccef961e17",
-      "1338": "0x08677Af0A7F54fE2a190bb1F75DE682fe596317e"
+      "1338": "0x88EE5050eBA44e68A0146e830d6E08aBda453f21"
     }
   },
   "TJSwapValidator": {
@@ -3511,7 +3511,7 @@
       }
     ],
     "addresses": {
-      "1338": "0xa7480B62a657555f6727bCdb96953bCC211FFbaC"
+      "1338": "0xC89EEc2129aBAC411BB422482f184CD252C7721f"
     }
   },
   "MerklIncentiveValidator": {
@@ -3536,7 +3536,7 @@
       }
     ],
     "addresses": {
-      "1337": "0xA27F2dCbCDaf5e57ede910940Fa76569AF494456"
+      "1337": "0xb782f215aB9C9B40287998Ce9cC0a127Ecd7B78C"
     }
   }
 };
