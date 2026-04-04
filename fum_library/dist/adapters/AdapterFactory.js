@@ -57,11 +57,8 @@ export default class AdapterFactory {
       throw new Error("chainId must be a valid number");
     }
 
-    // Check if chain is supported
-    const chainConfig = getChainConfig(chainId);
-    if (!chainConfig) {
-      return { adapters, failures };
-    }
+    // Validate chain is supported (getChainConfig throws for unsupported chains)
+    getChainConfig(chainId);
 
     // Get all enabled platform IDs for this chain
     const platformIds = lookupChainPlatformIds(chainId);

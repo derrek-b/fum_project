@@ -237,10 +237,8 @@ export default class UniswapV3Adapter extends PlatformAdapter {
    * @private
    */
   _createTokenInstance(tokenAddress) {
+    // getTokenByAddress throws if token not found — no guard needed
     const tokenConfig = getTokenByAddress(tokenAddress, this.chainId);
-    if (!tokenConfig) {
-      throw new Error(`Token ${tokenAddress} not found in config for chain ${this.chainId}`);
-    }
     return new Token(
       this.alphaRouterChainId,
       tokenAddress,
@@ -5608,26 +5606,6 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       ),
       poolCount: rwvq.route.pools?.length || rwvq.route.pairs?.length || 1,
     }));
-
-    // 🔬 Diagnostic: Log AlphaRouter quote and route details
-    if (process.env.DEBUG_SWAP_DIAG) {
-      const routeDetails = (routeResult.route.route || []).map(rwvq => {
-        const pools = rwvq.route.pools || [];
-        return pools.map(p => ({
-          fee: p.fee,
-          liquidity: p.liquidity?.toString(),
-          sqrtRatioX96: p.sqrtRatioX96?.toString(),
-          tickCurrent: p.tickCurrent
-        }));
-      });
-      console.log(`🔬 [SWAP-DIAG] AlphaRouter result for ${tokenIn.symbol}→${tokenOut.symbol}:`);
-      console.log(`🔬 [SWAP-DIAG]   quotedAmountIn=${routeResult.amountIn}, quotedAmountOut=${routeResult.amountOut}`);
-      console.log(`🔬 [SWAP-DIAG]   slippageTolerance=${slippageTolerance}%, isAmountIn=${isAmountIn}`);
-      console.log(`🔬 [SWAP-DIAG]   route count: ${routes.length}, route pools: ${JSON.stringify(routeDetails)}`);
-      if (routeResult.route.estimatedGasUsed) {
-        console.log(`🔬 [SWAP-DIAG]   estimatedGasUsed=${routeResult.route.estimatedGasUsed.toString()}`);
-      }
-    }
 
     // 2. Branch: native ETH input skips Permit2
     if (tokenIn.isNative) {

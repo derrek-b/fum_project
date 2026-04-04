@@ -1977,7 +1977,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       const balance1 = JSBI.BigInt(token1Amount);
 
       // Apply slippage to reduce amounts for position calculation
-      // e.g., 5% slippage → use 95% of balance for position calculation
+      // e.g., 0.5% slippage → use 99.5% of balance for position calculation
       const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
       const slippageDivisor = JSBI.BigInt(10000);
 
@@ -2690,7 +2690,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
       // Apply slippage to reduce amounts for position calculation
       // This leaves headroom for price movement during execution
-      // e.g., 5% slippage → use 95% of balance for position calculation
+      // e.g., 0.5% slippage → use 99.5% of balance for position calculation
       const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
       const slippageDivisor = JSBI.BigInt(10000);
 
