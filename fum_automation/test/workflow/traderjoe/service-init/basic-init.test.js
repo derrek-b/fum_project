@@ -29,8 +29,12 @@ describe('AutomationService Initialization - Trader Joe V2.2 / Avalanche (0 Vaul
   });
 
   afterAll(async () => {
-    if (service && service.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });

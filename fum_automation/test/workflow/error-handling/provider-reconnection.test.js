@@ -55,7 +55,7 @@ describe('Provider Reconnection', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 50,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 20 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -408,7 +408,7 @@ describe('Provider Reconnection', () => {
         fatalError = error;
         // Do the cleanup that handleFatalError does, but skip process.exit(1)
         // which vitest intercepts and throws an error for
-        await service.stop();
+        await service.stop(true);
       });
 
       // Start service

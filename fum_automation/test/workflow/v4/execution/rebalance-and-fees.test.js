@@ -21,7 +21,9 @@ import {
   executeV4PoolSwap,
   getV4PoolData,
   configureV4StrategyParameters,
-  getV4TokenAddress
+  getV4TokenAddress,
+  computePriceMovementSwapAmount,
+  calculateSwapsForRange
 } from '../../../helpers/v4-swap-utils.js';
 import { waitForCondition } from '../../../helpers/wait-utils.js';
 import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
@@ -47,9 +49,9 @@ describe('V4 Rebalance and Fee Collection', () => {
       usdcAmount: '0'
     });
 
-    // Create test vault with NO positions - service will create one during setup
-    // This avoids Graph indexing delay issues (same pattern as BS-0010-v4)
-    console.log('Creating V4 test vault (no initial positions)...');
+    // Create test vault with position pre-created during setup (percentOfAssets: 100)
+    // This eliminates slow AlphaRouter deficit swaps during service initialization
+    console.log('Creating V4 test vault...');
     testVault = await setupV4TestVault(
       testEnv.hardhatServer,
       testEnv.contracts,
@@ -57,10 +59,15 @@ describe('V4 Rebalance and Fee Collection', () => {
       {
         vaultName: 'V4 Rebalance & Fee Test Vault',
         nativeEthAmount: '10',
-        nativeEthToVault: '20', // V4 needs significant ETH: deficit swap + position msg.value
-        swapTokens: [], // No pre-swaps
-        positions: [], // NO positions - service will create during setupVault
-        tokenTransfers: {},
+        wrapEthAmount: '10',
+        swapTokens: [{ from: 'ETH', to: 'USDC', amount: '5' }],
+        positions: [{
+          token0: 'ETH',
+          token1: 'USDC',
+          fee: 500,
+          percentOfAssets: 100,
+          tickRange: { type: 'centered', spacing: 10 }
+        }],
         targetTokens: ['ETH', 'USDC'],
         targetPlatforms: ['uniswapV4'],
         strategy: 'bob'
@@ -107,8 +114,12 @@ describe('V4 Rebalance and Fee Collection', () => {
   }, 240000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupV4TestBlockchain(testEnv);
   });
@@ -280,12 +291,12 @@ describe('V4 Rebalance and Fee Collection', () => {
       // Get token addresses
       const usdcAddress = getV4TokenAddress('USDC', 1337);
 
-      // Execute LARGE swaps to push price DOWN (ETH -> USDC decreases tick)
-      // Need bigger swaps to push price beyond 2% threshold
-      const swapAmount = ethers.utils.parseEther('50');
-      const maxSwaps = 20;
+      // Compute swap count from position range (5% half-range, 1% per swap)
+      const pricePerSwap = 1; // 1% per swap
+      const rangePercent = 5; // targetRangeUpper/Lower = 500 bps = 5%
+      const maxSwaps = calculateSwapsForRange(rangePercent, pricePerSwap);
 
-      console.log(`Executing V4 swaps to push price down (lower tick)...`);
+      console.log(`Executing ${maxSwaps} V4 swaps to push price down (${pricePerSwap}% each, ${rangePercent}% range)...`);
 
       for (let i = 0; i < maxSwaps; i++) {
         // Check if rebalance occurred
@@ -295,20 +306,25 @@ describe('V4 Rebalance and Fee Collection', () => {
         }
 
         try {
+          // Compute exact swap amount from current pool state
+          const poolData = await getV4PoolData(testEnv, NATIVE_ETH, usdcAddress, 500, 10);
+          const { amount: swapAmount, currentTick } = computePriceMovementSwapAmount(poolData, {
+            targetPriceMove: pricePerSwap / 100, // convert % to decimal
+            direction: 'down',
+            wethIsToken0: true // V4: ETH (AddressZero) is always token0
+          });
+
           await executeV4PoolSwap(testEnv, {
             tokenIn: NATIVE_ETH,
             tokenOut: usdcAddress,
             amountIn: swapAmount,
             wallet: swapWallet.wallet,
-            fee: 500,        // Target the 500bp pool where position lives
+            fee: 500,
             tickSpacing: 10,
-            slippage: 100 // High slippage for aggressive price movement
+            slippage: 100
           });
 
-          // Get current tick
-          const poolData = await getV4PoolData(testEnv, NATIVE_ETH, usdcAddress, 500, 10);
-          const tickDelta = poolData.tick - (initialPosition.currentTick || poolData.tick);
-          console.log(`  Swap ${i + 1}: current tick = ${poolData.tick} (delta from initial: ${tickDelta})`);
+          console.log(`  Swap ${i + 1}/${maxSwaps}: tick ${currentTick}, ${ethers.utils.formatEther(swapAmount)} ETH (~${pricePerSwap}%)`);
 
           // Wait for event processing
           await new Promise(resolve => setTimeout(resolve, 2000));

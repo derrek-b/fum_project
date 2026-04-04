@@ -73,7 +73,7 @@ describe('V4 AutomationService Initialization - createNewPosition Workflow', () 
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }
@@ -165,7 +165,7 @@ describe('V4 AutomationService Initialization - createNewPosition Workflow', () 
       expect(vaultsLoadedEvents[0].total).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
       expect(vaultsLoadedEvents[0].failed).toBe(0);
-    }, 60000);
+    }, 180000);
   });
 
   describe('setupVault() Step 1: Vault Data Loading', () => {

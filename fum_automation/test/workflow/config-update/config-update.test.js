@@ -60,7 +60,7 @@ describe('Config Update Success Cases', () => {
             token0: 'USDC',
             token1: 'WETH',
             fee: 500,
-            percentOfAssets: 50,
+            percentOfAssets: 100,
             tickRange: {
               type: 'centered',
               spacing: 10
@@ -229,7 +229,7 @@ describe('Config Update Success Cases', () => {
       expect(service.pendingConfigUpdates.has(normalizedAddress)).toBe(false);
 
       console.log('Immediate token update test passed');
-    }, 90000);
+    }, 120000);
 
     it('should update VDS immediately when TargetPlatformsUpdated and vault is unlocked', async () => {
       await createTestService(3502);

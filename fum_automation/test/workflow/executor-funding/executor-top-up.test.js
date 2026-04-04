@@ -16,7 +16,10 @@ import {
   setupSwapWallet,
   executeSwap,
   configureStrategyParameters,
-  getTokenAddressForTest
+  getTokenAddressForTest,
+  computePriceMovementSwapAmount,
+  calculateSwapsForRange,
+  getPoolData
 } from '../../helpers/swap-utils.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
@@ -52,7 +55,6 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
   let service;
   let testVault;
   let swapWallet;
-  let adapter;
 
   beforeAll(async () => {
     testEnv = await setupTestBlockchain();
@@ -66,8 +68,6 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
       usdcAmount: '300'
     });
     swapWallet = swapSetup;
-
-    adapter = new UniswapV3Adapter(1337);
 
     // Create vault with NO native ETH — forces unwrap path in attemptTopUp
     console.log('Creating test vault (no native ETH)...');
@@ -87,7 +87,6 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
           percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }   // Tight for easy rebalance
         }],
-        tokenTransfers: { 'WETH': 60, 'USDC': 60 },
         targetTokens: ['USDC', 'WETH'],
         targetPlatforms: ['uniswapV3']
       }
@@ -123,8 +122,12 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -253,10 +256,13 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
     // which is what was happening before this fix.)
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
-    const swapAmount = ethers.utils.parseUnits('40000', 6); // 40k USDC per swap (~20 ETH equivalent)
-    const maxSwaps = 30;
 
-    console.log('Executing swaps to trigger rebalance (USDC → WETH, pushing tick UP)...');
+    // Compute swap count from position range (0.25% half-range, 0.1% per swap)
+    const pricePerSwap = 0.1;
+    const rangePercent = 0.25;
+    const maxSwaps = calculateSwapsForRange(rangePercent, pricePerSwap);
+
+    console.log(`Executing up to ${maxSwaps} swaps to trigger rebalance (USDC → WETH, pushing tick UP)...`);
     for (let i = 0; i < maxSwaps; i++) {
       if (rebalanceEvents.length > 0) {
         console.log(`Rebalance triggered after ${i} swaps`);
@@ -264,6 +270,15 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
       }
 
       try {
+        // Compute exact swap amount from current pool state
+        // WETH (0x82aF) < USDC (0xaf88) → WETH is token0; buying WETH = direction 'up'
+        const poolData = await getPoolData(testEnv, wethAddress, usdcAddress, 500);
+        const { amount: swapAmount } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: pricePerSwap / 100,
+          direction: 'up',
+          wethIsToken0: true // WETH is token0 (lower address)
+        });
+
         await executeSwap(testEnv, {
           tokenIn: usdcAddress,
           tokenOut: wethAddress,
@@ -273,8 +288,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
           slippage: 100
         });
 
-        const poolData = await adapter._fetchPoolData(usdcAddress, wethAddress, 500, testEnv.hardhatServer.provider);
-        console.log(`  Swap ${i + 1}: current tick = ${poolData.tick}`);
+        console.log(`  Swap ${i + 1}/${maxSwaps}: ${ethers.utils.formatUnits(swapAmount, 6)} USDC`);
 
         await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
@@ -283,10 +297,10 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
       }
     }
 
-    // Wait for rebalance
+    // Wait for rebalance — AlphaRouter can be slow on modified fork state
     await waitForCondition(
       () => rebalanceEvents.length > 0,
-      60000,
+      180000,
       1000
     );
     expect(rebalanceEvents.length).toBeGreaterThan(0);
@@ -409,7 +423,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
     expect(fundedTxs[0].fundingAmountUSD).toBeGreaterThan(0);
     expect(fundedTxs[0].gasNative).toBeGreaterThan(0);
     expect(fundedTxs[0].gasUSD).toBeGreaterThan(0);
-    expect(fundedTxs[0].txHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+    expect(fundedTxs[0].transactionHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
 
     // Rebalance also tracked (exercise came via rebalance trigger)
     expect(metadata.aggregates.rebalanceCount).toBeGreaterThanOrEqual(1);
@@ -525,7 +539,6 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
           percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }
         }],
-        tokenTransfers: { 'WBTC': 60, 'USD₮0': 60 },
         targetTokens: ['WBTC', 'USD₮0'],
         targetPlatforms: ['uniswapV3']
       }
@@ -561,8 +574,12 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
   }, 240000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -618,10 +635,13 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
     // triggers the ERC20→native swap top-up. Stop as soon as ExecutorFunded fires.
     const wbtcAddress = getTokenAddressForTest('WBTC', 1337);
     const usdtAddress = getTokenAddressForTest('USD₮0', 1337);
-    const swapAmount = ethers.utils.parseUnits('0.1', 8); // 0.1 WBTC (~$7k) per swap
-    const maxSwaps = 30;
 
-    console.log('Executing swaps to push WBTC/USD₮0 pool tick out of range...');
+    // Compute swap count from position range (0.25% half-range, 0.1% per swap)
+    const pricePerSwap = 0.1;
+    const rangePercent = 0.25;
+    const maxSwaps = calculateSwapsForRange(rangePercent, pricePerSwap);
+
+    console.log(`Executing up to ${maxSwaps} swaps to push WBTC/USD₮0 pool tick out of range...`);
     for (let i = 0; i < maxSwaps; i++) {
       if (executorFundedEvents.length > 0) {
         console.log(`Top-up completed after ${i} swaps`);
@@ -629,6 +649,15 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
       }
 
       try {
+        // Compute exact swap amount from current pool state
+        // WBTC (0x2f2a) < USDT (0xFd08) → WBTC is token0
+        const poolData = await getPoolData(testEnv, wbtcAddress, usdtAddress, 500);
+        const { amount: swapAmount } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: pricePerSwap / 100,
+          direction: 'down',
+          wethIsToken0: true // WBTC is token0 (lower address)
+        });
+
         await executeSwap(testEnv, {
           tokenIn: wbtcAddress,
           tokenOut: usdtAddress,
@@ -637,7 +666,7 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
           wallet: swapWallet.wallet,
           slippage: 100
         });
-        console.log(`  Swap ${i + 1} completed`);
+        console.log(`  Swap ${i + 1}/${maxSwaps}: ${ethers.utils.formatUnits(swapAmount, 8)} WBTC`);
         await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
         console.log(`  Swap ${i + 1} failed: ${error.message.slice(0, 80)}`);
@@ -648,10 +677,11 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
     // Wait for ExecutorFunded — the core assertion for this test.
     // Flow: swap events → rebalance attempt starts → FeesCollected/PositionsClosed → pendingTopUp set →
     // rebalance completes or fails → VaultUnlocked → attemptTopUp → ERC20→native swap → fundExecutor
+    // The rebalance involves AlphaRouter quotes for WBTC/USDT which can be slow on modified fork state
     try {
       await waitForCondition(
         () => executorFundedEvents.length > 0,
-        90000,
+        150000,
         1000
       );
     } catch (timeoutError) {

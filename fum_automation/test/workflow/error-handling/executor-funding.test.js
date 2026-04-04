@@ -138,7 +138,7 @@ describe('Executor Funding — Recovery via fundExecutor()', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -174,8 +174,12 @@ describe('Executor Funding — Recovery via fundExecutor()', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -285,7 +289,7 @@ describe('Executor Funding — Recovery via Raw ETH Transfer', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -321,8 +325,12 @@ describe('Executor Funding — Recovery via Raw ETH Transfer', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -417,7 +425,7 @@ describe('Executor Funding — Vault Exclusion While Locked', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -453,8 +461,12 @@ describe('Executor Funding — Vault Exclusion While Locked', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });

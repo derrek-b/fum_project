@@ -66,7 +66,7 @@ describe('Swap Event Detection', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 10 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -97,8 +97,12 @@ describe('Swap Event Detection', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });

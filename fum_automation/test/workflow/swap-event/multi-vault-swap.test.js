@@ -20,7 +20,10 @@ import {
   setupSwapWallet,
   executeSwap,
   configureStrategyParameters,
-  getTokenAddressForTest
+  getTokenAddressForTest,
+  computePriceMovementSwapAmount,
+  calculateSwapsForRange,
+  getPoolData
 } from '../../helpers/swap-utils.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
@@ -74,7 +77,7 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 } // Tight — rebalances easily
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -97,7 +100,7 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 50 } // Wide — stays in range
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -145,8 +148,12 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
   }, 300000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -202,17 +209,29 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
     // Execute swaps to push price down — vault A (tight) goes out of range, vault B (wide) stays
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
-    const swapAmount = ethers.utils.parseUnits('20', 18);
+
+    // Vault A has 0.25% half-range, 0.1% per swap → 4 swaps to push OOR
+    const pricePerSwap = 0.1;
+    const maxSwaps = calculateSwapsForRange(0.25, pricePerSwap);
 
     console.log('Executing swaps to push vault A out of range...');
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < maxSwaps; i++) {
       if (rebalanceEvents.length > 0) {
         console.log(`Rebalance triggered after ${i + 1} swaps`);
         break;
       }
 
       try {
+        // Compute exact swap amount from current pool state
+        // WETH (0x82aF) < USDC (0xaf88) → WETH is token0
+        const poolData = await getPoolData(testEnv, wethAddress, usdcAddress, 500);
+        const { amount: swapAmount } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: pricePerSwap / 100,
+          direction: 'down',
+          wethIsToken0: true
+        });
+
         await executeSwap(testEnv, {
           tokenIn: wethAddress,
           tokenOut: usdcAddress,
@@ -228,10 +247,10 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
       }
     }
 
-    // Wait for vault A's rebalance
+    // Wait for vault A's rebalance — AlphaRouter can be slow on modified fork state
     await waitForCondition(
       () => rebalanceEvents.some(e => e.vaultAddress === vaultA.vaultAddress),
-      60000,
+      120000,
       1000
     );
 

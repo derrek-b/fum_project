@@ -91,13 +91,10 @@ describe('VaultAuthGranted Workflow', () => {
             token0: 'USDC',
             token1: 'WETH',
             fee: 500,
-            percentOfAssets: 20,
+            percentOfAssets: 100,
             tickRange: { type: 'centered', spacing: 10 }
           }
         ],
-        tokenTransfers: {
-          'USDC': 60
-        },
         targetTokens: ['USDC', 'WETH'],
         targetPlatforms: ['uniswapV3']
       }
@@ -118,7 +115,7 @@ describe('VaultAuthGranted Workflow', () => {
   afterAll(async () => {
     if (service?.isRunning) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }

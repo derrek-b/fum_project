@@ -394,3 +394,101 @@ export async function configureTJStrategyParameters(testEnv, vaultAddress, vault
 
   console.log(`  TJ Strategy parameters configured for vault ${vaultAddress}`);
 }
+
+// =============================================================================
+// Bin-Precise Swap Utilities
+// =============================================================================
+
+const LB_PAIR_ABI = [
+  'function getActiveId() external view returns (uint24)',
+  'function getBin(uint24 id) external view returns (uint128 binReserveX, uint128 binReserveY)',
+];
+
+const REFERENCE_BIN = 8388608; // 2^23
+
+/**
+ * Compute the exact swap amount needed to drain a specified number of bins
+ * and land in the next one. Adapted from fum/test/scripts/manipulate-price-avalanche.js.
+ *
+ * @param {Object} provider - Ethers provider
+ * @param {string} lbPairAddress - LBPair contract address
+ * @param {Object} options - Configuration
+ * @param {number} options.binStep - Pool bin step (e.g., 10)
+ * @param {number} options.numBins - Number of bins to drain per swap (default 2)
+ * @param {number} options.overshootPct - % of landing bin to overshoot into (default 5)
+ * @param {string} options.direction - 'down' (sell tokenX/buy tokenY) or 'up'
+ * @param {number} options.tokenXDecimals - Decimals of tokenX (lower address)
+ * @param {number} options.tokenYDecimals - Decimals of tokenY (higher address)
+ * @returns {Promise<{amount: BigNumber, activeId: number, landingBinId: number}>}
+ */
+export async function computeBinDrainAmount(provider, lbPairAddress, options) {
+  const {
+    binStep,
+    numBins = 2,
+    overshootPct = 5,
+    direction = 'down',
+    tokenXDecimals = 18,
+    tokenYDecimals = 6
+  } = options;
+
+  const pair = new ethers.Contract(lbPairAddress, LB_PAIR_ABI, provider);
+  const activeId = Number(await pair.getActiveId());
+
+  // direction=down → sell tokenX for tokenY → drains tokenY from bins, activeId shifts DOWN
+  // direction=up → buy tokenX with tokenY → drains tokenX from bins, activeId shifts UP
+  const binShiftUp = direction === 'up';
+  const drainX = binShiftUp; // shifting up = draining X reserves, shifting down = draining Y reserves
+
+  let totalInput = ethers.BigNumber.from(0);
+
+  for (let i = 0; i < numBins; i++) {
+    const binId = binShiftUp ? activeId + i : activeId - i;
+    const bin = await pair.getBin(binId);
+    const drainReserve = drainX ? bin.binReserveX : bin.binReserveY;
+
+    const priceXinY = Math.pow(1 + binStep / 10000, binId - REFERENCE_BIN)
+      * Math.pow(10, tokenXDecimals - tokenYDecimals);
+
+    const drainDecimals = drainX ? tokenXDecimals : tokenYDecimals;
+    const inputDecimals = drainX ? tokenYDecimals : tokenXDecimals;
+    const drainHuman = Number(ethers.utils.formatUnits(drainReserve, drainDecimals));
+
+    // Convert drained reserve to input token amount
+    const inputNeeded = drainX ? drainHuman * priceXinY : drainHuman / priceXinY;
+    totalInput = totalInput.add(
+      ethers.utils.parseUnits(inputNeeded.toFixed(inputDecimals), inputDecimals)
+    );
+  }
+
+  // Add overshoot into the landing bin
+  const landingBinId = binShiftUp ? activeId + numBins : activeId - numBins;
+  const landingBin = await pair.getBin(landingBinId);
+  const landingReserve = drainX ? landingBin.binReserveX : landingBin.binReserveY;
+
+  if (!landingReserve.isZero()) {
+    const overshoot = landingReserve.mul(overshootPct).div(100);
+    const priceXinY = Math.pow(1 + binStep / 10000, landingBinId - REFERENCE_BIN)
+      * Math.pow(10, tokenXDecimals - tokenYDecimals);
+    const drainDecimals = drainX ? tokenXDecimals : tokenYDecimals;
+    const inputDecimals = drainX ? tokenYDecimals : tokenXDecimals;
+    const overshootHuman = Number(ethers.utils.formatUnits(overshoot, drainDecimals));
+    const inputNeeded = drainX ? overshootHuman * priceXinY : overshootHuman / priceXinY;
+    totalInput = totalInput.add(
+      ethers.utils.parseUnits(inputNeeded.toFixed(inputDecimals), inputDecimals)
+    );
+  }
+
+  return { amount: totalInput, activeId, landingBinId };
+}
+
+/**
+ * Calculate the number of bin-drain swaps needed to push a position out of range.
+ *
+ * @param {number} positionHalfWidth - Bins from center to edge (e.g., 10 for ±10)
+ * @param {number} binsPerSwap - Bins drained per swap (default 2)
+ * @returns {number} Number of swaps needed (includes 1 extra bin to be solidly out of range)
+ */
+export function calculateSwapsToOutOfRange(positionHalfWidth, binsPerSwap = 2) {
+  // Need to move past the edge: halfWidth + 1 bins from center
+  return Math.ceil((positionHalfWidth + 1) / binsPerSwap);
+}

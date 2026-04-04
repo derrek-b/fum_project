@@ -41,7 +41,8 @@ describe('V4 Fee Tracking Failure', () => {
       usdcAmount: '0'
     });
 
-    // Create vault with no positions — service will create one during init
+    // Create vault with position pre-created during setup (percentOfAssets: 100)
+    // This eliminates slow AlphaRouter deficit swaps during service initialization
     console.log('Creating V4 test vault...');
     testVault = await setupV4TestVault(
       testEnv.hardhatServer,
@@ -50,10 +51,15 @@ describe('V4 Fee Tracking Failure', () => {
       {
         vaultName: 'V4 Fee Tracking Failure Test',
         nativeEthAmount: '10',
-        nativeEthToVault: '20',
-        swapTokens: [],
-        positions: [],
-        tokenTransfers: {},
+        wrapEthAmount: '10',
+        swapTokens: [{ from: 'ETH', to: 'USDC', amount: '5' }],
+        positions: [{
+          token0: 'ETH',
+          token1: 'USDC',
+          fee: 500,
+          percentOfAssets: 100,
+          tickRange: { type: 'centered', spacing: 10 }
+        }],
         targetTokens: ['ETH', 'USDC'],
         targetPlatforms: ['uniswapV4'],
         strategy: 'bob'
@@ -97,8 +103,12 @@ describe('V4 Fee Tracking Failure', () => {
 
   afterAll(async () => {
     vi.restoreAllMocks();
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupV4TestBlockchain(testEnv);
   });

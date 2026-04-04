@@ -72,7 +72,7 @@ describe('Fee Collection Trigger', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 10 } // Wide range to stay in range
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -107,8 +107,12 @@ describe('Fee Collection Trigger', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });

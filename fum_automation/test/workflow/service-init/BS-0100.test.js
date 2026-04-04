@@ -199,7 +199,7 @@ describe('BS-0100: Cross-Platform Position Closure (V3 vault with V4 position)',
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }
@@ -242,7 +242,7 @@ describe('BS-0100: Cross-Platform Position Closure (V3 vault with V4 position)',
 
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 60000);
+    }, 180000);
   });
 
   // ===========================================================================

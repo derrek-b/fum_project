@@ -96,7 +96,7 @@ describe('BS-0012: Combined Native/Wrapped Swap Consolidation (TJ V2.2)', () => 
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }

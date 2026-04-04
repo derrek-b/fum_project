@@ -57,7 +57,7 @@ describe('BS-0000: Empty Vault (Immediate Blacklist)', () => {
 
   afterAll(async () => {
     if (service?.isRunning) {
-      try { await service.stop(); } catch (e) { /* ignore */ }
+      try { await service.stop(true); } catch (e) { /* ignore */ }
     }
     await cleanupTestBlockchain(testEnv);
   });

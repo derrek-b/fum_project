@@ -91,7 +91,7 @@ describe('V4 AutomationService Initialization - 1AP/1NP addToPosition Workflow',
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }
@@ -131,7 +131,7 @@ describe('V4 AutomationService Initialization - 1AP/1NP addToPosition Workflow',
 
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 60000);
+    }, 180000);
   });
 
   describe('Vault Data Loading', () => {

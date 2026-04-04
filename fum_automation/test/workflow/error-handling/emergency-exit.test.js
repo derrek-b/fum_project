@@ -84,7 +84,7 @@ describe('Emergency Exit - Swap Event Trigger', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 5 }
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -119,8 +119,12 @@ describe('Emergency Exit - Swap Event Trigger', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -254,10 +258,9 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 80,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 10 }
         }],
-        tokenTransfers: { 'WETH': 50, 'USDC': 50 },
         targetTokens: ['USDC', 'WETH'],
         targetPlatforms: ['uniswapV3'],
         strategy: 'bob'

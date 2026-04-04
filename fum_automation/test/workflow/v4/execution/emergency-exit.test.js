@@ -43,9 +43,9 @@ describe('V4 Emergency Exit', () => {
       usdcAmount: '0' // No USDC needed - we'll swap ETH -> USDC
     });
 
-    // Create test vault with NO positions - service will create one during setup
-    // This avoids Graph indexing delay issues (same pattern as BS-0010-v4 and rebalance-and-fees)
-    console.log('Creating V4 test vault (no initial positions)...');
+    // Create test vault with position pre-created during setup (percentOfAssets: 100)
+    // This eliminates slow AlphaRouter deficit swaps during service initialization
+    console.log('Creating V4 test vault...');
     testVault = await setupV4TestVault(
       testEnv.hardhatServer,
       testEnv.contracts,
@@ -53,10 +53,15 @@ describe('V4 Emergency Exit', () => {
       {
         vaultName: 'V4 Emergency Exit Test Vault',
         nativeEthAmount: '10',
-        nativeEthToVault: '20', // V4 needs ETH for deficit swap + position msg.value
-        swapTokens: [], // No pre-swaps
-        positions: [], // NO positions - service will create during setupVault
-        tokenTransfers: {},
+        wrapEthAmount: '10',
+        swapTokens: [{ from: 'ETH', to: 'USDC', amount: '5' }],
+        positions: [{
+          token0: 'ETH',
+          token1: 'USDC',
+          fee: 500,
+          percentOfAssets: 100,
+          tickRange: { type: 'centered', spacing: 10 }
+        }],
         targetTokens: ['ETH', 'USDC'],
         targetPlatforms: ['uniswapV4'],
         strategy: 'bob'
@@ -103,8 +108,12 @@ describe('V4 Emergency Exit', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupV4TestBlockchain(testEnv);
   });

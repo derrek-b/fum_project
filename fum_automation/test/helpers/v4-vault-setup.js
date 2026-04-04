@@ -176,9 +176,12 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
   const adapter = new UniswapV4Adapter(1337, hardhat.provider);
   const owner = hardhat.signers[0];
 
-  // Track token contracts and balances
+  // Track token contracts and balances (including native ETH)
   const tokenContracts = {};
   const tokenBalances = {};
+
+  // Seed ETH balance with the configured budget for this test
+  tokenBalances['ETH'] = ethers.utils.parseEther(settings.nativeEthAmount);
 
   // Step 1: Perform token swaps from native ETH
   for (const swap of settings.swapTokens) {
@@ -211,6 +214,9 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
       value: swapData.value
     });
     await swapTx.wait();
+
+    // Subtract swapped ETH from tracked balance
+    tokenBalances['ETH'] = tokenBalances['ETH'].sub(ethers.utils.parseEther(swap.amount));
 
     console.log(`  - Swap completed: ${swap.from} → ${swap.to}`);
   }
@@ -310,13 +316,12 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
     let token0Amount, token1Amount;
 
     if (sortedToken0 === NATIVE_ETH) {
-      // ETH is token0, use native ETH balance
-      const ethBalance = await hardhat.provider.getBalance(owner.address);
-      token0Amount = ethBalance.mul(percentOfAssets).div(100);
-      token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
+      // ETH is token0 — use the tracked ETH budget (not the owner's full Hardhat balance)
+      token0Amount = tokenBalances['ETH'].mul(percentOfAssets).div(100);
+      token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100);
     } else {
-      token0Amount = tokenBalances[sortedSymbol0]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
-      token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100) || ethers.BigNumber.from(0);
+      token0Amount = tokenBalances[sortedSymbol0]?.mul(percentOfAssets).div(100);
+      token1Amount = tokenBalances[sortedSymbol1]?.mul(percentOfAssets).div(100);
     }
 
     // Build poolKey for V4
@@ -376,6 +381,9 @@ export async function setupV4TestVault(hardhat, contracts, deployedContracts, co
     };
 
     // Update remaining balances
+    if (sortedToken0 === NATIVE_ETH) {
+      tokenBalances['ETH'] = tokenBalances['ETH'].sub(token0Amount);
+    }
     if (sortedSymbol1 !== 'ETH' && tokenBalances[sortedSymbol1]) {
       tokenBalances[sortedSymbol1] = tokenBalances[sortedSymbol1].sub(token1Amount);
     }

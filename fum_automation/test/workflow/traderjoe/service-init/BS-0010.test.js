@@ -86,7 +86,7 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition Workflow'
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }

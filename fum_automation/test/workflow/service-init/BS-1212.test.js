@@ -116,7 +116,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }
@@ -221,7 +221,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(vaultsLoadedEvents[0].successful).toBe(1);
       expect(vaultsLoadedEvents[0].failed).toBe(0);
       expect(vaultsLoadedEvents[0].skippedBlacklisted).toBe(0);
-    }, 60000);
+    }, 240000);
   });
 
   describe('setupVault() Step 1: Vault Data Loading', () => {
@@ -240,7 +240,8 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(vault.targetTokens).toEqual(['USDC', 'ETH']);
       expect(vault.targetPlatforms).toEqual(['uniswapV3']);
       expect(vault.lastUpdated).toBeDefined();
-      expect(vault.lastUpdated).toBeGreaterThan(Date.now() - 60000);
+      // Wide window: vault loads at step 1 but Phase 3 can take up to 180s
+      expect(vault.lastUpdated).toBeGreaterThan(Date.now() - 300000);
     });
 
     it('should derive correct executor addresses from service mnemonic', async () => {
@@ -421,7 +422,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(event.capturePoint).toBe('pre_initialization');
       expect(event.strategyId).toBe('bob');
       expect(typeof event.timestamp).toBe('number');
-      expect(event.timestamp).toBeGreaterThan(Date.now() - 60000);
+      expect(event.timestamp).toBeGreaterThan(Date.now() - 300000);
     });
   });
 

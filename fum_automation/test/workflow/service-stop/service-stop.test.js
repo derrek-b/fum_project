@@ -46,7 +46,7 @@ describe('Service Stop Workflow', () => {
             token0: 'USDC',
             token1: 'WETH',
             fee: 500,
-            percentOfAssets: 90,
+            percentOfAssets: 100,
             tickRange: { type: 'centered', spacing: 10 }
           }
         ],

@@ -21,7 +21,9 @@ import { setupTraderJoeTestVault } from '../../../helpers/traderjoe-vault-setup.
 import {
   setupTJSwapWallet,
   executeTraderJoeSwap,
-  configureTJStrategyParameters
+  configureTJStrategyParameters,
+  computeBinDrainAmount,
+  calculateSwapsToOutOfRange
 } from '../../../helpers/traderjoe-swap-utils.js';
 import { waitForCondition } from '../../../helpers/wait-utils.js';
 import { getTokenAddress } from 'fum_library';
@@ -40,7 +42,16 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;
 
-    const network = await testEnv.hardhatServer.provider.getNetwork();
+    // Sync chain timestamp with real time — when run after other TJ tests,
+    // hundreds of rapidly mined blocks drift the chain timestamp ahead of
+    // wall-clock, causing Date.now()-based deadlines to expire on-chain.
+    const provider = testEnv.hardhatServer.provider;
+    const currentBlock = await provider.getBlock('latest');
+    const nextTimestamp = Math.max(Math.floor(Date.now() / 1000), currentBlock.timestamp) + 1;
+    await provider.send('evm_setNextBlockTimestamp', [nextTimestamp]);
+    await provider.send('evm_mine', []);
+
+    const network = await provider.getNetwork();
     const chainId = network.chainId;
     wavaxAddress = getWrappedNativeAddress(chainId);
     usdcAddress = getTokenAddress('USDC', chainId);
@@ -124,8 +135,12 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
   }, 300000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -206,7 +221,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       // Wait for FeesCollected event
       await waitForCondition(
         () => feesCollectedEvents.length > 0,
-        60000,
+        180000,
         1000
       );
 
@@ -242,7 +257,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       console.log(`TJ V2.2 Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`);
 
       console.log('✅ TJ V2.2 Fee collection test passed');
-    }, 180000);
+    }, 240000);
   });
 
   describe('Phase 2: Rebalance', () => {
@@ -283,16 +298,22 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       const initialLowerBinId = initialPosition.lowerBinId;
       const initialUpperBinId = initialPosition.upperBinId;
       const initialPositionId = initialPosition.id;
+      const lbPairAddress = initialPosition.pool;
+
+      // Calculate swap count from position width
+      // Position is centered, so half-width = bins from center to edge
+      const positionHalfWidth = Math.floor((initialUpperBinId - initialLowerBinId) / 2);
+      const binsPerSwap = 2;
+      const maxSwaps = calculateSwapsToOutOfRange(positionHalfWidth, binsPerSwap);
+
       console.log(`\n🔍 [TEST] ========== INITIAL STATE ==========`);
       console.log(`   Position ID: ${initialPositionId}`);
       console.log(`   Bin Range: ${initialLowerBinId} to ${initialUpperBinId}`);
+      console.log(`   Half-width: ${positionHalfWidth} bins, ${maxSwaps} swaps planned (${binsPerSwap} bins/swap)`);
       console.log(`==========================================\n`);
 
-      // Execute LARGE swaps to push activeId out of range (WAVAX → USDC)
-      // 5000 WAVAX (~$47k) per swap to move through deep pool bins
-      const swapAmount = ethers.utils.parseEther('5000');
-      const maxSwaps = 20;
-
+      // Execute bin-precise swaps to push activeId out of range
+      // Each swap drains exactly 2 bins + 5% overshoot into the landing bin
       console.log(`Executing TJ V2.2 swaps to push activeId out of range...`);
 
       for (let i = 0; i < maxSwaps; i++) {
@@ -303,6 +324,13 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
         }
 
         try {
+          // Compute exact amount to drain 2 bins at current pool state
+          const { amount: swapAmount, activeId, landingBinId } = await computeBinDrainAmount(
+            testEnv.hardhatServer.provider,
+            lbPairAddress,
+            { binStep: 10, numBins: binsPerSwap, direction: 'down', tokenXDecimals: 18, tokenYDecimals: 6 }
+          );
+
           await executeTraderJoeSwap(testEnv, {
             tokenIn: wavaxAddress,
             tokenOut: usdcAddress,
@@ -310,10 +338,10 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
             binStep: 10,
             version: 3, // V2.2
             wallet: swapWallet.wallet,
-            slippage: 100 // High slippage for aggressive price movement
+            slippage: 100
           });
 
-          console.log(`  Swap ${i + 1}/${maxSwaps} (5000 WAVAX→USDC) completed`);
+          console.log(`  Swap ${i + 1}/${maxSwaps}: drained bins ${activeId}→${landingBinId} (${ethers.utils.formatEther(swapAmount)} WAVAX)`);
 
           // Wait for event processing
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -326,7 +354,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       // Wait for PositionRebalanced event
       await waitForCondition(
         () => rebalanceEvents.length > 0,
-        60000,
+        180000,
         1000
       );
 
@@ -389,6 +417,6 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       expect(updatedPositions.length).toBe(1);
 
       console.log('✅ TJ V2.2 Rebalance test passed');
-    }, 180000);
+    }, 300000);
   });
 });

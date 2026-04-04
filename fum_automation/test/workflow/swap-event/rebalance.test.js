@@ -15,7 +15,10 @@ import {
   executeSwap,
   configureStrategyParameters,
   getTokenAddressForTest,
-  getTokenDataForTest
+  getTokenDataForTest,
+  computePriceMovementSwapAmount,
+  calculateSwapsForRange,
+  getPoolData
 } from '../../helpers/swap-utils.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import { ethers } from 'ethers';
@@ -84,7 +87,7 @@ describe('Position Rebalancing', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 90,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 } // Tight range for easier rebalancing
         }],
         targetTokens: ['USDC', 'WETH'],
@@ -119,8 +122,12 @@ describe('Position Rebalancing', () => {
   }, 180000);
 
   afterAll(async () => {
-    if (service?.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });
@@ -166,12 +173,12 @@ describe('Position Rebalancing', () => {
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
 
-    // Execute large swaps to push price down (WETH -> USDC)
-    // This decreases the tick value
-    const swapAmount = ethers.utils.parseUnits('20', 18);
-    const maxSwaps = 30;
+    // Compute swap count from position range (0.25% half-range, 0.1% per swap)
+    const pricePerSwap = 0.1; // 0.1% per swap
+    const rangePercent = 0.25; // targetRangeUpper/Lower = 25 bps = 0.25%
+    const maxSwaps = calculateSwapsForRange(rangePercent, pricePerSwap);
 
-    console.log(`Executing swaps to push price down (lower tick)...`);
+    console.log(`Executing ${maxSwaps} swaps to push price down (${pricePerSwap}% each, ${rangePercent}% range)...`);
 
     for (let i = 0; i < maxSwaps; i++) {
       // Check if rebalance occurred
@@ -181,23 +188,24 @@ describe('Position Rebalancing', () => {
       }
 
       try {
+        // Compute exact swap amount from current pool state
+        const poolData = await getPoolData(testEnv, usdcAddress, wethAddress, 500);
+        const { amount: swapAmount, currentTick } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: pricePerSwap / 100, // convert % to decimal
+          direction: 'down',
+          wethIsToken0: true // Arbitrum: WETH (0x82aF) < USDC (0xaf88), so WETH is token0
+        });
+
         await executeSwap(testEnv, {
           tokenIn: wethAddress,
           tokenOut: usdcAddress,
           amountIn: swapAmount,
           fee: 500,
           wallet: swapWallet.wallet,
-          slippage: 100 // High slippage for aggressive price movement
+          slippage: 100
         });
 
-        // Get current tick
-        const poolData = await adapter._fetchPoolData(
-          usdcAddress,
-          wethAddress,
-          500,
-          testEnv.hardhatServer.provider
-        );
-        console.log(`  Swap ${i + 1}: current tick = ${poolData.tick}`);
+        console.log(`  Swap ${i + 1}/${maxSwaps}: tick ${currentTick}, ${ethers.utils.formatEther(swapAmount)} WETH (~${pricePerSwap}%)`);
 
         // Wait for event processing
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -293,18 +301,12 @@ describe('Position Rebalancing', () => {
     const wethAddress = getTokenAddressForTest('WETH', 1337);
     const usdcAddress = getTokenAddressForTest('USDC', 1337);
 
-    // Execute large swaps in reverse direction (USDC -> WETH)
-    // This increases the tick value
-    const swapAmount = ethers.utils.parseUnits('80000', 6); // 80k USDC
-    const maxSwaps = 20;
+    // Compute swap count — same range parameters as Phase 1
+    const reverseMaxSwaps = calculateSwapsForRange(0.25, 0.1);
 
-    console.log(`Executing swaps to push price up (higher tick)...`);
+    console.log(`Executing ${reverseMaxSwaps} swaps to push price up (0.1% each, 0.25% range)...`);
 
-    // Need to approve USDC for swaps
-    const ERC20_ABI = ['function approve(address spender, uint256 amount) returns (bool)'];
-    const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, swapWallet.wallet);
-
-    for (let i = 0; i < maxSwaps; i++) {
+    for (let i = 0; i < reverseMaxSwaps; i++) {
       // Check if rebalance occurred
       if (rebalanceEvents.length > 0) {
         console.log(`Reverse rebalance triggered after ${i + 1} swaps`);
@@ -312,6 +314,14 @@ describe('Position Rebalancing', () => {
       }
 
       try {
+        // Compute exact swap amount from current pool state
+        const poolData = await getPoolData(testEnv, usdcAddress, wethAddress, 500);
+        const { amount: swapAmount, currentTick } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: 0.001, // 0.1%
+          direction: 'up',
+          wethIsToken0: true // Arbitrum: WETH (0x82aF) < USDC (0xaf88), so WETH is token0
+        });
+
         await executeSwap(testEnv, {
           tokenIn: usdcAddress,
           tokenOut: wethAddress,
@@ -321,14 +331,7 @@ describe('Position Rebalancing', () => {
           slippage: 100
         });
 
-        // Get current tick
-        const poolData = await adapter._fetchPoolData(
-          usdcAddress,
-          wethAddress,
-          500,
-          testEnv.hardhatServer.provider
-        );
-        console.log(`  Swap ${i + 1}: current tick = ${poolData.tick}`);
+        console.log(`  Swap ${i + 1}/${reverseMaxSwaps}: tick ${currentTick}, ${ethers.utils.formatUnits(swapAmount, 6)} USDC (~0.1%)`);
 
         // Wait for event processing
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -338,10 +341,12 @@ describe('Position Rebalancing', () => {
       }
     }
 
-    // Wait for PositionRebalanced event
+    // Wait for PositionRebalanced event — Phase 2 rebalance involves a large
+    // deficit swap (USDC→WETH) through AlphaRouter which can be slow after
+    // ~$490k of test swaps modified pool state
     await waitForCondition(
       () => rebalanceEvents.length > 0,
-      60000,
+      120000,
       1000
     );
 

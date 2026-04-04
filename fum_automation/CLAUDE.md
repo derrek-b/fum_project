@@ -86,6 +86,14 @@ Detailed docs in `docs/architecture/`:
 5. **Event emission** — EventManager broadcasts what happened (PositionRebalanced, FeesCollected, etc.)
 6. **SSE broadcast** — Frontend clients get real-time updates
 
+### Lock-Aware Operations
+
+Config updates and auth revocations are deferred when a vault is locked (operation in progress):
+- **Config updates** → queued in `pendingConfigUpdates`, applied on `VaultUnlocked` (latest-wins per type)
+- **Auth revocations** → queued in `pendingOffboards`, offboarded on `VaultUnlocked` (re-locks before cleanup to prevent stale events)
+
+See `docs/architecture/automation-flow.md` for the full flow diagrams.
+
 ### Test Infrastructure
 
 - Tests start their own Hardhat node via `global-setup.js` (shared across all test files)

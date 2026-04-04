@@ -27,8 +27,12 @@ describe('AutomationService Initialization - 0 Pre-Existing Vaults (New Architec
   });
 
   afterAll(async () => {
-    if (service && service.isRunning) {
-      await service.stop();
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
     }
     await cleanupTestBlockchain(testEnv);
   });

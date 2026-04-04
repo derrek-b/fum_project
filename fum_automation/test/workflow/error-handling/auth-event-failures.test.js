@@ -125,7 +125,7 @@ describe('VaultAuthEventFailed - Grant Processing Failure', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 50,
+          percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 10 }
         }],
         targetTokens: ['USDC', 'WETH'],

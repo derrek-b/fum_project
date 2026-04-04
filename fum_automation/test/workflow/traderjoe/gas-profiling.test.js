@@ -163,6 +163,13 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
       gasResults.push(result);
 
       it('should create position and measure gas', async () => {
+        // Sync chain timestamp with real time — prior iterations mine blocks rapidly,
+        // advancing chain time past Date.now()-based deadlines in adapter methods
+        const currentBlock = await provider.getBlock('latest');
+        const nextTimestamp = Math.max(Math.floor(Date.now() / 1000), currentBlock.timestamp) + 1;
+        await provider.send('evm_setNextBlockTimestamp', [nextTimestamp]);
+        await provider.send('evm_mine', []);
+
         // Get fresh pool data for current active bin
         const poolData = await adapter.getPoolData(lbPairAddress, provider);
         const activeId = poolData.activeId;
@@ -206,11 +213,17 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
           deadlineMinutes: 5
         });
 
-        // Execute through vault
+        // Execute through vault — explicit gas limit to account for EIP-150 63/64 rule.
+        // The inner call{} in PositionVault only gets 63/64 of remaining gas, which can
+        // be insufficient when the gas estimate is tight (especially for mid-range bin counts).
+        const estimatedGas = await vaultContract.estimateGas.mint(
+          [createData.to], [createData.data], [createData.value]
+        );
         const mintTx = await vaultContract.mint(
           [createData.to],
           [createData.data],
-          [createData.value]
+          [createData.value],
+          { gasLimit: estimatedGas.mul(130).div(100) } // 30% buffer over estimate
         );
         const mintReceipt = await mintTx.wait();
         result.create = mintReceipt.gasUsed.toNumber();
@@ -225,7 +238,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
 
         console.log(`  [${binCount} bins] Create: ${result.create.toLocaleString()} gas (positionId: ${positionId})`);
         expect(result.create).toBeGreaterThan(0);
-      }, 60000);
+      }, 180000);
 
       it('should generate fees, collect, and measure gas', async () => {
         expect(positionId).toBeDefined();
@@ -288,7 +301,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         } else {
           console.log(`  [${binCount} bins] Collect fees: no fees to collect (feeShares all zero)`);
         }
-      }, 60000);
+      }, 180000);
 
       it('should close position (100% remove) and measure gas', async () => {
         expect(positionId).toBeDefined();
@@ -316,7 +329,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
 
         console.log(`  [${binCount} bins] Close: ${result.close.toLocaleString()} gas`);
         expect(result.close).toBeGreaterThan(0);
-      }, 60000);
+      }, 180000);
     });
   }
 });

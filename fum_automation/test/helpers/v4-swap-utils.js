@@ -406,3 +406,91 @@ export async function configureV4StrategyParameters(testEnv, vaultAddress, vault
 
   console.log(`  V4 Strategy parameters configured for vault ${vaultAddress}`);
 }
+
+// =============================================================================
+// Price-Precise Swap Utilities
+// =============================================================================
+
+/**
+ * Compute the exact swap amount needed to move pool price by a target percentage.
+ * Uses the concentrated liquidity AMM formula with BigInt arithmetic to avoid
+ * precision loss on pools with deep liquidity (e.g., Arbitrum ETH/USDC ~$500M TVL).
+ *
+ * AMM formulas (Uniswap V3/V4):
+ *   amount1 = L * (sqrtPrice_new - sqrtPrice)     [buying token0 / selling token1]
+ *   amount0 = L * (1/sqrtPrice_new - 1/sqrtPrice) [selling token0 / buying token1]
+ *
+ * @param {Object} poolData - Pool state with sqrtPriceX96, liquidity, tick
+ * @param {Object} options - Configuration
+ * @param {number} options.targetPriceMove - Target price move as decimal (0.001 = 0.1%)
+ * @param {string} options.direction - 'down' (sell ETH for USDC) or 'up' (buy ETH with USDC)
+ * @param {boolean} [options.wethIsToken0=true] - Whether ETH is token0 (true for V4 native ETH pools)
+ * @returns {{ amount: BigNumber, currentTick: number }}
+ */
+export function computePriceMovementSwapAmount(poolData, options) {
+  const { targetPriceMove, direction, wethIsToken0 = true } = options;
+
+  const sqrtPriceX96 = BigInt(poolData.sqrtPriceX96.toString());
+  const L = BigInt(poolData.liquidity.toString());
+  const Q96 = 1n << 96n;
+
+  // Compute sqrtPriceNew ratio using float (the ratio itself is small enough for float precision)
+  let ratioFloat;
+  let needsAmount1; // true = amount1 formula, false = amount0 formula
+
+  if (direction === 'up') {
+    if (wethIsToken0) {
+      ratioFloat = Math.sqrt(1 + targetPriceMove);
+      needsAmount1 = true;
+    } else {
+      ratioFloat = Math.sqrt(1 / (1 + targetPriceMove));
+      needsAmount1 = false;
+    }
+  } else {
+    if (wethIsToken0) {
+      ratioFloat = Math.sqrt(1 - targetPriceMove);
+      needsAmount1 = false;
+    } else {
+      ratioFloat = Math.sqrt(1 / (1 - targetPriceMove));
+      needsAmount1 = true;
+    }
+  }
+
+  // Scale ratio to BigInt with 18 decimal places of precision
+  const SCALE = 10n ** 18n;
+  const ratioBig = BigInt(Math.round(ratioFloat * Number(SCALE)));
+  const sqrtPriceNewX96 = (sqrtPriceX96 * ratioBig) / SCALE;
+
+  let amount;
+  const delta = sqrtPriceNewX96 > sqrtPriceX96
+    ? sqrtPriceNewX96 - sqrtPriceX96
+    : sqrtPriceX96 - sqrtPriceNewX96;
+
+  if (needsAmount1) {
+    // amount1 = L * deltaSqrtPrice / Q96
+    amount = (L * delta) / Q96;
+  } else {
+    // amount0 = L * deltaSqrtPrice / (sqrtPrice * sqrtPriceNew / Q96)
+    // Restructured to avoid huge intermediates: divide L*delta by each sqrt separately
+    amount = (L * delta / sqrtPriceX96) * Q96 / sqrtPriceNewX96;
+  }
+
+  // Add 1% buffer to ensure the swap actually crosses the target
+  amount = amount + amount / 100n;
+
+  return {
+    amount: ethers.BigNumber.from(amount.toString()),
+    currentTick: poolData.tick
+  };
+}
+
+/**
+ * Calculate the number of swaps needed to push a position out of range.
+ *
+ * @param {number} rangePercent - Position half-range in percent (e.g., 5 for ±5%)
+ * @param {number} pricePerSwap - Price move per swap in percent (e.g., 1 for 1%)
+ * @returns {number} Number of swaps needed (includes 1 extra to land past the edge)
+ */
+export function calculateSwapsForRange(rangePercent, pricePerSwap) {
+  return Math.ceil(rangePercent / pricePerSwap) + 1;
+}

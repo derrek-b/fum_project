@@ -147,10 +147,9 @@ describe('Partial Fee Distribution Failure', () => {
           token0: 'USDC',
           token1: 'WETH',
           fee: 500,
-          percentOfAssets: 60,
+          percentOfAssets: 100,
           tickRange: { type: 'close-to-boundary', spacing: 10 }
         }],
-        tokenTransfers: { 'WETH': 50, 'USDC': 50 },
         targetTokens: ['USDC', 'WETH'],
         targetPlatforms: ['uniswapV3'],
         strategy: 'bob'

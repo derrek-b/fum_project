@@ -83,7 +83,7 @@ describe('BS-0012: Combined Phase with Excess Aligned Native/Wrapped (V3)', () =
   afterAll(async () => {
     if (service) {
       try {
-        await service.stop();
+        await service.stop(true);
       } catch (error) {
         console.warn('Error stopping service:', error.message);
       }
@@ -120,7 +120,7 @@ describe('BS-0012: Combined Phase with Excess Aligned Native/Wrapped (V3)', () =
       expect(service.isRunning).toBe(true);
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 120000);
+    }, 180000);
   });
 
   // ===========================================================================

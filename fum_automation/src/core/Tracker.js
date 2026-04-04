@@ -278,8 +278,10 @@ export default class Tracker {
         }
       };
 
-      await this.saveMetadata(vaultAddress, metadata);
+      // Set in-memory first so subsequent events (e.g., LiquidityAddedToPosition)
+      // can find the metadata immediately — saveMetadata is async disk I/O
       this.vaultMetadata.set(vaultAddress, metadata);
+      await this.saveMetadata(vaultAddress, metadata);
 
       // Clear any prior tracking failure for this vault
       await this.clearTrackingFailure(vaultAddress);

@@ -62,7 +62,7 @@ describe('BS-1000: All Capital in Position (No Deployment)', () => {
 
   afterAll(async () => {
     if (service?.isRunning) {
-      try { await service.stop(); } catch (e) { /* ignore */ }
+      try { await service.stop(true); } catch (e) { /* ignore */ }
     }
     await cleanupTestBlockchain(testEnv);
   });
