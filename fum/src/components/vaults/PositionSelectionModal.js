@@ -6,7 +6,8 @@ import { useToast } from "../../context/ToastContext";
 import { useProviders } from '../../hooks/useProviders';
 import { platforms } from 'fum_library/configs';
 import { transferPositionToVault, transferPositionFromVault } from "../../redux/vaultPositionActions";
-import { lookupPlatformById, getPlatformMetadata } from 'fum_library/helpers/platformHelpers';
+import { getPlatformMetadata } from 'fum_library/helpers/platformHelpers';
+import { getPlatformAddresses } from 'fum_library/helpers/chainHelpers';
 import { getTokenBySymbol, getNativeSymbol, getWrappedNativeSymbol } from 'fum_library/helpers/tokenHelpers';
 import { getVaultContract } from 'fum_library/blockchain/contracts';
 import { ethers } from "ethers";
@@ -75,11 +76,13 @@ export default function PositionSelectionModal({
     }
   };
 
-  // Reset selection when modal opens/closes or mode changes
+  // Reset state when modal opens/closes or mode changes
   useEffect(() => {
-    // Reset selections when modal opens or mode changes
     if (show) {
       setSelectedPositions([]);
+      setError("");
+      setTransactionError("");
+      setTransactionWarning("");
     }
   }, [show, mode]);
 
@@ -218,8 +221,8 @@ export default function PositionSelectionModal({
         }
 
         // Get the correct position manager address based on the position's platform
-        const platformInfo = lookupPlatformById(position.platform, chainId);
-        if (!platformInfo || !platformInfo.positionManagerAddress) {
+        const { positionManagerAddress } = getPlatformAddresses(chainId, position.platform);
+        if (!positionManagerAddress) {
           throw new Error(`Position manager address not found for platform ${position.platform}`);
         }
 
@@ -227,7 +230,7 @@ export default function PositionSelectionModal({
         if (mode === 'add') {
           // Add: Transfer position from user wallet to vault
           const nftPositionManager = new ethers.Contract(
-            platformInfo.positionManagerAddress,
+            positionManagerAddress,
             [
               'function safeTransferFrom(address from, address to, uint256 tokenId) external'
             ],
@@ -239,7 +242,7 @@ export default function PositionSelectionModal({
           const vaultContract = getVaultContract(vault.address, readProvider);
           const vaultWithSigner = vaultContract.connect(signer);
           tx = await vaultWithSigner.withdrawPosition(
-            platformInfo.positionManagerAddress,
+            positionManagerAddress,
             positionId
           );
         }
@@ -297,8 +300,8 @@ export default function PositionSelectionModal({
             }
 
             // Get the correct position manager address based on the position's platform
-            const platformInfo = lookupPlatformById(position.platform, chainId);
-            if (!platformInfo || !platformInfo.positionManagerAddress) {
+            const { positionManagerAddress } = getPlatformAddresses(chainId, position.platform);
+            if (!positionManagerAddress) {
               throw new Error(`Position manager address not found for platform ${position.platform}`);
             }
 
@@ -306,7 +309,7 @@ export default function PositionSelectionModal({
             if (mode === 'add') {
               // Add: Transfer position from user wallet to vault
               const nftPositionManager = new ethers.Contract(
-                platformInfo.positionManagerAddress,
+                positionManagerAddress,
                 [
                   'function safeTransferFrom(address from, address to, uint256 tokenId) external'
                 ],
@@ -318,7 +321,7 @@ export default function PositionSelectionModal({
               const vaultContract = getVaultContract(vault.address, readProvider);
               const vaultWithSigner = vaultContract.connect(signer);
               tx = await vaultWithSigner.withdrawPosition(
-                platformInfo.positionManagerAddress,
+                positionManagerAddress,
                 positionId
               );
             }

@@ -357,9 +357,7 @@ export default function PositionContainer() {
               <Col md={6} key={pos.id}>
                 <PositionCard
                   position={pos}
-                  // Pass inVault property to the position card
                   inVault={pos.inVault}
-                  vaultAddress={pos.vaultAddress}
                 />
               </Col>
             ))}

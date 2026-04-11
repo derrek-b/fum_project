@@ -255,7 +255,7 @@ async function main() {
   const adapter = new UniswapV4Adapter(CHAIN_ID);
   const usdcAddress = getTokenAddress('USDC', CHAIN_ID);
 
-  const poolData = await adapter._fetchPoolData(
+  const poolData = await adapter.fetchPoolDataForTesting(
     NATIVE_ETH, usdcAddress, FEE, TICK_SPACING,
     ethers.constants.AddressZero, provider
   );

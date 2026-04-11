@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Modal, Button, Spinner, Alert, Badge, Form, Row, Col, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
 
@@ -65,6 +65,14 @@ export default function RemoveLiquidityModal({
   // State for operation status
   const [isRemoving, setIsRemoving] = useState(false);
   const [operationError, setOperationError] = useState(null);
+
+  // Reset to 100% each time modal opens
+  useEffect(() => {
+    if (show) {
+      setPercentage(100);
+      setOperationError(null);
+    }
+  }, [show]);
 
   // Get adapter for this position's platform
   const adapter = useMemo(() => {

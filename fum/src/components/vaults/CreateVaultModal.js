@@ -1,5 +1,5 @@
 // src/components/CreateVaultModal.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Modal, Button, Form, Spinner, Alert } from "react-bootstrap";
 import { useSelector, useDispatch } from "react-redux";
 import { useToast } from "../../context/ToastContext";
@@ -24,6 +24,13 @@ export default function CreateVaultModal({
   const [vaultDescription, setVaultDescription] = useState("");
   const [isCreatingVault, setIsCreatingVault] = useState(false);
   const [error, setError] = useState("");
+
+  // Reset errors when modal opens
+  useEffect(() => {
+    if (show) {
+      setError("");
+    }
+  }, [show]);
 
   // Create vault
   const handleCreateVault = async () => {

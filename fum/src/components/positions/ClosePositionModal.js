@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Modal, Button, Spinner, Alert, Form, InputGroup } from 'react-bootstrap';
 import { useSelector, useDispatch } from 'react-redux';
 import { useRouter } from 'next/router';
@@ -50,6 +50,13 @@ export default function ClosePositionModal({
   // State for operation status
   const [isClosing, setIsClosing] = useState(false);
   const [operationError, setOperationError] = useState(null);
+
+  // Reset errors when modal opens
+  useEffect(() => {
+    if (show) {
+      setOperationError(null);
+    }
+  }, [show]);
 
   // Get adapter for this position's platform
   const adapter = useMemo(() => {

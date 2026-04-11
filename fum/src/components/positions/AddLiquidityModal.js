@@ -72,6 +72,9 @@ export default function AddLiquidityModal({
   // When the modal is shown, pause auto-refresh
   useEffect(() => {
     if (show) {
+      setOperationError(null);
+      setTransactionError('');
+      setTransactionWarning('');
 
       // Store original state and pause auto-refresh if it's enabled if it's adding liquidity
       if (autoRefresh.enabled && isExistingPosition) {
