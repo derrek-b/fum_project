@@ -34,8 +34,6 @@ module.exports = {
       chainId: forkConfig.chainId,
       forking: {
         url: forkConfig.url,
-        // Optionally pin to a block for consistent testing:
-        // blockNumber: 280000000
       },
       // Cancun is the default in Hardhat 2.22+, but being explicit
       hardfork: "cancun",

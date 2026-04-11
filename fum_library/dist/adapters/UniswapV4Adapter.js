@@ -150,6 +150,22 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
     }
 
+    // On local fork, constrain route exploration to avoid 60-370s EXACT_OUTPUT calls.
+    // Default Arbitrum config explores many splits/pools — unnecessary for test pairs.
+    this.routingConfig = chainId === 1337 ? {
+      protocols: [Protocol.V3, Protocol.V4],
+      maxSplits: 1,
+      distributionPercent: 100,
+      v3PoolSelection: {
+        topN: 1,
+        topNDirectSwaps: 1,
+        topNTokenInOut: 1,
+        topNSecondHop: 0,
+        topNWithEachBaseToken: 1,
+        topNWithBaseToken: 1,
+      },
+    } : undefined;
+
     // V4 supports native ETH pools (currency0 = AddressZero)
     this.supportsNativePools = true;
   }
@@ -1977,7 +1993,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
       const balance1 = JSBI.BigInt(token1Amount);
 
       // Apply slippage to reduce amounts for position calculation
-      // e.g., 5% slippage → use 95% of balance for position calculation
+      // e.g., 0.5% slippage → use 99.5% of balance for position calculation
       const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
       const slippageDivisor = JSBI.BigInt(10000);
 
@@ -2690,7 +2706,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
 
       // Apply slippage to reduce amounts for position calculation
       // This leaves headroom for price movement during execution
-      // e.g., 5% slippage → use 95% of balance for position calculation
+      // e.g., 0.5% slippage → use 99.5% of balance for position calculation
       const slippageMultiplier = JSBI.BigInt(Math.floor((100 - slippageTolerance) * 100));
       const slippageDivisor = JSBI.BigInt(10000);
 
@@ -2919,10 +2935,11 @@ export default class UniswapV4Adapter extends PlatformAdapter {
     // Route through best pools (AlphaRouter optimizes across all protocols)
     // ========================================================================
 
-    // Build routing config - optionally force specific protocol
-    const routingConfig = forceProtocol ? {
-      protocols: [Protocol[forceProtocol]]
-    } : undefined;
+    // Build routing config - optionally force specific protocol, merge with fork optimization
+    const protocolOverride = forceProtocol ? { protocols: [Protocol[forceProtocol]] } : {};
+    const routingConfig = this.routingConfig
+      ? { ...this.routingConfig, ...protocolOverride }
+      : (forceProtocol ? { protocols: [Protocol[forceProtocol]] } : undefined);
 
     const route = await this.alphaRouter.route(
       currencyAmount,
@@ -3078,7 +3095,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_OUTPUT,
         undefined, // swapConfig - not needed for quotes only
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {
@@ -3103,7 +3120,7 @@ export default class UniswapV4Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_INPUT,
         undefined, // swapConfig - not needed for quotes only
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {

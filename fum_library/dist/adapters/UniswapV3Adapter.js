@@ -19,6 +19,7 @@ import { PERMIT2_ADDRESS, wrapWithPermit2, getPermit2Nonce, generatePermit2Signa
 import { Position, Pool, NonfungiblePositionManager, tickToPrice, priceToClosestTick, TickMath } from '@uniswap/v3-sdk';
 import { Percent, Token, CurrencyAmount, Price, TradeType, Ether } from '@uniswap/sdk-core';
 import { AlphaRouter, SwapType, StaticV3SubgraphProvider, UniswapMulticallProvider, V3PoolProvider, StaticGasPriceProvider } from '@uniswap/smart-order-router';
+import { Protocol } from '@uniswap/router-sdk';
 import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import JSBI from "jsbi";
 
@@ -131,6 +132,22 @@ export default class UniswapV3Adapter extends PlatformAdapter {
       const alphaRouterProvider = new ethers.providers.JsonRpcProvider(rpcUrls[0]);
       this.alphaRouter = new AlphaRouter({ chainId: this.alphaRouterChainId, provider: alphaRouterProvider });
     }
+
+    // On local fork, constrain route exploration to avoid 60-370s EXACT_OUTPUT calls.
+    // Default Arbitrum config explores many splits/pools — unnecessary for test pairs.
+    this.routingConfig = chainId === 1337 ? {
+      protocols: [Protocol.V3],
+      maxSplits: 1,
+      distributionPercent: 100,
+      v3PoolSelection: {
+        topN: 1,
+        topNDirectSwaps: 1,
+        topNTokenInOut: 1,
+        topNSecondHop: 0,
+        topNWithEachBaseToken: 1,
+        topNWithBaseToken: 1,
+      },
+    } : undefined;
 
     // AlphaRouter can route through V4 native ETH pools — treat as native-pool capable
     this.supportsNativePools = true;
@@ -4954,7 +4971,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_OUTPUT,
         undefined, // swapConfig - not needed for quotes only
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {
@@ -4979,7 +4996,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_INPUT,
         undefined, // swapConfig - not needed for quotes only
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {
@@ -5120,7 +5137,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_OUTPUT,
         swapConfig,
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {
@@ -5145,7 +5162,7 @@ export default class UniswapV3Adapter extends PlatformAdapter {
         quoteCurrency,
         TradeType.EXACT_INPUT,
         swapConfig,
-        undefined  // partialRoutingConfig - use defaults
+        this.routingConfig
       );
 
       if (!route) {

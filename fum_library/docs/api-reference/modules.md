@@ -98,6 +98,7 @@ UniswapV3Adapter - Uniswap V3 Protocol Integration
 - from `../helpers/tokenHelpers.js`
 - from `./PlatformAdapter.js`
 - from `@openzeppelin/contracts/build/contracts/ERC20.json`
+- from `@uniswap/router-sdk`
 - from `@uniswap/sdk-core`
 - from `@uniswap/smart-order-router`
 - from `@uniswap/universal-router-sdk`
