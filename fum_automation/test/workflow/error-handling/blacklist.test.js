@@ -71,7 +71,7 @@ describe('Blacklist Management', () => {
     );
 
     console.log(`Blacklist test vault created at: ${testVault.vaultAddress}`);
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -245,7 +245,7 @@ describe('Blacklist Management', () => {
 
       const retryTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultRetryQueued');
       expect(retryTxs.length).toBe(0);
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Test 2: Yo-yo Trigger (5 trips in 24h) → Blacklist
@@ -375,7 +375,7 @@ describe('Blacklist Management', () => {
       const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
       expect(blacklistTxs.length).toBe(1);
       expect(blacklistTxs[0].reason).toContain('retry trip limit');
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Test 3: Retry Timeout (max duration exceeded) → Blacklist
@@ -437,7 +437,7 @@ describe('Blacklist Management', () => {
 
       const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
       expect(blacklistTxs.length).toBe(1);
-    }, 60000);
+    });
   });
 
   // ==========================================================================
@@ -511,7 +511,7 @@ describe('Blacklist Management', () => {
       // VaultBlacklisted transaction recorded
       const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
       expect(blacklistTxs.length).toBe(1);
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Test 5: Auth Revocation → Blacklist Preserved
@@ -564,7 +564,7 @@ describe('Blacklist Management', () => {
 
       const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
       expect(blacklistTxs.length).toBe(1);
-    }, 60000);
+    });
   });
 
   // ==========================================================================
@@ -662,7 +662,7 @@ describe('Blacklist Management', () => {
       expect(blacklistTxs2.length).toBe(1);
 
       console.log('Blacklist persistence test passed');
-    }, 90000);
+    });
 
     // ------------------------------------------------------------------------
     // Test 7: Blacklist file format verification
@@ -719,6 +719,6 @@ describe('Blacklist Management', () => {
       expect(blacklistTxs[0].reason).toContain('Invalid vault configuration');
 
       console.log('Blacklist file format test passed');
-    }, 60000);
+    });
   });
 });

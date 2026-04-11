@@ -91,7 +91,7 @@ describe('Partial Fee Distribution Failure', () => {
     });
 
     poolSnapshotId = await testEnv.hardhatServer.takeSnapshot();
-  }, 120000);
+  });
 
   afterAll(async () => {
     shouldFailWithdrawTokens = false;
@@ -262,5 +262,5 @@ describe('Partial Fee Distribution Failure', () => {
     }
 
     console.log('Partial fee distribution test passed');
-  }, 240000);
+  });
 });

@@ -475,17 +475,18 @@ class VaultHealth {
         { log: (msg) => this.log(msg) }
       );
 
+      // Check if sending what the vault has would bring the executor above minBalance.
+      // The executor already has some gas — even a small top-up can push it over the threshold.
+      const executorBalance = await retryRpcCall(
+        () => this.provider.getBalance(executorAddress),
+        `getBalance(executor:${executorAddress.slice(0, 8)}:topUp)`,
+        { log: (msg) => this.log(msg) }
+      );
       const { decimals: nativeDecimals } = getChainConfig(this.chainId).nativeCurrency;
       const minBalanceWei = ethers.utils.parseUnits(getMinExecutorBalance(this.chainId).toString(), nativeDecimals);
 
-      if (availableNative.lt(minBalanceWei)) {
-        this.log(`Vault ${vaultAddress} has insufficient native balance for top-up (${ethers.utils.formatEther(availableNative)} < min ${getMinExecutorBalance(this.chainId)})`);
-        // COMMENTED OUT: refreshTokens moved to top of attemptTopUp
-        // if (vaultStateMutated) {
-        //   await this.vaultDataService.refreshTokens(vaultAddress).catch(refreshErr => {
-        //     this.log(`Failed to refresh tokens after give-up for ${vaultAddress}: ${refreshErr.message}`);
-        //   });
-        // }
+      if (executorBalance.add(availableNative).lt(minBalanceWei)) {
+        this.log(`Vault ${vaultAddress} cannot bring executor above min (vault: ${ethers.utils.formatEther(availableNative)}, executor: ${ethers.utils.formatEther(executorBalance)}, min: ${getMinExecutorBalance(this.chainId)})`);
         this.unlockVault(vaultAddress);
         return;
       }

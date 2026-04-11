@@ -78,7 +78,7 @@ describe('BS-0012: Combined Phase with Excess Aligned Native/Wrapped (V3)', () =
     console.log('Test vault created at:', testVault.vaultAddress);
     console.log('Vault has: ~2 ETH (native) + ~9.6 WETH + ~3000 USDC');
     console.log('Target: USDC/WETH (WETH is target with excess, ETH is non-aligned)');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -120,7 +120,7 @@ describe('BS-0012: Combined Phase with Excess Aligned Native/Wrapped (V3)', () =
       expect(service.isRunning).toBe(true);
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 180000);
+    });
   });
 
   // ===========================================================================

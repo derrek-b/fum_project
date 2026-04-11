@@ -74,6 +74,15 @@ async function drainAndTriggerFundingRequired({
       break;
     }
 
+    // Wait if vault is locked (rebalance in progress — don't move the pool)
+    if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+      await waitForCondition(
+        () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+        420000,
+        500
+      );
+    }
+
     try {
       await executeSwap(testEnv, {
         tokenIn: wethAddress,
@@ -171,7 +180,7 @@ describe('Executor Funding — Recovery via fundExecutor()', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -251,7 +260,7 @@ describe('Executor Funding — Recovery via fundExecutor()', () => {
     console.log(`Executor balance recovered: ${executorBalanceEth.toFixed(6)} ETH`);
 
     console.log('fundExecutor() recovery test passed');
-  }, 240000);
+  });
 });
 
 // ============================================================================
@@ -322,7 +331,7 @@ describe('Executor Funding — Recovery via Raw ETH Transfer', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -387,7 +396,7 @@ describe('Executor Funding — Recovery via Raw ETH Transfer', () => {
     console.log(`Executor balance: ${executorBalanceEth.toFixed(6)} ETH`);
 
     console.log('Raw ETH transfer recovery test passed');
-  }, 240000);
+  });
 });
 
 // ============================================================================
@@ -458,7 +467,7 @@ describe('Executor Funding — Vault Exclusion While Locked', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -620,5 +629,5 @@ describe('Executor Funding — Vault Exclusion While Locked', () => {
     console.log('Confirmed: vault resumed processing after recovery');
 
     console.log('Vault exclusion test passed');
-  }, 360000);
+  });
 });

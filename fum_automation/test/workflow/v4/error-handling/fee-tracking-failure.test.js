@@ -99,7 +99,7 @@ describe('V4 Fee Tracking Failure', () => {
       1000
     );
     console.log('V4 Position created by service');
-  }, 300000);
+  });
 
   afterAll(async () => {
     vi.restoreAllMocks();
@@ -215,5 +215,5 @@ describe('V4 Fee Tracking Failure', () => {
     expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
 
     console.log('V4 Fee tracking failure test passed');
-  }, 180000);
+  });
 });

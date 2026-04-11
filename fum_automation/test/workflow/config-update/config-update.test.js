@@ -77,7 +77,7 @@ describe('Config Update Success Cases', () => {
     // Take snapshot AFTER vault creation - this is our clean state
     vaultSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
     console.log(`Vault snapshot taken: ${vaultSnapshot}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -229,7 +229,7 @@ describe('Config Update Success Cases', () => {
       expect(service.pendingConfigUpdates.has(normalizedAddress)).toBe(false);
 
       console.log('Immediate token update test passed');
-    }, 120000);
+    });
 
     it('should update VDS immediately when TargetPlatformsUpdated and vault is unlocked', async () => {
       await createTestService(3502);
@@ -277,7 +277,7 @@ describe('Config Update Success Cases', () => {
       expect(service.pendingConfigUpdates.has(normalizedAddress)).toBe(false);
 
       console.log('Immediate platform update test passed');
-    }, 90000);
+    });
   });
 
   // ============================================================================
@@ -339,7 +339,7 @@ describe('Config Update Success Cases', () => {
       service.unlockVault(normalizedAddress);
 
       console.log('Queue when locked test passed');
-    }, 90000);
+    });
 
     it('should process queued updates when vault unlocks', async () => {
       await createTestService(3504);
@@ -395,7 +395,7 @@ describe('Config Update Success Cases', () => {
       console.log(`Updated targetTokens: ${vaultAfter.targetTokens.join(', ')}`);
 
       console.log('Process on unlock test passed');
-    }, 90000);
+    });
 
     it('should apply only latest update when multiple same-type updates queued', async () => {
       await createTestService(3505);
@@ -461,7 +461,7 @@ describe('Config Update Success Cases', () => {
       console.log(`Final targetTokens: ${vaultAfter.targetTokens.join(', ')}`);
 
       console.log('Latest wins test passed');
-    }, 90000);
+    });
 
     it('should queue tokens and platforms independently', async () => {
       await createTestService(3506);
@@ -529,7 +529,7 @@ describe('Config Update Success Cases', () => {
       console.log(`Final targetPlatforms: ${vaultAfter.targetPlatforms.join(', ') || '(empty)'}`);
 
       console.log('Independent queue test passed');
-    }, 90000);
+    });
   });
 
   // ============================================================================
@@ -609,7 +609,7 @@ describe('Config Update Success Cases', () => {
       expect(service.pendingConfigUpdates.has(normalizedAddress)).toBe(false);
 
       console.log('Immediate strategy param update test passed');
-    }, 90000);
+    });
 
     it('should queue strategy param update when vault is locked', async () => {
       await createTestService(3508);
@@ -703,6 +703,6 @@ describe('Config Update Success Cases', () => {
       console.log(`Updated targetRangeUpper after unlock: ${vaultAfter.strategy.parameters.targetRangeUpper}`);
 
       console.log('Queue strategy param when locked test passed');
-    }, 90000);
+    });
   });
 });

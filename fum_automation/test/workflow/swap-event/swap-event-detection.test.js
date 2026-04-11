@@ -94,7 +94,7 @@ describe('Swap Event Detection', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -208,7 +208,7 @@ describe('Swap Event Detection', () => {
     expect(vaultLocked).toBeFalsy();
 
     console.log(`Concurrency test passed: ${vaultLockEvents.length} lock/unlock cycles`);
-  }, 60000);
+  });
 
   it('should skip second swap event when vault is locked by first', async () => {
     // This test verifies that when a vault is already locked (being processed),
@@ -308,5 +308,5 @@ describe('Swap Event Detection', () => {
     vi.restoreAllMocks();
 
     console.log('Concurrent lock test passed');
-  }, 30000);
+  });
 });

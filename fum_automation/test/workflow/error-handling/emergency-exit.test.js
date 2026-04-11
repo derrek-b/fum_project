@@ -116,7 +116,7 @@ describe('Emergency Exit - Swap Event Trigger', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -216,7 +216,7 @@ describe('Emergency Exit - Swap Event Trigger', () => {
     expect(isBlacklisted).toBe(true);
 
     console.log('Emergency exit test passed - vault successfully blacklisted');
-  }, 180000);
+  });
 });
 
 // ============================================================================
@@ -279,7 +279,7 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
     });
 
     console.log(`Retry test vault created at: ${testVault.vaultAddress}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -478,5 +478,5 @@ describe('Emergency Exit - Retry Scenario Trigger', () => {
     console.log(`Blacklist reason: ${blacklistEvent.reason}`);
 
     console.log('Retry scenario emergency exit test passed');
-  }, 240000);
+  });
 });

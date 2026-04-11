@@ -132,7 +132,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       1000
     );
     console.log('TJ V2.2 Position created by service');
-  }, 300000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -257,7 +257,7 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       console.log(`TJ V2.2 Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`);
 
       console.log('✅ TJ V2.2 Fee collection test passed');
-    }, 240000);
+    });
   });
 
   describe('Phase 2: Rebalance', () => {
@@ -321,6 +321,15 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
         if (rebalanceEvents.length > 0) {
           console.log(`Rebalance triggered after ${i + 1} swaps`);
           break;
+        }
+
+        // Wait if vault is locked (rebalance in progress — don't move the pool)
+        if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+          await waitForCondition(
+            () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+            420000,
+            500
+          );
         }
 
         try {
@@ -417,6 +426,6 @@ describe('TJ V2.2 Rebalance and Fee Collection', () => {
       expect(updatedPositions.length).toBe(1);
 
       console.log('✅ TJ V2.2 Rebalance test passed');
-    }, 300000);
+    });
   });
 });

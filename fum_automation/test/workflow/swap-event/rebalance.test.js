@@ -119,7 +119,7 @@ describe('Position Rebalancing', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -185,6 +185,15 @@ describe('Position Rebalancing', () => {
       if (rebalanceEvents.length > 0) {
         console.log(`Rebalance triggered after ${i + 1} swaps`);
         break;
+      }
+
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+          420000,
+          500
+        );
       }
 
       try {
@@ -268,7 +277,7 @@ describe('Position Rebalancing', () => {
     expect(service.eventManager.poolToVaults[poolAddress]).toContain(testVault.vaultAddress);
 
     console.log('Lower threshold rebalance test passed');
-  }, 180000);
+  });
 
   it('should trigger rebalance in reverse direction when tick crosses upper threshold', async () => {
     // Clear previous events
@@ -311,6 +320,15 @@ describe('Position Rebalancing', () => {
       if (rebalanceEvents.length > 0) {
         console.log(`Reverse rebalance triggered after ${i + 1} swaps`);
         break;
+      }
+
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+          420000,
+          500
+        );
       }
 
       try {
@@ -386,7 +404,7 @@ describe('Position Rebalancing', () => {
     expect(newPosition.tickUpper).not.toBe(currentPosition.tickUpper);
 
     console.log('Upper threshold rebalance (reverse direction) test passed');
-  }, 180000);
+  });
 
   describe('Tracker — Transaction History & Aggregates', () => {
     it('should have baseline captured from initial vault setup', () => {

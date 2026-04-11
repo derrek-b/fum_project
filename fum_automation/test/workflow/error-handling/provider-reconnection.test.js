@@ -64,7 +64,7 @@ describe('Provider Reconnection', () => {
     );
 
     console.log(`Test vault created: ${testVault.vaultAddress}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -245,7 +245,7 @@ describe('Provider Reconnection', () => {
       console.log('Swap event detected post-reconnection - listeners working');
 
       console.log('Successful reconnection test passed');
-    }, 120000);
+    });
 
     it('should trigger reconnection when heartbeat detects silent disconnect', async () => {
       await createTestService(3504);
@@ -302,7 +302,7 @@ describe('Provider Reconnection', () => {
       expect(service.vaultDataService.provider).toBe(service.provider);
 
       console.log('Heartbeat disconnect detection test passed');
-    }, 60000);
+    });
 
     it('should preserve failedVaults queue across reconnection', async () => {
       await createTestService(3502);
@@ -373,7 +373,7 @@ describe('Provider Reconnection', () => {
       console.log('failedVaults queue preserved across reconnection');
 
       console.log('Failed vaults preservation test passed');
-    }, 120000);
+    });
   });
 
   // ============================================================================
@@ -451,6 +451,6 @@ describe('Provider Reconnection', () => {
 
       // Restore WebSocketProvider mock before afterEach cleanup
       wsProviderSpy.mockRestore();
-    }, 60000);
+    });
   });
 });

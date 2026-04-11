@@ -105,7 +105,7 @@ describe('V4 Emergency Exit', () => {
       1000
     );
     console.log('V4 Position created by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -208,5 +208,5 @@ describe('V4 Emergency Exit', () => {
 
     console.log(`Final position count: ${finalPositions.length}`);
     console.log('✅ V4 Emergency exit test passed - vault successfully blacklisted');
-  }, 180000);
+  });
 });

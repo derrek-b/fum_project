@@ -24,7 +24,7 @@ describe('Vault Setup Errors - Step 3 (Strategy Initialization)', () => {
   beforeAll(async () => {
     testEnv = await setupTestBlockchain();
     testConfig = testEnv.testConfig;
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);

@@ -91,7 +91,7 @@ describe('BS-0012: Combined Native/Wrapped Swap Consolidation (TJ V2.2)', () => 
     console.log('Test vault created at:', testVault.vaultAddress);
     console.log('Vault has: ~50 AVAX (native) + ~48 WAVAX + ~936 USDC');
     console.log('Target: USDC/' + USDT + ' (stablecoin pair)');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -133,7 +133,7 @@ describe('BS-0012: Combined Native/Wrapped Swap Consolidation (TJ V2.2)', () => 
       expect(service.isRunning).toBe(true);
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 120000);
+    });
   });
 
   // ===========================================================================

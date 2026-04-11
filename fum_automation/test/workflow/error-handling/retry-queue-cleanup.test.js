@@ -62,7 +62,7 @@ describe('Retry Queue Cleanup', () => {
     );
 
     console.log(`Test vault created at: ${testVault.vaultAddress}`);
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -208,7 +208,7 @@ describe('Retry Queue Cleanup', () => {
 
       // Verify vault is NOT blacklisted
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -272,7 +272,7 @@ describe('Retry Queue Cleanup', () => {
 
       // Verify vaultTripHistory is cleaned up
       expect(service.vaultTripHistory.has(testVault.vaultAddress)).toBe(false);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -346,7 +346,7 @@ describe('Retry Queue Cleanup', () => {
       // Verify VaultOffboarded event was emitted with removedFromRetryQueue flag
       expect(offboardData).toBeDefined();
       expect(offboardData.removedFromRetryQueue).toBe(true);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -427,7 +427,7 @@ describe('Retry Queue Cleanup', () => {
       const remainingFailures = service.eventManager.getFailedRemovals();
       expect(remainingFailures.size).toBe(0);
       console.log('All listener removals succeeded on retry');
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -523,7 +523,7 @@ describe('Retry Queue Cleanup', () => {
       console.log(`🔍 VaultRetryTrip shows trip #${lastTripEvent.tripCount}`);
 
       console.log('Trip history lazy decay test passed');
-    }, 60000);
+    });
 
     it('should accumulate trips when failures happen within 24 hours', async () => {
       await createTestService(3307);
@@ -599,6 +599,6 @@ describe('Retry Queue Cleanup', () => {
       console.log(`🔍 Trip count: ${events.vaultRetryTrip[2].tripCount} (should be 3)`);
 
       console.log('Trip accumulation test passed');
-    }, 90000);
+    });
   });
 });

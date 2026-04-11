@@ -75,7 +75,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
     );
 
     console.log(`Test vault created at: ${testVault.vaultAddress}`);
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -214,7 +214,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       // 3 calls: 1 fail (initial setup) + 1 succeed (retry setupVault) + 1 VaultHealth.checkExecutorBalance
       expect(getVaultCallCount).toBe(3);
-    }, 120000);
+    });
   });
 
   // ============================================================================
@@ -261,7 +261,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultRecovered.length).toBe(1);
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       expect(fetchAssetValuesCallCount).toBe(2);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -310,7 +310,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultRecovered.length).toBe(1);
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       expect(initializeVaultCallCount).toBe(2);
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Sub-failure: selectBestPool (wrapped in retryRpcCall with 3 retries)
@@ -362,7 +362,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       // 4 failed calls during initial setup + 1 successful call during retry = 5 total
       expect(selectBestPoolCallCount).toBe(5);
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Sub-failure: evaluateInitialPositions (no retry wrapper)
@@ -409,7 +409,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultRecovered.length).toBe(1);
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       expect(evaluateCallCount).toBe(2);
-    }, 60000);
+    });
 
     // ------------------------------------------------------------------------
     // Sub-failure: addToPosition (no retry wrapper)
@@ -566,7 +566,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       // 3 failed calls during initial setup + 1 successful call during retry = 4 total
       expect(testVaultSubscribeCallCount).toBe(4);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -633,7 +633,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
       // +1 for VaultHealth.checkExecutorBalance after successful setup
       expect(testVaultGetVaultCallCount).toBe(4);
-    }, 60000);
+    });
 
     it('should recover on 3rd retry after initial setup and retries 1-2 all fail', async () => {
       await createTestService(3120);
@@ -700,7 +700,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultRecovered.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
       // +1 for VaultHealth.checkExecutorBalance after successful setup
       expect(testVaultGetVaultCallCount).toBe(5);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -741,7 +741,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       await service.retryFailedVaults();
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
       expect(events.vaultRecovered.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
-    }, 60000);
+    });
 
     it('should blacklist immediately on unrecoverable errors', async () => {
       await createTestService(3115);
@@ -773,7 +773,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
       expect(blacklistEvents.filter(e => e.vaultAddress === testVault.vaultAddress).length).toBe(1);
-    }, 60000);
+    });
   });
 
   // ============================================================================
@@ -827,7 +827,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
         { ...vaultConfig, vaultName: 'Concurrent Test Vault 3' }
       );
       console.log(`Vault 3 created: ${vault3.vaultAddress}`);
-    }, 180000);
+    });
 
     afterAll(async () => {
       // Revert to snapshot to clean up the 3 vaults
@@ -922,7 +922,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       console.log('🔍 All 3 vaults now tracked in vaultDataService');
 
       console.log('Multiple vault concurrent failures test passed');
-    }, 120000);
+    });
 
     it('should handle mixed recovery outcomes independently', async () => {
       await createTestService(3122);
@@ -1020,7 +1020,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(service.isVaultBlacklisted(vault2.vaultAddress)).toBe(true);
 
       console.log('Mixed recovery outcomes test passed');
-    }, 120000);
+    });
   });
 
   // ============================================================================
@@ -1059,7 +1059,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
 
       // Snapshot after vault creation — each test reverts to this clean state
       perTestSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
-    }, 120000);
+    });
 
     afterAll(async () => {
       if (deficitSwapSnapshot) {
@@ -1119,7 +1119,7 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultFailed.some(e => e.vaultAddress === deficitSwapVault.vaultAddress)).toBe(false);
 
       console.log('Deficit swap inline retry success test passed');
-    }, 120000);
+    });
 
     it('should escalate to retry queue when inline retry is also exhausted', async () => {
       await createTestService(3126);
@@ -1181,6 +1181,6 @@ describe('Error Handling - Setup Retry Recovery', () => {
       expect(events.vaultRecovered.some(e => e.vaultAddress === deficitSwapVault.vaultAddress)).toBe(true);
 
       console.log('Deficit swap retry exhaustion → recovery test passed');
-    }, 120000);
+    });
   });
 });

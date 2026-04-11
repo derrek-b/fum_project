@@ -107,7 +107,7 @@ describe('V4 Executor Top-Up — Native Balance Path', () => {
       1000
     );
     console.log('V4 Position created by service');
-  }, 240000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -178,6 +178,15 @@ describe('V4 Executor Top-Up — Native Balance Path', () => {
         break;
       }
 
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+          420000,
+          500
+        );
+      }
+
       try {
         await executeV4PoolSwap(testEnv, {
           tokenIn: NATIVE_ETH,
@@ -234,5 +243,5 @@ describe('V4 Executor Top-Up — Native Balance Path', () => {
     console.log(`V4 Executor balance recovered: ${recoveredBalanceEth.toFixed(6)} ETH (min: ${minBalance})`);
 
     console.log('V4 Native balance path top-up test passed');
-  }, 240000);
+  });
 });

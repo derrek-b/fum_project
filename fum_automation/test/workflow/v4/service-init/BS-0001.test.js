@@ -63,7 +63,7 @@ describe('V4 WETH Cross-Version Swap Workflow', () => {
     );
 
     console.log('V4 WETH test vault created at:', testVault.vaultAddress);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -160,7 +160,7 @@ describe('V4 WETH Cross-Version Swap Workflow', () => {
       expect(vaultsLoadedEvents[0].total).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
       expect(vaultsLoadedEvents[0].failed).toBe(0);
-    }, 180000);
+    });
   });
 
   describe('Vault Data Loading', () => {

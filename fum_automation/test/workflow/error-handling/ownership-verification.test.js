@@ -58,7 +58,7 @@ describe('Ownership Verification Failure → Blacklist', () => {
       }
     );
     console.log(`Test vault created at: ${testVault.vaultAddress}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -128,5 +128,5 @@ describe('Ownership Verification Failure → Blacklist', () => {
     expect(vaultsLoadedEvents[0].failed).toBeGreaterThanOrEqual(1);
 
     console.log('Ownership verification failure → blacklist test passed');
-  }, 120000);
+  });
 });

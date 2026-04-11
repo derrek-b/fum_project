@@ -111,7 +111,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
     );
 
     console.log('Test vault created at:', testVault.vaultAddress);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -221,7 +221,7 @@ describe('AutomationService Initialization - 1 Vault (New Architecture)', () => 
       expect(vaultsLoadedEvents[0].successful).toBe(1);
       expect(vaultsLoadedEvents[0].failed).toBe(0);
       expect(vaultsLoadedEvents[0].skippedBlacklisted).toBe(0);
-    }, 240000);
+    });
   });
 
   describe('setupVault() Step 1: Vault Data Loading', () => {

@@ -145,7 +145,7 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
       500
     );
     console.log('Both vaults discovered by service');
-  }, 300000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -222,6 +222,15 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
         break;
       }
 
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(vaultA.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(vaultA.vaultAddress)],
+          420000,
+          500
+        );
+      }
+
       try {
         // Compute exact swap amount from current pool state
         // WETH (0x82aF) < USDC (0xaf88) → WETH is token0
@@ -278,7 +287,7 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
 
     console.log(`Vault A rebalanced: ${vaultAInitialPositionId} → ${vaultARebalance.newPositionId}`);
     console.log(`Vault B stayed healthy (${vaultBLockEvents.length} swap events processed)`);
-  }, 180000);
+  });
 
   it('should maintain shared swap listener after vault A rebalance', async () => {
     // refreshSwapListeners fires async after PositionRebalanced — wait for it
@@ -300,7 +309,7 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
     expect(service.eventManager.poolToVaults[poolAddress]).toContain(vaultA.vaultAddress);
 
     console.log('Shared swap listener intact after rebalance');
-  }, 30000);
+  });
 
   it('should continue delivering swap events to vault B after vault A rebalance', async () => {
     // Track swap events for vault B specifically
@@ -339,5 +348,5 @@ describe('Multi-Vault Swap Event Fan-Out', () => {
     expect(service.isVaultBlacklisted(vaultB.vaultAddress)).toBe(false);
 
     console.log('Vault B continues receiving swap events after vault A rebalance');
-  }, 60000);
+  });
 });

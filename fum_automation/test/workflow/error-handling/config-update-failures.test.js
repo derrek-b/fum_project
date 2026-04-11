@@ -78,7 +78,7 @@ describe('Config Update Failures', () => {
     // Take snapshot AFTER vault creation - this is our clean state
     vaultSnapshot = await testEnv.hardhatServer.provider.send('evm_snapshot', []);
     console.log(`Vault snapshot taken: ${vaultSnapshot}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -240,7 +240,7 @@ describe('Config Update Failures', () => {
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
 
       console.log('updateTargetTokens failure test passed');
-    }, 90000);
+    });
 
     it('should track vault for retry when updateTargetPlatforms fails', async () => {
       await createTestService(3402);
@@ -287,7 +287,7 @@ describe('Config Update Failures', () => {
       expect(service.failedVaults.has(normalizedAddress)).toBe(true);
 
       console.log('updateTargetPlatforms failure test passed');
-    }, 90000);
+    });
   });
 
   // ============================================================================
@@ -358,7 +358,7 @@ describe('Config Update Failures', () => {
       expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
 
       console.log('updateStrategyParameters failure test passed');
-    }, 90000);
+    });
   });
 
   // ============================================================================
@@ -444,7 +444,7 @@ describe('Config Update Failures', () => {
       console.log('Lock was released during emergency cleanup');
 
       console.log('Config update cascade failure test passed');
-    }, 90000);
+    });
 
     it('should emergency blacklist when StrategyParameterUpdateFailed handler itself fails', async () => {
       // Use a synthetic vault address for this test (doesn't need real vault)
@@ -499,6 +499,6 @@ describe('Config Update Failures', () => {
       expect(events.vaultBlacklisted[0].emergency).toBe(true);
 
       console.log('StrategyParameterUpdateFailed cascade failure test passed');
-    }, 60000);
+    });
   });
 });

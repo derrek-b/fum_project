@@ -97,7 +97,7 @@ describe('VaultAuthRevoked Workflow', () => {
     expect(vaults.length).toBe(1);
     console.log('Vault discovered and monitored:', vaults[0].address);
 
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service?.isRunning) {
@@ -227,7 +227,7 @@ describe('VaultAuthRevoked - Deferred Offboard (Locked Vault)', () => {
       500
     );
     console.log('Vault discovered and monitored');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service?.isRunning) {
@@ -289,5 +289,5 @@ describe('VaultAuthRevoked - Deferred Offboard (Locked Vault)', () => {
     expect(service.vaultLocks[normalizedAddress]).toBeUndefined();
 
     console.log('Deferred offboard completed successfully');
-  }, 60000);
+  });
 });

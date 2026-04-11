@@ -86,7 +86,7 @@ describe('V4 AutomationService Initialization - 1AP/1NP addToPosition Workflow',
     );
 
     console.log('V4 1AP/1NP test vault created at:', testVault.vaultAddress);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -131,7 +131,7 @@ describe('V4 AutomationService Initialization - 1AP/1NP addToPosition Workflow',
 
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 180000);
+    });
   });
 
   describe('Vault Data Loading', () => {

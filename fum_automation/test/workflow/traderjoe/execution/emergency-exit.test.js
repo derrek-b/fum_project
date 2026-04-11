@@ -125,7 +125,7 @@ describe('TJ V2.2 Emergency Exit', () => {
       1000
     );
     console.log('TJ V2.2 Position created by service');
-  }, 300000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -223,5 +223,5 @@ describe('TJ V2.2 Emergency Exit', () => {
     console.log(`Final position count: ${finalPositions.length}`);
 
     console.log('TJ V2.2 Emergency exit test passed - vault successfully blacklisted');
-  }, 180000);
+  });
 });

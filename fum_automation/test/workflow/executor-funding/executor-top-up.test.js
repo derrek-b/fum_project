@@ -4,6 +4,8 @@
  * Tests:
  * 1. Unwrap path — vault has WETH but no native ETH, forces WETH unwrap for top-up
  * 2. ERC20 swap path — vault has only non-native ERC20s, forces ERC20→native swap
+ * 3. Partial & skipped funding — tests attemptTopUp's 25% dust gate by planting
+ *    controlled WETH amounts and triggering via swap event (no rebalance/AlphaRouter)
  *
  * Each describe block has its own setupTestBlockchain() for full isolation.
  */
@@ -87,6 +89,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
           percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }   // Tight for easy rebalance
         }],
+        tokenTransfers: {},                              // No loose tokens — avoids AlphaRouter during init
         targetTokens: ['USDC', 'WETH'],
         targetPlatforms: ['uniswapV3']
       }
@@ -119,7 +122,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -269,6 +272,15 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
         break;
       }
 
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+          420000,
+          500
+        );
+      }
+
       try {
         // Compute exact swap amount from current pool state
         // WETH (0x82aF) < USDC (0xaf88) → WETH is token0; buying WETH = direction 'up'
@@ -300,7 +312,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
     // Wait for rebalance — AlphaRouter can be slow on modified fork state
     await waitForCondition(
       () => rebalanceEvents.length > 0,
-      180000,
+      420000,
       1000
     );
     expect(rebalanceEvents.length).toBeGreaterThan(0);
@@ -431,7 +443,7 @@ describe('Executor Top-Up — Unwrap Path (USDC/WETH)', () => {
     expectNoTrackingFailures(service, testVault.vaultAddress);
 
     console.log('Unwrap path top-up test passed');
-  }, 240000);
+  });
 });
 
 // ============================================================================
@@ -539,6 +551,7 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
           percentOfAssets: 100,
           tickRange: { type: 'centered', spacing: 3 }
         }],
+        tokenTransfers: {},                              // No loose tokens — avoids AlphaRouter during init
         targetTokens: ['WBTC', 'USD₮0'],
         targetPlatforms: ['uniswapV3']
       }
@@ -571,7 +584,7 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 240000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -646,6 +659,15 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
       if (executorFundedEvents.length > 0) {
         console.log(`Top-up completed after ${i} swaps`);
         break;
+      }
+
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+          420000,
+          500
+        );
       }
 
       try {
@@ -725,5 +747,250 @@ describe('Executor Top-Up — ERC20 Swap Path (WBTC/USD₮0)', () => {
     expectNoTrackingFailures(service, testVault.vaultAddress);
 
     console.log('ERC20 swap path top-up test passed');
-  }, 240000);
+  });
+});
+
+// ============================================================================
+// Test 3: Partial & Skipped Funding — 25% Dust Gate
+// Tests attemptTopUp behavior when vault has insufficient WETH for full holdback.
+// No rebalance, no fee collection, no AlphaRouter — triggers via swap event only.
+// ============================================================================
+describe('Executor Top-Up — Partial & Skipped Funding (25% Dust Gate)', () => {
+  let testEnv;
+  let service;
+  let testVault;
+  let swapWallet;
+
+  beforeAll(async () => {
+    testEnv = await setupTestBlockchain();
+
+    // Setup swap wallet (source of WETH to plant in vault + swaps to trigger events)
+    const swapSetup = await setupSwapWallet(testEnv, {
+      ethAmount: '100',
+      wethAmount: '50',
+      usdcAmount: '20'  // Swap 20 WETH for USDC, keep 30 WETH for planting + pool swaps
+    });
+    swapWallet = swapSetup;
+
+    // Create vault: USDC/WETH position, 100% assets in position, no loose tokens
+    testVault = await setupTestVault(
+      testEnv.hardhatServer,
+      testEnv.contracts,
+      testEnv.deployedContracts,
+      {
+        vaultName: 'Top-Up Dust Gate',
+        wrapEthAmount: '10',
+        nativeEthAmount: null,
+        swapTokens: [{ from: 'WETH', to: 'USDC', amount: '5' }],
+        positions: [{
+          token0: 'USDC',
+          token1: 'WETH',
+          fee: 500,
+          percentOfAssets: 100,
+          tickRange: { type: 'centered', spacing: 10 }
+        }],
+        tokenTransfers: {},
+        targetTokens: ['USDC', 'WETH'],
+        targetPlatforms: ['uniswapV3']
+      }
+    );
+    console.log(`Test vault created: ${testVault.vaultAddress}`);
+
+    // Configure strategy: wide range to avoid rebalance, high thresholds to avoid interference
+    await configureStrategyParameters(testEnv, testVault.vaultAddress, testVault.vault, {
+      targetRangeUpper: 500,
+      targetRangeLower: 500,
+      rebalanceThresholdUpper: 500,
+      rebalanceThresholdLower: 500,
+      emergencyExitTrigger: 5000,
+      reinvestmentTrigger: 50000,
+      reinvestmentRatio: 5000
+    });
+
+    // Start service — init should be fast (no loose tokens to deploy)
+    service = new AutomationService({
+      ...testEnv.testConfig,
+      vaultHealthIntervalMs: 0  // Disable interval — we call checkAllBalances() manually
+    });
+    await service.start();
+
+    await waitForCondition(
+      () => service.vaultDataService.hasVault(testVault.vaultAddress),
+      30000,
+      500
+    );
+    console.log('Service started, vault discovered');
+  });
+
+  afterAll(async () => {
+    if (service) {
+      try {
+        await service.stop(true);
+      } catch (error) {
+        console.warn('Error stopping service:', error.message);
+      }
+    }
+    await cleanupTestBlockchain(testEnv);
+  });
+
+  it('should partially fund executor when vault WETH exceeds 25% of holdback deficit', async () => {
+    const vaultAddress = testVault.vaultAddress;
+    const executorAddress = service.vaultHealth.deriveExecutorAddress(
+      service.vaultDataService.getAllVaults()[0]
+    );
+    const wethAddress = getTokenAddressForTest('WETH', 1337);
+
+    // Track events
+    const executorFundedEvents = [];
+    const topUpFailedEvents = [];
+    service.eventManager.subscribe('ExecutorFunded', (data) => {
+      if (data.vaultAddress === vaultAddress) executorFundedEvents.push(data);
+    });
+    service.eventManager.subscribe('ExecutorTopUpFailed', (data) => {
+      if (data.vaultAddress === vaultAddress) topUpFailedEvents.push(data);
+    });
+
+    // Plant 0.001 WETH in vault (~$2.20, above 25% gate of ~0.0005)
+    const plantAmount = ethers.utils.parseEther('0.001');
+    const wethContract = new ethers.Contract(
+      wethAddress,
+      ['function transfer(address to, uint256 amount) returns (bool)'],
+      swapWallet.wallet
+    );
+    await (await wethContract.transfer(vaultAddress, plantAmount)).wait();
+    await service.vaultDataService.refreshTokens(vaultAddress);
+    console.log(`Planted 0.001 WETH in vault`);
+
+    // Drain executor below min
+    await testEnv.hardhatServer.provider.send('hardhat_setBalance', [
+      executorAddress,
+      ethers.utils.hexValue(ethers.utils.parseEther('0.00199'))
+    ]);
+    console.log(`Executor drained to 0.00199 ETH`);
+
+    // Force holdback detection
+    await service.vaultHealth.checkAllBalances();
+    expect(service.vaultHealth.holdbacks.has(vaultAddress)).toBe(true);
+    const holdback = service.vaultHealth.getHoldback(vaultAddress);
+    console.log(`Holdback set: ${holdback.amountNative.toFixed(6)} ETH ($${holdback.amountUsd.toFixed(2)})`);
+
+    // Set pending flag so VaultUnlocked triggers attemptTopUp
+    service.vaultHealth.pendingTopUp.add(vaultAddress);
+
+    // Execute one small swap to trigger lock/unlock cycle
+    const usdcAddress = getTokenAddressForTest('USDC', 1337);
+    const poolData = await getPoolData(testEnv, wethAddress, usdcAddress, 500);
+    const { amount: swapAmount } = computePriceMovementSwapAmount(poolData, {
+      targetPriceMove: 0.0001, // 0.01% — tiny, won't trigger rebalance
+      direction: 'down',
+      wethIsToken0: true
+    });
+    await executeSwap(testEnv, {
+      tokenIn: wethAddress,
+      tokenOut: usdcAddress,
+      amountIn: swapAmount,
+      fee: 500,
+      wallet: swapWallet.wallet,
+      slippage: 100
+    });
+    console.log('Swap executed, waiting for top-up...');
+
+    // Wait for ExecutorFunded
+    await waitForCondition(
+      () => executorFundedEvents.length > 0,
+      30000,
+      500
+    );
+
+    // Assert partial funding
+    const fundedEvent = executorFundedEvents[0];
+    expect(fundedEvent.executorAddress).toBe(executorAddress);
+    const fundedAmount = parseFloat(fundedEvent.amount);
+    expect(fundedAmount).toBeGreaterThan(0);
+    expect(fundedAmount).toBeLessThan(holdback.amountNative); // Partial — less than full holdback
+    console.log(`Executor partially funded: ${fundedAmount.toFixed(6)} ETH`);
+
+    // Holdback cleared on any successful fundExecutor
+    expect(service.vaultHealth.holdbacks.has(vaultAddress)).toBe(false);
+
+    // No failures
+    expect(topUpFailedEvents.length).toBe(0);
+
+    // Executor balance increased
+    const finalBalance = await testEnv.hardhatServer.provider.getBalance(executorAddress);
+    expect(finalBalance.gt(ethers.utils.parseEther('0.00199'))).toBe(true);
+    console.log(`Executor final balance: ${ethers.utils.formatEther(finalBalance)} ETH`);
+  });
+
+  it('should skip funding when vault WETH is below 25% of holdback deficit', async () => {
+    const vaultAddress = testVault.vaultAddress;
+    const executorAddress = service.vaultHealth.deriveExecutorAddress(
+      service.vaultDataService.getAllVaults()[0]
+    );
+    const wethAddress = getTokenAddressForTest('WETH', 1337);
+
+    // Track events
+    const executorFundedEvents = [];
+    service.eventManager.subscribe('ExecutorFunded', (data) => {
+      if (data.vaultAddress === vaultAddress) executorFundedEvents.push(data);
+    });
+
+    // Plant 0.0001 WETH in vault (~$0.22, below 25% gate of ~0.0005)
+    const plantAmount = ethers.utils.parseEther('0.0001');
+    const wethContract = new ethers.Contract(
+      wethAddress,
+      ['function transfer(address to, uint256 amount) returns (bool)'],
+      swapWallet.wallet
+    );
+    await (await wethContract.transfer(vaultAddress, plantAmount)).wait();
+    await service.vaultDataService.refreshTokens(vaultAddress);
+    console.log(`Planted 0.0001 WETH in vault`);
+
+    // Drain executor below min
+    await testEnv.hardhatServer.provider.send('hardhat_setBalance', [
+      executorAddress,
+      ethers.utils.hexValue(ethers.utils.parseEther('0.00199'))
+    ]);
+    console.log(`Executor drained to 0.00199 ETH`);
+
+    // Force holdback detection
+    await service.vaultHealth.checkAllBalances();
+    expect(service.vaultHealth.holdbacks.has(vaultAddress)).toBe(true);
+    console.log(`Holdback set`);
+
+    // Set pending flag
+    service.vaultHealth.pendingTopUp.add(vaultAddress);
+
+    // Execute one small swap to trigger lock/unlock cycle
+    const usdcAddress = getTokenAddressForTest('USDC', 1337);
+    const poolData = await getPoolData(testEnv, wethAddress, usdcAddress, 500);
+    const { amount: swapAmount } = computePriceMovementSwapAmount(poolData, {
+      targetPriceMove: 0.0001,
+      direction: 'down',
+      wethIsToken0: true
+    });
+    await executeSwap(testEnv, {
+      tokenIn: wethAddress,
+      tokenOut: usdcAddress,
+      amountIn: swapAmount,
+      fee: 500,
+      wallet: swapWallet.wallet,
+      slippage: 100
+    });
+    console.log('Swap executed, waiting for processing...');
+
+    // Wait for event processing — attemptTopUp should run but skip all paths
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Assert NO funding occurred
+    expect(executorFundedEvents.length).toBe(0);
+
+    // Holdback persists (attemptTopUp gave up without calling fundExecutor)
+    expect(service.vaultHealth.holdbacks.has(vaultAddress)).toBe(true);
+
+    // Executor balance unchanged
+    const finalBalance = await testEnv.hardhatServer.provider.getBalance(executorAddress);
+    expect(finalBalance.eq(ethers.utils.parseEther('0.00199'))).toBe(true);
+    console.log(`Executor balance unchanged: ${ethers.utils.formatEther(finalBalance)} ETH`);
+  });
 });

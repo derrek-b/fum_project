@@ -111,7 +111,7 @@ describe('V4 Rebalance and Fee Collection', () => {
       1000
     );
     console.log('V4 Position created by service');
-  }, 240000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -241,7 +241,7 @@ describe('V4 Rebalance and Fee Collection', () => {
       console.log(`V4 Fee distribution: ${distEvent.distributions.length} tokens distributed to owner, ${distEvent.failures.length} failed`);
 
       console.log('✅ V4 Fee collection test passed');
-    }, 180000);
+    });
   });
 
   describe('Phase 2: Rebalance', () => {
@@ -303,6 +303,15 @@ describe('V4 Rebalance and Fee Collection', () => {
         if (rebalanceEvents.length > 0) {
           console.log(`Rebalance triggered after ${i + 1} swaps`);
           break;
+        }
+
+        // Wait if vault is locked (rebalance in progress — don't move the pool)
+        if (service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)]) {
+          await waitForCondition(
+            () => !service.vaultLocks[ethers.utils.getAddress(testVault.vaultAddress)],
+            420000,
+            500
+          );
         }
 
         try {
@@ -404,6 +413,6 @@ describe('V4 Rebalance and Fee Collection', () => {
       expect(BigInt(newPosition.liquidity)).toBeGreaterThan(0n);
 
       console.log('✅ V4 Rebalance test passed');
-    }, 180000);
+    });
   });
 });

@@ -104,7 +104,7 @@ describe('Fee Collection Trigger', () => {
       500
     );
     console.log('Vault discovered by service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -232,7 +232,7 @@ describe('Fee Collection Trigger', () => {
     console.log(`Swap counter after fee collection: ${swapCount}`);
 
     console.log('Fee collection test passed');
-  }, 180000);
+  });
 
   describe('Tracker — standalone fee collection gas tracking', () => {
     it('should have FeesCollected with gas data for swap_threshold source', async () => {

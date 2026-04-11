@@ -58,7 +58,7 @@ describe('BS-1000: All Capital in Position (No Deployment)', () => {
     );
 
     console.log(`Test vault created at: ${testVault.vaultAddress}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service?.isRunning) {
@@ -100,7 +100,7 @@ describe('BS-1000: All Capital in Position (No Deployment)', () => {
     expect(service.vaultDataService.hasVault(testVault.vaultAddress)).toBe(true);
     expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
     expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
-  }, 120000);
+  });
 
   it('should evaluate 1 aligned position, 0 non-aligned', () => {
     const evalEvent = initialPositionsEvaluatedEvents.find(

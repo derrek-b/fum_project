@@ -18,8 +18,6 @@ module.exports = {
       chainId: 1337,
       forking: {
         url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
-        // Optionally pin to a block for consistent testing:
-        // blockNumber: 280000000
       },
       // Cancun is the default in Hardhat 2.22+, but being explicit
       hardfork: "cancun",

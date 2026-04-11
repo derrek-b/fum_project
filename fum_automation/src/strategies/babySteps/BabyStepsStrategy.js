@@ -2458,6 +2458,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       }
     }
 
+
     // ===========================================================================
     // Step B: Combined Native/Wrapped Phase (native-pool platforms only)
     // ===========================================================================
@@ -2912,6 +2913,7 @@ export default class BabyStepsStrategy extends StrategyBase {
       timestamp: Date.now(),
       log: { level: 'info', message: `Generated ${deficitSwaps.length} deficit swap transactions${wrapUnwrapSummary}`, includeData: false }
     });
+
 
     return {
       deficitSwaps,

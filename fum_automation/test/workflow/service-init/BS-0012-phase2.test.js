@@ -74,7 +74,7 @@ describe('BS-0012-phase2: Combined Phase + Phase 2 Active Execution (V3)', () =>
     console.log('Vault has: ~1 ETH (native) + ~3 WETH + USDC');
     console.log('Target: USDC/USDT (neither is native/wrapped)');
     console.log('Expected: combined phase covers partial USDT deficit, Phase 2 covers rest with excess USDC');
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -111,7 +111,7 @@ describe('BS-0012-phase2: Combined Phase + Phase 2 Active Execution (V3)', () =>
       expect(service.isRunning).toBe(true);
       expect(vaultsLoadedEvents.length).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
-    }, 180000);
+    });
   });
 
   // ===========================================================================

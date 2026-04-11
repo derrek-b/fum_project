@@ -31,7 +31,7 @@ import { ethers } from 'ethers';
 import AutomationService from '../../../src/core/AutomationService.js';
 import { setupTestBlockchain, cleanupTestBlockchain } from '../../helpers/hardhat-setup.js';
 import { setupTestVault } from '../../helpers/test-vault-setup.js';
-import { setupSwapWallet, executeSwap, configureStrategyParameters } from '../../helpers/swap-utils.js';
+import { setupSwapWallet, executeSwap, configureStrategyParameters, computePriceMovementSwapAmount, getPoolData } from '../../helpers/swap-utils.js';
 import { waitForCondition } from '../../helpers/wait-utils.js';
 import path from 'path';
 import fs from 'fs/promises';
@@ -94,7 +94,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       wethAmount: '50',
       usdcAmount: '20'
     });
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -248,7 +248,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 120000);
+    });
 
     it('should blacklist vault when vault not found (unrecoverable)', async () => {
       await createTestService(3201);
@@ -278,7 +278,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(false);
-    }, 60000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -320,7 +320,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(false);
-    }, 60000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -354,7 +354,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 60000);
+    });
 
     it('should add vault to retry queue when vault has 0 positions', async () => {
       await createTestService(3204);
@@ -382,7 +382,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 60000);
+    });
 
     it('should add vault to retry queue when vault has more than 1 position', async () => {
       await createTestService(3205);
@@ -417,7 +417,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 60000);
+    });
 
     it('should add vault to retry queue on pool mismatch between swap event and position', async () => {
       await createTestService(3206);
@@ -450,7 +450,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === testVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 60000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -528,7 +528,7 @@ describe('Swap Event Failures - Handler and Evaluation Phase', () => {
       expect(vaultFailedEvents.length).toBe(0);
 
       console.log(`Fees collected via fallback: $${feeEvent.totalUSD.toFixed(4)}`);
-    }, 120000);
+    });
   });
 });
 
@@ -564,7 +564,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
     // This ensures each test starts with a clean pool state
     poolSnapshotId = await testEnv.hardhatServer.takeSnapshot();
     console.log(`Pool snapshot taken: ${poolSnapshotId}`);
-  }, 120000);
+  });
 
   afterAll(async () => {
     await cleanupTestBlockchain(testEnv);
@@ -728,7 +728,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
   const executeSwapsUntilRebalance = async (events, vault, maxSwaps = 20) => {
     const wethAddress = swapWallet.wrappedNativeAddress;
     const usdcAddress = swapWallet.usdcAddress;
-    const swapAmount = ethers.utils.parseUnits('15', 18); // 15 WETH per swap
+    const pricePerSwap = 0.1; // 0.1% per swap
 
     console.log(`Executing swaps to push position out of range for vault ${vault.vaultAddress.slice(0, 10)}...`);
 
@@ -743,7 +743,24 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
         return { swapCount: i + 1, rebalanceTriggered: true };
       }
 
+      // Wait if vault is locked (rebalance in progress — don't move the pool)
+      if (service.vaultLocks[ethers.utils.getAddress(vault.vaultAddress)]) {
+        await waitForCondition(
+          () => !service.vaultLocks[ethers.utils.getAddress(vault.vaultAddress)],
+          420000,
+          500
+        );
+      }
+
       try {
+        // Compute exact swap amount from current pool state
+        const poolData = await getPoolData(testEnv, usdcAddress, wethAddress, 500);
+        const { amount: swapAmount, currentTick } = computePriceMovementSwapAmount(poolData, {
+          targetPriceMove: pricePerSwap / 100,
+          direction: 'down',
+          wethIsToken0: true // Arbitrum: WETH (0x82aF) < USDC (0xaf88)
+        });
+
         await executeSwap(testEnv, {
           tokenIn: wethAddress,
           tokenOut: usdcAddress,
@@ -752,7 +769,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
           wallet: swapWallet.wallet,
           slippage: 100
         });
-        console.log(`  Swap ${i + 1} executed`);
+        console.log(`  Swap ${i + 1}: tick ${currentTick}, ${ethers.utils.formatEther(swapAmount)} WETH (~${pricePerSwap}%)`);
 
         // Wait for event processing
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -815,7 +832,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === currentVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 180000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -857,7 +874,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       const failEvent = events.swapEventFailed.find(e => e.vaultAddress === currentVault.vaultAddress);
       expect(failEvent).toBeDefined();
       expect(failEvent.recoverable).toBe(true);
-    }, 180000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -917,7 +934,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       // Verify VaultRecovered event
       const recoveredEvent = events.vaultRecovered.find(e => e.vaultAddress === currentVault.vaultAddress);
       expect(recoveredEvent).toBeDefined();
-    }, 240000);
+    });
   });
 
   // ------------------------------------------------------------------------
@@ -1001,7 +1018,7 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       }
 
       console.log('Fee distribution failure test passed');
-    }, 180000);
+    });
 
   });
 
@@ -1082,6 +1099,6 @@ describe('Swap Event Failures - Rebalance Execution Phase', () => {
       expect(service.eventManager.poolToVaults[poolAddress]).toContain(currentVault.vaultAddress);
 
       console.log('Listener refresh failure test passed');
-    }, 240000);
+    });
   });
 });

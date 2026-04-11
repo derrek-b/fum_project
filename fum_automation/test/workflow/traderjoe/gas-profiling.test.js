@@ -105,7 +105,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
     console.log(`  Vault: ${vaultAddress}`);
     console.log(`  LBPair: ${lbPairAddress} (${sortedToken0.symbol}/${sortedToken1.symbol}, binStep=${BIN_STEP})`);
     console.log(`  Bin counts to test: ${BIN_COUNTS.join(', ')}\n`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     // Print summary table
@@ -238,7 +238,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
 
         console.log(`  [${binCount} bins] Create: ${result.create.toLocaleString()} gas (positionId: ${positionId})`);
         expect(result.create).toBeGreaterThan(0);
-      }, 180000);
+      });
 
       it('should generate fees, collect, and measure gas', async () => {
         expect(positionId).toBeDefined();
@@ -301,7 +301,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
         } else {
           console.log(`  [${binCount} bins] Collect fees: no fees to collect (feeShares all zero)`);
         }
-      }, 180000);
+      });
 
       it('should close position (100% remove) and measure gas', async () => {
         expect(positionId).toBeDefined();
@@ -329,7 +329,7 @@ describe('TJ V2.2 Gas Profiling — Bin Count Scaling', () => {
 
         console.log(`  [${binCount} bins] Close: ${result.close.toLocaleString()} gas`);
         expect(result.close).toBeGreaterThan(0);
-      }, 180000);
+      });
     });
   }
 });

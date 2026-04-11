@@ -53,7 +53,7 @@ describe('BS-0000: Empty Vault (Immediate Blacklist)', () => {
     );
 
     console.log(`Empty test vault created at: ${testVault.vaultAddress}`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service?.isRunning) {
@@ -88,7 +88,7 @@ describe('BS-0000: Empty Vault (Immediate Blacklist)', () => {
     // Vault should be blacklisted, NOT in retry queue
     expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
     expect(service.failedVaults.has(testVault.vaultAddress)).toBe(false);
-  }, 120000);
+  });
 
   it('should NOT have completed vault setup', () => {
     const setupComplete = vaultSetupCompleteEvents.find(

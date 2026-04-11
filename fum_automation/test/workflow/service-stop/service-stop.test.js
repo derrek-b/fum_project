@@ -84,7 +84,7 @@ describe('Service Stop Workflow', () => {
     const monitoredVault = service.vaultDataService.getVault(testVault.vaultAddress);
     expect(monitoredVault).toBeTruthy();
     console.log('Vault is being monitored by the service');
-  }, 180000);
+  });
 
   afterAll(async () => {
     // Clean up blockchain environment
@@ -171,5 +171,5 @@ describe('Service Stop Workflow', () => {
     console.log('Idempotent stop behavior verified');
 
     console.log('Service stop workflow test completed successfully');
-  }, 30000);
+  });
 });

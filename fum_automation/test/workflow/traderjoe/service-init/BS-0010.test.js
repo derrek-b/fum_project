@@ -81,7 +81,7 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition Workflow'
     });
 
     console.log('Test vault created at:', testVault.vaultAddress);
-  }, 180000);
+  });
 
   afterAll(async () => {
     if (service) {
@@ -178,7 +178,7 @@ describe('AutomationService Initialization - TJ V2.2 createNewPosition Workflow'
       expect(vaultsLoadedEvents[0].total).toBe(1);
       expect(vaultsLoadedEvents[0].successful).toBe(1);
       expect(vaultsLoadedEvents[0].failed).toBe(0);
-    }, 300000);
+    });
   });
 
   describe('setupVault() Step 1: Vault Data Loading', () => {

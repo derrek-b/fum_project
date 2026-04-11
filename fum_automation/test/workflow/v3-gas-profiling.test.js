@@ -104,7 +104,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
     console.log(`  Vault: ${vaultAddress}`);
     console.log(`  Pool: ${sortedToken0Data.symbol}/${sortedToken1Data.symbol}, fee=${FEE}`);
     console.log(`  Tick widths to test: ±${TICK_WIDTHS.join(', ±')} spacings\n`);
-  }, 180000);
+  });
 
   afterAll(async () => {
     // Print summary table
@@ -156,7 +156,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
 
     console.log(`  Approvals: ${approvalGas.toLocaleString()} gas (${approvalTxs.length} token approvals)`);
     expect(approvalGas).toBeGreaterThan(0);
-  }, 60000);
+  });
 
   for (const tickWidth of TICK_WIDTHS) {
     describe(`±${tickWidth} tick spacings`, () => {
@@ -227,7 +227,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
 
         console.log(`  [±${tickWidth}] Create: ${result.create.toLocaleString()} gas (tokenId: ${tokenId}, ticks: ${tickLower}→${tickUpper})`);
         expect(result.create).toBeGreaterThan(0);
-      }, 60000);
+      });
 
       it('should add liquidity to existing position and measure gas', async () => {
         expect(tokenId).toBeDefined();
@@ -271,7 +271,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
 
         console.log(`  [±${tickWidth}] Add liquidity: ${result.addLiquidity.toLocaleString()} gas`);
         expect(result.addLiquidity).toBeGreaterThan(0);
-      }, 60000);
+      });
 
       it('should generate fees, collect, and measure gas', async () => {
         expect(tokenId).toBeDefined();
@@ -323,7 +323,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
         } else {
           console.log(`  [±${tickWidth}] Collect fees: no fees to collect`);
         }
-      }, 60000);
+      });
 
       it('should close position (100% remove) and measure gas', async () => {
         expect(tokenId).toBeDefined();
@@ -359,7 +359,7 @@ describe('Uniswap V3 Gas Profiling — Tick Width Scaling', () => {
 
         console.log(`  [±${tickWidth}] Close: ${result.close.toLocaleString()} gas`);
         expect(result.close).toBeGreaterThan(0);
-      }, 60000);
+      });
     });
   }
 });

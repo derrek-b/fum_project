@@ -48,7 +48,7 @@ describe('VaultAuthEventFailed - Grant Processing Failure', () => {
   beforeAll(async () => {
     testEnv = await setupTestBlockchain();
     console.log('Test blockchain connected');
-  }, 120000);
+  });
 
   afterAll(async () => {
     shouldFailExecutorIndex = false;
@@ -179,5 +179,5 @@ describe('VaultAuthEventFailed - Grant Processing Failure', () => {
     expect(recoveredEvent).toBeDefined();
 
     console.log('Auth event failure + recovery test passed');
-  }, 240000);
+  });
 });
