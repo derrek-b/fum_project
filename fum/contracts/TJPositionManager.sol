@@ -24,28 +24,28 @@ interface ITJPositionProxy {
  *      TJPositionValidator via VaultFactory.
  *
  *      Auth model:
- *      - createPosition: takes vault as param (no existing position), checks vault == msg.sender
- *      - addToPosition, collectFees, decreaseLiquidity, removePosition: no vault param,
- *        checks pos.vault == msg.sender (ownership from stored position state)
+ *      - createPosition: takes owner as param (no existing position), checks owner == msg.sender
+ *      - addToPosition, collectFees, decreaseLiquidity, removePosition: no owner param,
+ *        checks pos.owner == msg.sender (ownership from stored position state)
  *
  *      Flow (createPosition):
  *        Vault.mint(target=TJPositionManager, data=createPosition(...))
  *          -> VaultFactory.validateMint(TJPositionManager, calldata, vault)
- *            -> TJPositionValidator.validateMint(calldata, vault) [selector + vault check]
+ *            -> TJPositionValidator.validateMint(calldata, vault) [selector + owner check]
  *          -> TJPositionManager.createPosition() executes
- *            1. Verify msg.sender == vault param
+ *            1. Verify msg.sender == owner param
  *            2. Deploy proxy via Clones.clone(), initialize
- *            3. Pull tokens from vault → manager → proxy
- *            4. Via proxy: approve LBRouter, call addLiquidity(to=proxy, refundTo=vault)
- *            5. Record position (ID, vault, proxy, lbPair, depositIds, liquidityMinted)
- *            6. Via proxy: reset approvals, sweep leftover tokens to vault
+ *            3. Pull tokens from owner → manager → proxy
+ *            4. Via proxy: approve LBRouter, call addLiquidity(to=proxy, refundTo=owner)
+ *            5. Record position (ID, owner, proxy, lbPair, depositIds, liquidityMinted)
+ *            6. Via proxy: reset approvals, sweep leftover tokens to owner
  *            7. Emit PositionCreated event
  */
 contract TJPositionManager is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct Position {
-        address vault;
+        address owner;
         address lbPair;
         address tokenX;
         address tokenY;
@@ -63,11 +63,11 @@ contract TJPositionManager is ReentrancyGuard {
     address public immutable proxyImplementation;
     uint256 private _nextPositionId = 1;
     mapping(uint256 => Position) private _positions;
-    mapping(address => uint256[]) private _vaultPositions;
+    mapping(address => uint256[]) private _ownerPositions;
 
     event PositionCreated(
         uint256 indexed positionId,
-        address indexed vault,
+        address indexed owner,
         address indexed lbPair,
         address proxy,
         uint256[] depositIds,
@@ -78,7 +78,7 @@ contract TJPositionManager is ReentrancyGuard {
 
     event PositionRemoved(
         uint256 indexed positionId,
-        address indexed vault,
+        address indexed owner,
         address indexed lbPair,
         uint256 percentage,
         uint256 amountX,
@@ -87,7 +87,7 @@ contract TJPositionManager is ReentrancyGuard {
 
     event PositionIncreased(
         uint256 indexed positionId,
-        address indexed vault,
+        address indexed owner,
         address indexed lbPair,
         uint256 amountXAdded,
         uint256 amountYAdded
@@ -95,10 +95,16 @@ contract TJPositionManager is ReentrancyGuard {
 
     event FeesCollected(
         uint256 indexed positionId,
-        address indexed vault,
+        address indexed owner,
         address indexed lbPair,
         uint256 amountX,
         uint256 amountY
+    );
+
+    event PositionTransferred(
+        uint256 indexed positionId,
+        address indexed from,
+        address indexed to
     );
 
     constructor(address _lbRouter, address _proxyImplementation) {
@@ -110,7 +116,7 @@ contract TJPositionManager is ReentrancyGuard {
 
     /**
      * @notice Create a new liquidity position on a Trader Joe V2.2 LB pair
-     * @param vault Must equal msg.sender; validator checks this in calldata
+     * @param owner Must equal msg.sender; validator checks this in calldata
      * @param lbPair The Liquidity Book pair to add liquidity to
      * @param amountX Amount of tokenX to deposit
      * @param amountY Amount of tokenY to deposit
@@ -125,7 +131,7 @@ contract TJPositionManager is ReentrancyGuard {
      * @return positionId The auto-incremented position ID
      */
     function createPosition(
-        address vault,
+        address owner,
         address lbPair,
         uint256 amountX,
         uint256 amountY,
@@ -138,7 +144,7 @@ contract TJPositionManager is ReentrancyGuard {
         uint256[] calldata distributionY,
         uint256 deadline
     ) external nonReentrant returns (uint256 positionId) {
-        require(vault == msg.sender, "TJPositionManager: vault must be caller");
+        require(owner == msg.sender, "TJPositionManager: owner must be caller");
         require(lbPair != address(0), "TJPositionManager: zero lbPair");
 
         // Derive token info from pair
@@ -150,9 +156,9 @@ contract TJPositionManager is ReentrancyGuard {
         address proxy = Clones.clone(proxyImplementation);
         ITJPositionProxy(proxy).initialize(address(this));
 
-        // Pull tokens from vault → manager → proxy
-        IERC20(tokenX).safeTransferFrom(vault, address(this), amountX);
-        IERC20(tokenY).safeTransferFrom(vault, address(this), amountY);
+        // Pull tokens from owner → manager → proxy
+        IERC20(tokenX).safeTransferFrom(owner, address(this), amountX);
+        IERC20(tokenY).safeTransferFrom(owner, address(this), amountY);
         IERC20(tokenX).safeTransfer(proxy, amountX);
         IERC20(tokenY).safeTransfer(proxy, amountY);
 
@@ -166,7 +172,7 @@ contract TJPositionManager is ReentrancyGuard {
             abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountY)
         );
 
-        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to vault)
+        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to owner)
         ILBRouter.LiquidityParameters memory params = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
@@ -181,7 +187,7 @@ contract TJPositionManager is ReentrancyGuard {
             distributionX: distributionX,
             distributionY: distributionY,
             to: proxy,
-            refundTo: vault,
+            refundTo: owner,
             deadline: deadline
         });
 
@@ -203,9 +209,9 @@ contract TJPositionManager is ReentrancyGuard {
             abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
         );
 
-        // Belt-and-suspenders: sweep leftover tokens from proxy to vault
-        _sweepProxyTokens(proxy, tokenX, vault);
-        _sweepProxyTokens(proxy, tokenY, vault);
+        // Belt-and-suspenders: sweep leftover tokens from proxy to owner
+        _sweepProxyTokens(proxy, tokenX, owner);
+        _sweepProxyTokens(proxy, tokenY, owner);
 
         // Calculate baselines (previousX/Y)
         uint256 len = depositedIds.length;
@@ -223,7 +229,7 @@ contract TJPositionManager is ReentrancyGuard {
         // Record position
         positionId = _nextPositionId++;
         _positions[positionId] = Position({
-            vault: vault,
+            owner: owner,
             lbPair: lbPair,
             tokenX: tokenX,
             tokenY: tokenY,
@@ -236,9 +242,9 @@ contract TJPositionManager is ReentrancyGuard {
             createdAt: block.timestamp,
             active: true
         });
-        _vaultPositions[vault].push(positionId);
+        _ownerPositions[owner].push(positionId);
 
-        emit PositionCreated(positionId, vault, lbPair, proxy, depositedIds, liquidityAmounts, amountXAdded, amountYAdded);
+        emit PositionCreated(positionId, owner, lbPair, proxy, depositedIds, liquidityAmounts, amountXAdded, amountYAdded);
     }
 
     /**
@@ -275,7 +281,7 @@ contract TJPositionManager is ReentrancyGuard {
         uint256 deadline
     ) external nonReentrant returns (uint256 amountXAdded, uint256 amountYAdded) {
         Position storage pos = _positions[positionId];
-        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
+        require(pos.owner == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
         require(previousFeesX.length == pos.depositIds.length, "TJPositionManager: feesX length mismatch");
         require(previousFeesY.length == pos.depositIds.length, "TJPositionManager: feesY length mismatch");
@@ -284,7 +290,7 @@ contract TJPositionManager is ReentrancyGuard {
         address tokenY = pos.tokenY;
         address proxy = pos.proxy;
 
-        // Pull tokens from vault → manager → proxy
+        // Pull tokens from owner → manager → proxy
         IERC20(tokenX).safeTransferFrom(msg.sender, address(this), amountX);
         IERC20(tokenY).safeTransferFrom(msg.sender, address(this), amountY);
         IERC20(tokenX).safeTransfer(proxy, amountX);
@@ -300,7 +306,7 @@ contract TJPositionManager is ReentrancyGuard {
             abi.encodeWithSelector(IERC20.approve.selector, lbRouter, amountY)
         );
 
-        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to vault)
+        // Via proxy: call addLiquidity (LB tokens minted to proxy, refund to owner)
         ILBRouter.LiquidityParameters memory params = ILBRouter.LiquidityParameters({
             tokenX: tokenX,
             tokenY: tokenY,
@@ -364,7 +370,7 @@ contract TJPositionManager is ReentrancyGuard {
             abi.encodeWithSelector(IERC20.approve.selector, lbRouter, 0)
         );
 
-        // Belt-and-suspenders: sweep leftover tokens from proxy to vault
+        // Belt-and-suspenders: sweep leftover tokens from proxy to owner
         _sweepProxyTokens(proxy, tokenX, msg.sender);
         _sweepProxyTokens(proxy, tokenY, msg.sender);
 
@@ -389,7 +395,7 @@ contract TJPositionManager is ReentrancyGuard {
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
         Position storage pos = _positions[positionId];
-        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
+        require(pos.owner == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
         (amountX, amountY) = _burnFeesViaProxy(positionId, feeShares, amountXMin, amountYMin, deadline);
@@ -415,7 +421,7 @@ contract TJPositionManager is ReentrancyGuard {
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
         Position storage pos = _positions[positionId];
-        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
+        require(pos.owner == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
         require(percentage > 0 && percentage <= 100, "TJPositionManager: invalid percentage");
 
@@ -440,7 +446,7 @@ contract TJPositionManager is ReentrancyGuard {
         uint256 deadline
     ) external nonReentrant returns (uint256 amountX, uint256 amountY) {
         Position storage pos = _positions[positionId];
-        require(pos.vault == msg.sender, "TJPositionManager: not position owner");
+        require(pos.owner == msg.sender, "TJPositionManager: not position owner");
         require(pos.active, "TJPositionManager: position not active");
 
         (amountX, amountY) = _decreaseLiquidityWithFees(positionId, 100, feeShares, amountXMin, amountYMin, deadline);
@@ -456,24 +462,62 @@ contract TJPositionManager is ReentrancyGuard {
     }
 
     /**
-     * @notice Get all position IDs for a vault
-     * @param vault The vault address to query
+     * @notice Get all position IDs for an owner
+     * @param owner The owner address to query
      * @return Array of position IDs
      */
-    function getPositionsByVault(address vault) external view returns (uint256[] memory) {
-        return _vaultPositions[vault];
+    function getPositionsByOwner(address owner) external view returns (uint256[] memory) {
+        return _ownerPositions[owner];
     }
 
     /**
-     * @notice Get the number of positions for a vault
-     * @param vault The vault address to query
+     * @notice Get the number of positions for an owner
+     * @param owner The owner address to query
      * @return The number of positions
      */
-    function getPositionCount(address vault) external view returns (uint256) {
-        return _vaultPositions[vault].length;
+    function getPositionCount(address owner) external view returns (uint256) {
+        return _ownerPositions[owner].length;
+    }
+
+    /**
+     * @notice Transfer position ownership (ERC721-compatible signature)
+     * @dev Called by PositionVault.withdrawPosition which does IERC721(target).safeTransferFrom(vault, owner, tokenId).
+     *      This allows TJ positions to be withdrawn from vaults using the same code path as V3/V4 NFTs.
+     * @param from Current owner (must equal pos.owner and msg.sender)
+     * @param to New owner
+     * @param tokenId The position ID to transfer
+     */
+    function safeTransferFrom(address from, address to, uint256 tokenId) external nonReentrant {
+        Position storage pos = _positions[tokenId];
+        require(pos.active, "TJPositionManager: position not active");
+        require(pos.owner == from, "TJPositionManager: not position owner");
+        require(from == msg.sender, "TJPositionManager: caller must be current owner");
+        require(to != address(0), "TJPositionManager: transfer to zero address");
+
+        pos.owner = to;
+        _removeFromOwnerPositions(from, tokenId);
+        _ownerPositions[to].push(tokenId);
+
+        emit PositionTransferred(tokenId, from, to);
     }
 
     // ── Internal helpers ──────────────────────────────────────────────
+
+    /**
+     * @dev Remove a position ID from an owner's position array (swap-and-pop).
+     * @param owner The owner address to remove from
+     * @param positionId The position ID to remove
+     */
+    function _removeFromOwnerPositions(address owner, uint256 positionId) internal {
+        uint256[] storage ids = _ownerPositions[owner];
+        for (uint256 i = 0; i < ids.length; i++) {
+            if (ids[i] == positionId) {
+                ids[i] = ids[ids.length - 1];
+                ids.pop();
+                return;
+            }
+        }
+    }
 
     /**
      * @dev Burns fee LB tokens via the position's proxy. No-op if all feeShares are zero.
@@ -510,7 +554,7 @@ contract TJPositionManager is ReentrancyGuard {
             abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, true)
         );
 
-        // Via proxy: removeLiquidity (fee burn, tokens to vault)
+        // Via proxy: removeLiquidity (fee burn, tokens to owner)
         bytes memory returnData = ITJPositionProxy(proxy).execute(
             lbRouter,
             abi.encodeWithSelector(
@@ -522,7 +566,7 @@ contract TJPositionManager is ReentrancyGuard {
                 amountYMin,
                 filteredIds,
                 filteredShares,
-                pos.vault,
+                pos.owner,
                 deadline
             )
         );
@@ -550,7 +594,7 @@ contract TJPositionManager is ReentrancyGuard {
             }
         }
 
-        emit FeesCollected(positionId, pos.vault, pos.lbPair, feeAmountX, feeAmountY);
+        emit FeesCollected(positionId, pos.owner, pos.lbPair, feeAmountX, feeAmountY);
     }
 
     /**
@@ -598,7 +642,7 @@ contract TJPositionManager is ReentrancyGuard {
                 abi.encodeWithSelector(ILBPair.approveForAll.selector, lbRouter, true)
             );
 
-            // Via proxy: removeLiquidity (principal burn, tokens to vault)
+            // Via proxy: removeLiquidity (principal burn, tokens to owner)
             bytes memory returnData = ITJPositionProxy(proxy).execute(
                 lbRouter,
                 abi.encodeWithSelector(
@@ -610,7 +654,7 @@ contract TJPositionManager is ReentrancyGuard {
                     0,
                     filteredIds,
                     filteredBurn,
-                    pos.vault,
+                    pos.owner,
                     deadline
                 )
             );
@@ -629,7 +673,7 @@ contract TJPositionManager is ReentrancyGuard {
         require(feeAmountY + principalAmountY >= amountYMin, "TJPositionManager: insufficient amountY");
 
         // Update state — cache for event since full removal deletes struct
-        address posVault = pos.vault;
+        address posOwner = pos.owner;
         address posLbPair = pos.lbPair;
 
         if (percentage == 100) {
@@ -650,17 +694,17 @@ contract TJPositionManager is ReentrancyGuard {
             }
         }
 
-        emit PositionRemoved(positionId, posVault, posLbPair, percentage, principalAmountX, principalAmountY);
+        emit PositionRemoved(positionId, posOwner, posLbPair, percentage, principalAmountX, principalAmountY);
     }
 
     /**
-     * @dev Sweep leftover ERC20 tokens from proxy to vault.
+     * @dev Sweep leftover ERC20 tokens from proxy to owner.
      *      Uses proxy.execute() to call balanceOf then transfer if non-zero.
      * @param proxy The proxy address to sweep from
      * @param token The ERC20 token to sweep
-     * @param vault The vault to receive swept tokens
+     * @param recipient The address to receive swept tokens
      */
-    function _sweepProxyTokens(address proxy, address token, address vault) internal {
+    function _sweepProxyTokens(address proxy, address token, address recipient) internal {
         bytes memory balData = ITJPositionProxy(proxy).execute(
             token,
             abi.encodeWithSelector(IERC20.balanceOf.selector, proxy)
@@ -669,7 +713,7 @@ contract TJPositionManager is ReentrancyGuard {
         if (balance > 0) {
             ITJPositionProxy(proxy).execute(
                 token,
-                abi.encodeWithSelector(IERC20.transfer.selector, vault, balance)
+                abi.encodeWithSelector(IERC20.transfer.selector, recipient, balance)
             );
         }
     }
