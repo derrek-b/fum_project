@@ -308,7 +308,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       );
 
       // Get all position IDs for this vault
-      const positionIds = await positionManager.getPositionsByVault(address);
+      const positionIds = await positionManager.getPositionsByOwner(address);
 
       if (positionIds.length === 0) {
         return { positions: {}, poolData: {} };
@@ -375,7 +375,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       );
 
       // Get all position IDs for this vault
-      const positionIds = await positionManager.getPositionsByVault(ownerAddress);
+      const positionIds = await positionManager.getPositionsByOwner(ownerAddress);
 
       if (positionIds.length === 0) {
         return { positions: {} };
@@ -829,7 +829,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
         position.id, feeShares, amountXMin, amountYMin, deadline
       ]),
       value: '0x00',
-      quote: { feeShares, feesX, feesY, amountXMin, amountYMin },
     };
   }
 
@@ -1018,7 +1017,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
    * @param {string} params.walletAddress - Vault address
    * @param {number} params.slippageTolerance - Slippage tolerance (0-100)
    * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
-   * @returns {Promise<{to: string, data: string, value: string, quote: Object}>}
+   * @returns {Promise<{to: string, data: string, value: string}>}
    */
   async generateRemoveLiquidityData(params) {
     const {
@@ -1177,19 +1176,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       to: positionManagerAddress,
       data: calldata,
       value: '0x00',
-      quote: {
-        positionId: position.id,
-        percentage,
-        amountX: amountXStr,
-        amountY: amountYStr,
-        amountXMin,
-        amountYMin,
-        feeShares,
-        deadline,
-        depositIds: position.depositIds,
-        liquidityMinted: position.liquidityMinted,
-        amountsToRemove
-      }
     };
   }
 
@@ -1383,23 +1369,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       to: positionManagerAddress,
       data: calldata,
       value: '0x00',
-      quote: {
-        positionId: position.id,
-        amountX,
-        amountY,
-        amountXMin,
-        amountYMin,
-        previousFeesX,
-        previousFeesY,
-        deltaIds,
-        distributionX: distributionX.map(d => d.toString()),
-        distributionY: distributionY.map(d => d.toString()),
-        tokensSwapped,
-        idSlippage,
-        lbPair: poolData.address,
-        binStep: poolData.binStep,
-        activeId: poolData.activeId
-      }
     };
   }
 
@@ -1574,7 +1543,7 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
    * @param {Object} params.token1Data - Caller's token1 data ({ address, decimals, symbol })
    * @param {number} params.slippageTolerance - Slippage tolerance (0-100)
    * @param {number} params.deadlineMinutes - Transaction deadline in minutes from now
-   * @returns {Promise<{to: string, data: string, value: string, quote: Object}>}
+   * @returns {Promise<{to: string, data: string, value: string}>}
    */
   async generateCreatePositionData(params) {
     const {
@@ -1760,20 +1729,6 @@ export default class TraderJoeV2_2Adapter extends PlatformAdapter {
       to: positionManagerAddress,
       data: calldata,
       value: '0x00',
-      quote: {
-        amountX,
-        amountY,
-        amountXMin,
-        amountYMin,
-        deltaIds,
-        distributionX: distributionX.map(d => d.toString()),
-        distributionY: distributionY.map(d => d.toString()),
-        tokensSwapped,
-        idSlippage,
-        lbPair: poolData.address,
-        binStep: poolData.binStep,
-        activeId: poolData.activeId
-      }
     };
   }
 

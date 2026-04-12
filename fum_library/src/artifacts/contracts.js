@@ -2414,7 +2414,7 @@
           {
             "indexed": true,
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           },
           {
@@ -2451,7 +2451,7 @@
           {
             "indexed": true,
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           },
           {
@@ -2506,7 +2506,7 @@
           {
             "indexed": true,
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           },
           {
@@ -2543,7 +2543,7 @@
           {
             "indexed": true,
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           },
           {
@@ -2572,6 +2572,31 @@
           }
         ],
         "name": "PositionRemoved",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "uint256",
+            "name": "positionId",
+            "type": "uint256"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          }
+        ],
+        "name": "PositionTransferred",
         "type": "event"
       },
       {
@@ -2706,7 +2731,7 @@
         "inputs": [
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           },
           {
@@ -2839,7 +2864,7 @@
             "components": [
               {
                 "internalType": "address",
-                "name": "vault",
+                "name": "owner",
                 "type": "address"
               },
               {
@@ -2910,7 +2935,7 @@
         "inputs": [
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           }
         ],
@@ -2929,11 +2954,11 @@
         "inputs": [
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "owner",
             "type": "address"
           }
         ],
-        "name": "getPositionsByVault",
+        "name": "getPositionsByOwner",
         "outputs": [
           {
             "internalType": "uint256[]",
@@ -3011,6 +3036,29 @@
             "type": "uint256"
           }
         ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          }
+        ],
+        "name": "safeTransferFrom",
+        "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
       }
@@ -3474,7 +3522,7 @@
           },
           {
             "internalType": "address",
-            "name": "vault",
+            "name": "caller",
             "type": "address"
           }
         ],

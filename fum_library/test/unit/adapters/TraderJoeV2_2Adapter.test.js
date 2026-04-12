@@ -2154,7 +2154,6 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('quote');
 
         // Verify 'to' is the position manager
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
@@ -2196,12 +2195,9 @@ describe('TraderJoeV2_2Adapter', () => {
         // Decode and verify token ordering
         const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
 
-        // tokensSwapped should be true (USDC > WETH, so inputs were swapped)
-        expect(result.quote.tokensSwapped).toBe(true);
-
-        // amountX should be the WETH amount (lower address = tokenX)
+        // After sorting, amountX corresponds to the lower address token (WETH, passed as token1)
         expect(decoded.amountX.toString()).toBe('1000000000000000000');
-        // amountY should be the USDC amount (higher address = tokenY)
+        // amountY corresponds to the higher address token (USDC, passed as token0)
         expect(decoded.amountY.toString()).toBe('2000000000');
       });
 
@@ -2227,8 +2223,7 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        expect(result.quote.tokensSwapped).toBe(false);
-
+        // No swap needed — amountX matches token0Amount, amountY matches token1Amount
         const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
         expect(decoded.amountX.toString()).toBe('1000000000000000000'); // WETH
         expect(decoded.amountY.toString()).toBe('2000000000'); // USDC
@@ -2258,11 +2253,12 @@ describe('TraderJoeV2_2Adapter', () => {
         // 10% slippage: min = amount * 90% = amount * 9000 / 10000
         // amountX = 10000 (WETH is lower address, no swap)
         // amountXMin = 10000 * 9000 / 10000 = 9000
-        expect(result.quote.amountXMin).toBe('9000');
-        expect(result.quote.amountYMin).toBe('18000'); // 20000 * 0.9
+        const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
+        expect(decoded.amountXMin.toString()).toBe('9000');
+        expect(decoded.amountYMin.toString()).toBe('18000'); // 20000 * 0.9
       });
 
-      it('should include deltaIds and distributions from SDK in quote', async () => {
+      it('should include deltaIds and distributions from SDK in calldata', async () => {
         const poolData = {
           activeId: 8388608,
           binStep: 20,
@@ -2283,27 +2279,26 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        // Verify quote has distribution data
-        expect(Array.isArray(result.quote.deltaIds)).toBe(true);
-        expect(Array.isArray(result.quote.distributionX)).toBe(true);
-        expect(Array.isArray(result.quote.distributionY)).toBe(true);
+        // Decode and verify distribution data from calldata
+        const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
+        const deltaIds = decoded.deltaIds.map(d => Number(d));
+        const distributionX = decoded.distributionX.map(d => d.toString());
+        const distributionY = decoded.distributionY.map(d => d.toString());
+
+        expect(Array.isArray(deltaIds)).toBe(true);
+        expect(Array.isArray(distributionX)).toBe(true);
+        expect(Array.isArray(distributionY)).toBe(true);
 
         // Number of bins should match the range
         const expectedBins = position.upperBinId - position.lowerBinId + 1;
-        expect(result.quote.deltaIds.length).toBe(expectedBins);
-        expect(result.quote.distributionX.length).toBe(expectedBins);
-        expect(result.quote.distributionY.length).toBe(expectedBins);
+        expect(deltaIds.length).toBe(expectedBins);
+        expect(distributionX.length).toBe(expectedBins);
+        expect(distributionY.length).toBe(expectedBins);
 
         // deltaIds should be relative to activeId
         // Position spans from -3 to +3 relative to activeId 8388608
-        expect(result.quote.deltaIds[0]).toBe(-3); // 8388605 - 8388608
-        expect(result.quote.deltaIds[result.quote.deltaIds.length - 1]).toBe(3); // 8388611 - 8388608
-
-        // Verify distributions are present in calldata too
-        const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
-        expect(decoded.deltaIds.length).toBe(expectedBins);
-        expect(decoded.distributionX.length).toBe(expectedBins);
-        expect(decoded.distributionY.length).toBe(expectedBins);
+        expect(deltaIds[0]).toBe(-3); // 8388605 - 8388608
+        expect(deltaIds[deltaIds.length - 1]).toBe(3); // 8388611 - 8388608
       });
 
       it('should encode all 12 createPosition parameters correctly', async () => {
@@ -2377,7 +2372,8 @@ describe('TraderJoeV2_2Adapter', () => {
         // = floor(log(1.05) / log(1.002))
         // = floor(0.04879 / 0.001998) = floor(24.42) = 24
         const expected = Math.floor(Math.log(1.05) / Math.log(1.002));
-        expect(result.quote.idSlippage).toBe(expected);
+        const decoded = createPositionIface.decodeFunctionData('createPosition', result.data);
+        expect(Number(decoded.idSlippage)).toBe(expected);
       });
 
       it('should execute end-to-end: approve → generateCreatePositionData → vault.mint()', async () => {
@@ -2434,7 +2430,9 @@ describe('TraderJoeV2_2Adapter', () => {
 
         expect(txData.to).toBe(pmAddress);
 
-        // 5. Execute vault.mint() with the calldata (no explicit estimateGas — this one always passes)
+        // 5. Execute vault.mint() — callStatic first to surface inner revert, estimateGas to warm fork cache
+        await testVault.callStatic.mint([pmAddress], [txData.data], [0]);
+        await testVault.estimateGas.mint([pmAddress], [txData.data], [0]);
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         const mintReceipt = await mintTx.wait();
         expect(mintReceipt.status).toBe(1);
@@ -2446,10 +2444,10 @@ describe('TraderJoeV2_2Adapter', () => {
         const positionCount = await tjpm.getPositionCount(vaultAddress);
         expect(positionCount.toNumber()).toBeGreaterThanOrEqual(1);
 
-        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const positionIds = await tjpm.getPositionsByOwner(vaultAddress);
         const position = await tjpm.getPosition(positionIds[0]);
 
-        expect(position.vault).toBe(vaultAddress);
+        expect(position.owner).toBe(vaultAddress);
         expect(position.lbPair).toBe(poolData.address);
         expect(position.active).toBe(true);
         expect(position.depositIds.length).toBeGreaterThan(0);
@@ -2587,7 +2585,7 @@ describe('TraderJoeV2_2Adapter', () => {
         // Get all positions from the contract (includes inactive ones from removal E2E tests)
         const pmAddress = adapter.addresses.positionManagerAddress;
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const allPositionIds = await tjpm.getPositionsByVault(testVault.address);
+        const allPositionIds = await tjpm.getPositionsByOwner(testVault.address);
 
         // Count active vs total on-chain
         let activeCount = 0;
@@ -2798,7 +2796,7 @@ describe('TraderJoeV2_2Adapter', () => {
         // Fetch position data from position manager for liquidityMinted
         const pmAddress = adapter.addresses.positionManagerAddress;
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
 
         // Find the matching position
         let matchingPosData;
@@ -2923,7 +2921,7 @@ describe('TraderJoeV2_2Adapter', () => {
       beforeAll(async () => {
         const pmAddress = adapter.addresses.positionManagerAddress;
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
         for (const pid of positionIds) {
           const pos = await tjpm.getPosition(pid);
           if (pos.active) {
@@ -3027,7 +3025,7 @@ describe('TraderJoeV2_2Adapter', () => {
       const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
 
       // Check if a position already exists from the E2E test
-      const positionIds = await tjpm.getPositionsByVault(testVault.address);
+      const positionIds = await tjpm.getPositionsByOwner(testVault.address);
       if (positionIds.length > 0) {
         positionId = positionIds[0];
         const pos = await tjpm.getPosition(positionId);
@@ -3086,7 +3084,7 @@ describe('TraderJoeV2_2Adapter', () => {
       const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
       await mintTx.wait();
 
-      const newPositionIds = await tjpm.getPositionsByVault(testVault.address);
+      const newPositionIds = await tjpm.getPositionsByOwner(testVault.address);
       positionId = newPositionIds[newPositionIds.length - 1];
     }, 120000);
 
@@ -3319,7 +3317,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const tjpmAbi = contractData.TJPositionManager.abi;
         const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
 
-        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
         if (positionIds.length > 0) {
           positionId = positionIds[0];
           return;
@@ -3372,7 +3370,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const mintTx = await testVault.mint([pmAddress], [txData.data], [0]);
         await mintTx.wait();
 
-        const newPositionIds = await tjpm.getPositionsByVault(testVault.address);
+        const newPositionIds = await tjpm.getPositionsByOwner(testVault.address);
         positionId = newPositionIds[newPositionIds.length - 1];
       }, 120000);
 
@@ -3751,7 +3749,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const tjpm = new ethers.Contract(positionManagerAddress, tjpmAbi, env.provider);
 
         // Use position from top-level E2E test (or create one)
-        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
         if (positionIds.length === 0) {
           console.log('No position available for calldata encoding tests - skipping');
           return;
@@ -3762,7 +3760,7 @@ describe('TraderJoeV2_2Adapter', () => {
         onChainPosition = result.position;
       }, 60000);
 
-      it('should return { to, data, value, quote } with correct structure', async () => {
+      it('should return { to, data, value } with correct structure', async () => {
         if (!onChainPosition) return;
         const result = await adapter.generateRemoveLiquidityData({
           position: onChainPosition,
@@ -3776,7 +3774,6 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('quote');
       }, 30000);
 
       it('should set to = positionManagerAddress', async () => {
@@ -3880,17 +3877,15 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        const lowXMin = BigInt(resultLow.quote.amountXMin);
-        const highXMin = BigInt(resultHigh.quote.amountXMin);
-        const lowYMin = BigInt(resultLow.quote.amountYMin);
-        const highYMin = BigInt(resultHigh.quote.amountYMin);
+        const decodedLow = removePositionIface.decodeFunctionData('removePosition', resultLow.data);
+        const decodedHigh = removePositionIface.decodeFunctionData('removePosition', resultHigh.data);
 
         // Higher slippage means lower mins
-        expect(lowXMin).toBeGreaterThanOrEqual(highXMin);
-        expect(lowYMin).toBeGreaterThanOrEqual(highYMin);
+        expect(BigInt(decodedLow.amountXMin)).toBeGreaterThanOrEqual(BigInt(decodedHigh.amountXMin));
+        expect(BigInt(decodedLow.amountYMin)).toBeGreaterThanOrEqual(BigInt(decodedHigh.amountYMin));
       }, 30000);
 
-      it('should return quote with all expected fields', async () => {
+      it('should encode expected fields in calldata', async () => {
         if (!onChainPosition) return;
         const result = await adapter.generateRemoveLiquidityData({
           position: onChainPosition,
@@ -3901,28 +3896,21 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        const q = result.quote;
-        expect(q).toHaveProperty('positionId');
-        expect(q).toHaveProperty('percentage');
-        expect(q).toHaveProperty('amountX');
-        expect(q).toHaveProperty('amountY');
-        expect(q).toHaveProperty('amountXMin');
-        expect(q).toHaveProperty('amountYMin');
-        expect(q).toHaveProperty('feeShares');
-        expect(q).toHaveProperty('deadline');
-        expect(q).toHaveProperty('depositIds');
-        expect(q).toHaveProperty('liquidityMinted');
-        expect(q).toHaveProperty('amountsToRemove');
+        const decoded = removePositionIface.decodeFunctionData('removePosition', result.data);
 
-        expect(q.positionId).toBe(onChainPosition.id);
-        expect(q.percentage).toBe(100);
-        expect(Array.isArray(q.feeShares)).toBe(true);
-        expect(Array.isArray(q.depositIds)).toBe(true);
-        expect(Array.isArray(q.liquidityMinted)).toBe(true);
-        expect(Array.isArray(q.amountsToRemove)).toBe(true);
+        // positionId matches the on-chain position
+        expect(decoded.positionId.toString()).toBe(onChainPosition.id);
+        // feeShares array length matches depositIds length
+        expect(Array.isArray(decoded.feeShares)).toBe(true);
+        expect(decoded.feeShares.length).toBe(onChainPosition.depositIds.length);
+        // amountXMin and amountYMin are present and valid
+        expect(BigInt(decoded.amountXMin) >= 0n).toBe(true);
+        expect(BigInt(decoded.amountYMin) >= 0n).toBe(true);
+        // deadline is in the future
+        expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       }, 30000);
 
-      it('should scale amountsToRemove correctly for different percentages', async () => {
+      it('should use removePosition for 100% and decreaseLiquidity for partial removal', async () => {
         if (!onChainPosition) return;
 
         const result50 = await adapter.generateRemoveLiquidityData({
@@ -3943,13 +3931,11 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        // 50% amounts should be roughly half of 100% amounts
-        for (let i = 0; i < result50.quote.amountsToRemove.length; i++) {
-          const half = BigInt(result100.quote.amountsToRemove[i]) / 2n;
-          const actual = BigInt(result50.quote.amountsToRemove[i]);
-          // Allow rounding difference of 1
-          expect(actual >= half - 1n && actual <= half + 1n).toBe(true);
-        }
+        // 100% uses removePosition selector, 50% uses decreaseLiquidity selector
+        const selector100 = result100.data.slice(0, 10);
+        const selector50 = result50.data.slice(0, 10);
+        expect(selector100).toBe(removePositionIface.getSighash('removePosition'));
+        expect(selector50).toBe(decreaseLiquidityIface.getSighash('decreaseLiquidity'));
       }, 30000);
 
       it('should use different deadline values', async () => {
@@ -3974,7 +3960,9 @@ describe('TraderJoeV2_2Adapter', () => {
         });
 
         // 30 min deadline should be later than 5 min deadline
-        expect(result30.quote.deadline).toBeGreaterThan(result5.quote.deadline);
+        const decoded30 = removePositionIface.decodeFunctionData('removePosition', result30.data);
+        const decoded5 = removePositionIface.decodeFunctionData('removePosition', result5.data);
+        expect(Number(decoded30.deadline)).toBeGreaterThan(Number(decoded5.deadline));
       }, 30000);
     });
 
@@ -4039,7 +4027,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         // Get the created position
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const positionIds = await tjpm.getPositionsByOwner(vaultAddress);
         e2ePositionId = positionIds[positionIds.length - 1];
 
         const result = await adapter.getPositionById(e2ePositionId, env.provider);
@@ -4126,7 +4114,7 @@ describe('TraderJoeV2_2Adapter', () => {
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const positionIds = await tjpm.getPositionsByOwner(vaultAddress);
         const partialPosId = positionIds[positionIds.length - 1];
 
         // Fetch position via adapter
@@ -4195,7 +4183,7 @@ describe('TraderJoeV2_2Adapter', () => {
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const posIds = await tjpm.getPositionsByVault(vaultAddress);
+        const posIds = await tjpm.getPositionsByOwner(vaultAddress);
         const posId = posIds[posIds.length - 1];
         const posResult = await adapter.getPositionById(posId, env.provider);
 
@@ -4864,7 +4852,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         // Get the created position
         const tjpm = new ethers.Contract(pmAddress, contractData.TJPositionManager.abi, env.provider);
-        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const positionIds = await tjpm.getPositionsByOwner(vaultAddress);
         e2ePositionId = positionIds[positionIds.length - 1];
 
         const result = await adapter.getPositionById(e2ePositionId, env.provider);
@@ -4958,7 +4946,7 @@ describe('TraderJoeV2_2Adapter', () => {
 
         await (await testVault.mint([pmAddress], [createData.data], [0])).wait();
 
-        const positionIds = await tjpm.getPositionsByVault(vaultAddress);
+        const positionIds = await tjpm.getPositionsByOwner(vaultAddress);
         const newPosId = positionIds[positionIds.length - 1];
         const posResult = await adapter.getPositionById(newPosId, env.provider);
         const newPos = posResult.position;
@@ -5038,7 +5026,6 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('quote');
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
         expect(result.value).toBe('0x00');
 
@@ -5066,12 +5053,9 @@ describe('TraderJoeV2_2Adapter', () => {
 
         const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
 
-        // tokensSwapped should be true (USDC > WETH, so inputs were swapped)
-        expect(result.quote.tokensSwapped).toBe(true);
-
-        // amountX should be the WETH amount (lower address = tokenX)
+        // After sorting, amountX corresponds to the lower address token (WETH, passed as token1)
         expect(decoded.amountX.toString()).toBe('1000000000000000000');
-        // amountY should be the USDC amount (higher address = tokenY)
+        // amountY corresponds to the higher address token (USDC, passed as token0)
         expect(decoded.amountY.toString()).toBe('2000000000');
       }, 60000);
 
@@ -5091,8 +5075,7 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        expect(result.quote.tokensSwapped).toBe(false);
-
+        // No swap needed — amountX matches token0Amount, amountY matches token1Amount
         const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
         expect(decoded.amountX.toString()).toBe('1000000000000000000'); // WETH
         expect(decoded.amountY.toString()).toBe('2000000000'); // USDC
@@ -5115,11 +5098,12 @@ describe('TraderJoeV2_2Adapter', () => {
         });
 
         // 10% slippage: min = amount * 90% = amount * 9000 / 10000
-        expect(result.quote.amountXMin).toBe('9000');
-        expect(result.quote.amountYMin).toBe('18000');
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.amountXMin.toString()).toBe('9000');
+        expect(decoded.amountYMin.toString()).toBe('18000');
       }, 60000);
 
-      it('should include deltaIds and distributions from SDK in quote', async () => {
+      it('should include deltaIds and distributions from SDK in calldata', async () => {
         if (!e2ePosition || !e2ePoolData) return;
         // Use custom bin range centered on activeId for predictable deltaIds
         const position = { id: e2ePositionId.toString(), lowerBinId: e2ePoolData.activeId - 3, upperBinId: e2ePoolData.activeId + 3 };
@@ -5136,25 +5120,25 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        expect(Array.isArray(result.quote.deltaIds)).toBe(true);
-        expect(Array.isArray(result.quote.distributionX)).toBe(true);
-        expect(Array.isArray(result.quote.distributionY)).toBe(true);
+        // Decode and verify distribution data from calldata
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        const deltaIds = decoded.deltaIds.map(d => Number(d));
+        const distributionX = decoded.distributionX.map(d => d.toString());
+        const distributionY = decoded.distributionY.map(d => d.toString());
+
+        expect(Array.isArray(deltaIds)).toBe(true);
+        expect(Array.isArray(distributionX)).toBe(true);
+        expect(Array.isArray(distributionY)).toBe(true);
 
         // Number of bins should match the range
         const expectedBins = 7; // activeId-3 to activeId+3
-        expect(result.quote.deltaIds.length).toBe(expectedBins);
-        expect(result.quote.distributionX.length).toBe(expectedBins);
-        expect(result.quote.distributionY.length).toBe(expectedBins);
+        expect(deltaIds.length).toBe(expectedBins);
+        expect(distributionX.length).toBe(expectedBins);
+        expect(distributionY.length).toBe(expectedBins);
 
         // deltaIds should be relative to activeId
-        expect(result.quote.deltaIds[0]).toBe(-3);
-        expect(result.quote.deltaIds[result.quote.deltaIds.length - 1]).toBe(3);
-
-        // Verify distributions are present in calldata too
-        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
-        expect(decoded.deltaIds.length).toBe(expectedBins);
-        expect(decoded.distributionX.length).toBe(expectedBins);
-        expect(decoded.distributionY.length).toBe(expectedBins);
+        expect(deltaIds[0]).toBe(-3);
+        expect(deltaIds[deltaIds.length - 1]).toBe(3);
       }, 60000);
 
       it('should encode all 13 addToPosition parameters correctly', async () => {
@@ -5200,7 +5184,7 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(decoded.deadline.toNumber()).toBeGreaterThan(Math.floor(Date.now() / 1000));
       }, 60000);
 
-      it('should include positionId and previousFees in quote', async () => {
+      it('should include positionId and previousFees in calldata', async () => {
         if (!e2ePosition || !e2ePoolData) return;
         const position = { id: e2ePositionId.toString(), lowerBinId: e2ePosition.lowerBinId, upperBinId: e2ePosition.upperBinId };
 
@@ -5216,12 +5200,11 @@ describe('TraderJoeV2_2Adapter', () => {
           deadlineMinutes: 10,
         });
 
-        expect(result.quote.positionId).toBe(e2ePositionId.toString());
-        expect(result.quote.lbPair).toBe(e2ePoolData.address);
-        expect(result.quote.binStep).toBe(e2ePoolData.binStep);
-        expect(result.quote.activeId).toBe(e2ePoolData.activeId);
-        expect(Array.isArray(result.quote.previousFeesX)).toBe(true);
-        expect(Array.isArray(result.quote.previousFeesY)).toBe(true);
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(decoded.positionId.toString()).toBe(e2ePositionId.toString());
+        expect(decoded.activeIdDesired.toNumber()).toBe(e2ePoolData.activeId);
+        expect(Array.isArray(decoded.previousFeesX)).toBe(true);
+        expect(Array.isArray(decoded.previousFeesY)).toBe(true);
       }, 60000);
 
       it('should compute idSlippage correctly for known values', async () => {
@@ -5242,7 +5225,8 @@ describe('TraderJoeV2_2Adapter', () => {
 
         // Formula: floor(log(1 + slippage) / log(1 + binStep/10000))
         const expected = Math.floor(Math.log(1.05) / Math.log(1 + e2ePoolData.binStep / 10000));
-        expect(result.quote.idSlippage).toBe(expected);
+        const decoded = addToPositionIface.decodeFunctionData('addToPosition', result.data);
+        expect(Number(decoded.idSlippage)).toBe(expected);
       }, 60000);
     });
   });
@@ -5797,7 +5781,7 @@ describe('TraderJoeV2_2Adapter', () => {
         const tjpmAbi = contractData.TJPositionManager.abi;
         const tjpm = new ethers.Contract(pmAddress, tjpmAbi, env.provider);
 
-        const positionIds = await tjpm.getPositionsByVault(testVault.address);
+        const positionIds = await tjpm.getPositionsByOwner(testVault.address);
         if (positionIds.length === 0) {
           console.log('No positions available for calculateTokenAmounts E2E tests');
           return;
@@ -6131,7 +6115,7 @@ describe('TraderJoeV2_2Adapter', () => {
     });
 
     describe('Happy path', () => {
-      it('should return { to, data, value, quote } with feeData provided', async () => {
+      it('should return { to, data, value } with feeData provided', async () => {
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
           walletAddress: '0x0000000000000000000000000000000000000001',
@@ -6145,7 +6129,6 @@ describe('TraderJoeV2_2Adapter', () => {
         expect(result).toHaveProperty('to');
         expect(result).toHaveProperty('data');
         expect(result).toHaveProperty('value');
-        expect(result).toHaveProperty('quote');
         expect(result.to).toBe(adapter.addresses.positionManagerAddress);
         expect(result.value).toBe('0x00');
       });
@@ -6199,15 +6182,15 @@ describe('TraderJoeV2_2Adapter', () => {
         })).rejects.toThrow('provider is required when feeData is not provided');
       });
 
-      it('should include feeShares, amountXMin, amountYMin in quote', async () => {
+      it('should not include extra metadata fields beyond { to, data, value }', async () => {
         const result = await adapter.generateClaimFeesData({
           position: { id: '42' },
           walletAddress: '0x0000000000000000000000000000000000000001',
           feeData: { feeShares: ['100', '200'], fees0: '1000000', fees1: '500' },
         });
-        expect(result.quote).toHaveProperty('feeShares');
-        expect(result.quote).toHaveProperty('amountXMin');
-        expect(result.quote).toHaveProperty('amountYMin');
+        const keys = Object.keys(result);
+        expect(keys).toEqual(expect.arrayContaining(['to', 'data', 'value']));
+        expect(keys).not.toContain('quote');
       });
     });
   });
