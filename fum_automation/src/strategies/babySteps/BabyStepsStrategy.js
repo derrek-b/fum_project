@@ -2177,7 +2177,6 @@ export default class BabyStepsStrategy extends StrategyBase {
     );
 
     this.log(`Position data generated, target: ${createPositionData.to}, value: ${createPositionData.value}`);
-    this.log(`Position quote: ${JSON.stringify(createPositionData.quote)}`);
 
     // 11b. Execute MINT transaction (different from 'addliq')
     this.log(`Executing mint for new ${token0Data.symbol}/${token1Data.symbol} position`);
