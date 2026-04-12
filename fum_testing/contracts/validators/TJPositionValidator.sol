@@ -9,9 +9,9 @@ import "../interfaces/ILiquidityValidator.sol";
  * @dev Called by VaultFactory before PositionVault executes calls to TJPositionManager.
  *
  *      Validation model:
- *      - validateMint (createPosition): selector check + vault address in calldata must match caller
+ *      - validateMint (createPosition): selector check + owner address in calldata must match caller
  *      - All other operations: selector-only check. Ownership is enforced by TJPositionManager
- *        itself via require(pos.vault == msg.sender), using stored on-chain state.
+ *        itself via require(pos.owner == msg.sender), using stored on-chain state.
  */
 contract TJPositionValidator is ILiquidityValidator {
     // createPosition(address,address,uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
@@ -22,14 +22,14 @@ contract TJPositionValidator is ILiquidityValidator {
     /**
      * @notice Validates mint (createPosition) calldata
      * @param data The calldata being sent to TJPositionManager
-     * @param vault The vault address (must match first param in calldata)
+     * @param caller The caller address (must match first param in calldata)
      */
-    function validateMint(bytes calldata data, address vault) external pure override {
+    function validateMint(bytes calldata data, address caller) external pure override {
         require(data.length >= 36, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
         require(selector == CREATE_POSITION_SELECTOR, "TJPositionValidator: not createPosition");
-        address calldataVault = abi.decode(data[4:36], (address));
-        require(calldataVault == vault, "TJPositionValidator: vault mismatch");
+        address calldataOwner = abi.decode(data[4:36], (address));
+        require(calldataOwner == caller, "TJPositionValidator: owner mismatch");
     }
 
     // addToPosition(uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)
@@ -37,7 +37,7 @@ contract TJPositionValidator is ILiquidityValidator {
         "addToPosition(uint256,uint256[],uint256[],uint256,uint256,uint256,uint256,uint256,uint256,int256[],uint256[],uint256[],uint256)"
     ));
 
-    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    // Selector-only: ownership enforced by TJPositionManager (pos.owner == msg.sender)
     function validateIncreaseLiquidity(bytes calldata data, address) external pure override {
         require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
@@ -59,7 +59,7 @@ contract TJPositionValidator is ILiquidityValidator {
         "removePosition(uint256,uint256[],uint256,uint256,uint256)"
     ));
 
-    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    // Selector-only: ownership enforced by TJPositionManager (pos.owner == msg.sender)
     function validateDecreaseLiquidity(bytes calldata data, address) external pure override {
         require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);
@@ -69,7 +69,7 @@ contract TJPositionValidator is ILiquidityValidator {
         );
     }
 
-    // Selector-only: ownership enforced by TJPositionManager (pos.vault == msg.sender)
+    // Selector-only: ownership enforced by TJPositionManager (pos.owner == msg.sender)
     function validateCollect(bytes calldata data, address) external pure override {
         require(data.length >= 4, "TJPositionValidator: invalid data");
         bytes4 selector = bytes4(data[:4]);

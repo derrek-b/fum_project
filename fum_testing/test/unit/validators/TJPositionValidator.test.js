@@ -60,7 +60,7 @@ describe("TJPositionValidator", function() {
       );
 
       await expect(validator.validateMint(calldata, vaultAddress))
-        .to.be.revertedWith("TJPositionValidator: vault mismatch");
+        .to.be.revertedWith("TJPositionValidator: owner mismatch");
     });
 
     it("should reject non-createPosition selector", async function() {

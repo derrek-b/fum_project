@@ -14,7 +14,7 @@ describe("TJPositionManager", function() {
   // Helper to encode createPosition calldata
   function encodeCreatePosition(vaultAddr, lbPairAddr, amountX, amountY, amountXMin, amountYMin, activeIdDesired, idSlippage, deltaIds, distributionX, distributionY, deadline) {
     const iface = new ethers.Interface([
-      "function createPosition(address vault, address lbPair, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
+      "function createPosition(address owner, address lbPair, uint256 amountX, uint256 amountY, uint256 amountXMin, uint256 amountYMin, uint256 activeIdDesired, uint256 idSlippage, int256[] deltaIds, uint256[] distributionX, uint256[] distributionY, uint256 deadline)"
     ]);
     return iface.encodeFunctionData("createPosition", [
       vaultAddr, lbPairAddr, amountX, amountY, amountXMin, amountYMin,
@@ -186,7 +186,7 @@ describe("TJPositionManager", function() {
 
       // Verify position was stored
       const position = await positionManager.getPosition(1);
-      expect(position.vault).to.equal(vaultAddr);
+      expect(position.owner).to.equal(vaultAddr);
       expect(position.lbPair).to.equal(lbPairAddr);
       expect(position.tokenX).to.equal(await tokenX.getAddress());
       expect(position.tokenY).to.equal(await tokenY.getAddress());
@@ -239,7 +239,7 @@ describe("TJPositionManager", function() {
       const createdEvent = events.find(e => e.name === "PositionCreated");
       expect(createdEvent).to.not.be.undefined;
       expect(createdEvent.args.positionId).to.equal(1);
-      expect(createdEvent.args.vault).to.equal(vaultAddr);
+      expect(createdEvent.args.owner).to.equal(vaultAddr);
       expect(createdEvent.args.lbPair).to.equal(lbPairAddr);
       expect(createdEvent.args.proxy).to.not.equal(ethers.ZeroAddress);
       expect(createdEvent.args.depositIds).to.deep.equal([8388607n, 8388608n, 8388609n]);
@@ -383,7 +383,7 @@ describe("TJPositionManager", function() {
 
       // Verify enumeration
       expect(await positionManager.getPositionCount(vaultAddr)).to.equal(2);
-      const ids = await positionManager.getPositionsByVault(vaultAddr);
+      const ids = await positionManager.getPositionsByOwner(vaultAddr);
       expect(ids.length).to.equal(2);
       expect(ids[0]).to.equal(1);
       expect(ids[1]).to.equal(2);
@@ -408,7 +408,7 @@ describe("TJPositionManager", function() {
       await vault.mint([pmAddr], [calldata], [0n]);
 
       const pos = await positionManager.getPosition(1);
-      expect(pos.vault).to.equal(vaultAddr);
+      expect(pos.owner).to.equal(vaultAddr);
       expect(pos.lbPair).to.equal(lbPairAddr);
       expect(pos.binStep).to.equal(20);
       expect(pos.active).to.equal(true);
@@ -418,7 +418,7 @@ describe("TJPositionManager", function() {
 
     it("should return empty data for non-existent position", async function() {
       const pos = await positionManager.getPosition(999);
-      expect(pos.vault).to.equal(ethers.ZeroAddress);
+      expect(pos.owner).to.equal(ethers.ZeroAddress);
       expect(pos.active).to.equal(false);
     });
 
@@ -450,7 +450,7 @@ describe("TJPositionManager", function() {
       // Validator should catch the mismatch before the call even reaches the manager
       await expect(
         vault.mint([pmAddr], [calldata], [0n])
-      ).to.be.revertedWith("TJPositionValidator: vault mismatch");
+      ).to.be.revertedWith("TJPositionValidator: owner mismatch");
     });
 
     it("should reject unregistered position manager", async function() {
@@ -583,7 +583,7 @@ describe("TJPositionManager", function() {
 
       await vault.mint([pmAddr], [calldata], [0n]);
 
-      const posIds = await positionManager.getPositionsByVault(vaultAddr);
+      const posIds = await positionManager.getPositionsByOwner(vaultAddr);
       return posIds[posIds.length - 1];
     }
 
@@ -804,7 +804,7 @@ describe("TJPositionManager", function() {
 
         const pos = await positionManager.getPosition(positionId);
         expect(pos.active).to.equal(true);
-        expect(pos.vault).to.equal(vaultAddr);
+        expect(pos.owner).to.equal(vaultAddr);
         expect(pos.lbPair).to.equal(await mockLBPair.getAddress());
         expect(pos.tokenX).to.equal(await tokenX.getAddress());
         expect(pos.tokenY).to.equal(await tokenY.getAddress());
@@ -1064,7 +1064,7 @@ describe("TJPositionManager", function() {
 
         // Struct should be fully deleted
         pos = await positionManager.getPosition(positionId);
-        expect(pos.vault).to.equal(ethers.ZeroAddress);
+        expect(pos.owner).to.equal(ethers.ZeroAddress);
         expect(pos.lbPair).to.equal(ethers.ZeroAddress);
         expect(pos.active).to.equal(false);
         expect(pos.depositIds.length).to.equal(0);
@@ -1238,7 +1238,7 @@ describe("TJPositionManager", function() {
 
       await vault.mint([pmAddr], [calldata], [0n]);
 
-      const posIds = await positionManager.getPositionsByVault(vaultAddr);
+      const posIds = await positionManager.getPositionsByOwner(vaultAddr);
       return posIds[posIds.length - 1];
     }
 
@@ -1252,7 +1252,7 @@ describe("TJPositionManager", function() {
 
       // Struct should be fully deleted (all fields zeroed)
       const pos = await positionManager.getPosition(positionId);
-      expect(pos.vault).to.equal(ethers.ZeroAddress);
+      expect(pos.owner).to.equal(ethers.ZeroAddress);
       expect(pos.lbPair).to.equal(ethers.ZeroAddress);
       expect(pos.active).to.equal(false);
       expect(pos.depositIds.length).to.equal(0);
@@ -1531,7 +1531,7 @@ describe("TJPositionManager", function() {
 
         // Struct should be fully deleted
         pos = await positionManager.getPosition(positionId);
-        expect(pos.vault).to.equal(ethers.ZeroAddress);
+        expect(pos.owner).to.equal(ethers.ZeroAddress);
         expect(pos.lbPair).to.equal(ethers.ZeroAddress);
         expect(pos.active).to.equal(false);
         expect(pos.depositIds.length).to.equal(0);
@@ -1735,7 +1735,7 @@ describe("TJPositionManager", function() {
 
       await vault.mint([pmAddr], [calldata], [0n]);
 
-      const posIds = await positionManager.getPositionsByVault(vaultAddr);
+      const posIds = await positionManager.getPositionsByOwner(vaultAddr);
       return posIds[posIds.length - 1];
     }
 
@@ -1846,7 +1846,7 @@ describe("TJPositionManager", function() {
 
         const parsed = positionManager.interface.parseLog(feesCollectedEvents[0]);
         expect(parsed.args.positionId).to.equal(positionId);
-        expect(parsed.args.vault).to.equal(vaultAddr);
+        expect(parsed.args.owner).to.equal(vaultAddr);
         expect(parsed.args.amountX).to.equal(ethers.parseEther("0.01"));
         expect(parsed.args.amountY).to.equal(100n * 10n ** 6n);
       });
@@ -1903,6 +1903,192 @@ describe("TJPositionManager", function() {
         expect(posAfter.previousX[2]).to.equal(950);
         expect(posAfter.previousY[2]).to.equal(0);
       });
+    });
+  });
+
+  describe("safeTransferFrom", function() {
+    let vaultAddr, pmAddress;
+
+    // Helper: create a position and return its ID
+    async function createTestPosition() {
+      vaultAddr = await vault.getAddress();
+      pmAddress = await positionManager.getAddress();
+
+      const calldata = encodeCreatePosition(
+        vaultAddr,
+        await mockLBPair.getAddress(),
+        ethers.parseEther("1"),
+        1000n * 10n ** 6n,
+        0, 0,
+        8388608, 0,
+        [-1, 0, 1],
+        [ethers.parseEther("0"), ethers.parseEther("0.5"), ethers.parseEther("1")],
+        [ethers.parseEther("1"), ethers.parseEther("0.5"), ethers.parseEther("0")],
+        deadline
+      );
+
+      await vault.mint([pmAddress], [calldata], [0]);
+      return 1; // First position ID
+    }
+
+    it("should transfer position ownership to new address", async function() {
+      const positionId = await createTestPosition();
+      const newOwner = user1.address;
+
+      // Transfer via vault.withdrawPosition (which calls safeTransferFrom)
+      await vault.withdrawPosition(pmAddress, positionId);
+
+      const pos = await positionManager.getPosition(positionId);
+      expect(pos.owner).to.equal(owner.address); // vault owner
+      expect(pos.active).to.equal(true);
+    });
+
+    it("should update _ownerPositions tracking", async function() {
+      const positionId = await createTestPosition();
+
+      // Before transfer: vault owns it
+      const vaultPositions = await positionManager.getPositionsByOwner(vaultAddr);
+      expect(vaultPositions.length).to.equal(1);
+      expect(vaultPositions[0]).to.equal(positionId);
+
+      // Transfer
+      await vault.withdrawPosition(pmAddress, positionId);
+
+      // After transfer: vault has none, owner has it
+      const vaultPositionsAfter = await positionManager.getPositionsByOwner(vaultAddr);
+      expect(vaultPositionsAfter.length).to.equal(0);
+
+      const ownerPositions = await positionManager.getPositionsByOwner(owner.address);
+      expect(ownerPositions.length).to.equal(1);
+      expect(ownerPositions[0]).to.equal(positionId);
+    });
+
+    it("should emit PositionTransferred event", async function() {
+      const positionId = await createTestPosition();
+
+      // vault.withdrawPosition calls safeTransferFrom(vault, owner, tokenId)
+      // We need to check the event on positionManager, not vault
+      const tx = await vault.withdrawPosition(pmAddress, positionId);
+      const receipt = await tx.wait();
+
+      const transferEvent = receipt.logs.find(log => {
+        try {
+          const parsed = positionManager.interface.parseLog(log);
+          return parsed && parsed.name === 'PositionTransferred';
+        } catch {
+          return false;
+        }
+      });
+
+      expect(transferEvent).to.not.be.undefined;
+      const parsed = positionManager.interface.parseLog(transferEvent);
+      expect(parsed.args.positionId).to.equal(positionId);
+      expect(parsed.args.from).to.equal(vaultAddr);
+      expect(parsed.args.to).to.equal(owner.address);
+    });
+
+    it("should revert if position is not active", async function() {
+      const positionId = await createTestPosition();
+
+      // Remove the position first (100% removal)
+      const removeIface = new ethers.Interface([
+        "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+      const removeCalldata = removeIface.encodeFunctionData("removePosition", [
+        positionId, [0, 0, 0], 0, 0, deadline
+      ]);
+      await vault.decreaseLiquidity([pmAddress], [removeCalldata]);
+
+      // Now try to transfer — should fail
+      await expect(
+        vault.withdrawPosition(pmAddress, positionId)
+      ).to.be.revertedWith("TJPositionManager: position not active");
+    });
+
+    it("should revert if caller is not current owner", async function() {
+      const positionId = await createTestPosition();
+
+      // user1 tries to call safeTransferFrom directly (not through vault)
+      await expect(
+        positionManager.connect(user1).safeTransferFrom(vaultAddr, user1.address, positionId)
+      ).to.be.revertedWith("TJPositionManager: caller must be current owner");
+    });
+
+    it("should revert if from address doesn't match position owner", async function() {
+      const positionId = await createTestPosition();
+
+      // Call with wrong from address
+      await expect(
+        positionManager.connect(owner).safeTransferFrom(owner.address, user1.address, positionId)
+      ).to.be.revertedWith("TJPositionManager: not position owner");
+    });
+
+    it("should revert on transfer to zero address", async function() {
+      const positionId = await createTestPosition();
+
+      // Call directly from vault (impersonate)
+      await ethers.provider.send("hardhat_impersonateAccount", [vaultAddr]);
+      await owner.sendTransaction({ to: vaultAddr, value: ethers.parseEther("1") });
+      const vaultSigner = await ethers.getSigner(vaultAddr);
+
+      await expect(
+        positionManager.connect(vaultSigner).safeTransferFrom(vaultAddr, ethers.ZeroAddress, positionId)
+      ).to.be.revertedWith("TJPositionManager: transfer to zero address");
+
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [vaultAddr]);
+    });
+
+    it("should allow new owner to call removePosition after transfer", async function() {
+      const positionId = await createTestPosition();
+
+      // Transfer out of vault to owner
+      await vault.withdrawPosition(pmAddress, positionId);
+
+      // Owner now calls removePosition directly
+      const removeIface = new ethers.Interface([
+        "function removePosition(uint256 positionId, uint256[] feeShares, uint256 amountXMin, uint256 amountYMin, uint256 deadline)"
+      ]);
+
+      // Owner calls positionManager directly (not through vault)
+      await positionManager.connect(owner).removePosition(
+        positionId, [0, 0, 0], 0, 0, deadline
+      );
+
+      const pos = await positionManager.getPosition(positionId);
+      expect(pos.owner).to.equal(ethers.ZeroAddress); // deleted
+    });
+
+    it("should handle transfer of multiple positions correctly", async function() {
+      // Create two positions
+      await createTestPosition(); // ID 1
+      // Create second position
+      const calldata = encodeCreatePosition(
+        vaultAddr,
+        await mockLBPair.getAddress(),
+        ethers.parseEther("1"),
+        1000n * 10n ** 6n,
+        0, 0,
+        8388608, 0,
+        [-1, 0, 1],
+        [ethers.parseEther("0"), ethers.parseEther("0.5"), ethers.parseEther("1")],
+        [ethers.parseEther("1"), ethers.parseEther("0.5"), ethers.parseEther("0")],
+        deadline
+      );
+      await vault.mint([pmAddress], [calldata], [0]); // ID 2
+
+      expect((await positionManager.getPositionsByOwner(vaultAddr)).length).to.equal(2);
+
+      // Transfer only position 1
+      await vault.withdrawPosition(pmAddress, 1);
+
+      // Vault has 1 position, owner has 1
+      const vaultPositions = await positionManager.getPositionsByOwner(vaultAddr);
+      expect(vaultPositions.length).to.equal(1);
+      expect(vaultPositions[0]).to.equal(2);
+
+      const ownerPositions = await positionManager.getPositionsByOwner(owner.address);
+      expect(ownerPositions.length).to.equal(1);
+      expect(ownerPositions[0]).to.equal(1);
     });
   });
 });
