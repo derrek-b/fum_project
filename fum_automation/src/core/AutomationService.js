@@ -121,6 +121,7 @@ class AutomationService {
       getVaultMetadata: (addr) => this.tracker.getMetadata(addr),
       getVaultTransactions: (addr, start, end) => this.tracker.getTransactions(addr, start, end),
       getFundingRequired: () => this.vaultHealth.getFundingRequiredData(),
+      retryBlacklistedVault: (addr) => this.retryBlacklistedVault(addr),
       onCrash: (error) => this.handleFatalError(error)
     });
 
@@ -1571,6 +1572,92 @@ class AutomationService {
   isVaultBlacklisted(vaultAddress) {
     const normalizedAddress = ethers.utils.getAddress(vaultAddress);
     return this.blacklistedVaults.has(normalizedAddress);
+  }
+
+  /**
+   * Retry a blacklisted vault: clear blacklist and re-attempt setup.
+   * Called via POST /vault/:address/retry endpoint.
+   * @param {string} vaultAddress - Vault address to retry
+   * @returns {Promise<Object>} { success: true, vaultAddress }
+   * @throws {Error} If vault is not blacklisted, service not running, or executor invalid
+   */
+  async retryBlacklistedVault(vaultAddress) {
+    const normalizedAddress = ethers.utils.getAddress(vaultAddress);
+
+    if (!this.isRunning) {
+      throw new Error('Service not running');
+    }
+
+    if (!this.isVaultBlacklisted(normalizedAddress)) {
+      throw new Error('Vault is not blacklisted');
+    }
+
+    // Verify executor is still authorized on-chain
+    const [executorIndex, onChainExecutor] = await Promise.all([
+      retryRpcCall(
+        () => getVaultExecutorIndex(normalizedAddress, this.provider),
+        'getVaultExecutorIndex(retry)'
+      ),
+      retryRpcCall(
+        () => getVaultContract(normalizedAddress, this.provider).executor(),
+        'vault.executor(retry)'
+      )
+    ]);
+
+    if (onChainExecutor === ethers.constants.AddressZero) {
+      throw new Error('Vault has no authorized executor');
+    }
+
+    const derivedAddress = this.hdNode.derivePath(
+      "m/44'/60'/0'/0/" + executorIndex
+    ).address;
+
+    if (derivedAddress.toLowerCase() !== onChainExecutor.toLowerCase()) {
+      throw new Error('Executor does not belong to this automation service');
+    }
+
+    // Clear blacklist and retry state
+    this.log(`Manual retry: clearing blacklist for ${normalizedAddress}`);
+    await this.unblacklistVault(normalizedAddress);
+
+    if (this.failedVaults.has(normalizedAddress)) {
+      this.failedVaults.delete(normalizedAddress);
+      this.log(`Cleared ${normalizedAddress} from retry queue for manual retry`);
+    }
+
+    if (this.vaultTripHistory.has(normalizedAddress)) {
+      this.vaultTripHistory.delete(normalizedAddress);
+      this.log(`Cleared ${normalizedAddress} trip history for manual retry`);
+    }
+
+    // Re-attempt setup (mirrors VaultAuthGranted handler)
+    try {
+      const result = await this.setupVault(normalizedAddress, { forceRefresh: true });
+
+      this.eventManager.emit('VaultOnboarded', {
+        vaultAddress: normalizedAddress,
+        strategyId: result.vault.strategy.strategyId,
+        positionCount: Object.keys(result.vault.positions).length,
+        log: {
+          level: 'info',
+          message: `Vault onboarded (manual retry): ${normalizedAddress} (${result.vault.strategy.strategyId})`
+        }
+      });
+
+      return { success: true, vaultAddress: normalizedAddress };
+    } catch (error) {
+      if (error.name === 'InsufficientGasError') {
+        this.vaultHealth.enterFundingRequired(normalizedAddress);
+      } else {
+        try {
+          await this.trackFailedVault(normalizedAddress, error.message, 'manual_retry');
+        } catch (handlerError) {
+          console.error(`[manual_retry] trackFailedVault error for ${normalizedAddress}:`, handlerError.message);
+          await this.emergencyVaultCleanup(normalizedAddress, `[manual_retry] trackFailedVault failed: ${handlerError.message}`);
+        }
+      }
+      throw error;
+    }
   }
 
   /**

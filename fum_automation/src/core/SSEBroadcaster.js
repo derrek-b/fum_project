@@ -43,6 +43,7 @@ export default class SSEBroadcaster {
     this.getFundingRequired = options.getFundingRequired || (() => ({}));
     this.getVaultMetadata = options.getVaultMetadata || (() => null);
     this.getVaultTransactions = options.getVaultTransactions || (async () => []);
+    this.retryBlacklistedVault = options.retryBlacklistedVault || null;
     this.onCrash = options.onCrash || null;
 
     this.clients = new Set();
@@ -129,7 +130,7 @@ export default class SSEBroadcaster {
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -154,6 +155,8 @@ export default class SSEBroadcaster {
       this.handleFundingRequiredRequest(urlParts, res);
     } else if (pathname.startsWith('/vault/') && req.method === 'GET') {
       this.handleVaultRequest(pathname, urlParts.searchParams, res);
+    } else if (pathname.startsWith('/vault/') && req.method === 'POST') {
+      this.handleVaultPostRequest(pathname, res);
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -361,6 +364,55 @@ export default class SSEBroadcaster {
       this.log(`Error handling vault request: ${error.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+  }
+
+  /**
+   * Handle vault POST requests (retry, etc.)
+   * @private
+   */
+  async handleVaultPostRequest(pathname, res) {
+    const parts = pathname.split('/').filter(Boolean);
+
+    if (parts.length !== 3 || parts[0] !== 'vault') {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+      return;
+    }
+
+    const vaultAddress = parts[1];
+    const endpoint = parts[2];
+
+    if (!vaultAddress.startsWith('0x') || vaultAddress.length !== 42) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid vault address format' }));
+      return;
+    }
+
+    if (endpoint === 'retry') {
+      if (!this.retryBlacklistedVault) {
+        res.writeHead(501, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Retry not configured' }));
+        return;
+      }
+
+      try {
+        const result = await this.retryBlacklistedVault(vaultAddress);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        const msg = error.message;
+        const status =
+          msg.includes('not blacklisted') ? 404 :
+          msg.includes('not running') ? 503 :
+          msg.includes('no authorized executor') || msg.includes('not belong') ? 409 :
+          500;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: msg }));
+      }
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
     }
   }
 

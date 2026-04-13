@@ -9,7 +9,19 @@
  *
  * Blacklist Exit (2 tests):
  *   4. Re-authorization (VaultAuthGranted) → unblacklist
- *   5. Auth revocation (VaultAuthRevoked) → unblacklist
+ *   5. Auth revocation (VaultAuthRevoked) → blacklist preserved
+ *
+ * Manual Retry (6 tests):
+ *   6. Manual retry → clears blacklist and re-onboards
+ *   7. Retry rejects when not blacklisted
+ *   8. Retry handles setup failure → enters retry queue
+ *   9. Retry clears yo-yo trip history
+ *  10. POST /vault/:address/retry → clears via HTTP
+ *  11. POST retry for non-blacklisted vault → 404
+ *
+ * Blacklist Persistence (2 tests):
+ *  12. Blacklist persists across service restart
+ *  13. Blacklist file format verification
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
@@ -564,6 +576,221 @@ describe('Blacklist Management', () => {
 
       const blacklistTxs = await getTransactionsByType(service, testVault.vaultAddress, 'VaultBlacklisted');
       expect(blacklistTxs.length).toBe(1);
+    });
+  });
+
+  // ==========================================================================
+  // MANUAL RETRY TESTS
+  // ==========================================================================
+  describe('Manual Retry', () => {
+
+    // ------------------------------------------------------------------------
+    // Test 6: Manual retry clears blacklist and re-onboards vault
+    // ------------------------------------------------------------------------
+    it('should clear blacklist and re-onboard vault on manual retry', async () => {
+      await createTestService(3305);
+      const events = setupEventTracking(service);
+
+      // Track call count - fail first, succeed after
+      let getVaultCallCount = 0;
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          getVaultCallCount++;
+          if (getVaultCallCount === 1) {
+            throw new UnrecoverableError('Strategy bob not found');
+          }
+        }
+        return realGetVault(addr, forceRefresh);
+      });
+
+      // Start service → vault blacklisted
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+
+      // Retry (mock now succeeds on second call)
+      await service.retryBlacklistedVault(testVault.vaultAddress);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verify unblacklisted
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      // Verify events
+      expect(events.vaultUnblacklisted.find(
+        e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
+      )).toBeDefined();
+      expect(events.vaultOnboarded.find(
+        e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
+      )).toBeDefined();
+
+      // Tracker: blacklist count stays at 1 (was blacklisted once, then cleared)
+      expectTrackerAggregates(service, testVault.vaultAddress, {
+        blacklistCount: 1
+      });
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 7: Retry rejects when vault is not blacklisted
+    // ------------------------------------------------------------------------
+    it('should reject retry when vault is not blacklisted', async () => {
+      await createTestService(3306);
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Vault loaded normally — not blacklisted
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      await expect(
+        service.retryBlacklistedVault(testVault.vaultAddress)
+      ).rejects.toThrow('not blacklisted');
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 8: Retry handles setup failure gracefully
+    // ------------------------------------------------------------------------
+    it('should enter retry queue when setup fails after manual retry', async () => {
+      await createTestService(3307);
+      const events = setupEventTracking(service);
+
+      // Always fail with a recoverable error
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          throw new Error('RPC timeout');
+        }
+        return null;
+      });
+
+      // Start service → vault enters retry queue, eventually blacklisted via timeout
+      // Instead, force-blacklist to skip the wait
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Force blacklist the vault directly
+      await service.blacklistVault(testVault.vaultAddress, 'test: forced blacklist');
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+
+      // Retry — setup will fail again (mock still active)
+      await expect(
+        service.retryBlacklistedVault(testVault.vaultAddress)
+      ).rejects.toThrow();
+
+      // Blacklist should be cleared (retry always clears it)
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+
+      // Vault should be in the retry queue (failed with recoverable error)
+      const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+      expect(service.failedVaults.has(normalizedAddress)).toBe(true);
+
+      // VaultFailed event emitted
+      expect(events.vaultFailed.find(
+        e => e.vaultAddress.toLowerCase() === testVault.vaultAddress.toLowerCase()
+      )).toBeDefined();
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 9: Retry clears yo-yo trip history
+    // ------------------------------------------------------------------------
+    it('should clear trip history on manual retry', async () => {
+      await createTestService(3308);
+
+      // Start service, blacklist, then seed trip history
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const normalizedAddress = ethers.utils.getAddress(testVault.vaultAddress);
+
+      // Force blacklist + seed trip history
+      await service.blacklistVault(testVault.vaultAddress, 'test: forced blacklist');
+      service.vaultTripHistory.set(normalizedAddress, {
+        trips: [{ timestamp: Date.now(), source: 'test' }],
+        firstTripAt: Date.now()
+      });
+
+      expect(service.vaultTripHistory.has(normalizedAddress)).toBe(true);
+
+      // Retry
+      let getVaultCallCount = 0;
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          getVaultCallCount++;
+          // First call was during start(), second is the retry
+          if (getVaultCallCount <= 1) {
+            return realGetVault(addr, forceRefresh);
+          }
+        }
+        return realGetVault(addr, forceRefresh);
+      });
+
+      await service.retryBlacklistedVault(testVault.vaultAddress);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Trip history should be cleared
+      expect(service.vaultTripHistory.has(normalizedAddress)).toBe(false);
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 10: POST /vault/:address/retry endpoint
+    // ------------------------------------------------------------------------
+    it('should clear blacklist via HTTP POST endpoint', async () => {
+      await createTestService(3309);
+      const events = setupEventTracking(service);
+
+      // Fail first call, succeed after
+      let getVaultCallCount = 0;
+      const realGetVault = service.vaultDataService.getVault.bind(service.vaultDataService);
+
+      vi.spyOn(service.vaultDataService, 'getVault').mockImplementation(async (addr, forceRefresh) => {
+        if (addr.toLowerCase() === testVault.vaultAddress.toLowerCase()) {
+          getVaultCallCount++;
+          if (getVaultCallCount === 1) {
+            throw new UnrecoverableError('Strategy bob not found');
+          }
+        }
+        return realGetVault(addr, forceRefresh);
+      });
+
+      // Start service → vault blacklisted
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(true);
+
+      // POST to retry endpoint
+      const response = await fetch(
+        `http://localhost:3309/vault/${testVault.vaultAddress}/retry`,
+        { method: 'POST' }
+      );
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+      expect(body.success).toBe(true);
+      expect(body.vaultAddress).toBeDefined();
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Vault should be unblacklisted and onboarded
+      expect(service.isVaultBlacklisted(testVault.vaultAddress)).toBe(false);
+      expect(events.vaultUnblacklisted.length).toBeGreaterThan(0);
+      expect(events.vaultOnboarded.length).toBeGreaterThan(0);
+    });
+
+    it('should return 404 when POSTing retry for non-blacklisted vault', async () => {
+      await createTestService(3313);
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const response = await fetch(
+        `http://localhost:3313/vault/${testVault.vaultAddress}/retry`,
+        { method: 'POST' }
+      );
+      expect(response.status).toBe(404);
+
+      const body = await response.json();
+      expect(body.error).toContain('not blacklisted');
     });
   });
 
